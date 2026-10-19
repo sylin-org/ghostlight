@@ -101,9 +101,13 @@ connection. For a read-only first task instead, ask:
 > you used. Do not click, type, submit, or change the page.
 
 When a session ends, the tabs Ghostlight keeps open leave its group and stay where they are, so
-no idle group is saved to your bookmarks bar. Next time, the same client gets its group back and
+no idle group is saved to your bookmarks bar. Next time, the same agent gets its group back and
 reuses a tab Ghostlight opened for it on that site and left open, so repeated work stops littering
-your tab strip. It never takes over a tab you opened, or a tab another client left open.
+your tab strip. It never takes over a tab you opened, or a tab another agent left open. After a
+browser restart, an agent's remembered tab is used only when the browser still shows that tab at
+the page Ghostlight last saw there; otherwise the agent opens a fresh tab. The one case it cannot
+tell apart is a tab of yours that the restarted browser gave the same id and that shows the same
+address, such as a restored copy of the agent's page.
 
 If a step needs attention, run:
 
@@ -148,9 +152,9 @@ Ghostlight follows the workspace instead of snapping it back. Ordinary tabs rema
 agent's owned set: a tab you opened is never reused, regrouped, or navigated, even on the same
 site, and loading a page yourself in a tab Ghostlight left open takes that tab back.
 
-Closing a tab needs two independent yes votes: the orchestrator's authority, and the browser's own
-preserve-tabs setting, which ships on. That keeps the evidence of what happened in front of you.
-Closing a tab yourself always works.
+Closing a tab needs two independent yes votes: the orchestrator's authority, which needs Action on
+that tab's site, and the browser's own preserve-tabs setting, which ships on. That keeps the
+evidence of what happened in front of you. Closing a tab yourself always works.
 
 Personal use is complete without a policy manifest. Start with the full browser engine and get
 useful work done. When a workflow needs stronger boundaries, grant `read`, `action`, `write`, and
@@ -169,9 +173,11 @@ remain restricted. Optional local and managed policy layers can only take capabi
 
 Credential input requires your explicit instruction. Fill and typing accept a per-request
 acknowledgement from the agent; without it, the call returns guidance without pausing the session.
-That acknowledgement cannot override policy or your Pause/Stop controls. Repeated policy refusals
-also leave later permitted work available. Browser messages and animations remain passive, with
-no buttons or interference with your input; interactive runtime control belongs in the workbench.
+That acknowledgement cannot override policy or your Pause and End session controls. Repeated policy
+refusals also leave later permitted work available; a tab that policy refused a landing on stays
+held until the agent moves it to an allowed page or closes it. Browser messages and animations
+remain passive, with no buttons or interference with your input; interactive runtime control belongs
+in the workbench.
 
 The audit record holds identifiers, decisions, and content-minimized measurements: which tool ran,
 whether authority allowed it, how long it took, and what it did -- 3 fields, 1,240 words, 1280x720.

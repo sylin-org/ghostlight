@@ -94,7 +94,7 @@ payload: an older payload is refused, the same intact version with an intact edg
 rename-swapped (`install/swap.rs`), and the edge is replaced only when the relay revision
 changes, the edge in `bin` is missing or is not the one the record names, a development install
 carries an edge that differs from the installed one (the development edge follows its build), or
-`bin` still holds the layout of an earlier development build, where the service image had the
+`bin` still holds an older layout that kept its connectors there, where the service image had the
 edge's name and two connector images sat beside it; the installer stops those exact images and deletes the connector
 files. It also stops what runs from each 1.x `bin/v<version>` directory, moves the audit log the
 directory holds into `state` under a name that says which version it came from, and removes the
@@ -195,7 +195,24 @@ latch was set while it waited for the lock; any other start deletes it after tak
 serves. So after Quit a browser restart does not bring
 Ghostlight back; the next agent request, a command that needs it, or a person does. Before it
 closes its streams the service sends a goodbye on each: `quit`, `replace` (the installer's quit)
-or `uninstall`. The MCP relay answers its outstanding requests as cut off on every goodbye,
+or `uninstall`.
+
+A service end decides its sessions' tabs once (ADR-0203 Decision 3). After the drain, the quit
+takes over every session before the first goodbye, and from then on a closing session releases
+nothing itself. Under one deadline (`END_LIMIT`, 5 s from the end of the drain) it then hands each
+MCP stream its resume token, sends the MCP and shell goodbyes, releases the workspaces it ends,
+and sends the browser goodbye last. A workspace with a call still running has its queue stopped
+for the quit first, and is released only if that call finishes inside the deadline. Which
+workspaces end depends on the reason. On `replace`, an MCP workspace whose connection is still
+live stays bound for its edge's resume, and one whose client left during the drain is released.
+On `quit`, `uninstall` or a reason this build does not know, every MCP workspace is released and
+its token carries no tabs, so a resumed session reads honest stale handles. A command-line
+workspace is released at every end, because nothing can resume it. Release follows preserve-tabs,
+as at any release. The end of the sign-in session and the idle exit send the browser nothing:
+they forget every binding and the released pool in memory, because the session end has a 2 s
+fallback exit and an idle exit has no browser stream open.
+
+The MCP relay answers its outstanding requests as cut off on every goodbye,
 except that after `replace` it sends a cut-off handshake or catalog listing to the next service.
 After `quit` it holds nothing and starts the service again only for the next request. After
 `replace` it holds lines and reconnects without starting the service for up to the hold limit,
@@ -229,18 +246,20 @@ the Applications entry starts the shell in their session, and so does `ghostligh
 service answers `no_display` and the command's own session names a display. With no display there
 either, `open` says why at once.
 
-The service owns the tray model and the shell draws it. The model is a state (ready, working,
-paused or attention, from the same readiness the band shows; a service with no browser connected
-looks ready), a tooltip (the band's word for the state, then the sentence that counts
-connections, and "No browser connected" when none is) and four entries: Open and Quit
-always, Pause while work is active, Resume while it is paused or ended. The first workbench frame
-carries it and a `tray_model` frame follows each change. The shell draws the state as a small dot
-at run time. On a dark taskbar the dot goes over the original icon bytes. On a light Windows
-taskbar it goes over the light-taskbar mascot in `crates/desktop/assets`: the same art without
-its sparkles, on a soft outline in the window's night colour, with the face darkened at 16 pixels
-so it still reads. The ring around the dot is drawn in the taskbar's ground. On Windows the shell
-draws the 16 pixel art at the 16 pixel small-icon size and the 32 pixel art above it; a Linux
-StatusNotifier host picks its own size, so it gets the 32 pixel art.
+The service owns the tray model and the shell draws it. The model is a state (ready, working, paused
+or attention, from the same readiness the band shows; a service with no browser connected looks
+ready), a tooltip (the band's word for the state, then the sentence that counts connections, and "No
+browser connected" when none is) and four entries: Open and Quit always, Pause while work is active,
+and Resume, enabled only while work is paused, which reads Start a new session once the session
+ended. Each entry is enabled exactly when the runtime state offers its act (`governance::offers`),
+the table the band and Settings read too. The first workbench frame carries it and a `tray_model`
+frame follows each change. The shell draws the state as a small dot at run time. On a dark taskbar
+the dot goes over the original icon bytes. On a light Windows taskbar it goes over the light-taskbar
+mascot in `crates/desktop/assets`: the same art without its sparkles, on a soft outline in the
+window's night colour, with the face darkened at 16 pixels so it still reads. The ring around the
+dot is drawn in the taskbar's ground. On Windows the shell draws the 16 pixel art at the 16 pixel
+small-icon size and the 32 pixel art above it; a Linux StatusNotifier host picks its own size, so it
+gets the 32 pixel art.
 
 The tray and the service do not depend on a permanent window. Closing the window destroys only the
 disposable workbench view in the shell, which stays with its icon; the shell tells the service
@@ -328,7 +347,11 @@ The browser adapter is a service component. `browser/adapter/mod.rs` names a clo
 calls. Chromium speaks one wire, adapter protocol 4 (`adapter/chromium/protocol4`, specified in
 `docs/design/adapter-protocol-4.md`). Its translator turns each unit of work into frozen
 primitives and back. Any first frame that is not a protocol-4 hello hears `adapter_incompatible`
-with a sentence telling the person to update the extension, and its socket closes.
+with a sentence telling the person to update the extension, and its socket closes. An extension
+that hears it shows that sentence under "Update Ghostlight in Browser." in its popup, options and
+setup pages, and no longer reconnects the moment the native host exits: it keeps only its delayed
+3 s retry until a hello is accepted, so a service put back to a compatible build heals the link
+with no one acting.
 
 Page-local observation and presentation ship as one service-owned source assembled in
 `adapter/chromium/protocol4/assets.rs` from `assets/world.js` and the files its include marker
@@ -403,12 +426,18 @@ for `mcp`, the failure templates. An opening that names an earlier relay revisio
 any work is accepted. A `control` opening asks `readiness`, `status`, `show` or `quit`. Correlation
 ids are opaque.
 
-The browser hello also carries a persistent opaque adapter installation id, a restart-local adapter
-epoch, an optional bounded product name, a reported attention fact, and versioned physical
-capability declarations. They identify and describe one local extension installation for
-diagnostics, compatibility, reconnect continuity, and routing. The installation id is the browser's
-identity: it never grants authority and never replaces workspace ownership, but it is the key the
-service routes on and the opaque handle a model may name. Human toolbar actions
+The browser hello also carries a persistent opaque adapter installation id, an optional life, an
+optional bounded product name, the platform, engine and adapter versions, and a reported attention
+fact. They identify and describe one local extension installation for diagnostics, compatibility,
+reconnect continuity, and routing. The installation id is the browser's identity: it never grants
+authority and never replaces workspace ownership, but it is the key the service routes on and the
+opaque handle a model may name. The life (`life_` and 32 hex digits) is minted by the worker into
+`chrome.storage.session` when none is there. Chrome keeps that storage across a worker restart and
+a native-host restart and clears it on a browser restart and on an extension reload, update or
+disable, so one life names one browser run, in which tab ids are never reused. The port keeps the
+life each connection's hello named, and a connection that ends or is replaced reports it in its
+`Disconnected` event. A hello with no readable life is accepted and names none, so a different or
+missing life proves nothing (ADR-0203 Decision 1). Human toolbar actions
 cross the adapter protocol as a closed control-intent vocabulary. The service applies them to its
 authoritative runtime controls and publishes the resulting content-free control state back to the
 adapter. Ended state is terminal for hold and resume; only explicit start-new-session intent creates
@@ -417,9 +446,17 @@ a new active runtime session.
 Browsers are plural (ADR-0114). The service holds one connection per browser identity, so several
 browsers are connected and worked in at once. A hello whose identity is already registered is the
 same adapter arriving twice: it replaces that entry and closes the replaced stream, so a duplicate
-connection collapses rather than lingering as a socket that silently discards work. Each workspace
-binds to one browser for its life, physical tab ids resolve as `(browser, physical_id)`, and every
-adapter event names the browser that produced it. A crossing with no binding takes an explicit
+connection collapses rather than lingering as a socket that silently discards work. Before the
+service registers the new connection it reports `Disconnected` for the one it replaces, whose own
+end is never seen, so the replaced connection's bindings go pending (see Workspace). Each workspace
+binds to one browser, physical tab ids resolve as `(browser, physical_id)`, and every adapter event
+names the browser that produced it. The binding is taken when the workspace's first tab binds: an
+open, an adopt, or a resumed tab the browser confirmed (ADR-0203 Decision 2.2). A crossing that
+binds no tab never binds a browser, so `browser_tabs` list and `browser_record` status, stop and
+discard leave the choice open, and a list in a session that holds no tab answers at once from what
+the service knows, without asking, waiting for or starting a browser. A bound workspace is never
+rebound; a tab of another browser is refused as `browser_pinned`. Until a tab binds, one call keeps
+the first browser it chose for all its crossings. A crossing with no binding takes an explicit
 selection, then reported attention, then the sole connected browser, and otherwise refuses while
 naming the candidates rather than choosing between two signed-in contexts. Attention is reported by
 adapters that advertise it, never inferred from connection order, and a bound browser that
@@ -517,7 +554,12 @@ waited shows the same span live as in history.
 A request's cancellation keeps who cancelled it beside its flag, set once: the agent (its
 `notifications/cancelled`), the end of its session, or Ghostlight's quit, which the session's
 close tells apart. A cancelled call's sentence names that cause, and a cancellation the browser
-reported without one keeps the plain words.
+reported without one keeps the plain words. A call that arrives once Ghostlight began to end, or
+after the end stopped its session's queue, is answered on the thread that reads its stream through
+`execute_prepared`, as cancelled before it started by the quit, with an audit line; it takes no
+lease. The quit's cause (`QuitCause`) carries why Ghostlight is ending: after a quit, a replace, an
+idle exit or a reason this build does not know, the edge reconnects, so the call's step is to try
+again in a moment; after an uninstall or the end of the sign-in session there is no step.
 
 What a frame learns lives with the frame and is read once by its completion. A frame is the
 request's top-level operation or one flow step, each built by its own constructor from its own
@@ -541,35 +583,101 @@ browser work (ADR-0196 Decision 8).
 
 A workspace is named for the connection that opened it (ADR-0202 Decision 15). It keeps that
 connection's evidence as its opener for its whole life, and the session card, the connection
-counts, Integrations in use, the tab-group title and released-tab reuse all read the opener. A
+counts, Integrations in use, the tab-group title, the ownership refusal and released-tab reuse all
+read the opener. When the workspace opens, the opener's agent is read once, as
+`language::provenance` names it for the window, together with its reuse key (ADR-0203 Decision 9).
+The group title is `Ghostlight - ` and that agent's name, such as `Ghostlight - Claude Code`,
+`Ghostlight - Command line`, or `Ghostlight - Unknown agent` for an opener nothing names. A
 command-line workspace outlives its connections (ADR-0106), so it cannot be named from the current
-ones, and a group is named for the client that opened it (ADR-0066). A later connection to the
-same workspace is listed beside the others and renames nothing.
+ones. A later connection to the same workspace is listed beside the others and renames nothing.
+The client's claim is one bounded value (`provenance::bounded_claim`: control and direction text
+stripped, at most 100 characters, an empty claim is none), read from `initialize`, discovery and
+a resume token.
+
+A tab binding has one lifecycle (ADR-0203 Decision 2). Forgetting a tab removes its targets,
+views, snapshots and images, whether Ghostlight closed it, the person closed it, or the browser
+did not confirm it, and a handle bound again at generation 0 carries nothing from before. A tab a
+refused landing left held still refuses reading and acting, but `browser_navigate` to an allowed
+address and `browser_tabs` close may select it, each authorized on its own and never on the page
+the tab shows, and a governed landing clears the hold. One executor helper takes every hold and
+emits `HoldEntered`, the read path's included.
+
+A physical tab id names one tab only within one browser run, and Chrome hands ids out again after a
+restart, so a binding the service keeps across a gap in what it knows about a browser is a hint
+until that browser confirms it (ADR-0203 Decision 1). A gap begins when a browser stream ends, when
+a hello registers that browser id again, and when a resume token brings bindings back after a
+service restart. The workspace aggregate states the rule once, and the released pool's reuse check
+is the same predicate. A pending binding is kept when the live browser has a tab with its id and
+either the binding was made in the life the browser reports now, or the tab shows the URL the
+workspace last knew. In the same life the binding takes the live URL, title and readiness, and its
+generation moves on when the URL is not the one it remembered, so a target or capture of the
+earlier page reads as navigated. Otherwise the binding is forgotten as closed, and the agent hears
+that the handle names no open tab. A pending binding is inert: it takes no commit, readiness or
+dialog event, a `TabClosed` forgets it, it does not count as owned when another session asks, an
+`OpenTab` or `AdoptTab` result that carries its id in its browser forgets it, and it is never
+released through the browser, because the extension closes any id it is sent when preserve-tabs is
+off. Release, quit, session end, reap and a failed confirmation forget it without a command. It
+stays in the one tabs map, so no handle is minted twice. The first call of a workspace that holds
+pending bindings confirms those of every connected browser with one `ListTabs` each, before any tab
+selection or browser targeting, and `browser_tabs` list does the same. A call that selects a
+pending tab of a browser not yet connected, or that names no tab while every pending binding is in
+one absent browser, waits for that browser as a bound session does, and forgets the bindings only
+when the browser did not come back. When the workspace binds another browser, the other browsers'
+pending bindings are forgotten and the result names their handles in `forgotten_tabs`. A browser
+can also restart between two crossings of one call, so every command addressed to one tab reads how
+the workspace holds that tab before it crosses, confirms it again if it went pending, and answers a
+tab the browser does not confirm as no longer open with nothing sent.
+
+An MCP session's resume token is written by the service and opaque to the edge, which holds it in
+memory and never reads it. It carries the session's revision, its client claim, and each tab with
+its own browser and a digest of the tab's URL (the SHA-256 of `TabState.url` bounded to 8192
+characters, as the adapter bounds a tab's URL), so the edge holds no page text. It carries the life
+of each kept tab's browser, when one life covers them. It is published with the `initialize`
+answer, after each call and on the session watch's one-second tick, so a close or a commit outside
+a call reaches it, and it is never written past 64 KiB (`MAX_RESUME_TOKEN_BYTES`, what the reader
+accepts): a token too large keeps its first tabs, and a tab left out reads as no longer open after
+a restart. A resumed session's tabs enter as pending bindings, each with its own browser. A token
+written before digests resumes with every tab stale, and a token that does not decode still resumes
+an initialized session at the oldest supported revision with no claim and no tabs, with a
+diagnostics line. The token stays unsigned: it is a hint and never authority. A same-user program
+that writes one can bind only a tab whose id shows the URL it names, or, carrying the browser's
+current life, a tab of the current run; that program can already act as the user (ADR-0199
+Decision 5, ADR-0203).
 
 Physical tab ids are unique inside one browser only. Ownership checks compare a tab id within the
 browser its workspace works in, so Chrome's tab 5 and Edge's tab 5 never refuse each other.
 
 When a workspace is released, the tabs it still holds enter a released-tab pool keyed by browser,
-with the governed URL each held at release and the name the releasing workspace's opener claimed. A
-held tab, or one that never landed, does not enter. Release cleanup then asks the browser to close
-each tab. A tab becomes reusable only when the person's preserve-tabs setting refuses that close:
-the extension has then already dropped the dead workspace's binding and debugger hold, and the tab
-stays open. Until the close answers, no session can claim the tab, so a cleanup close never acts on
-a tab another session took (ADR-0196 Decision 8). A close that worked, failed, or did not answer in
-time removes the tab, so with preserve-tabs off nothing is reused. A tab also leaves the pool when
-it closes, when any page commits in it, when a workspace takes it, and when its browser disconnects,
-because a restarted browser hands out tab ids again. A close or commit that arrives while cleanup
-runs keeps the tab out. Default reuse (`reuse:"domain"`) adopts only from this pool (ADR-0196
-Decision 9). The executor claims the best same-host candidate released by a session of the same
-client, under the aggregate lock, exact URL first and then lowest id, checks it against the live tab
-list, adds it to the workspace, and sends `AdoptTab` with that exact tab id and the client's group
-title. The kept tab left its group when its session ended (ADR-0201), so the adopt puts it back in
-`Ghostlight - <opener claim>` as it loads the page, unless the person put it in a group of their
-own. The claim must match, so a client reuses only the tabs its own sessions kept: a tab another
-client released is left in the pool and the open creates a fresh tab. The label only narrows reuse
-and never grants authority. The pool is in memory and does not survive a service restart. A person
-can still type into a preserved released tab without loading a page, and a later reuse would then
-replace that page.
+with the governed URL each held at release and the releasing workspace's reuse key. A held tab, one
+that never landed, or a tab of a workspace with no reuse key does not enter; it is still released
+and closed as preserve-tabs says. Release cleanup then asks the browser to close each tab. A tab
+becomes reusable only when the person's preserve-tabs setting refuses that close: the extension has
+then already dropped the dead workspace's binding and debugger hold, and the tab stays open. Until
+the close answers, no session can claim the tab, so a cleanup close never acts on a tab another
+session took (ADR-0196 Decision 8). A close that worked, failed, or did not answer in time removes
+the tab, so with preserve-tabs off nothing is reused. A tab also leaves the pool when it closes,
+when any page commits in it, and when a workspace takes it. When its browser disconnects, its
+entries go pending as bindings do, because a restarted browser hands out tab ids again: after the
+browser returns, an entry is reused only where that browser still shows the tab at its release
+address, and pool entries record no life, so the URL decides. A close or commit that arrives while
+cleanup runs keeps the tab out. Default reuse (`reuse:"domain"`) adopts only from this pool
+(ADR-0196 Decision 9). The executor claims the best same-host candidate released under the caller's
+reuse key, under the aggregate lock, exact URL first and then lowest id, checks it against the live
+tab list, adds it to the workspace, and sends `AdoptTab` with that exact tab id and the workspace's
+group title. The kept tab left its group when its session ended (ADR-0201), so the adopt puts it
+back in `Ghostlight - <agent name>` as it loads the page, unless the person put it in a group of
+their own. The reuse key is the agent the opener's claim names on its channel (`Agent::of(claim,
+channel).id`): every command-line session shares the command line's, a claim the catalog knows gives
+that agent's catalog id, and any other claim an unknown agent under its claimed name. A claim that
+names no agent gives no key, so that session reuses no kept tab and no one reuses its tabs. The
+source Ghostlight saw takes no part, because the source decides nothing (ADR-0202 Decision 1). So an
+agent reuses only the tabs its own sessions kept, as a courtesy between clients: a tab another agent
+released is left in the pool and the open creates a fresh tab. The key only narrows reuse and never
+grants authority. A client that claims another client's name can adopt that client's kept tabs; the
+adopt loads the page in the kept tab, so the origin's sessionStorage and the tab's history cross
+with it, and that is the accepted same-user risk (ADR-0199 Decision 5, ADR-0203). The pool is in
+memory and does not survive a service restart. A person can still type into a preserved released tab
+without loading a page, and a later reuse would then replace that page.
 
 A same-document change keeps the document generation. When an action receipt reports an address
 in the same origin and no committed document, the workspace updates the tab's URL and title and
@@ -595,6 +703,19 @@ any browser work, and a channel that any layer turned off refuses the request th
 completion path. The connection stays open, so the agent hears why. The channel is declared by
 Ghostlight's own peer, and any program running as the same user could declare another, so a switch
 is a guardrail for well-behaved agents, not a barrier against hostile software on the same account.
+
+The snapshot gives one answer to each question (ADR-0203 Decision 7). Whether a requirement set
+can be used anywhere is decided through the snapshot's full landing decision, never-touch hosts and
+the window's own origin included, over a finite set of probe hosts: every exact pattern, one fresh
+label under each suffix wildcard, and one host that matches no suffix. The catalog lists a tool
+only when that answer is not unavailable (`could_admit`), and the Policy page's reach lines read
+the same answer, so layers whose grants share no host advertise nothing and get their own
+sentence. Recorded work is replayed by one function, `AuthoritySnapshot::replay(channel,
+requirements, host)`, which checks the channel first, reading a record that names none as MCP
+work, then the host; `ghostlight policy simulate` and the window's preview both call it. One
+organization identity is resolved per publication, the signed presentation's name, rationale and
+contacts first and the manifest's block for what it lacks, and the snapshot, the window, the
+channel refusal and the passport read it.
 
 One refresher publishes the authority. The service starts a single thread that, once a second,
 checks each policy file and the managed bootstrap by existence, modified time and size, reads only
@@ -635,7 +756,9 @@ change governance state first. Governance then sends that state to adapters as a
 notice, and the workbench confirms only the governance state, in words from `language/control.rs`.
 Runtime control does not depend on a connected browser. Readiness offers it in every state, so
 the WebView disables the header control only while it cannot reach the authority, because its
-last snapshot outlives that connection.
+last snapshot outlives that connection. The controls part carries the acts the runtime state
+offers, and the connections part carries the counts the service computes, the ones the tray's
+tooltip and `status` say; the band, Settings and About draw those and count nothing of their own.
 
 Harness registration is an orchestrator-owned local-human capability. Each supported harness has
 one explicit config resolver and schema. The resolver applies Windows or Linux environment
@@ -852,7 +975,12 @@ one receipt; aggregate wrappers do not repeat them or create a denial counter.
 `governance/evidence.rs` captures bounded permission checks from the admission evaluator, including
 positive grant identities for each evaluated layer. It carries no caller restriction: a call that
 sends `restrict_hosts` or `restrict_capabilities` is refused at decoding, before dispatch.
-`language/history.rs` owns the readable explanations. `workbench/history.rs` projects and restores
+`language/history.rs` owns the readable explanations and each history row's one closed outcome
+class, computed from the typed record (`OutcomeClass::recorded`): `succeeded`, `refused`, `kept`,
+`needs_you`, `failed`, `unknown` or `cancelled`. A credential refusal is `needs_you`, the
+preserve-tabs refusal `kept`, and a step that never started `failed`. The window draws each row
+from its class and search finds a row by its class's word; composition's flow causes derive from
+the same class. `workbench/history.rs` projects and restores
 whole groups, at most 500 with at most 20 children each. Missing receipts stay unconfirmed; only
 parent evidence establishes a never-run suffix. A composition-change projection updates the
 existing feed without settling the parent or sending extra completion notifications. Expanded
@@ -957,7 +1085,9 @@ only the perpetual controlled-scope glow; transient action feedback remains avai
 
 An export names one of three destinations and one output budget. Attaching to a page target and
 writing through the browser's download mechanism both finish inside Chromium; only a client return
-carries bytes out, and only that destination is bounded by the transfer ceiling. Encoding runs in
+carries bytes out, and only that destination is bounded by the transfer ceiling. A save to
+Downloads carries effect, so a pause refuses it before it is sent and a lost receipt reads as
+after dispatch, its effect unknown. Encoding runs in
 an offscreen document, because Chrome may evict a service worker mid-encode and because object
 URLs do not exist in one. Fidelity is traded to meet a budget, never coverage: dropping a frame
 folds its time into the frame before it, so a thinned replay still spans and plays for as long as
@@ -969,7 +1099,10 @@ Diagnostics are off until an authorized `browser_diagnose` call enables bounded 
 one owned tab. The extension captures only the Chrome event facts that must originate there, owns
 the bounded problem/all projection, literal matching, opaque cursor, and URL-sanitization
 mechanisms, and never writes them to extension storage. The orchestrator owns authorization and
-applies cross-origin authority plus final filtering before any model disclosure. Reads are
+applies cross-origin authority plus final filtering before any model disclosure. A read sends the
+extension a document binding only when the authority watches documents, which it does when its
+policy does not admit every document. A bound tab's ring starts fresh at a top-frame navigation and
+at a changed binding; a navigation inside an embedded document never clears it. Reads are
 non-destructive and visually quiet. Diagnostic payloads never enter audit or presentation.
 
 Process diagnostics are a separate, local surface (ADR-0145). When activated, all three
@@ -993,7 +1126,12 @@ the browser automation contract.
 
 `GHOSTLIGHT_POLICY_FILE` selects an optional strict schema-4 local policy. Ordered grants combine
 host allow and deny patterns with complete independent RAWX sets. Exact hosts outrank longer
-suffix wildcards, which outrank `*`; an exact tie denies. Managed and local policy intersect. Sacred destinations compose by union. False tab-close and target-name
+suffix wildcards, which outrank `*`; an exact tie denies. Managed and local policy intersect. Sacred
+destinations compose by union, and each layer keeps its own list: a refusal of a never-touch host is
+that layer's policy decision, reason `protected_host` and rule `sacred_host`, credited to the first
+layer whose list matches, with its tier and a denial id taken from that layer and the rule alone, so
+the id names no host (ADR-0203 Decision 7.2). Only non-HTTP(S) schemes and Ghostlight's own control
+page stay Ghostlight's own ceiling, credited to no authored layer. False tab-close and target-name
 settings are monotonic. Every denial is enforced. A malformed cold source fails closed; an invalid
 replacement keeps the last valid authority for future snapshots. A schema-3 file is invalid. The
 user policy Ghostlight owns moves to schema 4 when it loads, with a `.schema3.bak` copy, if the move
@@ -1020,9 +1158,12 @@ browser events.
 Navigation prepares commit observation before dispatch. Every committed URL is checked before
 content or readiness is accepted. A denied new-tab landing is closed only when tab-close authority
 and the adapter's local physical interlock both permit that compensation. Otherwise it remains
-visible and the result reports that compensation did not occur. A denied landing in an existing
-tab enters hold and returns a committed, non-repeat-safe blocked outcome. Redirects receive the
-same check.
+visible and the result reports that compensation did not occur, and the tab is held. A denied
+landing in an existing tab enters hold and returns a committed, non-repeat-safe blocked outcome.
+The hold keeps the landing's decision, the snapshot that made it and the refused address, in
+memory only. A later call on the held tab is refused as `tab_held` with that landing's denial, its
+reason, rule, denial id and tier, decided again under a republished authority; it names the
+refused host and the two calls that leave it. Redirects receive the same check.
 
 Audit records include time, invocation id, workspace id, tool, complete RAWX requirement set,
 authority version, managed sequence, mode, deciding tier, grant, rule, denial id, decision,
@@ -1030,7 +1171,14 @@ status, effect class, and reason code. They exclude request and page payloads ex
 host and optional bounded target name described by the active privacy setting.
 
 Every terminal supplies a language-owned `AuditProjection` alongside its client result. Audit
-accepts this projection rather than a raw summary or result JSON. Refusal metadata is a closed
+accepts this projection rather than a raw summary or result JSON. One `retained()` in
+`language/audit.rs` gives what history may keep of an outcome or a refusal: it strips page-authored
+text and client claims (fill read-backs, dialog messages, another session's owner, a credential
+control's name and handle, the control page's origin and the browser's own words) and recurses
+into an outcome wrapped by an opened dialog or an unconfirmed check, and `Outcome::audit` and
+`Refusal::audit` render from it with no fallback to the agent's sentence (ADR-0203 Decision 4.1).
+A flow step that never started is written by `AuditRecord::not_started`, the one writer of that
+line, which carries the policy sequence as every other line does. Refusal metadata is a closed
 type; arbitrary browser error text stays in the permitted client result. The workbench renders
 the retained sentence. Historical failure payloads are discarded when read, without editing the
 historical file or claiming to sanitize its old summary text (ADR-0103 H1 amendment).
@@ -1080,7 +1228,8 @@ file means resubmitting, which is the owner's call (ADR-0200 Decision 16).
 
 Workspace tab grouping is browser mechanism. `OpenTab` carries the governed URL, the owning
 workspace already present on every browser request, and the presentation-only exact title
-`Ghostlight - <opener claim>`, the name the client that opened the workspace claimed. The adapter
+`Ghostlight - <agent name>`, the name of the agent that opened the workspace as the window names it
+(see Workspace). The adapter
 resolves placement before opening: it reuses one browser-wide exact-title group wherever that group
 currently resides, otherwise reuses a window containing another Ghostlight group, otherwise creates
 a dedicated normal window containing the requested URL. Destination resolution is serialized so
@@ -1112,7 +1261,13 @@ reports active runtime control (ADR-0168). This keeps focus-triggered page refre
 interrupting automation between calls. The existing debugger lifecycle owns per-tab serialization,
 retention, and restoration. Pause and disconnection remove the override; stop and local
 debugger release also detach. A released workspace loses debugger retention even when its tab is
-preserved. Passive browser events never acquire this custody. The scope can outlive a model turn,
+preserved. Custody follows the service that granted it (ADR-0203 Decision 3, amending ADR-0186):
+the extension keeps the service epoch in `chrome.storage.session`, and a `hello_accepted` with a
+new epoch releases every managed tab through `controlledTabs.release` before Active applies, so
+the debugger is unretained, focus emulation and the glow go off, and the tab stays released until
+its next top-level commit. The service takes a tab back with its next call that addresses it
+(ADR-0168), and a worker restart against the same service keeps custody. Passive browser events
+never acquire this custody. The scope can outlive a model turn,
 and unsaved values are not guaranteed to survive normal page lifecycle after release.
 Extension reload clears session storage. The next explicit tab-scoped service request repairs
 the opaque workspace association from that authoritative request before retaining its debugger;
@@ -1133,13 +1288,15 @@ native relay owns ordinary backend reconnection; the alarm-backed extension loop
 when the native host itself ends. Both paths repeat the same adapter identity and capability
 declaration.
 
-Model-driven close is dual gated. The orchestrator first admits the action capability and the
-monotonic tab-close policy constraint. The extension then checks its default-on preserve-tabs
-preference immediately before `chrome.tabs.remove`. A local refusal uses the existing content-free
-adapter error channel and is rendered by the orchestrator as a blocked no-effect result. The local
-preference is not advertised as a physical capability, does not renegotiate the adapter, and
-cannot override service authority. Direct human closure through Chromium remains outside this
-model-driven path.
+Model-driven close is dual gated. The orchestrator first admits the action capability on the tab's
+host and then the monotonic tab-close policy constraint. Closing a tab a refused landing left held,
+like undoing Ghostlight's own denied landing, checks the runtime controls and the tab-close setting
+only, because it takes the tab away from a page no policy admitted. The extension then checks its
+default-on preserve-tabs preference immediately before `chrome.tabs.remove`. A local refusal uses
+the existing content-free adapter error channel and is rendered by the orchestrator as a blocked
+no-effect result. The local preference is not advertised as a physical capability, does not
+renegotiate the adapter, and cannot override service authority. Direct human closure through
+Chromium remains outside this model-driven path.
 
 The operation journal records only the current service epoch, correlation id, and one of accepted,
 dispatched, completed, failed, or uncertain. Duplicate accepted work and known no-effect failures
@@ -1184,7 +1341,9 @@ Chromium loads `extension/` directly with id `cjcmhepmagomefjggkcohdbfemacojoa`,
 Governance owns configured authority and explicit human runtime controls. Policy denials and
 credential-input guidance create no automatic hold, rolling counters, incident ids,
 or session recovery journey. Any later permitted request remains available under the same policy
-and controls.
+and controls. The one hold a refusal leaves is on a tab a refused landing left on the refused page:
+that tab refuses reading and acting until a navigation to an allowed address or a close takes it
+away, and every other tab and session is unaffected.
 
 The page renderer creates only passive messages and animations, never buttons, focusable controls,
 or a pointer-intercepting layer. That property holds when CSS fails. Runtime-state changes alone do not create a page dialog.
@@ -1206,7 +1365,13 @@ The common executor browser boundary obtains a bounded document inventory and ex
 subjects before extraction. Governance admits actual documents through the immutable snapshot;
 the negotiated `document_scope` mechanism carries exact identities and permitted scope. The
 extension uses Chrome document-targeted messaging and supplies physical coverage. Its locator
-mechanism binds frame routing to document identity. Neither relay interprets policy.
+mechanism binds frame routing to document identity. Neither relay interprets policy. A locator
+whose embedded document now holds another document, or whose frame is gone from a complete
+inventory, is a stale target that navigated, decided where the adapter describes the documents,
+and a `document_changed` answer to a call that names one locator is the same; an incomplete
+inventory still reads as unverified access. A read targeted below the top document reports the
+tab's top URL and no title, so the landing check, the observed host and the `url` fact are the
+tab's, and an embedded host never enters the durable record (ADR-0203 Decisions 5.4 and 6.1).
 
 Language owns the content-free coverage qualification. Completion adds bounded coverage to
 model results and audit. Volatile workbench details hold excluded host names for the human only.

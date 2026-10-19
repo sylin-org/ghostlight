@@ -7,6 +7,16 @@
 > Acknowledge, DescribeDocuments and InDocuments) as well as the extension's legacy files. Where
 > this document says level 3 stays "for one release", read "until the switch commit".
 
+> **ADR-0203 (2026-10-19).** The hello carries an optional `life`: an opaque `life_` id the worker
+> mints into `chrome.storage.session` when none is there. Chrome keeps it across a worker and a
+> native-host restart and clears it on a browser restart and on an extension reload, update or
+> disable, so the service confirms a remembered tab by id in the same life and by URL otherwise. A
+> hello without one, or with one that is not a `life_` id, is accepted and names none. `list_tabs`
+> no longer reports `opener_tab_id`; a call that names tabs still lists the tabs they opened. On a
+> new `service_epoch` the extension also releases every managed tab before it applies the control
+> state, and an `adapter_incompatible` error stops the immediate reconnect and leaves the 3 s
+> retry, with the popup saying to update Ghostlight in Browser.
+
 
 Status: implementation spec for the owner. Written read-only against dev at `95a7e646`.
 
@@ -72,7 +82,7 @@ Line references such as `service-worker.js:1472` point at dev `95a7e646`.
 | `form_diagnostics` local fact and `drain()` | Removed; the form-reset trace is deleted | OD14, task |
 | `OpenTab{url, group_title, ...}` | `open_tab{url?, group_key, group_title, adopt_tab_id?, focus_window, ready_timeout_ms}` | D4, CRITIQUE (group identity) |
 | Recording ops with optional ids, ambiguity outcomes | Ids required on the wire; a workspace holds one recording and the service supplies its id | OD13, D3 (no workspace field), ADR-0197 D21 |
-| No child-tab story | `list_tabs` reports `opener_tab_id`; adoption only by explicit `adopt_tab_id` | D4, CRITIQUE (OD18 contradiction) |
+| No child-tab story | `list_tabs` with `tab_ids` also lists the tabs they opened; adoption only by explicit `adopt_tab_id` | D4, CRITIQUE (OD18 contradiction), ADR-0203 |
 | Dialog inspect returns type only | Status returns a bounded message | D4, LU-5 |
 | No accessibility primitive | `accessibility_snapshot` | D4, OD18 |
 | `evaluate_main` with no deadline enforcement | Deadline enforced with `Runtime.terminateExecution` | D4, EXT-9 |
@@ -103,7 +113,7 @@ the relay. A service-to-extension frame must stay under 768 KiB (Chromium caps h
 
 | Direction | `kind` | Fields | Notes |
 |---|---|---|---|
-| ext to svc | `hello` | `protocol:4, browser_id, browser_name?, platform, engine_version?, adapter_version, attended` | Always the first frame on a port |
+| ext to svc | `hello` | `protocol:4, browser_id, life?, browser_name?, platform, engine_version?, adapter_version, attended` | Always the first frame on a port |
 | svc to ext | `hello_accepted` | `service_epoch, service_version?, control_state, assets{id, source}` | `service_version` is display-only (popup) |
 | svc to ext | `request` | `correlation, primitive{name, args}` | One receipt answers it |
 | svc to ext | `command_chunk` | one chunk shape | Reassembled by `chunks.js` into a `request` |
@@ -131,7 +141,7 @@ Events (extension to service):
 
 Removed at protocol 4:
 - the `correlation` field on `document_committed` (commits now ride in receipts);
-- `child_tab_opened` (replaced by `opener_tab_id` in `list_tabs`);
+- `child_tab_opened` (a `list_tabs` that names tabs lists the tabs they opened);
 - `diagnostics_toggle_requested` (OD14: `hello_accepted` carries no diagnostics state, so the popup row stays
   hidden).
 
@@ -176,7 +186,8 @@ connection is ready at once; no install round trip
   1. checks `sha256(assets.source) == assets.id`;
   2. stores the assets and re-registers them on every live session (section 2.3);
   3. if `service_epoch` changed, settles the service boundary state: interrupts recordings, clears
-     diagnostics, cancels in-flight primitives, clears chunk transfers;
+     diagnostics, cancels in-flight primitives, clears chunk transfers; then releases every managed
+     tab and keeps the new epoch in `chrome.storage.session` (ADR-0203 Decision 3);
   4. applies `control_state`.
 - A second `hello_accepted` on the same port is legal and idempotent: the extension accepts a new epoch and
   new assets on an open port. The edge never replays the hello (D7): when the service is lost the edge says
@@ -187,7 +198,7 @@ connection is ready at once; no install round trip
 `hello` example:
 
 ```json
-{"kind":"hello","protocol":4,"browser_id":"browser_3f2a9c","browser_name":"Chrome",
+{"kind":"hello","protocol":4,"browser_id":"browser_3f2a9c","life":"life_0123456789abcdef0123456789abcdef","browser_name":"Chrome",
  "platform":"ghostlight/chromium","engine_version":"131.0.6778.86","adapter_version":"2.0.0","attended":true}
 ```
 
@@ -269,6 +280,7 @@ pub enum Inbound {
 pub struct Hello {
     pub protocol: u16,
     pub browser_id: String,
+    #[serde(default)] pub life: Option<String>,            // "life_" + 32 hex; ADR-0203
     #[serde(default)] pub browser_name: Option<String>,
     #[serde(default)] pub platform: Option<String>,        // "ghostlight/chromium"
     #[serde(default)] pub engine_version: Option<String>,  // [0-9.]{1,32}, informational
@@ -467,8 +479,7 @@ pub struct NoticeSignal { pub invocation: String, pub signal: PresentationKind, 
 // ---- outcomes (the `ok` object of each primitive) ----
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Tab { pub tab_id: u64, #[serde(default)] pub title: String, #[serde(default)] pub url: String,
-                 #[serde(default)] pub active: bool, pub readiness: Readiness,
-                 #[serde(default)] pub opener_tab_id: Option<u64> }
+                 #[serde(default)] pub active: bool, pub readiness: Readiness }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Readiness { Loading, Complete, #[serde(other)] Unknown }
@@ -728,7 +739,7 @@ async function establishNativeConnection() {                 // single-flight vi
   nativePort = port;
   port.onMessage.addListener((frame) => onNativeMessage(frame, port).catch(recordError));
   port.onDisconnect.addListener(() => onPortClosed(port));   // cancels in-flight primitives, ambient "disconnected", retry 3 s
-  send({ kind: "hello", protocol: 4, browser_id: browserId, browser_name: shared.browserName(navigator.userAgentData?.brands),
+  send({ kind: "hello", protocol: 4, browser_id: browserId, life, browser_name: shared.browserName(navigator.userAgentData?.brands),
          platform: "ghostlight/chromium", engine_version: engine, adapter_version: manifest.version, attended });
   helloTimer = setTimeout(() => setConnection({ compatible: false, last_error: OUTDATED_SERVICE }), HELLO_TIMEOUT_MS);
 }
@@ -745,7 +756,8 @@ async function onNativeMessage(frame, port) {
     case "notice": return notice.deliver(frame);
     case "control_state": return applyRuntimeState(stateApi.controlState(frame.state));
     case "backend_unavailable": return serviceLost("The local Ghostlight service is unavailable.", frame.service === "absent");
-    case "error": return setConnection({ last_error: shared.bounded(frame.message, 500) });
+    case "error": if (frame.code === "adapter_incompatible") return adapterRefused(frame.message);   // sticky until hello_accepted
+                  return setConnection({ last_error: shared.bounded(frame.message, 500) });
     default: return;                                         // D6: unknown kinds are ignored
   }
 }
@@ -756,7 +768,7 @@ async function accept(frame) {
     setConnection({ connected: false, compatible: false, last_error: "The service sent page code that failed its checksum." });
     return nativePort?.disconnect();
   }
-  if (frame.service_epoch !== serviceEpoch) { serviceEpoch = frame.service_epoch; await settleServiceBoundaryState(); }
+  if (frame.service_epoch !== serviceEpoch) { await settleServiceBoundaryState(); await releaseManagedTabs(); serviceEpoch = frame.service_epoch; }
   setConnection({ connected: true, compatible: true, service_version: frame.service_version ?? null, last_error: null });
   await applyRuntimeState(stateApi.controlState(frame.control_state));   // focus emulation, held/ended effects, ambient
 }
@@ -1137,12 +1149,11 @@ at the start and `releaseDebugger` in `finally`, as today (`service-worker.js:20
 ```js
 async function listTabs(args) {                             // read; no prelude; no custody
   const named = args.tab_ids ? new Set(args.tab_ids) : null;
-  const openers = new Set([...controlled.managedIds(), ...(named ?? [])]);
   return { tabs: (await chrome.tabs.query({}))
     .filter((t) => !named || named.has(t.id) || named.has(t.openerTabId))
-    .map((t) => tabFact(t, openers.has(t.openerTabId) ? t.openerTabId : undefined)) };
+    .map(tabFact) };
 }
-// tabFact: { tab_id, title: bounded 500, url: url || pendingUrl || "about:blank", active, readiness, opener_tab_id? }
+// tabFact: { tab_id, title: bounded 500, url: url || pendingUrl || "about:blank", active, readiness }
 
 async function openTab(args, fx) {
   if (args.adopt_tab_id !== undefined) {                    // only a tab the service chose (ADR-0196 D9)
@@ -2084,7 +2095,7 @@ Abbreviations:
 | 52 | Present | section 4.7; write `notice`; `Presented{rendered:false}` at once | 0 |
 
 **Outcome mapping.**
-- `Tab` converts to `PhysicalTab` (dropping `opener_tab_id`).
+- `Tab` converts to `PhysicalTab`.
 - `TabOpened` becomes `TabOpened{tab, committed_urls: l.committed(), reused: adopted}`.
 - Effect commands take `committed_urls` from the Link.
 - `Captured` becomes `Screenshot{viewport: geometry::viewport(scope, clip, view, output_scale)}`.

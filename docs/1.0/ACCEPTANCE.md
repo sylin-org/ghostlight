@@ -342,7 +342,9 @@ workbench shows waiting becoming running once.
     bounded problems from both sources. Exercise console-only, network-only, all-detail, literal
     match, cursor continuation, eviction, host filtering, expiry, browser loss, and tab closure.
 20. Prove diagnostics never return headers, bodies, cookies, authorization, post data, query
-    strings, fragments, or another workspace's entries, and that a read cannot clear history.
+    strings, fragments, or another workspace's entries, and that a read cannot clear history. A
+    read sends a document binding only when the policy does not admit every document, and a
+    navigation inside an embedded document keeps the tab's entries.
 21. With `Auto-open browser on request` off and no adapter connected, call a browser tool and
     verify no browser starts. The failed result tells the model to ask the user to open one of
     every eligible installed browser it names with the Ghostlight extension installed, carries
@@ -362,24 +364,38 @@ workbench shows waiting becoming running once.
     what takes ownership (ADR-0149 amendment).
 24. A session cannot list, switch to, or act on another session's workspace. A tab or target
     handle from another session is refused before any browser work and offers no switch. The
-    refusal names the owner only by its client label, with a next step to the caller's own
-    `browser_tabs` list. An owner with an empty label gets the generic refusal, so no refusal
-    carries a workspace id. The caller's own tab list never shows the other session's tab, and a
+    refusal names the owner only as the window names its opener's agent, with a next step to the
+    caller's own `browser_tabs` list. An owner nothing names gets the generic refusal, so no
+    refusal carries a workspace id, and the audit keeps no owner's name. The caller's own tab
+    list never shows the other session's tab, and a
     retired `browser_workspace` call, direct or inside `browser_flow`, fails without dispatch
     (ADR-0196).
 25. Default reuse never takes a person's tab. With a person-opened tab on the same host, a plain
     `browser_navigate` asks the browser only for a fresh tab with `reuse` set to `never`, and the
     person's tab is not regrouped, navigated, or attached. A tab Ghostlight opened and a released
-    session of the same client left open is reused by the next open on its host in the same
+    session of the same agent left open is reused by the next open on its host in the same
     browser, after a live check that it still shows its release address, and the summary says it
     was reused. A released tab becomes reusable only once its release close is refused by the
     preserve-tabs setting. Before that answer, or after a close that worked, the next open creates
-    a fresh tab. A page commit, a close, or a browser disconnect since the release removes it from
-    reuse. A tab released by a `ghostlight call` session is not reused by a Claude Code session,
-    which gets a fresh tab in its own `Ghostlight - Claude Code` group, while the next
-    `ghostlight call` session still reuses it. Chrome's tab 5 and Edge's tab 5 are different tabs,
-    and a workspace refusal found after the browser opened a tab reports an applied effect
-    (ADR-0196 Decision 9).
+    a fresh tab. A page commit or a close since the release removes it from reuse, and after a
+    browser disconnect it is reused only where the returning browser still shows it at its
+    release address. A tab released by a `ghostlight call` session is not reused by a Claude Code
+    session, which gets a fresh tab in its own `Ghostlight - Claude Code` group, while the next
+    `ghostlight call` session still reuses it. A client that claims no name reuses no kept tab,
+    and a claimless client that Claude Code started does not reuse a Claude Code tab. Chrome's
+    tab 5 and Edge's tab 5 are different tabs, and a workspace refusal found after the browser
+    opened a tab reports an applied effect (ADR-0196 Decision 9).
+26. After a browser restart that gives a person's tab the id of an agent's tab, the agent's handle
+    reaches nothing: list, read, screenshot and navigate say the handle names no open tab, and a
+    release with preserve-tabs off closes nothing. A worker or native-host restart in the same
+    browser run keeps the agent's tab bound even when its page routed itself, and a port restart
+    keeps a tab whose page is unchanged. A resumed session's tabs are confirmed by id and page
+    before their first use, and a token written before a browser restart restores nothing
+    (ADR-0203 Decision 1).
+27. A replace keeps a live session's tabs bound, grouped and resumable. A quit, an uninstall or an
+    unknown reason releases every session's tabs and hands each stream a token with no tabs, and a
+    command-line session's tabs are released at every service end. A call during a quit gets a
+    cancelled tool result with an audit line (ADR-0203 Decisions 3 and 4.2).
 
 ## Presentation gates
 
@@ -403,8 +419,10 @@ workbench shows waiting becoming running once.
 2. The same opaque adapter installation id is sent after service-worker suspension, browser
    restart, extension reload, and native reconnect.
 3. The adapter's first frame is the protocol-4 hello. It carries the persistent browser id, the
-   browser's product name, platform and engine version, the adapter version, and whether the
-   browser already holds a focused window. The service answers with `hello_accepted`: its epoch,
+   life the worker keeps in session storage, the browser's product name, platform and engine
+   version, the adapter version, and whether the browser already holds a focused window. A worker
+   restart keeps the life, and an extension reload mints a new one. The service answers with
+   `hello_accepted`: its epoch,
    version, control state and the page assets with an id. Service behavior is gated by the
    protocol, not by the extension version string, and a service that cannot answer a protocol-4
    hello is called outdated. An adapter reports attention when a browser window gains focus and
@@ -428,7 +446,8 @@ workbench shows waiting becoming running once.
    effects-on, captions-off, diagnostics-off, and preserve-tabs-on defaults under local keys.
    Preserve tabs is a final physical interlock: it can refuse model-driven close but cannot edit,
    import, expand, or override authority. Human browser closure remains available.
-8. Each exact `Ghostlight - <client label>` title has one canonical blue group across normal
+8. Each exact `Ghostlight - <agent name>` title, named for the agent that opened the workspace as
+   the window names it, has one canonical blue group across normal
    browser windows. A new tab is created directly in that group's window. With no Ghostlight group,
    the first URL opens in a dedicated normal window; no tab is inserted into the user's active
    window and no blank tab is exposed. Concurrent opens cannot create duplicate groups. An opener
@@ -651,13 +670,14 @@ workbench shows waiting becoming running once.
 3. Credential input without acknowledgement returns guidance and dispatches no input, including
    an ordinary field before a credential field in grouped fill. Subsequent ordinary input works
    immediately. A first-call or later `user_authorized_credentials: true` reaches password input
-   for grouped fill and targeted/focused typing. It cannot bypass configured policy or Pause/Stop.
+   for grouped fill and targeted/focused typing. It cannot bypass configured policy, Pause or End
+   session.
 4. Control arriving after preparation or during writer queuing prevents the next command. Queued
    cancellation/deadline also sends no command and leaves no pending receipt. Applied and uncertain
    receipts keep their facts when controls change after dispatch; postcondition refusal preserves
    the previously acknowledged action. Its summary names that action before saying why the check
    did not confirm it, and never says nothing happened.
-5. Human Pause and Stop still prevent the next browser effect. Resume
+5. A person's Pause and End session still prevent the next browser effect. Resume
    permits new requests without replay or permission changes. Page feedback contains no buttons,
    focusable elements, or input-intercepting layers, even when its stylesheet is unavailable.
 6. Rust application/relay tests and the fresh-build process journey cover timing and isolation with

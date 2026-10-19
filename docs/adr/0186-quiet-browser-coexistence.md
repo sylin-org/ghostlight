@@ -7,6 +7,9 @@ ADR-0137's unconditional same-host adoption and duplicate-group repair. Builds o
 ADR-0126, ADR-0164, ADR-0168, ADR-0181, and ADR-0185.
 The source trial is unpublished. It changes no release version or public availability claim.
 
+Amended by ADR-0203 (2026-10-19): Decision 3. A new service epoch releases every managed tab, and
+each entry stays released until its next commit, where this record cleared it.
+
 ## Context
 
 The operator and several agents can share one authenticated browser. Avoiding one window-focus

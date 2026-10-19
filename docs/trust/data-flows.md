@@ -112,6 +112,11 @@ either case.
   `state/watch.off`, `state/setup.json`, `state/last-browser.json`, `state/icons`, the archived 1.x logs, and the files an upgrade from 1.x
   copies there. The Windows native-host manifest is not in this list. A file that already existed
   keeps its mode.
+- On Windows, the private seed files `ghostlight policy keygen` writes, the MCP client locations
+  file in `state` and the user policy file Ghostlight owns in `policy` are written with a protected
+  access list for the user and SYSTEM that inherits nothing from their folder. A seed file is
+  created once and never overwritten. Ghostlight changes no file's access when it starts, so a
+  locations or policy file an earlier build wrote keeps its access until Ghostlight next writes it.
 
 The governed host and optional bounded target name are the only page-derived audit text. Audit
 does not contain paths, queries, fragments, arbitrary page text, selectors, target handles, typed
@@ -123,8 +128,15 @@ browser error text. Earlier versions could retain those values. Existing files a
 see the [H1 implementation record](../tasks/security-hardening/h1-readable-audit.md) for verification
 and publication state. The correction must be deployed before relying on it for new records.
 
+A 2.0 source correction (ADR-0203 Decision 4.1) closes one more path. In 1.3.14 and earlier
+releases, a refusal of a handle that belonged to another Ghostlight session wrote that session's
+client label, or its workspace id when it had none, into the audit `summary` and `refusal_facts`.
+2.0 writes neither. A form value or a dialog message reaching the audit through a dialog the fill
+raised or an expectation it missed was found before any 2.0 release and never shipped in one.
+Existing files are not rewritten.
+
 See [security-overview.md](security-overview.md),
 [the SIEM guide](../guides/siem-integration.md), and
 [the governance guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-10-18 against the current source | Contact: hello@sylin.org
+Last reviewed: 2026-10-19 against the current source | Contact: hello@sylin.org

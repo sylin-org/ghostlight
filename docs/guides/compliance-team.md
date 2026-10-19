@@ -27,8 +27,9 @@ as audit.
 Test update failure too. A bad signature, rollback, malformed source, or unreachable source must
 retain the active verified bundle. A configured cold start without a valid source or cache must
 fail closed. Repeated denials must leave later permitted requests available without a session
-review or resume. Credential-input acknowledgement must not override configured policy or human
-Pause/Stop; without acknowledgement, the call returns guidance and creates no session hold.
+review or resume. Credential-input acknowledgement must not override configured policy or a
+person's Pause or End session; without acknowledgement, the call returns guidance and creates no
+session hold.
 
 ## Collect evidence
 

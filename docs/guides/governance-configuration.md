@@ -81,6 +81,11 @@ remain separate.
 | `browser.startup` | `on_demand` or `manual` | Controls whether admitted work may request one bounded browser-startup attempt. Windows defaults to `on_demand`; Linux defaults to `manual`. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
 
+Every `config` entry names a `level`, `mandatory` or `recommended`, and both set a ceiling. Layers
+combine each setting the same way whatever its level: a value that takes something away in one
+layer cannot be relaxed by another, so a `recommended` value is not a default the user layer may
+lift.
+
 A channel switch set to `false` refuses every request on that channel before any browser work, and
 the refusal says which switch is off and whose policy turned it off. The connection still opens,
 so the agent hears why. Either layer can turn a channel off; a user layer cannot turn back on a
@@ -261,11 +266,11 @@ pause the workspace or create a review/resume requirement. Each subsequent reque
 same configured authority and explicit human controls.
 
 Fill and typing accept `user_authorized_credentials`, false by default. Set it only when the user
-explicitly instructed credential entry; existing conversation authorization is sufficient. It is
-a per-request caller acknowledgement, not independently verified proof or a policy grant. Without
-it, credential detection returns guidance for that request and creates no session hold. With it,
-configured policy and human Pause/Stop still apply. Browser feedback contains no buttons or
-input-intercepting overlays; interactive runtime control belongs in the workbench.
+explicitly instructed credential entry; existing conversation authorization is sufficient. It is a
+per-request caller acknowledgement, not independently verified proof or a policy grant. Without it,
+credential detection returns guidance for that request and creates no session hold. With it,
+configured policy and a person's Pause or End session still apply. Browser feedback contains no
+buttons or input-intercepting overlays; interactive runtime control belongs in the workbench.
 
 ## Audit collection
 
@@ -276,17 +281,28 @@ open a direct syslog or HTTP delivery channel. See [`siem-integration.md`](siem-
 
 ## Permanent ceilings
 
-Policy never grants non-HTTP(S) schemes. Localhost, its subdomains, loopback, and link-local
-addresses use the ordinary host rules. An exact host such as `localhost` or `127.0.0.1` can be
-allowed or denied by a grant, and `content.security.sacred_domains` can mark a host never-touch.
-No special local-access setting or exception is needed.
+Policy never grants non-HTTP(S) schemes, and agents can never open or read Ghostlight's own window
+address. These two are Ghostlight's own ceiling: a refusal credits no policy layer. Localhost, its
+subdomains, loopback, and link-local addresses use the ordinary host rules. An exact host such as
+`localhost` or `127.0.0.1` can be allowed or denied by a grant, and
+`content.security.sacred_domains` can mark a host never-touch. No special local-access setting or
+exception is needed.
+
+A never-touch refusal is the decision of the layer that listed the host. Its audit line and result
+carry reason `protected_host`, rule `sacred_host`, the first listing layer's tier and a `D-` denial
+id taken from that layer and the rule alone, so every host one layer lists shares one id and the id
+names none. The window names the organization when its policy listed the host.
 
 Committed landings are checked again before their content is accepted. These checks govern
 browser operations and observed destinations; they do not filter every network request a page
 makes or classify hostnames by their resolved IP address.
 
 The extension's **Preserve controlled tabs** setting is an independent physical interlock. Both
-orchestrator policy and that browser-local choice must allow model-driven close. Manual browser
+orchestrator policy and that browser-local choice must allow model-driven close. Policy decides a
+close in two steps: Action on the tab's host, then `browser.tabs.allow_close`. So under a read-only
+policy an agent cannot close its own tab on a host it may only read, and that tab stays open for
+you. A tab Ghostlight's refused landing left open and held can always be closed under the tab-close
+setting alone, because closing it takes the tab away from a page no policy admitted. Manual browser
 closure always remains the user's action.
 
 ## When history cannot be saved

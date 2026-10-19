@@ -81,8 +81,8 @@ when the service writes a different shape.
 | `capabilities` | Complete independent RAWX requirement set. Empty is valid, and a request that never decoded records it empty. |
 | `authority` | Opaque immutable authority snapshot id. |
 | `policy_seq` | Signed managed publish sequence, when active. |
-| `allowed`, `reason` | Final-boundary decision and stable reason. |
-| `policy_rule`, `policy_tier`, `grant_id` | Content-free deciding attribution. |
+| `allowed`, `reason` | Final-boundary decision and stable reason. `allowed` is `false` when the boundary refused the work: a policy, a channel switch or a person's control refused it, or the request did not match the catalog (`invalid_request`, which a flow step that never started also records). A call that ended for another reason, such as a cancellation, a full queue or a quit, keeps `allowed: true`; read `status` and `effect` for what happened. |
+| `policy_rule`, `policy_tier`, `grant_id` | Content-free deciding attribution. A never-touch refusal has `policy_rule` `sacred_host`, the tier of the layer that listed the host, and no `grant_id`. |
 | `denial_id` | Deterministic `D-` correlation id for an authored denial. |
 | `status`, `effect` | Terminal result and physical-effect class. |
 | `summary` | Bounded Ghostlight-authored sentence. |
@@ -120,6 +120,15 @@ audit v2 contract, which freezes at 2.0: a word is not renamed or removed, and a
 ignores a word it does not know. A line from an earlier build carries the bare string
 `"stale_target"` as its `cause`; a reader keeps such a line and omits its `refusal_facts`.
 
+A refusal because a handle does not fit the call has `refusal_facts`
+`{"reason":"workspace_unusable","cause":"<word>"}`, and `<word>` includes `handle_on_other_tab`
+(a target or view handle of another of the session's tabs), `fields_on_several_tabs` (one fill
+across two tabs), `outside_image` (a point outside the view's image) and `tab_held` (a tab a
+refused landing left on the refused page). The cause is a bare word: the other tab's handle is
+never kept. A `tab_held` line carries the decision of the landing that held the tab, its `reason`,
+`policy_rule`, `denial_id` and `policy_tier`, and `observed.host` is the refused host. Nothing
+reached the browser. The same audit v2 rules apply to these words.
+
 A request refused because a policy turned off its channel has `reason` `channel_denied`,
 `policy_rule` `channel`, the deciding `policy_tier`, and `refusal_facts`
 `{"reason":"channel_off","channel":"<channel>"}`, where `<channel>` is `mcp` or `cli`. Nothing
@@ -143,6 +152,11 @@ evidence comes from the original immutable-snapshot evaluation. See [H4 source a
 state](../tasks/security-hardening/h4-grouped-history.md) before assuming an installed version
 writes these fields.
 
+A flow step that never started, because its preparation failed, has its own line: `status`
+`not_started`, `allowed: false`, `reason` `invalid_request`, and the flow's `step` correlation with
+`preparation_failed: true`. Under managed governance it carries `policy_seq` like every other line;
+`tests/golden/audit/not-started.json` pins it.
+
 Two values read differently on lines from builds before 2.0. There, a request that never decoded
 records `capabilities` as `["read"]`, and a flow's own record has no `permissions` checks, because
 the flow's admission check was dropped when its first step started.
@@ -164,10 +178,13 @@ before assuming an installed version includes the correction.
 | `rebound` | Present, as `true`, when the action used a handle that followed its control through a re-render the page proved. A closed fact: it names no handle, row or link. |
 
 The governed host and an optional normalized target name inside `summary` are the deliberate
-page-derived exceptions. The target name is bounded to 80 characters and can be removed by
-`privacy.preserve_target_names: false`. Audit never contains paths, queries, fragments, arbitrary
-page text, selectors, target handles, form values, filenames, file bytes, scripts, screenshots,
-recordings, dialog text, policy payloads, credentials, or model prompts.
+page-derived exceptions. `summary` and `refusal_facts` keep no page text and no client's claim
+through any wrapper: a fill that raises a dialog or whose expectation falls short keeps no field
+value, and an ownership refusal keeps no other session's name. The target name is bounded to 80
+characters and can be removed by `privacy.preserve_target_names: false`. Audit never contains paths,
+queries, fragments, arbitrary page text, selectors, target handles, form values, filenames, file
+bytes, scripts, screenshots, recordings, dialog text, policy payloads, credentials, or model
+prompts.
 
 ## Collect and query
 

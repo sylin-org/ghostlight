@@ -6,8 +6,11 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-D0 and D1 have landed. Next: D2, which writes the contract lines for each slice after its code
-lands. D1's lines that wait on the owner's two questions are listed under Notes.
+D0, D1 and D2's first commit have landed. D2's first commit writes the contract lines of every
+slice landed by `e2752439`. The slices still open in other lanes (C3b, C3c, C12b, C10c, C16, C17,
+C18, C19b, C19c, C20, S3 to S8 and I11) get their lines in a later D2 commit, after their code;
+Notes lists the lines each one owes. D1's lines that wait on the owner's two questions are listed
+under Notes too.
 
 ## Slices
 
@@ -17,7 +20,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | --- | --- | --- | --- | --- | --- |
 | D0 | docs(adr): one owner for each fact | candidate | none (commit 2: ux-2 closes) | - | landed (3729f9a1 and this commit) |
 | D1 | docs(release): the release candidate names the plugin, and LANGUAGE names where a selector works | candidate | D0; ux-2 closes (`docs/1.0/LANGUAGE.md`) | see Notes | landed (this commit) |
-| D2 | docs(contracts): the contracts state what landed | as the code it follows | each landed slice; ux-2 closes (`docs/1.0/`) | - | todo |
+| D2 | docs(contracts): the contracts state what landed | as the code it follows | each landed slice; ux-2 closes (`docs/1.0/`) | first commit covers every slice landed by `e2752439`; see Notes | landed (this commit) |
 
 ## Notes
 
@@ -35,3 +38,51 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   (974a5ed2 kept the rc.1 copy "as history", but rc.1 is not published). D1 leaves it as is.
 - D1, for the install lane: `packaging/plugin/ghostlight/README.md` still states the precedence
   claim the ADR-0144 amendment withdraws. I9a removes it there.
+- D2, what the first commit covers: A1 to A4, B1, B2, C1 to C7, C9, C10a, C10b, C11, C12a, C13,
+  C19a, C21, C22, I1 to I10, I12, I13, P1 to P10, S1, S2 and S4a. Each claim was read against the
+  tree at `e2752439` before it was written: the sentences against `language/outcome.rs` and
+  `language/provenance.rs`, the list facts against `work/navigation.rs`, the service end against
+  `service/mod.rs`, the hello against `protocol4/wire.rs` and `extension/worker.js`, the audit
+  shapes against `tests/golden/audit/`, the never-touch credit against the policy ledger, and the
+  Windows file access against `install/record.rs`.
+- D2, lines owed by slices still open, written only after their code: ARCHITECTURE's Work
+  chokepoints without `CompletionGate`, and the SIEM guide's `allowed` wording checked against the
+  doc comments (C19c); the recording binding as a workspace fact (C16); the SIEM guide's optional
+  `browser_id`, install-local and random, a new audit log owner-only on Windows and how an
+  administrator grants a collector account read access (C19b, which also adds the audit log to
+  data-flows' Windows line); the adapter-protocol-4 design's dropped `presentationLabel` (C18); the
+  catalog dropping `browser_screenshot` when screenshots are off (C10c); a pinned wait that reads
+  its own browser in ARCHITECTURE's waiting paragraph (C3b); the window's `window_failed` (S8).
+- D2, beyond the named ACCEPTANCE items: Browser job journeys gain item 26 (a browser restart never
+  hands an agent's handle the person's tab, which proves README's promise) and item 27 (a replace
+  keeps, a quit releases, a call during a quit gets a tool result), and Extension product gates
+  item 3 names the hello's `life`. Each restates a proof the core or package ledger already names.
+  Not a changed decision.
+- D2, the diagnostics ring: ARCHITECTURE and ACCEPTANCE item 20 claim the top-frame reset only for
+  a bound tab, and that an embedded document's navigation never clears a ring. An unbound tab's
+  ring still survives a top-frame navigation (the open item in LEDGER-package.md and
+  LEDGER-adapter.md), so no document says it starts fresh there. When that fix lands, its D2
+  line says every tab's ring starts fresh at a top-frame navigation.
+- D2, Ghostlight's own ceiling: the docs name non-HTTP(S) schemes and the window's own address,
+  not localhost, loopback and link-local as Decision 7.2's text does, because ADR-0155 removed
+  those ceilings and P2 did not restore them (LEDGER-policy.md, P2). The trust and governance docs
+  already said local destinations follow policy.
+- D2, Windows file access: data-flows names the policy keygen seeds, the MCP client locations file
+  and the owned user policy. The spec's "a file that already existed keeps its access" is written
+  as "keeps its access until Ghostlight next writes it", because those files are replaced through
+  `atomic_replace`, which writes the new file owner-only (LEDGER-install.md, I1). The audit log is
+  C19b's and is not named.
+- D2, data-flows' correction paragraph: C1 found the ownership leak in 1.3.14 (`v1.3.15` was
+  withdrawn unreleased, STATUS), so the paragraph names 1.3.14 and earlier releases, and says the
+  fill and dialog leak never shipped in a release.
+- D2, also edited: ADR-0186's header gains the ADR-0203 pointer D0 left for when B2 landed;
+  `docs/guides/compliance-team.md`'s "Pause/Stop"; the adapter-protocol-4 design loses
+  `opener_tab_id` (B2's note) and gains `life` (B1), the epoch release and the outdated-extension
+  handling (B2); ARCHITECTURE's older-layout line (I10's note) and its hello sentence, which no
+  longer lists capability declarations the protocol-4 hello does not carry.
+- D2, "Pause/Stop" kept: `docs/design/security-assessment-2026-09-06.md` and
+  `docs/design/tool-surface-review-2026-09-07.md` are dated reviews that quote the vocabulary of
+  their day, so they keep it.
+- D2, for the coordinator: ARCHITECTURE's Fringe stability paragraph still says hello capability
+  revisions derive from the handler table, which the protocol-4 hello no longer carries. It
+  predates this batch and no landed slice changed it, so D2 leaves it.

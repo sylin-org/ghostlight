@@ -16,6 +16,30 @@ Every model-requested action crosses one executor, one immutable authority snaps
 port, and one completion path. Unknown effects are reported as unknown and are never replayed
 automatically.
 
+## Tabs across restarts
+
+A browser hands tab ids out again after it restarts, so a tab Ghostlight remembers across a
+browser or extension reconnect, or across a service restart, is a hint until the browser confirms
+it.
+It is kept only when the browser shows a tab with that id and either the extension reports the
+same browser run it was made in, or the tab shows the page Ghostlight last saw there. Otherwise
+the agent's handle names no open tab, and the agent opens a fresh one. The one case this cannot
+tell apart is a tab of the person's that received the same id after a browser restart and shows
+the same address, such as a restored copy of the agent's page; that tab is bound.
+
+An MCP session's resume token is unsigned and opaque, written by the service and held by the edge
+in memory. It is a hint, never authority. A program running as the same user can write one, but it
+binds only a tab whose id shows the page it names, or, carrying the browser's current run id, a tab
+of that run. Such a program can already act as the user, and it could open the same site in a new
+tab with the person's cookies; what a forged token adds is an existing tab's in-page state.
+
+A client reuses only tabs that sessions of the agent it claims to be kept open. That is a courtesy
+between well-behaved clients, not authority: a same-user program that claims another agent's name
+can adopt that agent's kept tabs. The adopt loads a page in the kept tab, so the origin's
+sessionStorage and the tab's history cross with it; cookies are shared across the profile anyway.
+A client that claims no name reuses nothing. Ghostlight makes no promise of tab ownership against
+programs running as the same user.
+
 ## Window on loopback
 
 The service serves the Ghostlight window's pages over HTTP on one loopback port. It binds
@@ -45,8 +69,9 @@ complete requirement set to exact, suffix-wildcard, or universal host patterns. 
 local tiers intersect. A request cannot narrow its own authority: request restrictions are refused,
 and audit records carry no restriction fields. Localhost, loopback, and link-local HTTP(S)
 destinations follow those policies, with one exception: agents can never open or read
-Ghostlight's own workbench address. Non-HTTP(S) schemes and configured sacred domains remain
-hard ceilings.
+Ghostlight's own workbench address. That address and non-HTTP(S) schemes are Ghostlight's own
+ceiling, credited to no policy layer. Configured sacred domains are never-touch for every agent,
+and each refusal of one is the decision of the layer that listed it.
 
 A policy can turn off work from MCP agents or from the command line, and every request on a
 channel that is off is refused before any browser work. The channel is declared by Ghostlight's
@@ -54,10 +79,13 @@ own programs when they connect, and any program running as the same user could d
 so a channel switch is a guardrail for well-behaved agents, not a barrier against hostile software
 on the same account.
 
-Every policy denial receives deterministic attribution to authority, tier, grant, and
-rule. Repeated refusals do not pause a session; later permitted work remains available. Human
-Pause/Stop remain authoritative. Controls are rechecked at browser
-transmission, while already dispatched work retains its actual effect evidence.
+Every policy denial receives deterministic attribution to authority, tier and rule, and to the
+grant when a grant decided it; a never-touch refusal names the layer that listed the host.
+Repeated refusals do not pause a session; later permitted work remains available. A tab a refused
+landing left on the refused page is held: it refuses reading and acting until the agent navigates
+it to an allowed page or closes it. A person's Pause and End session remain authoritative. Controls
+are rechecked at browser transmission, while already dispatched work retains its actual effect
+evidence.
 
 Fill and typing require the caller to acknowledge explicit user authorization for credential
 entry through `user_authorized_credentials`, false by default. Existing conversation authorization
@@ -69,9 +97,11 @@ input. [ADR-0185](../adr/0185-explicit-user-control-and-passive-browser-feedback
 source behavior; [STATUS](../STATUS.md) distinguishes verification and deployment evidence.
 
 Audit is a local append-only JSONL flight recorder. It carries the complete RAWX requirement set,
-decision attribution, managed sequence, governed host, and bounded outcome measurements. It does
-not contain credentials, arbitrary page text, full URLs, typed values, scripts, screenshots, or
-recordings. SIEM delivery uses the endpoint's existing file collector.
+decision attribution, managed sequence, governed host, and bounded outcome measurements. It does not
+contain credentials, arbitrary page text, full URLs, typed values, scripts, screenshots, or
+recordings, including when an action raises a dialog or its expected condition falls short, and it
+keeps no client's own words or another session's name. SIEM delivery uses the endpoint's existing
+file collector.
 
 ## Signed managed policy
 
@@ -113,5 +143,6 @@ audit of Ghostlight will be published in full, including findings.
 
 See [data-flows.md](data-flows.md) and [supply-chain.md](supply-chain.md).
 
-Last reviewed: 2026-10-18 against the current source; local-destination policy follows ADR-0155.
+Last reviewed: 2026-10-19 against the current source; local-destination policy follows ADR-0155,
+and tabs across restarts follow ADR-0203.
 Contact: hello@sylin.org

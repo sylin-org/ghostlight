@@ -56,16 +56,49 @@ tabs no tab is a default, and the refusal lists them in `tabs`, each with its `t
 | --- | --- | --- | --- |
 | No tab yet | `This session has no open tab yet.` | `no_tab` | `browser_navigate` with `url` |
 | Several tabs could be meant | `More than one tab is open in this session, so the call must name one.` | `ambiguous_tab` | repeat with `tab` from `tabs` |
-| Named tab is gone | `That tab is no longer open.` | `tab_unavailable` | `browser_tabs` list |
+| Named tab is gone | `That tab handle names no open tab in this session.` | `tab_unavailable` | `browser_tabs` list |
+
+`tab_unavailable` is true for a handle whose tab closed, whose binding the browser did not confirm,
+and a handle the session never issued. After a browser restart a remembered tab is confirmed by its
+id and the page it last showed before it is used, and one the browser does not confirm reads this
+way (ADR-0203 Decision 1). An update keeps a session's tabs, and the session resumes with them. A
+person's Quit, an uninstall, or an end for a reason the service does not know releases them, so
+the resumed session's earlier handles read this way and the agent opens a fresh tab (ADR-0203
+Decision 3).
 
 Each session works only in its own workspace. A tab, target, or view handle that belongs to
 another session is refused before any browser work with `reason: ownership_mismatch`. When the
-owning session has a client label, the summary names that label, for example `That tab handle
-belongs to Codex.`, the `owner_workspace` fact carries it, and the next step is `browser_tabs` list
-in the caller's own session. Otherwise, including a client that reported an empty name, the
-summary is `That handle belongs to a different Ghostlight session.` and the next step is to collect
-fresh handles in this session. A refusal never carries another session's workspace id. No tool
-lists other sessions or moves a session into another workspace (ADR-0196 Decision 8).
+owning session's opener is an agent Ghostlight can name, the summary names it the way the window
+does, for example `That handle belongs to another Ghostlight session (Claude Code).`, the
+`owner_workspace` fact carries the same name, and the next step is `browser_tabs` list in the
+caller's own session. For an opener nothing names, the summary is `That handle belongs to a
+different Ghostlight session.` and the next step is to collect fresh handles in this session. The
+audit keeps neither name. A refusal never carries another session's workspace id. No tool lists
+other sessions or moves a session into another workspace (ADR-0196 Decision 8).
+
+A handle that belongs to this session but does not fit the call is refused before any browser work
+with `failed`, no effect and `repeat_safe: true`, and says what is true of it (ADR-0203 Decision
+5.3). The audit keeps the bare cause word under `workspace_unusable` and never the other tab's
+handle:
+
+| Case | Summary | `reason` | Next step |
+| --- | --- | --- | --- |
+| A target or view handle of another of this session's tabs than the one the call named | `That handle belongs to tab_..., another of this session's tabs.`, with that tab in `handle_tab` | `handle_on_other_tab` | repeat with handles from one tab, and `tab` left out or set to that tab |
+| A fill whose fields or submit target sit on more than one tab | `A fill works in one tab, and these targets are on more than one.` | `fields_on_several_tabs` | one `browser_fill_form` call for each tab |
+| A point outside the view's image | `Those coordinates are outside the view's image, which is W by H pixels.`, with the size in `image` | `outside_image` | repeat inside the image, or take a new `browser_screenshot` |
+
+A tab that a refused landing left on the refused page is held. It still refuses reading and acting:
+such a call is `blocked`, no effect, `reason: tab_held`, with the `denial_id` and `policy_rule` of
+the landing that held it, and its summary names the refused host, for example `That tab shows
+example.com, which this session may not use, so Ghostlight will not read or act on it there.`. The
+one next step names the calls that clear it: `browser_navigate` with the tab and an allowed `url`,
+or `browser_tabs` with action `close`. Each is authorized on its own, never on the page the tab
+shows, and a governed landing clears the hold. A held tab is not paused, so nothing asks the person
+to resume, and a `browser_flow` step on a held tab is blocked by policy: the flow follows its
+`on_error` choice, as for any policy refusal, where a pause would stop it. The audit records the
+landing's denial, reason, rule, denial id and tier, with the cause `tab_held`; under a republished
+authority the refused address is decided again and that decision is recorded (ADR-0203 Decision
+5.5).
 
 Tab handles are durable correlation slots: navigating by a handle whose
 tab has closed recreates that tab through the governed open path under the same handle and says
@@ -82,8 +115,10 @@ A stale target handle refuses with `reason: stale_target`, no effect and `repeat
 a `stale` fact that says why in one of four words, whoever noticed. The service notices a closed
 tab or a left document; the page notices a control that left it. A handle of a closed tab, of a
 document the tab left, or of a control the page reported removed refuses at once, before anything
-is sent to the browser. The sentence and the step depend on the word only, and never quote page
-text:
+is sent to the browser. A handle of a control in an embedded document that was replaced or removed
+is `navigated` too, as is the one target handle of a call that met a changed document, instead of
+an unverified page (ADR-0203 Decision 5.4). The sentence and the step depend on the word only,
+and never quote page text:
 
 | `stale` | Summary | Next step |
 | --- | --- | --- |
@@ -140,7 +175,11 @@ target handle by `browser_click`, `browser_type_text`, `browser_upload`, each `b
 field, and the `selector_present` wait, so drivers can prefer what a control is called over
 stashing handles. Every other call that takes a target takes a handle. A selector's `role` is one
 of `button`, `link`, `checkbox`, `radio`, `textbox`, `searchbox`, `combobox`, `listbox`, `slider`,
-`spinbutton`, `tab`, `menuitem` or `option`; each is a role an observed control can have.
+`spinbutton`, `tab`, `menuitem` or `option`; each is a role an observed control can have. A
+selector that matches no visible control, or more than one, acts on nothing and says so: `No
+visible control matched the semantic selector in the inspected content.`, or `3 visible controls
+matched the semantic selector; none was chosen.` Ghostlight asks the page for at most 8 matches,
+and when more matched than that the sentence starts `At least 8`.
 
 View handles are returned by screenshots. They bind rendered coordinates to one tab, document
 generation, viewport origin, viewport size, device scale, and zoom. Coordinate input is rejected
@@ -160,8 +199,8 @@ it, and it is unique within that session.
 Ordinary bursts may wait within the original invocation deadline. Sustained waiting is visible
 in the human workbench; it does not create a new tool call or a popup. An exceptional admission
 capacity refusal returns `reason: capacity`, no effect, and safe guidance for a request that never
-started. Human Pause/Stop preserves its fixed directive and terminal history without repeated
-guardrail popups while queued work drains (ADR-0160).
+started. A person's Pause or End session preserves its fixed directive and terminal history
+without repeated guardrail popups while queued work drains (ADR-0160).
 
 Ordinary page tools share optional `visual_settle`, default true: read, inspect, find,
 screenshot, click, scroll, hover, fill, type, key input, drag, upload and script execution.
@@ -251,7 +290,11 @@ Refusals say what is true, and their next steps suggest only what the caller can
   anything reached the browser.` or `Ghostlight quit before anything reached the browser.`, each
   with status `cancelled`, no effect, and no next step. A cancellation the browser reported
   without one of these causes answers `Cancelled before anything reached the browser.` None of
-  them says the browser disconnected.
+  them says the browser disconnected. A call that arrives while Ghostlight is ending, or after the
+  end stopped its session, gets this tool result and an audit line too, never a protocol error:
+  `Ghostlight quit before the browser job started.` After a quit, a replacement, an idle exit or a
+  reason this build does not know, its one step is `Try the call again in a moment.`, because the
+  edge reconnects; after an uninstall or the end of the person's sign-in session it has none.
 - A browser that cannot take a call is waited for first when there is evidence it is coming
   back. A session that already works in a browser always waits for that browser. A session with
   no browser yet waits only while a connection is registered but initializing or silent, a
@@ -317,7 +360,9 @@ Refusals say what is true, and their next steps suggest only what the caller can
 
 The same language owner supplies a separate typed audit projection. Readable explanations,
 measurements, and governed target names survive; arbitrary browser details and result facts do
-not enter retained history. A permitted client result may still contain those details. Expanding
+not enter retained history. That holds through every wrapper: a fill that raises a dialog or whose
+`expect` falls short keeps no field value, and an ownership refusal keeps no other session's name
+(ADR-0203 Decision 4.1). A permitted client result may still contain those details. Expanding
 existing history does not authorize more capture. Additional retention profiles and richer
 diagnostic capture remain deferred (ADR-0103 H1 amendment).
 
@@ -349,16 +394,26 @@ only to stale details within the running installation's own directory (ADR-0149 
 
 List, focus, or close controlled tabs. Actions are:
 
-- `list`: no `tab`; shortest call `{"action":"list"}`; capability `read`. The list is read live
-  from the connected browser on every call and names only this session's own tabs, so it
-  requires a connected browser and refuses without one. The summary reads `Listed 2 tabs in this
-  session.`; an empty list points to `browser_navigate` with `url`.
+- `list`: no `tab`; shortest call `{"action":"list"}`; capability `read`. A session that holds
+  tabs reads the list live from its browser on every call and names only its own tabs, so it
+  needs that browser connected and refuses without it. It first confirms any tab remembered
+  across a browser or service restart, and a tab the browser does not confirm is left out. A
+  session that holds no tab answers at once, asking no browser: `Listed 0 tabs in this session.`,
+  `tabs: []`, the connected browsers, and the step `Call browser_navigate with url to open a
+  page.` It never waits for, starts or binds a browser, so the browser it names can still be
+  chosen for the first tab (ADR-0203 Decision 2.2). The summary otherwise reads `Listed 2 tabs in
+  this session.`
 - `focus`: required `tab`; no RAWX capability.
-- `close`: required exact `tab`; capability `action` and the tab-close policy constraint.
+- `close`: required exact `tab`; capability `action` on the tab's host, then the tab-close policy
+  constraint. A tab a refused landing left held, or one already gone, is closed under the
+  person's runtime controls and the tab-close setting alone.
 
-Close also respects the browser's local preserve-tabs interlock. Facts for list contain `tabs`,
-each with `tab`, bounded `title`, governed `url`, `active`, and `readiness`. Focus facts include
-`tab`, `active`, and `window_focused`. Close facts include `tab` and `closed`.
+Close also respects the browser's local preserve-tabs interlock. Facts for list contain `tabs` and
+`browsers`. Each tab has `tab`, bounded `title`, governed `url`, `active`, and `readiness`. A tab
+whose page the policy refuses Read on keeps `tab`, `active` and `readiness`, has no `title` or
+`url`, and names its `host` (null when the address has none) and the refusal's `reason`, as a held
+tab's refusal names its host. Each entry of `browsers` has `browser`, `name` and `attended`. Focus
+facts include `tab`, `active`, and `window_focused`. Close facts include `tab` and `closed`.
 
 ### `browser_navigate`
 
@@ -372,15 +427,19 @@ blocking prompt stops the navigation and is reported, never accepted.
 With `new_tab:true`, Ghostlight creates and navigates a new controlled tab. With `tab`, it navigates
 that exact tab. With neither, it uses the unambiguous controlled tab, and when none exists it opens
 one. With `reuse:"domain"`, the open first reuses a tab Ghostlight opened on the same host and port
-and a released session of the same client left open, in the same browser, with no page loaded in it
-since the release. Same client means the same client label, so the tab already sits in the caller's
-`Ghostlight - <client label>` group; a tab another client released is never reused, and the open
-creates a fresh tab. A released tab stays open only when the person's preserve-tabs setting kept it,
-so with that setting off nothing is reused. An exact URL wins, then the lowest tab id. The service
-makes that choice, checks that the browser still shows the tab at its release address, and navigates
-that exact tab. A tab the person opened is never reused, and the browser is never asked to pick one
-(ADR-0196 Decision 9). `reuse:"never"` always creates a fresh tab. A reused open says so: the
-summary reads "Reused the example.com tab." rather than "Opened example.com." Capability: `read`.
+and a released session of the same agent left open, in the same browser, with no page loaded in it
+since the release. Same agent means the agent the opener's claim names: every command-line session
+is the command line, a claim the catalog knows is that agent, and any other claim is an unknown
+agent under its claimed name. The reused tab goes back into the caller's `Ghostlight - <agent name>`
+group. A tab another agent released is never reused, and the open creates a fresh tab. A client that
+claims no name reuses no kept tab, and no one reuses its tabs. The claim is a courtesy between
+well-behaved clients, never authority (ADR-0203 Decision 9). A released tab stays open only when the
+person's preserve-tabs setting kept it, so with that setting off nothing is reused. An exact URL
+wins, then the lowest tab id. The service makes that choice, checks that the browser still shows the
+tab at its release address, and navigates that exact tab. A tab the person opened is never reused,
+and the browser is never asked to pick one (ADR-0196 Decision 9). `reuse:"never"` always creates a
+fresh tab. A reused open says so: the summary reads "Reused the example.com tab." rather than
+"Opened example.com." Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `created`, `reused`, and `document_generation`.
 
@@ -803,7 +862,9 @@ Rules: each condition has its own branch. `load_ready` accepts neither `value` n
 `url_contains`, `text_present`, and `text_absent` require `value`; `target_present` and
 `target_absent` require `target`; `selector_present` requires a typed `selector` and polls the
 live page until a control matching it exists; `duration` requires a decimal string `value`
-of whole milliseconds (for example, `"1200"`) and waits executor-side; `visual_settle` is met when
+of whole milliseconds (for example, `"1200"`) and waits executor-side, and a duration that cannot
+end before the call's deadline is refused at once, before anything waits, as a deadline before
+dispatch with `repeat_safe: true`; `visual_settle` is met when
 the page, or an optional `target`, stops moving and repainting; `layout_stable` was the same
 condition and is refused with a pointer to `visual_settle`. The optional `visual_settle` field adds
 a short layout settle after the condition holds. Its default depends on the condition, so the
@@ -923,8 +984,8 @@ arguments. A reference that does not resolve fails its step without effect.
 With `on_error: stop`, a child execution, argument-decoding, or reference-resolution failure ends
 the flow before the next step. Effects from earlier steps remain applied; stopping does not roll
 them back. Explicit `continue` permits later independent steps to run and still reports a
-non-success when any child fails. Human pause/stop, a local interlock, cancellation, and deadlines end
-execution even under Continue.
+non-success when any child fails. A person's Pause or End session, a local interlock,
+cancellation, and deadlines end execution even under Continue.
 
 Captured per-step envelopes stop being recorded past a bounded byte budget while execution continues to a truthful
 terminal aggregate. Facts: `completed`, `total`, `stopped`, `progress`, and bounded per-step rows
@@ -951,7 +1012,7 @@ Flow uses this progress contract; historical sequence receipts retain it:
   effect with incomplete work is partial. Fully successful applied work remains applied.
 - Repetition is safe only when every child succeeded, every child permits repetition, and there
   were no effects. Recovery respects confirmed changes and never suggests replaying the whole
-  composition. Pinned human pause/stop directives remain intact.
+  composition. Pinned directives of a person's Pause or End session remain intact.
 
 Examples: `Completed all 5 steps.`, `Completed 3 of 5 steps. 2 failed.`, and
 `Completed 2 of 5 steps. Step 3 could not start.` H1 audit may retain the same payload-free

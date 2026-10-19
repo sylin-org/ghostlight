@@ -200,12 +200,16 @@ The unpacked extension is a complete local product surface, not an invisible rel
   diagnostics, and physical safety preferences. Authority and policy never move into the
   extension.
 - Controlled tabs use one browser-wide blue exact-title group named
-  `Ghostlight - <client label>`. New work reuses that group wherever the user placed it. When no
+  `Ghostlight - <agent name>`, for the agent that opened the session as the Ghostlight window
+  names it: `Ghostlight - Claude Code`, `Ghostlight - Command line`, or `Ghostlight - Unknown
+  agent` for an opener nothing names. New work reuses that group wherever the user placed it.
+  When no
   Ghostlight group exists, the adapter creates a dedicated normal browser window instead of
   inserting work into the user's active window. Moves between windows preserve ownership. An
   opener never makes a tab Ghostlight's: child tabs and popups stay the person's (ADR-0164). A
-  plain open reuses only a tab Ghostlight opened and a released session of the same client left
-  open, and never a tab the person opened (ADR-0196 Decision 9). A tab preserve-tabs keeps after
+  plain open reuses only a tab Ghostlight opened and a released session of the same agent left
+  open, and never a tab the person opened (ADR-0196 Decision 9, ADR-0203 Decision 9). A tab
+  preserve-tabs keeps after
   its session ends leaves the group, so Chromium deletes the idle group instead of saving it, and
   a reuse puts the tab back in its client's group (ADR-0201).
 - Presentation preserves Ghostlight's luminous sky-blue visual language: controlled-tab border,

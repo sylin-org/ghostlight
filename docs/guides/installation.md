@@ -69,6 +69,9 @@ demand-starts Ghostlight if it is absent. The service starts the window's tray w
 can show it; an agent that starts Ghostlight shows only the icon, and a Start-menu launch,
 Applications or `ghostlight open` shows the window.
 
+Ghostlight supports the stable channel of each browser it lists. Beta, Dev and Canary channels
+install separately with their own profiles, and Ghostlight does not support them.
+
 Linux binaries support x86_64 glibc-based desktops and a native Chrome, Edge, Brave, or Chromium
 package. Snap and Flatpak browsers cannot start Ghostlight's browser relay through native
 messaging. Install and doctor identify those package forms and name the native-package remedy. Use
@@ -212,8 +215,11 @@ Open **Integrations** and confirm your client reads Connected. Then ask it:
 > Open https://example.com in a new Ghostlight tab, summarize the page, and tell me which tab you
 > used. Do not click, type, submit, or change the page after it opens.
 
-The browser should create or reuse one blue `Ghostlight - <client label>` group. A new first group
-opens in a dedicated normal window rather than disrupting the user's active window.
+The browser should create or reuse one blue group named for your agent as the Ghostlight window
+names it, such as `Ghostlight - Claude Code`. A new first group opens in a dedicated normal window
+rather than disrupting the user's active window. After an update from an earlier build, each agent
+gets one new group; the old one goes once it is idle, and a group Chromium already saved keeps its
+old title until you remove it.
 
 ## Recovery
 
