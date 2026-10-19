@@ -199,7 +199,11 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
         };
         records += 1;
         let requirements = record.capabilities;
-        let decision = decide_record(&snapshot, &record);
+        let decision = snapshot.replay(
+            record.channel,
+            requirements,
+            record.observed.host.as_deref(),
+        );
         if !decision.allowed {
             denied += 1;
             let host = record.observed.host.as_deref().unwrap_or("no host");
@@ -224,25 +228,6 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
         manifest.name, manifest.version
     )?;
     Ok(())
-}
-
-/// Decide one recorded request as the candidate would have: by its channel first, as the executor
-/// does, then by its capabilities and host.
-fn decide_record(
-    snapshot: &super::AuthoritySnapshot,
-    record: &crate::audit::AuditRecord,
-) -> super::Decision {
-    if let Some((decision, _)) = record
-        .channel
-        .and_then(|channel| snapshot.channel_refusal(channel))
-    {
-        return decision;
-    }
-    let requirements = record.capabilities;
-    record.observed.host.as_deref().map_or_else(
-        || snapshot.authorize_requirements(requirements),
-        |host| snapshot.authorize_landing(requirements, &format!("https://{host}")),
-    )
 }
 
 fn short_hash(hash: &str) -> &str {
@@ -349,8 +334,10 @@ mod tests {
         assert!(simulation.contains("1 would be denied"));
     }
 
+    /// A record that names no channel is MCP work, so a draft that turns MCP off refuses it, as it
+    /// refuses the declared MCP line, while the command line's work still passes.
     #[test]
-    fn simulate_refuses_the_recorded_requests_of_a_channel_the_candidate_turns_off() {
+    fn simulate_refuses_recorded_mcp_work_under_a_draft_that_turns_mcp_off() {
         let policy = Scratch::file("policy.json");
         let audit = Scratch::file("audit.jsonl");
         fs::write(
@@ -360,10 +347,15 @@ mod tests {
         .unwrap();
         let line = |channel: &str| {
             format!(
-                r#"{{"timestamp_ms":1,"invocation":"i","workspace":"w","tool":"browser_click","capabilities":["action"],"authority":"a","allowed":true,"reason":"permitted","status":"succeeded","effect":"applied","observed":{{"host":"example.com"}},"channel":"{channel}"}}"#
+                r#"{{"timestamp_ms":1,"invocation":"i","workspace":"w","tool":"browser_click","capabilities":["action"],"authority":"a","allowed":true,"reason":"permitted","status":"succeeded","effect":"applied","observed":{{"host":"example.com"}}{channel}}}"#
             )
         };
-        let lines = [line("mcp"), line("cli")].join("\n");
+        let lines = [
+            line(r#","channel":"mcp""#),
+            line(r#","channel":"cli""#),
+            line(""),
+        ]
+        .join("\n");
         fs::write(&audit, lines).unwrap();
 
         let mut simulation = Vec::new();
@@ -376,13 +368,16 @@ mod tests {
         )
         .unwrap();
         let simulation = String::from_utf8(simulation).unwrap();
-        assert!(
-            simulation
-                .contains("Would deny line 1: browser_click [action] on example.com -- channel"),
-            "{simulation}"
-        );
+        for denied in [1, 3] {
+            assert!(
+                simulation.contains(&format!(
+                    "Would deny line {denied}: browser_click [action] on example.com -- channel"
+                )),
+                "{simulation}"
+            );
+        }
         assert!(!simulation.contains("Would deny line 2"), "{simulation}");
-        assert!(simulation.contains("1 would be denied"), "{simulation}");
+        assert!(simulation.contains("2 would be denied"), "{simulation}");
     }
 
     #[test]

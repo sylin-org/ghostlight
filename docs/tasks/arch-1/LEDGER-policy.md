@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-P10, P1 and P2 landed. Next: P3.
+P10, P1, P2 and P3 landed. Next: P4.
 
 ## Slices
 
@@ -15,9 +15,9 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
 | P10 | feat(governance): the runtime state names the acts it accepts | candidate | ux-2 closes | - | landed (570528ad, 4476fda8) |
-| P1 | fix(governance): one evaluator says whether a capability can be used anywhere | candidate | ux-2 closes | see Notes | landed (3373e274, this commit) |
-| P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | flatten already gone, see Notes | landed (this commit) |
-| P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | - | todo |
+| P1 | fix(governance): one evaluator says whether a capability can be used anywhere | candidate | ux-2 closes | see Notes | landed (3373e274, e45f09ed) |
+| P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | flatten already gone, see Notes | landed (bc00a84b) |
+| P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | see Notes | landed (this commit) |
 | P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | - | todo |
 | P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | - | todo |
 | P5 | refactor(governance): one publication is read whole | none | ux-2 closes | - | todo |
@@ -69,3 +69,9 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   Ghostlight's own ceiling" is not restored: ADR-0155 removed those ceilings on the owner's
   direction, so only non-HTTP(S) schemes (and the window's own origin, ADR-0199) stay unattributed.
   The SIEM guide's `sacred_host` is D2's. The catalog and result goldens are unchanged.
+- P3: `AuthoritySnapshot::replay(channel, requirements, host)` takes the record's channel as an
+  `Option`, so a line that names none (one written after its workspace was gone) is read as MCP
+  work, and simulate calls it. `decide_record` is deleted. The proof replaces
+  `simulate_refuses_the_recorded_requests_of_a_channel_the_candidate_turns_off`: it now also holds
+  that an undeclared line is refused with the MCP one. No departure. The window's preview still
+  decides by host alone until S4a moves it onto `replay` with each item's channel.

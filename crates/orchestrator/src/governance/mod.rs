@@ -723,6 +723,27 @@ impl AuthoritySnapshot {
         (policy_decision.unwrap_or_else(Decision::allow), outcomes)
     }
 
+    /// Decide recorded work as this snapshot would have: its channel first, as the executor does,
+    /// then its requirements on the host it observed, or on no host when it observed none.
+    ///
+    /// A record that names no channel is read as MCP work, the channel every request arrives on
+    /// unless its peer declares another.
+    #[must_use]
+    pub fn replay(
+        &self,
+        channel: Option<IntakeChannel>,
+        requirements: CapabilitySet,
+        host: Option<&str>,
+    ) -> Decision {
+        if let Some((decision, _)) = self.channel_refusal(channel.unwrap_or(IntakeChannel::Mcp)) {
+            return decision;
+        }
+        host.map_or_else(
+            || self.authorize_requirements(requirements),
+            |host| self.authorize_landing(requirements, &format!("https://{host}")),
+        )
+    }
+
     /// Whether some host admits `requirements` under this snapshot, so the catalog may list a tool
     /// that needs them.
     ///
