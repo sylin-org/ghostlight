@@ -186,23 +186,24 @@ Result, 2026-10-19, done, on test-01 with the L2-11 bundle:
 - F1 on the bundle install: 23 Ghostlight tools at every step, never 46; with no service replace
   in between, the holder did get `list_changed` on the policy change and on its restore; `/mcp`
   disabling the holder brought the plugin's 23.
-- Idle exit, on the bundle's images in a scratch home with nothing connected: the service exited
-  by itself 632 s after the install.
-- A browser restart mid-session, measured on the system Chromium in a scratch home (the owner's
-  browser was not restarted): Chromium restored both pages under new tab ids, so both of the
-  agent's handles read "That tab handle names no open tab in this session." (`tab_unavailable`),
-  ADR-0203's "no longer open", and the session listed no tabs.
+- Idle exit: measured only on the bundle's images in a scratch home with nothing connected, where
+  the service exited by itself 632 s after the install. On test-01 itself the owner's agents and
+  browser always hold a stream, so idle exit is not validated on this machine.
+- A browser restart mid-session, on the owner's Chromium and the installed bundle: an MCP client on
+  the installed edge opened the demo desk and the Ghostlight page in new tabs; Chromium was quit
+  with SIGTERM and started again with `--restore-last-session`, and its extension reconnected
+  within 1 s. Both of the agent's handles then read "That tab handle names no open tab in this
+  session." (`tab_unavailable`), ADR-0203's "no longer open", because Chromium restores tabs under
+  new ids; the session listed no tabs, and the agent reopened the desk and read it.
 - Uninstall again was clean, and the reinstall from the bundle reconnected the owner's Chromium
   by itself.
 
 Observations, for windows-claude:
 
-1. After desktop-check's lost-service phase (the service killed, then restarted by the tray at
-   14:01) and the owner's reload of the extension, the owner's Chromium did not reconnect for
-   about 10 minutes, and with diagnostics on no browser relay started in 3 of them. The first
-   agent call (`browser_navigate`) started Chromium as on_demand says, which woke the extension: the
-   relay started in 0.7 s and the page opened in 1.2 s. The same kill and restart in a scratch home
-   reconnected in 3 s, so the cause is not known; the extension's own connection log was off.
+1. Explained, not a defect: after the extension's reload the owner's Chromium was not connected
+   for a few minutes because it had exited at 14:07:32 (user journal); the first agent call
+   (`browser_navigate`) at 14:11:08 started Chromium as on_demand says, its relay started in 0.7 s
+   and the page opened in 1.2 s.
 2. `browser_tabs` with `list` succeeds with "Listed 0 tabs in this session." when no browser is
    connected and the session has no tab, while its catalog description says list "refuses when
    none is connected".
