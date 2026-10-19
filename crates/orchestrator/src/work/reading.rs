@@ -30,7 +30,6 @@ impl ApplicationExecutor {
             lease,
             requested_tab,
             target,
-            Capability::Read,
             |selected, locator, _, decision| {
                 let command = if target.is_none() {
                     BrowserCommand::ReadDocument {
@@ -103,7 +102,6 @@ impl ApplicationExecutor {
             context,
             lease,
             requested_tab,
-            Capability::Read,
             BrowserCommand::Inspect {
                 tab_id: 0,
                 kind: kind.into(),
@@ -130,7 +128,6 @@ impl ApplicationExecutor {
             lease,
             requested_tab,
             root,
-            Capability::Read,
             |selected, locator, _, decision| {
                 match self.dispatch(
                     context,
@@ -207,7 +204,6 @@ impl ApplicationExecutor {
             context,
             lease,
             requested_tab,
-            Capability::Read,
             BrowserCommand::Find {
                 tab_id: 0,
                 text: text.into(),
@@ -226,89 +222,82 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
-        capability: Capability,
         command: BrowserCommand,
         noun: TargetNoun,
     ) -> Terminal {
-        self.with_authorized_tab(
-            context,
-            lease,
-            requested_tab,
-            capability,
-            |selected, decision| {
-                let command = match command {
-                    BrowserCommand::Inspect {
-                        kind, max_items, ..
-                    } => BrowserCommand::Inspect {
-                        tab_id: selected.physical_id,
-                        kind,
-                        max_items,
-                    },
-                    BrowserCommand::Find {
-                        text,
-                        kind,
-                        max_results,
-                        ..
-                    } => BrowserCommand::Find {
-                        tab_id: selected.physical_id,
-                        text,
-                        kind,
-                        max_results,
-                    },
-                    _ => unreachable!("target operations are closed"),
-                };
-                match self.dispatch(context, command) {
-                    Ok(BrowserOutcome::Targets {
-                        tab_id,
-                        targets,
-                        listing,
-                    }) if tab_id == selected.physical_id => {
-                        let mapped = match lease.register_targets(selected, &targets) {
-                            Ok(mapped) => mapped,
-                            Err(error) => return self.workspace_failure(context, error),
-                        };
-                        let items: Vec<_> = mapped
-                            .into_iter()
-                            .map(|(handle, target)| control_item(handle.as_str(), &target))
-                            .collect();
-                        let outcome = Outcome::TargetsListed {
-                            noun,
-                            count: items.len(),
-                            host: observed_host(&selected.url),
-                            left_out: listing.left_out.clone(),
-                        };
-                        let fact_key = match noun {
-                            TargetNoun::Match => "matches",
-                            TargetNoun::Control | TargetNoun::Item => "items",
-                        };
-                        let mut facts = serde_json::Map::new();
-                        facts.insert("tab".into(), json!(selected.handle.as_str()));
-                        facts.insert("document_generation".into(), json!(selected.generation));
-                        facts.insert(fact_key.into(), json!(items));
-                        if let Some(left_out) = listing.left_out.to_value() {
-                            facts.insert("left_out".into(), left_out);
-                        }
-                        if listing.modal_open {
-                            facts.insert("modal_open".into(), json!(true));
-                        }
-                        self.succeeded(
-                            context,
-                            decision,
-                            Some(tab_id),
-                            Effect::None,
-                            readiness(selected.readiness),
-                            true,
-                            outcome,
-                            Value::Object(facts),
-                        )
+        self.with_authorized_tab(context, lease, requested_tab, |selected, decision| {
+            let command = match command {
+                BrowserCommand::Inspect {
+                    kind, max_items, ..
+                } => BrowserCommand::Inspect {
+                    tab_id: selected.physical_id,
+                    kind,
+                    max_items,
+                },
+                BrowserCommand::Find {
+                    text,
+                    kind,
+                    max_results,
+                    ..
+                } => BrowserCommand::Find {
+                    tab_id: selected.physical_id,
+                    text,
+                    kind,
+                    max_results,
+                },
+                _ => unreachable!("target operations are closed"),
+            };
+            match self.dispatch(context, command) {
+                Ok(BrowserOutcome::Targets {
+                    tab_id,
+                    targets,
+                    listing,
+                }) if tab_id == selected.physical_id => {
+                    let mapped = match lease.register_targets(selected, &targets) {
+                        Ok(mapped) => mapped,
+                        Err(error) => return self.workspace_failure(context, error),
+                    };
+                    let items: Vec<_> = mapped
+                        .into_iter()
+                        .map(|(handle, target)| control_item(handle.as_str(), &target))
+                        .collect();
+                    let outcome = Outcome::TargetsListed {
+                        noun,
+                        count: items.len(),
+                        host: observed_host(&selected.url),
+                        left_out: listing.left_out.clone(),
+                    };
+                    let fact_key = match noun {
+                        TargetNoun::Match => "matches",
+                        TargetNoun::Control | TargetNoun::Item => "items",
+                    };
+                    let mut facts = serde_json::Map::new();
+                    facts.insert("tab".into(), json!(selected.handle.as_str()));
+                    facts.insert("document_generation".into(), json!(selected.generation));
+                    facts.insert(fact_key.into(), json!(items));
+                    if let Some(left_out) = listing.left_out.to_value() {
+                        facts.insert("left_out".into(), left_out);
                     }
-                    Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
-                    Err(error) => {
-                        self.browser_failure(context, decision, error, Some(selected.physical_id))
+                    if listing.modal_open {
+                        facts.insert("modal_open".into(), json!(true));
                     }
+                    self.succeeded(
+                        context,
+                        decision,
+                        Some(tab_id),
+                        Effect::None,
+                        readiness(selected.readiness),
+                        true,
+                        outcome,
+                        Value::Object(facts),
+                    )
                 }
-            },
-        )
+                Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
+                Err(error) => {
+                    self.browser_failure(context, decision, error, Some(selected.physical_id))
+                }
+            }
+        })
     }
 
     pub(super) fn screenshot(
@@ -387,7 +376,7 @@ impl ApplicationExecutor {
             };
             (selected, command, scope)
         };
-        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,

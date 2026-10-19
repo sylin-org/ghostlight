@@ -40,16 +40,10 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         value: &HandleDialog,
     ) -> Terminal {
-        let capability = if value.action == "status" {
-            Capability::Read
-        } else {
-            Capability::Action
-        };
         self.with_authorized_tab(
             context,
             lease,
             value.tab.as_deref(),
-            capability,
             |selected, decision| {
                 if value.action == "status" {
                     return match self.dispatch(
@@ -153,7 +147,6 @@ impl ApplicationExecutor {
             context,
             lease,
             value.tab.as_deref(),
-            Capability::Read,
             |selected, decision| {
                 let source = match value.source.as_str() {
                     "console" => DiagnosticSource::Console,

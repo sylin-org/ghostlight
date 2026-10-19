@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use serde_json::{json, Map, Value};
 
-use crate::governance::CapabilitySet;
 use crate::language::composition::StepCause;
 use crate::language::history::{CompositionKind, StepReceipt};
 use crate::language::{Operation, RunFlow};
@@ -23,7 +22,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         value: &RunFlow,
     ) -> Terminal {
-        let decision = self.authorize(context, CapabilitySet::EMPTY, None);
+        let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
             return self.blocked(
                 context,

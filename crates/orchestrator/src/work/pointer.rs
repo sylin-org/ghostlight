@@ -3,7 +3,7 @@
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, ClickShape};
 use serde_json::json;
 
-use crate::governance::{Capability, CapabilitySet};
+use crate::governance::Capability;
 use crate::language::{
     outcome::{Outcome, TargetRole},
     Click, Drag, Hover, ScrollPage,
@@ -167,7 +167,6 @@ impl ApplicationExecutor {
             lease,
             value.tab.as_deref(),
             value.target.as_deref(),
-            Capability::Read,
             |selected, locator, revealed_role, decision| {
                 // A scroll to a target cues the target once the page has scrolled to it, so its
                 // own start draws no chevrons at the viewport centre first.
@@ -268,7 +267,7 @@ impl ApplicationExecutor {
         else {
             unreachable!("a view input resolves to a point")
         };
-        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -333,7 +332,6 @@ impl ApplicationExecutor {
             context,
             lease,
             requested_tab,
-            Capability::Read,
             |selected, decision| {
                 match self.dispatch(
                     context,
@@ -384,7 +382,6 @@ impl ApplicationExecutor {
             context,
             lease,
             requested_tab,
-            CapabilitySet::EMPTY,
             |selected, decision| {
                 match self.dispatch(
                     context,
@@ -445,7 +442,7 @@ impl ApplicationExecutor {
             Err(error) => return self.workspace_failure(context, error),
         };
         let selected = location.tab();
-        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -581,7 +578,7 @@ impl ApplicationExecutor {
             };
             (selected, command, facts)
         };
-        let decision = self.authorize(context, Capability::Action, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,

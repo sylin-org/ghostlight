@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5, C6, C7, C13, C9 and C10a have landed, and C22 landed with C13. C10b is
+C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a and C10b have landed, and C22 landed with C13. C11 is
 next. ux-2 has closed, so every slice whose "After" is met can start.
 
 ## Slices
@@ -25,7 +25,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C13 | fix(provenance): the opener is named once | candidate | C7 | see Notes | landed (c78d4bd3) |
 | C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | see Notes | landed (565293f6) |
 | C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | see Notes | landed (51d1e05d, review fixup) |
-| C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | - | todo |
+| C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | see Notes | landed (this commit) |
 | C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | - | todo |
 | C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | - | todo |
 | C19a | fix(audit): a step that never started carries the policy sequence | candidate | ux-2 closes | - | todo |
@@ -398,3 +398,24 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `a_retained_denied_landing_is_closed_under_the_setting_alone` and
   `listing_withholds_title_and_url_of_a_tab_on_a_refused_host_and_names_the_host` in
   `work/tests/tabs.rs`. No catalog, result or audit golden changed. No journey is needed.
+- C10b, a source may be embedded: the recording's source list holds every document the capture
+  saw, embedded ones included, and an embedded host never enters the durable record (Decision
+  6.1). So each source is checked once on the frame's trace through `authorize_document`, the
+  frame's landing check with the host left off, rather than through `authorize_landing`, which
+  would write every source's host into the audit. The refused hosts still reach the person's
+  coverage notice. The dialog check in `work/documents.rs` uses the same helper in place of its
+  copy.
+- C10b, the admission helpers: `with_authorized_tab`, `with_authorized_optional_target` and
+  `targets_operation` lose their capability parameter and admit `context.requirements`, so no
+  caller can name a capability of its own. A model close checks `context.requirements` on its
+  host. Only an upload by selector changes what it checks: Read and Write, as classified, in place
+  of Write alone. A fill's check before it resolves its selectors asks the classified set too.
+- C10b, staged checks stay: an action's landing on the pages it committed asks for Action alone,
+  a recording placed on a page asks for Write on its destination, and a held or gone tab's close
+  asks the runtime controls alone. These are later stages under their own requirement, not
+  admissions.
+- C10b, proofs: `every_single_stage_tool_is_admitted_against_its_classified_requirements`, which
+  runs every catalog variant bare and in a flow and lists the staged variants it lets check a
+  later stage, and `a_refused_recording_save_records_its_deciding_check`, in
+  `work/tests/catalog_authority.rs`. No catalog, result or audit golden changed. No journey is
+  needed.

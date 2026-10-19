@@ -741,13 +741,13 @@ impl ApplicationExecutor {
         )
     }
 
-    /// Authorize and resolve one controlled tab, executing the closure only when allowed (ADR-0176).
+    /// Resolve one controlled tab and authorize the frame's classified requirements on its page,
+    /// executing the closure only when allowed (ADR-0176, ADR-0203 Decision 7.7).
     fn with_authorized_tab<F>(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
-        capability: impl Into<CapabilitySet>,
         f: F,
     ) -> Terminal
     where
@@ -757,7 +757,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -771,14 +771,15 @@ impl ApplicationExecutor {
         f(&selected, decision)
     }
 
-    /// Authorize and resolve one controlled tab and optional target, executing the closure only when allowed (ADR-0177).
+    /// Resolve one controlled tab and optional target and authorize the frame's classified
+    /// requirements on its page, executing the closure only when allowed (ADR-0177, ADR-0203
+    /// Decision 7.7).
     fn with_authorized_optional_target<F>(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         target: Option<&str>,
-        capability: impl Into<CapabilitySet>,
         f: F,
     ) -> Terminal
     where
@@ -789,7 +790,7 @@ impl ApplicationExecutor {
                 Ok(tuple) => tuple,
                 Err(error) => return self.workspace_failure(context, error),
             };
-        let decision = self.authorize(context, capability, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -1333,6 +1334,24 @@ impl ApplicationExecutor {
         decision
     }
 
+    /// Govern one document that may be embedded in its tab, keeping the check on the frame's
+    /// trace. The check carries no host: an embedded document's host never enters the durable
+    /// record (ADR-0203 Decision 6.1), and the tab's own admission already names the top
+    /// document's host.
+    fn authorize_document(
+        &self,
+        context: &InvocationContext<'_>,
+        requirements: impl Into<CapabilitySet>,
+        url: &str,
+    ) -> Decision {
+        let (decision, mut evidence) = context
+            .snapshot
+            .authorize_with_evidence(requirements.into(), Some(url));
+        evidence.host = None;
+        context.findings.permit(evidence);
+        decision
+    }
+
     /// Admit the model's close of a tab (ADR-0203 Decision 7.6).
     ///
     /// `page` is the address the close takes the tab away from, and the close needs Action on its
@@ -1341,7 +1360,7 @@ impl ApplicationExecutor {
     /// cannot touch: the setting alone decides those, after the person's runtime controls.
     fn authorize_tab_close(&self, context: &InvocationContext<'_>, page: Option<&str>) -> Decision {
         let admitted = match page {
-            Some(url) => self.authorize(context, Capability::Action, Some(url)),
+            Some(url) => self.authorize(context, context.requirements, Some(url)),
             None => self.authorize(context, CapabilitySet::EMPTY, None),
         };
         if !admitted.allowed {

@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use crate::browser::BrowserError;
 use crate::events::DomainEvent;
-use crate::governance::{Capability, CapabilitySet, Decision};
+use crate::governance::{Capability, Decision};
 use crate::language::outcome::{Outcome, Refusal};
 use crate::language::provenance::group_title;
 use crate::language::ReusePolicy;
@@ -34,7 +34,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
     ) -> Terminal {
-        let decision = self.authorize(context, Capability::Read, None);
+        let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -131,7 +131,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, CapabilitySet::EMPTY, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -180,7 +180,7 @@ impl ApplicationExecutor {
         url: &str,
         reuse: ReusePolicy,
     ) -> Terminal {
-        let decision = self.authorize(context, Capability::Read, Some(url));
+        let decision = self.authorize(context, context.requirements, Some(url));
         if !decision.allowed {
             return self.blocked_at(
                 context,
@@ -400,7 +400,7 @@ impl ApplicationExecutor {
         discard_beforeunload: bool,
         reuse: ReusePolicy,
     ) -> Terminal {
-        let decision = self.authorize(context, Capability::Read, Some(url));
+        let decision = self.authorize(context, context.requirements, Some(url));
         if !decision.allowed {
             return self.blocked_at(
                 context,
@@ -427,7 +427,7 @@ impl ApplicationExecutor {
                     Ok(opener) => opener,
                     Err(error) => return self.workspace_failure(context, error),
                 };
-                let decision = self.authorize(context, Capability::Read, Some(url));
+                let decision = self.authorize(context, context.requirements, Some(url));
                 if !decision.allowed {
                     return self.blocked_at(
                         context,
@@ -544,33 +544,27 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         direction: &str,
     ) -> Terminal {
-        self.with_authorized_tab(
-            context,
-            lease,
-            requested_tab,
-            Capability::Action,
-            |selected, decision| {
-                let outcome = self.dispatch(
-                    context,
-                    BrowserCommand::TraverseHistory {
-                        tab_id: selected.physical_id,
-                        direction: direction.into(),
-                    },
-                );
-                self.complete_navigation(
-                    context,
-                    lease,
-                    selected,
-                    decision,
-                    outcome,
-                    |host| Outcome::HistoryTraversed {
-                        direction: direction.into(),
-                        host,
-                    },
-                    json!({"action":direction}),
-                )
-            },
-        )
+        self.with_authorized_tab(context, lease, requested_tab, |selected, decision| {
+            let outcome = self.dispatch(
+                context,
+                BrowserCommand::TraverseHistory {
+                    tab_id: selected.physical_id,
+                    direction: direction.into(),
+                },
+            );
+            self.complete_navigation(
+                context,
+                lease,
+                selected,
+                decision,
+                outcome,
+                |host| Outcome::HistoryTraversed {
+                    direction: direction.into(),
+                    host,
+                },
+                json!({"action":direction}),
+            )
+        })
     }
 
     pub(super) fn reload_page(
@@ -580,30 +574,24 @@ impl ApplicationExecutor {
         requested_tab: Option<&str>,
         bypass_cache: bool,
     ) -> Terminal {
-        self.with_authorized_tab(
-            context,
-            lease,
-            requested_tab,
-            Capability::Action,
-            |selected, decision| {
-                let outcome = self.dispatch(
-                    context,
-                    BrowserCommand::Reload {
-                        tab_id: selected.physical_id,
-                        bypass_cache,
-                    },
-                );
-                self.complete_navigation(
-                    context,
-                    lease,
-                    selected,
-                    decision,
-                    outcome,
-                    |host| Outcome::PageReloaded { host },
-                    json!({"action":"reload","bypass_cache":bypass_cache}),
-                )
-            },
-        )
+        self.with_authorized_tab(context, lease, requested_tab, |selected, decision| {
+            let outcome = self.dispatch(
+                context,
+                BrowserCommand::Reload {
+                    tab_id: selected.physical_id,
+                    bypass_cache,
+                },
+            );
+            self.complete_navigation(
+                context,
+                lease,
+                selected,
+                decision,
+                outcome,
+                |host| Outcome::PageReloaded { host },
+                json!({"action":"reload","bypass_cache":bypass_cache}),
+            )
+        })
     }
 
     #[expect(

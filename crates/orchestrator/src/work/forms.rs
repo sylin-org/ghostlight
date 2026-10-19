@@ -10,7 +10,7 @@ use crate::browser::BrowserError;
 use crate::governance::Decision;
 use serde_json::{json, Value};
 
-use crate::governance::{Capability, CapabilitySet};
+use crate::governance::Capability;
 use crate::language::{
     field_echo::{self, HeldField},
     field_problem::{self, ControlRef, FieldProblem, RejectedControl, RejectedField},
@@ -44,7 +44,11 @@ impl ApplicationExecutor {
                 Ok(tab) => tab,
                 Err(error) => return self.workspace_failure(context, error),
             };
-            let pre = self.authorize(context, CapabilitySet::READ, Some(established.url.as_str()));
+            let pre = self.authorize(
+                context,
+                context.requirements,
+                Some(established.url.as_str()),
+            );
             if !pre.allowed {
                 return self.blocked(
                     context,
@@ -112,14 +116,7 @@ impl ApplicationExecutor {
             },
             None => None,
         };
-        let requirements = if submit.is_some() {
-            CapabilitySet::READ
-                .union(CapabilitySet::WRITE)
-                .union(CapabilitySet::ACTION)
-        } else {
-            CapabilitySet::READ.union(CapabilitySet::WRITE)
-        };
-        let decision = self.authorize(context, requirements, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -211,7 +208,7 @@ impl ApplicationExecutor {
                     context,
                     lease,
                     decision,
-                    requirements,
+                    context.requirements,
                     &selected,
                     &tab,
                     &committed_urls,
@@ -475,7 +472,7 @@ impl ApplicationExecutor {
                 Err(error) => return self.workspace_failure(context, error),
             }
         };
-        let decision = self.authorize(context, Capability::Write, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -644,7 +641,6 @@ impl ApplicationExecutor {
             context,
             lease,
             value.tab.as_deref(),
-            Capability::Execute,
             |selected, decision| {
                 match self.dispatch(
                     context,
@@ -699,7 +695,6 @@ impl ApplicationExecutor {
             lease,
             value.tab.as_deref(),
             value.target.as_deref(),
-            context.requirements,
             |selected, locator, focused_role, decision| {
                 let strokes: Vec<String> = if value.strokes.is_empty() {
                     vec![value.key.clone()]
@@ -802,7 +797,6 @@ impl ApplicationExecutor {
             lease,
             value.tab.as_deref(),
             value.target.as_deref(),
-            Capability::Read,
             |selected, locator, _target_role, decision| {
                 if value.condition == "duration" {
                     // A sleep sends nothing, so the deadline can never leave its effect in doubt.
@@ -1181,7 +1175,6 @@ impl ApplicationExecutor {
             context,
             lease,
             value.tab.as_deref(),
-            context.requirements,
             |selected, decision| {
                 // The describe step is not only a credential gate: the control it observes is the
                 // typing receipt's subject. The typed outcome itself carries no subject, so without

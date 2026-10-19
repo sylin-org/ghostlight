@@ -1,6 +1,7 @@
 //! Every advertised authority variant must admit ordinary work with its stated capabilities.
 
 use super::*;
+use crate::governance::CapabilitySet;
 use crate::language::capability_map::DIRECTORY;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -960,4 +961,141 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                 .contains("PRIVATE_"));
         }
     }
+}
+
+#[test]
+fn every_single_stage_tool_is_admitted_against_its_classified_requirements() {
+    // These variants check a later stage after their admission, under that stage's own
+    // requirement: an action's landing on the pages it committed asks for Action alone, and a
+    // recording placed on a page asks for Read on its sources and Write on its destination.
+    const STAGED: &[(&str, Option<&str>)] = &[
+        ("browser_click", Some("selector")),
+        ("browser_click", Some("expect")),
+        ("browser_type_text", Some("selector")),
+        ("browser_type_text", Some("expect")),
+        ("browser_press_key", Some("expect")),
+        ("browser_record", Some("save_target")),
+    ];
+    let templates = cases(&json!("target_1"), &json!("target_2"), &json!("tab_1"));
+    let mut failures = Vec::new();
+    for (index, template) in templates.iter().enumerate() {
+        if template.tool == "browser_flow" {
+            continue;
+        }
+        for composed in [false, true] {
+            let (executor, browser, _, workspace, audit) = fixture();
+            let (tab_handle, target, button) = established(&executor, &browser, &workspace);
+            let case = cases(&target, &button, &tab_handle).swap_remove(index);
+            let classified = crate::language::capability_map::requirements(
+                &crate::language::decode(case.tool, case.arguments.clone()).unwrap(),
+            );
+            for reply in case.replies {
+                browser.push(Ok(reply));
+            }
+            let arguments = if composed {
+                json!({"steps":[{"id":"step","tool":case.tool,"arguments":case.arguments}]})
+            } else {
+                case.arguments
+            };
+            let result = executor.execute(
+                &workspace,
+                if composed { "browser_flow" } else { case.tool },
+                arguments,
+                &CancellationToken::default(),
+            );
+            let label = format!("{} {:?} composed={composed}", case.tool, case.variant);
+            assert_eq!(result.status, Status::Succeeded, "{label}: {result:?}");
+            let records = audit.0.lock().unwrap();
+            let record = records
+                .iter()
+                .find(|record| record.invocation == result.invocation && record.tool == case.tool)
+                .unwrap_or_else(|| panic!("{label}: the call writes its own record"));
+            assert_eq!(record.capabilities, classified, "{label}");
+            let checks: Vec<_> = record
+                .permissions
+                .checks
+                .iter()
+                .map(|check| check.requirements)
+                .collect();
+            let admitted = checks.first() == Some(&classified);
+            let single_stage = !STAGED.contains(&(case.tool, case.variant));
+            if !admitted || (single_stage && checks.iter().any(|checked| *checked != classified)) {
+                failures.push(format!(
+                    "{label}: classified {classified:?}, checked {checks:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn a_refused_recording_save_records_its_deciding_check() {
+    let (mut executor, browser, _, workspace, audit) = fixture();
+    let (tab_handle, target, button) = established(&executor, &browser, &workspace);
+    let policy = temporary_policy("recording-refused-source");
+    fs::write(
+        &policy,
+        serde_json::to_vec(&json!({
+            "schema":4,"name":"Only the recorded page","version":"1","grants":[
+                {"id":"page","hosts":{"allow":["example.com"]},"allowed":["read"]}
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()));
+    let mut case = cases(&target, &button, &tab_handle)
+        .into_iter()
+        .find(|case| case.variant == Some("save_client"))
+        .unwrap();
+    for reply in &mut case.replies {
+        if let BrowserOutcome::RecordingStopped { summary, .. }
+        | BrowserOutcome::RecordingExported { summary, .. } = reply
+        {
+            summary.source_urls = vec![
+                PAGE.into(),
+                "https://embedded.example/PRIVATE_SOURCE_PATH".into(),
+            ];
+        }
+    }
+    for reply in case.replies {
+        browser.push(Ok(reply));
+    }
+    let result = executor.execute(
+        &workspace,
+        "browser_record",
+        case.arguments,
+        &CancellationToken::default(),
+    );
+    drop(policy);
+    assert_eq!(result.status, Status::Blocked, "{result:?}");
+    let records = audit.0.lock().unwrap();
+    let record = records
+        .iter()
+        .find(|record| record.invocation == result.invocation)
+        .unwrap();
+    let refused: Vec<_> = record
+        .permissions
+        .checks
+        .iter()
+        .filter(|check| !check.allowed)
+        .collect();
+    assert_eq!(refused.len(), 1, "{:?}", record.permissions.checks);
+    let deciding = refused[0];
+    assert_eq!(deciding.requirements, CapabilitySet::READ);
+    assert_eq!(deciding.reason.as_str(), result.facts["reason"]);
+    assert!(
+        !deciding.layers.is_empty(),
+        "configured policy owns the denial"
+    );
+    assert_eq!(deciding.host, None, "a source may be embedded");
+    assert!(record
+        .permissions
+        .checks
+        .iter()
+        .any(|check| check.allowed && check.requirements == CapabilitySet::READ));
+    assert!(!serde_json::to_string(&*records)
+        .unwrap()
+        .contains("embedded.example"));
 }

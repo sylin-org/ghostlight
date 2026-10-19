@@ -230,13 +230,8 @@ impl ApplicationExecutor {
             else {
                 return Err(BrowserError::DocumentUnavailable);
             };
-            let (decision, mut evidence) = context
-                .snapshot
-                .authorize_with_evidence(context.requirements, Some(url));
-            // The raising frame may be embedded, and an embedded document's host never enters
-            // the durable audit; the tab admission already records the top document's host.
-            evidence.host = None;
-            context.findings.permit(evidence);
+            // The raising frame may be embedded.
+            let decision = self.authorize_document(context, context.requirements, url);
             if !decision.allowed {
                 return Err(BrowserError::DocumentAccess(decision));
             }

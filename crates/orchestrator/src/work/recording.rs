@@ -53,7 +53,7 @@ impl ApplicationExecutor {
                 // Needs no capability, but crosses the runtime gate like every path to the
                 // browser, so a pause also holds status, stop and discard. See stop_recording
                 // and discard_recording for the same gate.
-                let decision = self.authorize(context, CapabilitySet::EMPTY, None);
+                let decision = self.authorize(context, context.requirements, None);
                 if !decision.allowed {
                     return self.blocked(
                         context,
@@ -89,7 +89,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize(context, Capability::Read, Some(selected.url.as_str()));
+        let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -144,7 +144,7 @@ impl ApplicationExecutor {
         // Needs no capability, but every operation that reaches the browser still crosses the
         // runtime pause gate, so a paused session cannot have its recording stopped from
         // underneath it.
-        let decision = self.authorize(context, CapabilitySet::EMPTY, None);
+        let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
             return self.blocked(
                 context,
@@ -296,23 +296,17 @@ impl ApplicationExecutor {
             )));
         }
         // Every destination discloses the captured documents, including a browser file input.
-        let denied = stopped.source_urls.iter().find_map(|url| {
-            let decision = context.snapshot.authorize_landing(Capability::Read, url);
-            (!decision.allowed).then_some(decision)
-        });
-        let decision = denied.unwrap_or_else(Decision::permitted);
-        if !decision.allowed {
-            let hosts: Vec<String> = stopped
-                .source_urls
-                .iter()
-                .filter(|url| {
-                    !context
-                        .snapshot
-                        .authorize_landing(Capability::Read, url)
-                        .allowed
-                })
-                .filter_map(|url| observed_host(url))
-                .collect();
+        // Each source is checked once, on the frame's trace, and a source may be embedded.
+        let mut denied = None;
+        let mut hosts = Vec::new();
+        for url in &stopped.source_urls {
+            let decision = self.authorize_document(context, Capability::Read, url);
+            if !decision.allowed {
+                denied.get_or_insert(decision);
+                hosts.extend(observed_host(url));
+            }
+        }
+        if let Some(decision) = denied {
             self.retain_coverage(
                 context,
                 crate::language::coverage::Coverage {
@@ -331,6 +325,7 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             )));
         }
+        let decision = Decision::permitted();
         if let Some(requested_target) = value.target.as_deref() {
             let lease = lease.expect("recording target save holds the workspace lease");
             let (selected, target) =
@@ -474,7 +469,7 @@ impl ApplicationExecutor {
     fn discard_recording(&self, context: &InvocationContext<'_>) -> Terminal {
         // Needs no capability, but every operation that reaches the browser still crosses the
         // runtime pause gate.
-        let decision = self.authorize(context, CapabilitySet::EMPTY, None);
+        let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
             return self.blocked(
                 context,
