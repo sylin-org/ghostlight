@@ -73,6 +73,10 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   denied drag draws no trail. The vocabulary table's field splash, scroll cue and target glow
   rows say so. An image dropped at a point and the zoom frame still name no element. Review:
   three reviewers found the first version cued a targeted scroll before it scrolled; fixed.
+- t1, open: click, hover and type still name their target before the command, and their
+  commands scroll the element into view first, so a cue for a control below the fold is drawn
+  off-screen. Naming them afterwards would lose a click's ripple when the click navigates, so it
+  needs its own decision; it is carried to the architecture sweep's ADR.
 - n1 (j-11): both light-taskbar frames, 16 and 32 pixels, are now the monochrome tray glyph
   in crates/desktop/assets (tray-glyph-16.png drawn by hand, tray-glyph-32.png smooth): one
   silhouette in the night colour with its eyes cut out and no sparkles. Since no light frame is

@@ -56,7 +56,9 @@ pub enum DomainEvent {
         tab: TabHandle,
         physical_id: u64,
     },
-    /// A target is about to receive a governed physical action.
+    /// The element a governed physical action's page feedback belongs to. Click, hover, drag
+    /// and type name it just before their command; fill, upload and a targeted scroll name it
+    /// once the browser has acted, where the element now is.
     TargetIndicated {
         invocation: String,
         workspace: String,

@@ -2150,8 +2150,9 @@ impl ApplicationExecutor {
         self.workbench.react(&event);
     }
 
-    /// Say which control on tab `physical_id` is about to receive a governed physical action, so
-    /// the page's feedback lands on it. Only a click describes its `click` shape.
+    /// Say which control on tab `physical_id` a governed physical action's page feedback belongs
+    /// to, so the feedback lands on it. Each caller picks the moment (see
+    /// `DomainEvent::TargetIndicated`). Only a click describes its `click` shape.
     fn indicate_target(
         &self,
         context: &InvocationContext<'_>,
