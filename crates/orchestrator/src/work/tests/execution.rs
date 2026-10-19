@@ -4027,6 +4027,104 @@ fn a_click_that_opens_a_dialog_says_so() {
     assert!(closed.next_steps.is_empty());
 }
 
+/// A fill whose submit raises a confirm tells the agent what the page now holds, and its audit
+/// line keeps the fill and the dialog without a field value (ADR-0203 Decision 4.1).
+#[test]
+fn a_fill_whose_submit_raises_a_confirm_writes_no_field_value() {
+    use crate::browser::adapter::FieldNow;
+    use crate::language::outcome::DialogKind;
+    let (executor, browser, workspaces, workspace, audit) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        &CancellationToken::default(),
+    );
+    let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+    let control = |locator: &str, role: &str, name: &str| ObservedTarget {
+        locator: locator.into(),
+        role: role.into(),
+        name: name.into(),
+        state: vec![],
+        credential_class: false,
+        ..Default::default()
+    };
+    let controls = vec![
+        control("plan", "combobox", "Plan"),
+        control("phone", "textbox", "Phone"),
+        control("send", "button", "Send"),
+    ];
+    browser.push(Ok(BrowserOutcome::targets(7, controls.clone())));
+    let inspected = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({"tab":tab_handle}),
+        &CancellationToken::default(),
+    );
+    let handle = |index: usize| inspected.facts["items"][index]["target"].clone();
+    let reading = |field: usize, now: &str, tolerated: bool| FieldNow {
+        field,
+        now: now.into(),
+        tolerated,
+        matched: None,
+        picked: None,
+        group: None,
+    };
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
+        tab_id: 7,
+        targets: controls,
+    }));
+    browser.push(Ok(BrowserOutcome::Filled {
+        rebound: false,
+        tab: tab(7, "https://example.com/"),
+        filled_count: 2,
+        held: vec![
+            reading(0, "PRIVATE_CHOICE", false),
+            reading(1, "PRIVATE_READING", true),
+        ],
+        submitted: true,
+        committed_urls: Vec::new(),
+    }));
+    workspaces.apply_browser_dialog(FAKE_BROWSER, 7, Some(DialogKind::Confirm));
+
+    let filled = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({
+            "tab": tab_handle,
+            "fields": [
+                {"target": handle(0), "value": "pro"},
+                {"target": handle(1), "value": "5551234567"}
+            ],
+            "submit_target": handle(2)
+        }),
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(filled.status, Status::Succeeded, "{filled:?}");
+    assert_eq!(filled.facts["dialog_opened"], "confirm");
+    for sentinel in ["PRIVATE_CHOICE", "PRIVATE_READING"] {
+        assert!(filled.summary.contains(sentinel), "{}", filled.summary);
+    }
+    let records = audit.0.lock().unwrap();
+    let record = records.last().unwrap();
+    assert_eq!(record.tool, "browser_fill_form");
+    assert_eq!(
+        record.summary,
+        "Filled 2 fields on example.com and submitted the form. A confirm dialog is now open."
+    );
+    let line = serde_json::to_string(record).unwrap();
+    for sentinel in ["PRIVATE_CHOICE", "PRIVATE_READING", "5551234567"] {
+        assert!(!line.contains(sentinel), "{line}");
+    }
+}
+
 /// A view the page moved on from is a stale view with the way out, not a refusal by the browser.
 #[test]
 fn a_moved_view_is_a_stale_view_with_a_screenshot_next_step() {

@@ -818,6 +818,16 @@ impl ControlRef {
         }
     }
 
+    /// The same control by its role alone, with no page name and no handle, as durable history
+    /// keeps it.
+    #[must_use]
+    pub const fn unnamed(&self) -> Self {
+        Self {
+            subject: ActionSubject::unnamed(self.subject.role()),
+            handle: None,
+        }
+    }
+
     /// The control as a clause subject: `The "Password" text field (target_x)` or `A text field`.
     #[must_use]
     pub fn phrase(&self) -> String {

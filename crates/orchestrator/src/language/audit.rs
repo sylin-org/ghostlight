@@ -139,18 +139,15 @@ pub enum AuditRefusal {
 }
 
 impl Outcome {
-    /// Project a completed operation's authored sentence without copying its result facts.
+    /// This outcome as durable history may keep it (ADR-0198 rule 3, ADR-0203 Decision 4.1).
     ///
-    /// A dialog message is page-authored text, so the durable sentence omits it. So are the
-    /// values and names a fill read back.
+    /// What a fill read back and a dialog's message are page-authored text, so they go. A dialog
+    /// the action left open retains the action it wraps, so a wrapper never carries past this
+    /// rule what the bare outcome could not. Every other outcome's sentence is Ghostlight's own,
+    /// with a page name only where the governed snapshot kept it.
     #[must_use]
-    pub fn audit(&self) -> AuditProjection {
-        let summary = match self {
-            Self::DialogObserved { present, .. } => Self::DialogObserved {
-                present: *present,
-                message: None,
-            }
-            .summary(),
+    pub fn retained(&self) -> Self {
+        match self {
             Self::FormFilled {
                 fields,
                 submitted,
@@ -163,29 +160,214 @@ impl Outcome {
                 host: host.clone(),
                 held: Vec::new(),
                 rebound: *rebound,
-            }
-            .summary(),
-            _ => self.summary(),
-        };
+            },
+            Self::DialogObserved { present, .. } => Self::DialogObserved {
+                present: *present,
+                message: None,
+            },
+            Self::DialogOpened { action, dialog } => Self::DialogOpened {
+                action: Box::new(action.retained()),
+                dialog: *dialog,
+            },
+            Self::TabsListed { .. }
+            | Self::PolicyExplained { .. }
+            | Self::SelectorUnresolved { .. }
+            | Self::CompositionRan(_)
+            | Self::CompositionProgress { .. }
+            | Self::CompositionUnrecorded
+            | Self::StepNotStarted
+            | Self::DocumentInspected { .. }
+            | Self::TabActivated { .. }
+            | Self::PageOpened { .. }
+            | Self::PageReused { .. }
+            | Self::PageRecovered { .. }
+            | Self::TabAlreadyClosed
+            | Self::PageNavigated { .. }
+            | Self::HistoryTraversed { .. }
+            | Self::PageReloaded { .. }
+            | Self::TabClosed
+            | Self::TextRead { .. }
+            | Self::TargetsListed { .. }
+            | Self::Captured { .. }
+            | Self::TargetClicked { .. }
+            | Self::PointClicked { .. }
+            | Self::PageScrolled { .. }
+            | Self::TargetRevealed { .. }
+            | Self::ZoomSet { .. }
+            | Self::WindowResized { .. }
+            | Self::Hovered { .. }
+            | Self::TextTyped { .. }
+            | Self::KeyboardSent { .. }
+            | Self::Dragged { .. }
+            | Self::FilesUploaded { .. }
+            | Self::ScriptEvaluated { .. }
+            | Self::Waited { .. }
+            | Self::DialogHandled { .. }
+            | Self::DiagnosticsRead { .. }
+            | Self::RecordingStarted { .. }
+            | Self::RecordingObserved { .. }
+            | Self::RecordingStopped { .. }
+            | Self::RecordingBoundary { .. }
+            | Self::RecordingSaved { .. }
+            | Self::RecordingDiscarded => self.clone(),
+        }
+    }
+
+    /// Project a completed operation into durable history: the sentence of its retained form,
+    /// and never its result facts.
+    #[must_use]
+    pub fn audit(&self) -> AuditProjection {
+        let retained = self.retained();
         AuditProjection {
             unconfirmed_history_steps: 0,
             coverage: None,
-            summary,
+            summary: retained.summary(),
             refusal: None,
             tools: vec![],
-            composition: match self {
-                Self::CompositionRan(progress) => Some(*progress),
+            composition: match retained {
+                Self::CompositionRan(progress) => Some(progress),
                 _ => None,
             },
         }
     }
 }
 
+impl WorkspaceReason {
+    /// This reason as durable history may keep it. The name another session's client claimed
+    /// is that client's word, not Ghostlight's, so an ownership refusal names no one.
+    #[must_use]
+    pub fn retained(&self) -> Self {
+        match self {
+            Self::OwnershipMismatch { .. } => Self::OwnershipMismatch { owner: None },
+            Self::NoTab
+            | Self::AmbiguousTab
+            | Self::TabUnavailable
+            | Self::StaleTarget { .. }
+            | Self::StaleView
+            | Self::TabHeld
+            | Self::WorkspaceBusy
+            | Self::WorkspaceClosed => self.clone(),
+        }
+    }
+}
+
 impl Refusal {
-    /// Project a refusal into durable history without retaining browser-authored error text.
+    /// This refusal as durable history may keep it (ADR-0198 rule 3, ADR-0203 Decision 4.1).
+    ///
+    /// The browser's own words, a credential control's name and handle, the address of
+    /// Ghostlight's own control page and the name another session's client claimed all go. An
+    /// unconfirmed action retains the action it wraps, so a wrapper never carries past this rule
+    /// what the bare outcome could not. A fill the page refused or undid keeps its fields only so
+    /// that its durable sentence can count them.
+    #[must_use]
+    pub fn retained(&self) -> Self {
+        match self {
+            Self::AuthorityBlocked { reason, host, .. } => Self::AuthorityBlocked {
+                reason: *reason,
+                host: host.clone(),
+                origin: None,
+            },
+            Self::CredentialAuthorization { control } => Self::CredentialAuthorization {
+                control: control.unnamed(),
+            },
+            Self::BrowserPrimitive { .. } => Self::BrowserPrimitive {
+                detail: String::new(),
+            },
+            Self::WorkspaceUnusable { reason } => Self::WorkspaceUnusable {
+                reason: reason.retained(),
+            },
+            Self::ActionUnconfirmed { action, cause } => Self::ActionUnconfirmed {
+                action: Box::new(action.retained()),
+                cause: *cause,
+            },
+            Self::Capacity
+            | Self::InvalidRequest
+            | Self::CancelledBeforeStart { .. }
+            | Self::DeadlineBeforeStart
+            | Self::ChannelOff { .. }
+            | Self::LocalInterlock
+            | Self::IncompatibleReceipt
+            | Self::BrowserAdapterOutdated
+            | Self::DeadlineExpired { .. }
+            | Self::PageRefused { .. }
+            | Self::FieldsReverted { .. }
+            | Self::FieldValuesRejected { .. }
+            | Self::DocumentUnavailable
+            | Self::CancelledBeforeDispatch { .. }
+            | Self::BrowserUnavailable { .. }
+            | Self::BrowserContract
+            | Self::BrowserAmbiguous
+            | Self::BrowserUnknown
+            | Self::BrowserPinned
+            | Self::BrowserStartupManual { .. }
+            | Self::BrowserRecoveryFailed { .. }
+            | Self::ConnectionLost
+            | Self::CancelledAfterDispatch { .. }
+            | Self::EffectUnknown
+            | Self::LandingDeniedUnknown
+            | Self::FilesUnreadable
+            | Self::CaptureTooLarge
+            | Self::TabNotShowing
+            | Self::NoDialogVisible
+            | Self::DialogOpen
+            | Self::RecordingUnavailable
+            | Self::RecordingHeld
+            | Self::RecordingExportFailed
+            | Self::RecordingNotAttached => self.clone(),
+        }
+    }
+
+    /// Project a refusal into durable history: the closed facts and the sentence of its retained
+    /// form.
     #[must_use]
     pub fn audit(&self) -> AuditProjection {
-        let refusal = match self {
+        let retained = self.retained();
+        AuditProjection {
+            unconfirmed_history_steps: 0,
+            coverage: None,
+            summary: retained.durable_summary(),
+            refusal: Some(retained.closed_facts()),
+            tools: vec![],
+            composition: None,
+        }
+    }
+
+    /// The sentence durable history keeps for a retained refusal.
+    ///
+    /// It is the refusal's own sentence, apart from the refusals whose sentence is made of what
+    /// history never keeps: the browser's own words, the fields a fill could not set and the
+    /// credential control. Those say what kind of thing was refused, and how many.
+    fn durable_summary(&self) -> String {
+        match self {
+            Self::BrowserPrimitive { .. } => PageGesture::Other.could_not().into(),
+            Self::FieldValuesRejected { fields, .. } => format!(
+                "Refused a form fill before any edit: {} could not take {}.",
+                counted(fields.len(), "field", "fields"),
+                if fields.len() == 1 {
+                    "its value"
+                } else {
+                    "their values"
+                },
+            ),
+            Self::FieldsReverted { set, .. } => format!(
+                "A form fill was partly applied: {} held {}.",
+                counted(*set, "field", "fields"),
+                if *set == 1 {
+                    "its value"
+                } else {
+                    "their values"
+                },
+            ),
+            Self::CredentialAuthorization { .. } => {
+                "Refused credential input that the user had not authorized.".into()
+            }
+            retained => retained.summary(),
+        }
+    }
+
+    /// The closed failure facts of a retained refusal.
+    fn closed_facts(&self) -> AuditRefusal {
+        match self {
             Self::InvalidRequest => AuditRefusal::InvalidRequest,
             Self::CancelledBeforeStart { .. } => AuditRefusal::CancelledBeforeStart,
             Self::DeadlineBeforeStart => AuditRefusal::DeadlineBeforeStart,
@@ -239,53 +421,6 @@ impl Refusal {
             Self::ActionUnconfirmed { cause, .. } => {
                 AuditRefusal::ActionUnconfirmed { cause: *cause }
             }
-        };
-        AuditProjection {
-            unconfirmed_history_steps: 0,
-            coverage: None,
-            summary: match self {
-                Self::BrowserPrimitive { .. } => PageGesture::Other.could_not().into(),
-                // The count is the whole of it: names, options and values stay out of history.
-                Self::FieldValuesRejected { fields, .. } => format!(
-                    "Refused a form fill before any edit: {} could not take {}.",
-                    counted(fields.len(), "field", "fields"),
-                    if fields.len() == 1 {
-                        "its value"
-                    } else {
-                        "their values"
-                    },
-                ),
-                // Only how many fields held: which ones changed, and to what, stays out of history.
-                Self::FieldsReverted { set, .. } => format!(
-                    "A form fill was partly applied: {} held {}.",
-                    counted(*set, "field", "fields"),
-                    if *set == 1 {
-                        "its value"
-                    } else {
-                        "their values"
-                    },
-                ),
-                // A credential refusal names the control; history keeps only that one was refused.
-                Self::CredentialAuthorization { .. } => {
-                    "Refused credential input that the user had not authorized.".into()
-                }
-                // The control page is named without its address: history keeps the reason, and the
-                // host the refusal already records, never the scheme or the port.
-                Self::AuthorityBlocked {
-                    reason: BlockedReason::OwnWorkbench,
-                    host,
-                    ..
-                } => Self::AuthorityBlocked {
-                    reason: BlockedReason::OwnWorkbench,
-                    host: host.clone(),
-                    origin: None,
-                }
-                .summary(),
-                _ => self.summary(),
-            },
-            refusal: Some(refusal),
-            tools: vec![],
-            composition: None,
         }
     }
 }
@@ -313,7 +448,9 @@ pub fn tool_name(requested: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language::outcome::{ActionSubject, StaleHelp, TargetRole};
+    use crate::language::field_echo::HeldField;
+    use crate::language::field_problem::ControlRef;
+    use crate::language::outcome::{ActionSubject, DialogKind, StaleHelp, TargetRole};
     use crate::workspace::StaleReason;
 
     #[test]
@@ -349,6 +486,166 @@ mod tests {
         assert!(audit
             .summary()
             .contains("JavaScript dialog is currently visible"));
+    }
+
+    /// A fill whose page read back a choice and a reformatted text, with names preserved, so the
+    /// agent's sentence carries both readings.
+    fn read_back_fill() -> Outcome {
+        Outcome::FormFilled {
+            fields: 2,
+            submitted: true,
+            host: Some("example.com".into()),
+            held: vec![
+                HeldField::new(
+                    "target_7k2nb5xe",
+                    TargetRole::Combobox,
+                    "Plan",
+                    "PRIVATE_CHOICE",
+                    false,
+                    true,
+                ),
+                HeldField::new(
+                    "target_8m3pc6yf",
+                    TargetRole::Textbox,
+                    "Phone",
+                    "PRIVATE_READING",
+                    true,
+                    true,
+                ),
+            ],
+            rebound: false,
+        }
+    }
+
+    /// Every way a check after an action can fall short.
+    const CHECK_FAILURES: [CheckFailure; 10] = [
+        CheckFailure::Unmet,
+        CheckFailure::Blocked(BlockedReason::Host),
+        CheckFailure::Blocked(BlockedReason::Hold),
+        CheckFailure::Blocked(BlockedReason::SessionEnded),
+        CheckFailure::Cancelled,
+        CheckFailure::DeadlineExpired,
+        CheckFailure::Disconnected,
+        CheckFailure::BrowserUnavailable,
+        CheckFailure::DocumentUnavailable,
+        CheckFailure::BrowserRefused,
+    ];
+
+    #[test]
+    fn no_page_text_reaches_the_audit_through_any_wrapper() {
+        let cases = [
+            (read_back_fill(), vec!["PRIVATE_CHOICE", "PRIVATE_READING"]),
+            (
+                Outcome::DialogObserved {
+                    present: true,
+                    message: Some("Delete PRIVATE_DIALOG?".into()),
+                },
+                vec!["PRIVATE_DIALOG"],
+            ),
+        ];
+        for (bare, sentinels) in cases {
+            let wrapped = bare.clone().with_open_dialog(DialogKind::Confirm);
+            let mut accounts = vec![
+                (bare.summary(), bare.audit()),
+                (wrapped.summary(), wrapped.audit()),
+            ];
+            for cause in CHECK_FAILURES {
+                for action in [&bare, &wrapped] {
+                    let refusal = Refusal::ActionUnconfirmed {
+                        action: Box::new(action.clone()),
+                        cause,
+                    };
+                    accounts.push((refusal.summary(), refusal.audit()));
+                }
+            }
+            for (said, audit) in accounts {
+                let kept = serde_json::to_string(&audit.refusal()).unwrap();
+                for sentinel in &sentinels {
+                    assert!(said.contains(sentinel), "the agent reads it: {said}");
+                    assert!(!audit.summary().contains(sentinel), "{}", audit.summary());
+                    assert!(!kept.contains(sentinel), "{kept}");
+                }
+            }
+        }
+        let fill = read_back_fill();
+        assert_eq!(
+            fill.audit().summary(),
+            "Filled 2 fields on example.com and submitted the form."
+        );
+        assert_eq!(
+            fill.clone()
+                .with_open_dialog(DialogKind::Confirm)
+                .audit()
+                .summary(),
+            "Filled 2 fields on example.com and submitted the form. A confirm dialog is now open."
+        );
+        assert_eq!(
+            Refusal::ActionUnconfirmed {
+                action: Box::new(fill),
+                cause: CheckFailure::Unmet,
+            }
+            .audit()
+            .summary(),
+            "The expected condition did not hold after the action. Filled 2 fields on example.com and submitted the form."
+        );
+    }
+
+    #[test]
+    fn an_ownership_refusal_writes_no_other_clients_name() {
+        let refusal = Refusal::WorkspaceUnusable {
+            reason: WorkspaceReason::OwnershipMismatch {
+                owner: Some("PRIVATE_CLIENT".into()),
+            },
+        };
+        assert!(refusal.summary().contains("PRIVATE_CLIENT"));
+        let audit = refusal.audit();
+        assert_eq!(
+            audit.summary(),
+            "That handle belongs to a different Ghostlight session."
+        );
+        assert_eq!(
+            serde_json::to_value(audit.refusal()).unwrap(),
+            serde_json::json!({
+                "reason": "workspace_unusable",
+                "cause": {"ownership_mismatch": {"owner": null}}
+            })
+        );
+    }
+
+    #[test]
+    fn the_retained_refusal_drops_the_control_page_address_the_credential_name_and_the_browsers_words(
+    ) {
+        let own_page = Refusal::AuthorityBlocked {
+            reason: BlockedReason::OwnWorkbench,
+            host: Some("127.0.0.1".into()),
+            origin: Some("http://127.0.0.1:41259".into()),
+        };
+        assert!(own_page.summary().contains(":41259"));
+        assert!(!own_page.retained().summary().contains(":41259"));
+        assert!(!own_page.audit().summary().contains(":41259"));
+        assert_eq!(own_page.observed().host.as_deref(), Some("127.0.0.1"));
+
+        let credential = Refusal::CredentialAuthorization {
+            control: ControlRef::new(
+                TargetRole::Textbox,
+                "PRIVATE_NAME",
+                Some("target_7k2nb5xe"),
+                true,
+            ),
+        };
+        assert!(credential.summary().contains("PRIVATE_NAME"));
+        for kept in [
+            credential.retained().summary(),
+            credential.audit().summary().into(),
+        ] {
+            assert!(!kept.contains("PRIVATE_NAME"), "{kept}");
+            assert!(!kept.contains("target_"), "{kept}");
+        }
+
+        let primitive = Refusal::BrowserPrimitive {
+            detail: "PRIVATE_EXCEPTION".into(),
+        };
+        assert!(!primitive.retained().summary().contains("PRIVATE_EXCEPTION"));
     }
 
     #[test]
