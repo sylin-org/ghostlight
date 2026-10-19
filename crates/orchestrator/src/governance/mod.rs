@@ -975,25 +975,6 @@ impl RuntimeControls {
         self.state()
     }
 
-    /// Enter a runtime hold.
-    pub fn hold(&self) {
-        self.transition(RUNTIME_HOLD);
-    }
-    /// End the admitted session.
-    pub fn end_session(&self) {
-        self.transition(RUNTIME_END);
-    }
-    /// Resume active work after an external authority decision.
-    pub fn resume(&self) {
-        self.transition(RUNTIME_ACTIVE);
-    }
-
-    /// Move to `next` under the observer lock.
-    fn transition(&self, next: u8) {
-        let observer = self.lock_observer();
-        self.store(observer.as_ref(), next);
-    }
-
     /// Lock the observer slot.
     ///
     /// The lock is held across a store and its notice, so two changes reach the observer in the

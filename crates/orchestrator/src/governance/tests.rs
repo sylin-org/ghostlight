@@ -1252,11 +1252,14 @@ fn every_state_changes_only_through_an_act_it_offers() {
     for state in states {
         for intent in intents {
             let controls = super::RuntimeControls::default();
-            match state {
-                RuntimeControlState::Active => controls.resume(),
-                RuntimeControlState::Held => controls.hold(),
-                RuntimeControlState::Ended => controls.end_session(),
-            }
+            let start = match state {
+                RuntimeControlState::Active => controls.state(),
+                RuntimeControlState::Held => controls.apply_intent(RuntimeControlIntent::Hold),
+                RuntimeControlState::Ended => {
+                    controls.apply_intent(RuntimeControlIntent::EndSession)
+                }
+            };
+            assert_eq!(start, state, "reach {state:?} through the table");
             let act = match (intent, state) {
                 (RuntimeControlIntent::ToggleHold, RuntimeControlState::Active) => {
                     RuntimeControlIntent::Hold
@@ -1281,7 +1284,7 @@ fn every_state_changes_only_through_an_act_it_offers() {
         }
     }
     let held = super::RuntimeControls::default();
-    held.hold();
+    held.apply_intent(RuntimeControlIntent::Hold);
     assert_eq!(
         held.apply_intent(RuntimeControlIntent::StartSession),
         RuntimeControlState::Held,
