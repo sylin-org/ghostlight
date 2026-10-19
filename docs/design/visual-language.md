@@ -28,9 +28,11 @@ courteous guest who narrates what they touch -- visible enough to trust, quiet e
 
 ## The 2.0 vocabulary
 
-What `presentation.js` and `presentation-css.js` draw today. Each row names the activity the
-service sends and the signal it arrives on: `start` while the action runs, `target` when the
-service knows the element, `completion` when it is done.
+What `presentation.js` and `presentation-css.js` draw in a page today. Each row names the
+activity the service sends and the signal it arrives on: `start` while the action runs, `target`
+when the service names the element, `completion` when it is done. The service sends a `target`
+only for `click`, `hover`, `drag` and `type`, and a completion names no element, so the table
+says what reaches the page, not every branch the renderer has.
 
 | Effect | Fires on | What it says | Shape |
 | --- | --- | --- | --- |
@@ -39,14 +41,14 @@ service knows the element, `completion` when it is done.
 | Target glow | `click` target | "this element was the target" | rounded halo hugging the element, 720ms |
 | Click ripple | `click` target | "clicked here, this many times, with this button" | one expanding ring per click, at most three, 150ms apart, 620ms each; dashed for a secondary button |
 | Drag trail | `drag` target | "dragged along this path" | twelve fading sky dots from the last pointer position to the target |
-| Field splash | `fill` and `upload` targets | "the agent just set this field" | ring and interior wash hugging the field, settling then releasing outward, 700ms |
+| Field splash | nothing today: the renderer draws it on a `fill` or `upload` target, and the service sends neither, so `browser_fill_form` and `browser_upload` show only the caption, when it is on | "the agent just set this field" | ring and interior wash hugging the field, settling then releasing outward, 700ms |
 | Field shimmer | `type` target | "typing into this field" | soft outline pulse on the field, 900ms |
-| Scroll cue | `scroll` start, and its target | "scrolled" | three cascading chevrons, 1100ms; at the viewport centre on start, and on the element with a target glow when it is known |
+| Scroll cue | `scroll` start | "scrolled" | three cascading chevrons at the viewport centre, 1100ms |
 | Read scan | `read` start | "the agent is reading, not touching" | a sky band sweeping down the viewport, 1450ms |
-| Navigate pill | `navigate` completion | "arrived at this destination" | top-centre pill: a small sky chevron pointing right, drawn as SVG, then the host and path (58 characters at most), 1600ms |
+| Navigate pill | `navigate` completion | "arrived at this destination" | top-centre pill: a small sky right arrow (shaft and head), drawn as SVG, then the host and path (58 characters at most), 1600ms |
 | Keycap | each `key` start | "a key was pressed" | one unlabelled glowing keycap in a bottom-centre lozenge, 1250ms; it never names the key |
 | Screenshot frame | `screenshot` completion | "this page was captured" | a brief flash, then a frame that shrinks into the bottom-right corner, 1500ms, with the camera medallion |
-| Zoom frame | `zoom` completion | "the agent is inspecting this region" | a frame converging onto the region, or onto the middle of the viewport, 1150ms |
+| Zoom frame | `zoom` completion | "the agent changed this tab's zoom" | a frame converging onto the middle of the viewport (its central 60 percent), 1150ms |
 | Signature medallion | `script`, `type`, `wait` and `find` start; `screenshot` completion | "the agent is doing this kind of work" | one 58px rounded tile fixed top-right, on the near-black ground with a sky stroke: a turning workwheel with three particles, a pulsing keyboard, three waiting lights, a searching lens, or a camera; a white glint when its invocation completes |
 | Caption | any activity, opt-in | names the activity ("Clicking", "Reading page") | bottom-centre pill, 1500ms; off by default |
 | Denial ribbon | one enforced denial | "a guardrail held; here is why" | centred ribbon on the near-black ground with a red shield badge, a title and one line of detail; replaced by the next denial, gone after five seconds |
@@ -66,9 +68,9 @@ indication that carries a shape.
 
 `ClickShape { clicks, button }` rides on `PresentationSignal`, populated from
 `DomainEvent::TargetIndicated` at the click emit site in
-`crates/orchestrator/src/work/pointer.rs`. The other target indications -- hover, drag, type and
-form writes -- pass `None`, because they have no click to describe. The renderer draws one ring per click on the
-150ms stagger unit and dashes the ring when the button is secondary.
+`crates/orchestrator/src/work/pointer.rs`. The other target indications -- hover, drag and type -- pass
+`None`, because they have no click to describe. The renderer draws one ring per click on the 150ms
+stagger unit and dashes the ring when the button is secondary.
 
 The field is optional on the wire with a serde default, so an adapter that predates it renders one
 primary ring, exactly as every click did before. The shape carries how the click landed and never
@@ -125,8 +127,10 @@ Every effect, present and future, obeys these.
 3. Add its row to `TRANSIENT_EFFECTS` in `presentation.js`. The row's `beat` is its lifetime, and
    the row enrolls it for reduced motion; nothing else about it is kept by hand.
 4. Draw it from the matching branch of `render`, and add its rule to `presentation-css.js`.
-5. Add its row to the 2.0 vocabulary table above, with every activity that triggers it in the
-   "Fires on" column. That column is the coverage record; the table and the code move together.
+5. Add its row to the 2.0 vocabulary table above, with every activity and signal the service
+   sends for it in the "Fires on" column. A renderer branch the service never reaches is not
+   coverage; the row says so. That column is the coverage record; the table and the code move
+   together.
 
 ## Provenance
 
@@ -151,7 +155,7 @@ Every 1.x release, v1.0.0 to v1.3.15, drew from the renderer the rebuild wrote,
 `extension/lib/presentation.js`, and its tools were already the `browser_*` tools. That renderer
 drew the set in the 2.0 table above, with two differences: it also drew an explicit attention
 notice in the denial ribbon, which 2.0 dropped, and its navigate pill's arrow was typed text
-rather than the SVG chevron. On 2026-10-14 the renderer moved into the orchestrator's Chromium
+rather than an SVG arrow. On 2026-10-14 the renderer moved into the orchestrator's Chromium
 adapter, and adapter protocol 4 placed it under `protocol4/assets/`. The sections below are kept
 as they were written.
 

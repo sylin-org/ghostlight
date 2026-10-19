@@ -35,8 +35,9 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
 - k1 (j-37): the 2.0 vocabulary table lists everything presentation.js draws today, not only the
   four effects the item named. The renderer still draws the cursor, ripples, trail, field splash
   and shimmer, scroll chevrons, read scan, navigate pill, screenshot and zoom frames, and five
-  medallion kinds, so a table of four would have under-described 2.0. The navigate pill's
-  chevron is described as u6 draws it, an SVG chevron. The dictionary page is labelled as the
+  medallion kinds, so a table of four would have under-described 2.0. The item called the
+  navigate pill's glyph a chevron; the tree (u6, navigationArrow) draws the kit's right arrow,
+  shaft and head, in SVG, and the table says so. The dictionary page is labelled as the
   pre-1.0 vocabulary rather than reskinned. The click section's emit site now points at
   work/pointer.rs, and docs/design/README.md names the dictionary as pre-1.0.
 - k1 (j-37), corrected label: the item called the old rows "1.x". The tree says they are the
@@ -52,6 +53,14 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   in them is deleted or rewritten. docs/design/README.md moves both out of Living references into
   the prior-architecture table. For 2.0, the "Fires on" column of the vocabulary table is the
   coverage record, and "Adding a new effect" says so instead of pointing at the old ledger.
+- k1 (j-37), what reaches the page: the service emits TargetIndicated only from perform_click,
+  perform_hover, perform_drag and perform_type_text, and WorkCompleted carries no locator. So
+  the renderer's fill and upload field splash, its scroll-target chevrons and glow, and its zoom
+  region never run in 2.0: browser_fill_form and browser_upload show only the caption, scroll
+  shows viewport-centre chevrons on start, and zoom converges on the middle of the viewport. The
+  table says that. Code follow-up for the owner, outside this lane: perform_fill, upload_files
+  and perform_scroll would emit TargetIndicated for their resolved targets; if that lands, the
+  table's rows return.
 - n1 (j-11): both light-taskbar frames, 16 and 32 pixels, are now the monochrome tray glyph
   in crates/desktop/assets (tray-glyph-16.png drawn by hand, tray-glyph-32.png smooth): one
   silhouette in the night colour with its eyes cut out and no sparkles. Since no light frame is
