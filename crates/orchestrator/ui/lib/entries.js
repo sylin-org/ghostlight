@@ -86,15 +86,8 @@
   /** Whether policy or a person refused the action: the one outcome drawn in the full red treatment. */
   const isBlocked = entry => entry.phase === "blocked" || entry.outcome === OUTCOME.refused;
 
-  /**
-   * Whether a settled action did not do what it was asked: it failed, or what it did cannot be
-   * confirmed. A refusal is not a failure; it has its own treatment.
-   */
-  const isFailed = entry => Boolean(entry.settled)
-    && (entry.outcome === OUTCOME.failed || entry.outcome === OUTCOME.unknown);
-
   return Object.freeze({
     entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isPending, isUnsettled,
-    isBlocked, isFailed
+    isBlocked
   });
 });

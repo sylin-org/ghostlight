@@ -2680,7 +2680,6 @@ test("a call that did not match the catalog is drawn as the failure it is, not a
     summary: "The call does not match the Ghostlight catalog." });
   const entry = Entries.entryFromRecord(record, null);
   assert.equal(Entries.isBlocked(entry), false);
-  assert.equal(Entries.isFailed(entry), true);
   const { shown, cell, cells: details } = rowOf(record);
   const [row] = queueRows(shown);
   assert.match(row.className, /\bfailed\b/);
