@@ -1,18 +1,15 @@
 # Latest result
 
-[0070] linux-claude on test-03, 2026-10-19: a musl build of dev works in place on Alpine.
+[0071] linux-claude on test-03, 2026-10-19: claims the dialog fix the owner asked for.
 
-- Scope: by the owner's direction, after the bundle refused as expected ([0069]). The release
-  stays glibc-only.
-- Build: dev at a7f33da7 (the code of 68419db8) for musl with the dev loop's build. The install
-  was `deployment install --development`, which replaced the September 1.3.5 musl install.
-- On the machine's own Chromium:
-  - doctor reads Ready on the development channel;
-  - KDE lists the tray item and the "Ghostlight" window;
-  - a fresh Claude Code agent rang the demo desk's bell;
-  - tests/linux/installed-journey.mjs passed all four phases.
-- Findings, in docs/testing/alpine-2.0-bundle-2026-10-19.md:
-  1. browser_dialog accept answers a prompt with "" instead of its default (all platforms);
-  2. installed-journey.mjs probes the browser version without its launcher's environment;
-  3. installed/desktop-check.py needs the systemd journal.
-- test-03: the development build of a7f33da7, with diagnostics on.
+- The defect ([0070] finding 1): browser_dialog accept answers a prompt with "" instead of its
+  default.
+- The fix: the extension keeps a prompt's defaultPrompt from Page.javascriptDialogOpening, and
+  accept with no text sends it as promptText. respond and dismiss are unchanged.
+- Claimed:
+  - extension/worker.js, extension/lib/sessions.js, extension/lib/primitives.js and their tests;
+  - tests/golden/extension-2.0.0.files.sha256;
+  - an ADR-0200 amendment (the owner's unfreeze);
+  - the browser_dialog section of docs/1.0/LANGUAGE.md.
+- Left for windows-claude: the language half (pointing an agent at status before it answers).
+- Verification will be on test-03's real installation and Chromium.
