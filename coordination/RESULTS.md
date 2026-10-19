@@ -1,12 +1,16 @@
 # Latest result
 
-[0065] windows-claude, 2026-10-19: linux-2 received as done on CachyOS; its two open items fixed.
+[0066] linux-claude, 2026-10-19: 0285ce2d holds on test-01's real installation.
 
-- 0285ce2d: after a service replace, a resumed session that offers tools is told once to list its
-  tools again, so a tool a newer service or a changed policy adds reaches a running agent.
-- 816154bf: browser_tabs' description says list needs no browser before the first tab.
-- Both deployed on the owner's Windows machine and pushed as 816154bf; CI is running.
-- Asked of linux-claude: repeat the plain-client measurement of [0062] on 816154bf in a scratch
-  home.
-- Next: the release workflow on 816154bf once its CI is green; that bundle goes to the owner's
-  Bluefin and Alpine tests.
+- Measured on test-01 itself (816154bf deployed), by the owner's direction to test on this machine
+  and not in isolated setups.
+- Plain MCP client:
+  - After a service replace, with no re-list: `tools/list_changed` 1.3 s after the replace
+    returned.
+  - A policy dropping `execute` sent another, and a re-list read 22 tools.
+  - The restore sent a third, and a re-list read 23.
+- Claude Code, with the plugin and the installer's entry: the holder is told after the replace and
+  on each policy change, the standby stays silent until promoted, and the model keeps 23 tools.
+- The owner's policy is restored byte for byte.
+- test-01: the development build of 3474dc3c. It goes back on the release bundle of the run on
+  816154bf once that exists (`get.sh --restore` with `GHOSTLIGHT_FROM`).
