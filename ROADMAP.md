@@ -5,8 +5,9 @@ baseline until 2.0 passes its release checks and is published.
 
 ## 2.0 release
 
-- Publish the release candidate, prove the pinned install on Windows and Linux, and run a 1.x
-  upgrade on another machine while the store still serves 1.x.
+- Build the release candidate, prove the install from its bundle on Windows and Linux, and run a
+  1.x upgrade on another machine while the store still serves 1.x. Nothing is tagged before
+  `v2.0.0`.
 - Submit the 2.0 extension for staged store review with the 2.0 privacy text already public.
 - Cut over in one sitting: the release, the npm launcher, the short install commands, the
   extension, the public state, the MCP Registry and WinGet.

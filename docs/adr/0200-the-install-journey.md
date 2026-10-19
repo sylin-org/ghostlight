@@ -357,3 +357,26 @@ wraps; the setup headline balances and its accent never breaks. The changed pack
 `options.js`. The window's setup view serves the same `kit.css` bytes. No permission, wire message
 or adapter protocol 4 behavior changes. The freeze golden is regenerated from the new zip in the
 same commit, the version stays 2.0.0, and Decision 16's rule is unchanged.
+
+## Amendment (2026-10-19): no prerelease tag; the candidate is the release workflow's bundle
+
+The owner decided on 2026-10-19 that there is no `v2.0.0-rc.1` tag. "Release candidate" is only the
+name for the bundle the release workflow builds from the candidate commit before the tag. This
+supersedes rule 2 of the amendment "reviewers install a pinned prerelease, and the cutover waits for
+approval". Rules 1 and 3 stand: a requested `GHOSTLIGHT_VERSION` still installs exactly that
+release, and the cutover still waits for approval and runs in one sitting from the same commit as
+the candidate.
+
+- **The pre-submission proof is the install from the bundle.** The one-line installer from the
+  candidate commit runs with `GHOSTLIGHT_FROM` naming the unpacked bundle on Windows PowerShell 5.1,
+  PowerShell 7 and a Linux shell. It checks every image against `SHA256SUMS` as it checks a
+  download and fetches nothing from GitHub (`docs/guides/installation.md`, Test a build before its
+  release). The 1.x upgrade proof uses the same command.
+- **One set of notes.** `docs/release/notes-v2.0.0.md` is the 2.0 release text. The prerelease
+  preamble and its copy of those notes are removed.
+- **Reviewers.** No public 2.0 build exists while the extension is in review, so the public command
+  installs 1.x for a reviewer, and the Notes for certification say so. Whether a reviewer is
+  offered a 2.0 build, and how, is the owner's decision, still open on 2026-10-19.
+
+The order is written out in `docs/RELEASE.md` (The 2.0 cutover) and
+`docs/release/store-disclosure-2.0.md`.

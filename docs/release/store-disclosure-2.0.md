@@ -122,68 +122,46 @@ reviewer's answer here and bring it to the owner. The decision is the owner's.
 
 A 2.0 service refuses a 1.x extension and a 2.0 extension refuses a 1.x service, so no order
 avoids a gap for 1.x users once both are public (ADR-0200 Decision 16). The order below keeps that
-gap to the minutes of the cutover and gives reviewers a 2.0 they can install before it
-(ADR-0200, amendment "reviewers install a pinned prerelease, and the cutover waits for approval").
-Until step 6, the latest release, `main` and every 1.x user are untouched.
+gap to the minutes of the cutover. There is no prerelease tag: the release candidate is the bundle
+the release workflow builds from the candidate commit (ADR-0200, amendment of 2026-10-19). Until
+step 6, the latest release, `main` and every 1.x user are untouched.
 
 1. Build the zip from the approved `dev` commit with `scripts/package-extension.ps1`. The package
    is frozen by `tests/guards/extension-freeze.test.mjs`.
-2. Publish `v2.0.0-rc.1`, the release candidate of that exact commit, as a GitHub prerelease. Never
-   mark it latest: `releases/latest` skips prereleases, so the public one-line command and the
-   scripts on `main` keep serving 1.x. Use the release tooling, which keeps its custody checks
-   (the tag resolves to the candidate's source revision, every file's build provenance verifies,
-   and the draft's files match the candidate by hash). The candidate is assembled as always, with
-   its version `2.0.0` (`docs/RELEASE.md`). The owner pushes the tag `v2.0.0-rc.1` on that
-   commit first; the script never creates a tag. Then, from the repository root:
-
-   ```powershell
-   pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Prerelease rc.1
-   pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Prerelease rc.1 -Action CreateDraft -NotesFile docs/release/notes-v2.0.0-rc.1.md -Execute
-   pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Prerelease rc.1 -Action PublishDraft -Execute
-   ```
-
-   The first command is a plan and makes no request. `-Prerelease rc.1` makes the tag
-   `v2.0.0-rc.1` and creates the release with `--prerelease`. Publishing refuses a draft whose
-   prerelease flag does not match the request.
-
-   The release candidate carries the 2.0.0 build, the same files that `v2.0.0` will carry. Its
-   programs report `2.0.0`, not `2.0.0-rc.1`. The pinned install prints
-   `Ghostlight 2.0.0-rc.1 downloaded` because that is the release it fetched, and the installed
-   summary and `--version` then say `2.0.0`. That is the right build, not a mix-up.
-3. Prove the install from the rc tag with the pinned commands. The script is read from the rc tag
-   and `GHOSTLIGHT_VERSION` names the release it installs. Run each on a clean machine or profile:
-
-   Windows PowerShell 5.1 (`powershell`) and PowerShell 7 (`pwsh`):
-
-   ```powershell
-   $env:GHOSTLIGHT_VERSION = "2.0.0-rc.1"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.ps1 | iex
-   ```
-
-   A Linux shell:
-
-   ```sh
-   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.sh | GHOSTLIGHT_VERSION=2.0.0-rc.1 sh
-   ```
-
-   Each prints one verify line and the install summary, which names version `2.0.0` (see step 2).
-   A version that does not exist prints one sentence and exits non-zero. A lookup that fails for
-   another reason (GitHub's rate limit of 60 unauthenticated requests an hour per address is one)
-   reports the failure and never says the release does not exist. Wait or use another network, and
-   run it again.
+2. Build the release candidate of that exact commit: dispatch the release workflow on it, download
+   its `release-candidate` bundle to `dist/release-candidate` and verify it with
+   `scripts/check-release-candidate.ps1` (`docs/RELEASE.md`, The 2.0 cutover, step 1). Nothing is
+   tagged or published. The bundle carries the 2.0.0 build, the same files that `v2.0.0` will
+   carry.
+3. Prove the install on the bundle on Windows PowerShell 5.1, PowerShell 7 and a Linux shell: the
+   one-line installer from the candidate commit with `GHOSTLIGHT_FROM` naming the unpacked bundle
+   ([installation guide](../guides/installation.md#test-a-build-before-its-release)). Each run
+   prints the install summary, which names version `2.0.0`, and fetches nothing from GitHub.
 
    The store serves the 1.x extension until step 6, so the proof loads `extension/` from the
-   `v2.0.0-rc.1` source unpacked. Its pinned key gives it the development id the install
-   registers. Then upgrade a 1.x install on another machine, as `docs/RELEASE.md` (The 2.0
-   cutover, step 3) describes, while the store still serves 1.x.
+   candidate commit unpacked. Its pinned key gives it the development id the install registers.
+   Then upgrade a 1.x install on another machine, as `docs/RELEASE.md` (The 2.0 cutover, step 3)
+   describes, while the store still serves 1.x.
 4. Make the public privacy page (`https://sylin.org/ghostlight/privacy/`) carry the 2.0 text of
    [PRIVACY.md](../legal/PRIVACY.md), then submit the zip as `STAGED_PUBLISH`. Do not publish. Put
    the text below in the Chrome dashboard's "Notes for certification" and in Partner Center's
    "Notes for certification" for Edge. For 1.x users the 2.0 privacy text only discloses more
    than their version does.
 5. Wait for approval (the item shows ready to publish). Do not cut over before it.
-6. Cut over in one sitting, from the same commit as the rc:
-   1. Publish `v2.0.0` as GitHub's latest release: push the tag `v2.0.0` on that commit, then
-      run the same three commands as in step 2 without `-Prerelease`.
+6. Cut over in one sitting, from the same commit as the candidate:
+   1. Publish `v2.0.0` as GitHub's latest release. Use the release tooling, which keeps its
+      custody checks (the tag resolves to the candidate's source revision, every file's build
+      provenance verifies, and the draft's files match the candidate by hash). The owner pushes
+      the tag `v2.0.0` on that commit first; the script never creates a tag. Then, from the
+      repository root:
+
+      ```powershell
+      pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate
+      pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Action CreateDraft -NotesFile docs/release/notes-v2.0.0.md -Execute
+      pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Action PublishDraft -Execute
+      ```
+
+      The first command is a plan and makes no request.
    2. Fast-forward `main` to that commit (the short commands fetch the scripts on `main`).
    3. Publish the npm launcher with `scripts/publish-npm.ps1` (a `-Mode Plan` run first, then
       `-Mode Publish -ExpectedSha256 <hash> -Execute` with the tarball
@@ -215,23 +193,19 @@ Until step 6, the latest release, `main` and every 1.x user are untouched.
 
 ### Notes for certification (draft)
 
-The same text goes in both dashboards. Recheck it against the install on the day.
+The same text goes in both dashboards. Recheck it against the install on the day. With no
+prerelease, no public 2.0 build exists while the item is in review, so a reviewer who installs the
+application gets 1.x. Whether a reviewer is offered a 2.0 build, and how, is the owner's call; until
+it is made, the draft says only what is true.
 
 > Ghostlight works with the Ghostlight application installed on the same computer. The extension
 > does nothing useful without it, and it shows a setup page that says so when the application is
 > not found.
 >
-> To try the extension, install the 2.0 application first. The one-line public command
-> (https://sylin.org/ghostlight/get.ps1 and https://sylin.org/ghostlight/get.sh) serves 2.0 only
-> after release, so while this item is in review use the pinned commands, which install the 2.0
-> release candidate. The release candidate is the 2.0.0 build, so the installed application
-> reports version 2.0.0:
->
-> Windows PowerShell or PowerShell 7:
-> `$env:GHOSTLIGHT_VERSION = "2.0.0-rc.1"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.ps1 | iex`
->
-> Linux shell:
-> `curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.sh | GHOSTLIGHT_VERSION=2.0.0-rc.1 sh`
+> To try the extension, install the Ghostlight 2.0 application first. Ghostlight 2.0 is released
+> together with this extension, after approval. Until then the one-line public command
+> (https://sylin.org/ghostlight/get.ps1 and https://sylin.org/ghostlight/get.sh) installs
+> Ghostlight 1.x, and with 1.x the popup reads Update needed.
 >
 > Then open the extension's popup: it reads Ready once the application answers. A safe page to try
 > it on is https://sylin.org/ghostlight/demo/.

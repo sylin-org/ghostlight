@@ -40,8 +40,8 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   packaged extension. Complete through j17-docs. The setup view offers Add in every found
   Chromium-family browser (Chrome, Brave, Chromium and Edge), because all of them install the
   extension from the Chrome Web Store; no Edge Add-ons listing is requested unless the owner asks
-  for one. Owed live checks (fresh homes on Windows and Linux, the pinned release-candidate
-  install) and the store submission are listed in the ledger.
+  for one. Owed live checks (fresh homes on Windows and Linux, the install from the release
+  candidate's bundle) and the store submission are listed in the ledger.
 - **Desktop shell** ([shell-m1.md](tasks/break-2.0/shell-m1.md),
   [shell-m2.md](tasks/break-2.0/shell-m2.md)): the service serves the workbench on 127.0.0.1 and
   `ghostlight-desktop` is a webview on it. Milestones 1 and 2 are complete and deployed on the
@@ -59,7 +59,8 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   Claude Code session on the owner's CachyOS machine worked the owed Linux checks L01 to L10 on
   the real installation and, by the owner's leave, fixed what it found (each fix is in the
   ledger, the record). On 2026-10-18 its open questions were settled by the user-delight test and
-  old leftovers removed (ledger, "Follow-up"). Owed: the release candidate's pinned install.
+  old leftovers removed (ledger, "Follow-up"). Owed: the install from the release candidate's
+  bundle.
   On 2026-10-18 the owner unfroze the extension for a proper fix of saved tab groups piling up, and
   it landed the same day ([ADR-0201](adr/0201-a-kept-tab-leaves-the-group.md), 0018941b): a tab
   preserve-tabs keeps after its session ends leaves Ghostlight's group, so Chromium deletes the
@@ -110,14 +111,16 @@ meaningful architecture change needs it, never because of a freeze (ADR-0197 ame
 2026-10-18).
 
 Release order (`docs/RELEASE.md`, The 2.0 cutover; `docs/release/store-disclosure-2.0.md`;
-ADR-0200): the `v2.0.0-rc.1` GitHub prerelease, the pinned install proof on Windows PowerShell 5.1,
-PowerShell 7 and a Linux shell, a 1.x upgrade on another machine while the store still serves 1.x,
-the 2.0 privacy text on the public page, the staged store submission and its approval. Then in one
-sitting: `v2.0.0` as latest, `main` fast-forwarded, the npm launcher published, the frozen install
-strings proved, the staged extension published, a clean-profile run of the public path on Windows
-and Linux, the public-state commit with a second fast-forward of `main` and a website rebuild, the
-MCP Registry record and the WinGet manifests, and once winget-pkgs merges them, the README and
-installation guide lines that say WinGet carries 2.0. Not before approval.
+ADR-0200). There is no prerelease tag (the owner, 2026-10-19): the release candidate is the bundle
+the release workflow builds from the candidate commit. First the install proof on that bundle on
+Windows PowerShell 5.1, PowerShell 7 and a Linux shell, a 1.x upgrade on another machine while the
+store still serves 1.x, the 2.0 privacy text on the public page, the staged store submission and
+its approval. Then in one sitting: `v2.0.0` as latest, `main` fast-forwarded, the npm launcher
+published, the frozen install strings proved, the staged extension published, a clean-profile run
+of the public path on Windows and Linux, the public-state commit with a second fast-forward of
+`main` and a website rebuild, the MCP Registry record and the WinGet manifests, and once
+winget-pkgs merges them, the README and installation guide lines that say WinGet carries 2.0. Not
+before approval.
 
 ## CI
 
@@ -130,34 +133,37 @@ and Windows. It carries ux-2 and ADR-0203's documents; arch-1's code lands after
 Each line names who does it: the coordinator (the agent session that integrates and deploys) or
 the owner. The ledgers keep the detail; this is what still gates the release.
 
-Before rc.1:
+Before the release candidate's bundle:
 
 - Coordinator: arch-1's candidate slices (ADR-0203), each lane deployed in place and pushed with
   a green CI run, then the owner's try-list on the deployed build.
-- Owner: ADR-0203's two questions: what the Claude Code plugin registers, and when the candidate
-  is tagged.
 - Coordinator: one MCPB install in Claude Desktop from the rehearsed unit, on a clean Windows test
   machine. The rehearsal, the candidate check and `winget validate` passed on 26e48ad0.
 - Coordinator: a Windows Chrome and Edge check of the extension: a session end with preserve-tabs
   on, a reuse, and the popup states.
 - Owner: JQ3, keep or drop the extension's host permissions, recorded as a decision.
 - Owner: the installer's wait times (90 s and 120 s), one timed cold run or "keep" recorded.
-- Owner: the `v2.0.0-rc.1` tag and prerelease, with `docs/release/notes-v2.0.0-rc.1.md`.
+- Coordinator: the release workflow's bundle from the candidate commit, verified with
+  `scripts/check-release-candidate.ps1`. Nothing is tagged or published.
 
-Between rc.1 and the cutover:
+Between the bundle and the cutover:
 
-- Coordinator: the pinned install proof on Windows PowerShell 5.1, PowerShell 7 and a Linux
-  shell, and clean installs from it on a Windows test machine and the Linux test machine.
+- Coordinator: the install proof on the bundle (`GHOSTLIGHT_FROM`) on Windows PowerShell 5.1,
+  PowerShell 7 and a Linux shell, and clean installs from it on a Windows test machine and the
+  Linux test machine.
 - Coordinator: a 1.x upgrade on another machine while the store still serves 1.x
   (`docs/RELEASE.md`, The 2.0 cutover, step 3).
 - Owner: on Windows, a restart and a sign-out with an agent session, the browser and the window
   open: no shutdown block, and one service afterwards.
-- Owner: the daily machine on the rc build, one check on a light-mode Windows account at 150%
-  (frame, height, tray), and the desktop shell's checkpoint 2.
+- Owner: the daily machine on the candidate build, one check on a light-mode Windows account at
+  150% (frame, height, tray), and the desktop shell's checkpoint 2.
 - Owner: tell the three 1.x users directly: remove the 1.x Claude Desktop extension or install the
   2.0 `.mcpb`, and do not run `npx ghostlight` until the cutover.
 - Owner: the sylin.org redirects `/ghostlight/get.ps1` and `/ghostlight/get.sh` to the scripts
   on `main`, and the website's 2.0 pages (separate repository).
+- Owner: what a store reviewer is offered while the item is in review. With no prerelease, the
+  public command installs 1.x until the cutover (`docs/release/store-disclosure-2.0.md`, Notes for
+  certification).
 - Owner: the 2.0 privacy page published, then the staged store submission with the remote-code
   answer (No) and the recaptured assets, and its approval.
 

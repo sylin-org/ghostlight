@@ -88,3 +88,23 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   protocol 4 does: the hello names the protocol major, no capability list crosses, and the
   protocol stays compatible by staying additive with tolerant readers and `unsupported` for an
   unknown primitive.
+
+### Follow-up (2026-10-19)
+
+- F7-no-rc1-names, the owner's word that there is no rc.1 tag: the release candidate is the
+  release workflow's bundle, and the install is proved on it with `GHOSTLIGHT_FROM` (RELEASE.md's
+  cutover steps 1 to 3 already said so, linux-claude, 422e4696). ADR-0200 gains a marked amendment
+  that supersedes rule 2 of its prerelease amendment, and the ADR index says so. The store
+  disclosure's release order builds and proves the bundle instead of publishing `v2.0.0-rc.1`,
+  and its cutover publishes `v2.0.0` with `docs/release/notes-v2.0.0.md`. The rc notes are removed
+  rather than renamed: `notes-v2.0.0.md` already is the 2.0 notes and the newer text (D1's note on
+  the channel switches), and the preamble only told people how to install the prerelease. No
+  active document linked the removed file except the store disclosure and STATUS. STATUS's
+  release order and checklist say bundle, not rc.1, and lose the owner-questions line, since
+  question 2 is answered here and question 1 by the install lane's F2. ROADMAP says the same.
+  RELEASE.md's description of `-Prerelease` keeps the option with a generic example and says 2.0
+  publishes none. New owner item in STATUS and the store disclosure: with no prerelease, a store
+  reviewer who installs Ghostlight gets 1.x, so the Notes for certification say that and no more
+  until the owner decides what a reviewer is offered. Historical records (task ledgers, the
+  break-2.0 journey, coordination) keep their rc.1 lines, and code and test fixtures keep
+  `2.0.0-rc.1` as a version-format example.
