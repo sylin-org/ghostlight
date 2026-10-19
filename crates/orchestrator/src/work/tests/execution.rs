@@ -2023,6 +2023,93 @@ fn unsatisfied_wait_is_decisive_before_the_invocation_deadline() {
     assert!(timeout_ms > 0);
 }
 
+/// A session holding one open tab on example.com, and that tab's handle.
+fn one_open_tab() -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    crate::workspace::WorkspaceId,
+    String,
+) {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
+    let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+    (executor, browser, workspace, tab_handle)
+}
+
+/// A duration wait sends nothing to the browser, so one its deadline would cut short changed
+/// nothing: a plain failure, safe to repeat, that says so and points at a longer `timeout_ms`.
+#[test]
+fn a_duration_wait_past_its_deadline_is_repeat_safe_and_says_nothing_was_sent() {
+    let (executor, browser, workspace, tab_handle) = one_open_tab();
+    let sent = browser.calls().len();
+
+    let waited = executor.execute(
+        &workspace,
+        "browser_wait",
+        json!({"tab":tab_handle,"condition":"duration","value":"10000"}),
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(waited.status, Status::Failed, "{}", waited.summary);
+    assert_eq!(waited.effect, Effect::None);
+    assert!(waited.repeat_safe);
+    assert_eq!(
+        waited.summary,
+        "The job ran out of time before anything changed in the browser."
+    );
+    assert_eq!(waited.facts["reason"], "deadline");
+    assert_eq!(waited.facts["phase"], "before_dispatch");
+    assert_eq!(
+        waited.next_steps,
+        vec!["Repeat with a longer timeout_ms when the page genuinely needs more time."]
+    );
+    assert_eq!(browser.calls().len(), sent, "a sleep sends nothing");
+}
+
+/// A duration that cannot end before the call's deadline is refused as soon as the call starts,
+/// instead of sleeping until the deadline and then giving up.
+#[test]
+fn a_duration_longer_than_the_time_left_is_refused_without_sleeping() {
+    let (executor, _browser, workspace, tab_handle) = one_open_tab();
+
+    let started = std::time::Instant::now();
+    let waited = executor.execute(
+        &workspace,
+        "browser_wait",
+        json!({"tab":tab_handle,"condition":"duration","value":"5000","timeout_ms":2_000}),
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(waited.status, Status::Failed, "{}", waited.summary);
+    assert_eq!(waited.facts["phase"], "before_dispatch");
+    assert!(
+        started.elapsed() < Duration::from_millis(1_000),
+        "the wait slept {:?}",
+        started.elapsed()
+    );
+
+    let fits = executor.execute(
+        &workspace,
+        "browser_wait",
+        json!({"tab":tab_handle,"condition":"duration","value":"50","visual_settle":false,
+            "timeout_ms":2_000}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(fits.status, Status::Succeeded, "{}", fits.summary);
+    assert_eq!(fits.facts["satisfied"], true);
+    assert!(fits.facts["elapsed_ms"].as_u64().unwrap() >= 50);
+}
+
 #[test]
 fn open_read_close_is_one_truthful_result_per_call() {
     let (executor, browser, _, workspace, audit) = fixture();

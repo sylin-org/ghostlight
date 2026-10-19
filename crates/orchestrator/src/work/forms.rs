@@ -1,6 +1,6 @@
 //! Form, text, file, script, keyboard, and wait execution.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, FieldNow, ObservedTarget, PhysicalActionSubject, PhysicalField,
@@ -26,6 +26,9 @@ use super::{
     ResolvedLocation, Status, Terminal, SELECTOR_MATCH_MAX,
 };
 use crate::browser::adapter::PhysicalFile;
+
+/// How often a duration wait looks for a cancellation while it sleeps.
+const DURATION_POLL: Duration = Duration::from_millis(20);
 
 impl ApplicationExecutor {
     pub(super) fn perform_fill(
@@ -802,36 +805,40 @@ impl ApplicationExecutor {
             Capability::Read,
             |selected, locator, _target_role, decision| {
                 if value.condition == "duration" {
+                    // A sleep sends nothing, so the deadline can never leave its effect in doubt.
+                    // One that would end after the deadline is refused before it starts, and one
+                    // that fits always finishes before it.
                     let milliseconds: u64 = value
                         .value
                         .as_deref()
                         .and_then(|raw| raw.parse().ok())
                         .unwrap_or(0);
                     let started = Instant::now();
+                    let Some(end) = started
+                        .checked_add(Duration::from_millis(milliseconds))
+                        .filter(|end| *end <= context.deadline)
+                    else {
+                        return self.browser_failure(
+                            context,
+                            decision,
+                            BrowserError::DeadlineBeforeDispatch,
+                            Some(selected.physical_id),
+                        );
+                    };
                     loop {
                         if context.cancellation.is_cancelled() {
                             return self.browser_failure(
                                 context,
                                 decision,
-                                crate::browser::BrowserError::CancelledBeforeDispatch,
+                                BrowserError::CancelledBeforeDispatch,
                                 Some(selected.physical_id),
                             );
                         }
-                        if started.elapsed().as_millis() >= u128::from(milliseconds) {
+                        let left = end.saturating_duration_since(Instant::now());
+                        if left.is_zero() {
                             break;
                         }
-                        if Instant::now() >= context.deadline {
-                            return self.browser_failure(
-                                context,
-                                decision,
-                                crate::browser::BrowserError::DeadlineAfterDispatch,
-                                Some(selected.physical_id),
-                            );
-                        }
-                        std::thread::sleep(std::cmp::min(
-                            std::time::Duration::from_millis(20),
-                            context.deadline.saturating_duration_since(Instant::now()),
-                        ));
+                        std::thread::sleep(std::cmp::min(DURATION_POLL, left));
                     }
                     let elapsed_ms =
                         u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -858,24 +865,18 @@ impl ApplicationExecutor {
                         None
                     };
                     let visual_settled = settlement.map(|(satisfied, _)| satisfied);
-                    let final_satisfied = true;
                     let final_elapsed_ms =
                         elapsed_ms.saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
-                    let status = if final_satisfied {
-                        Status::Succeeded
-                    } else {
-                        Status::Failed
-                    };
                     let outcome = Outcome::Waited {
                         condition: value.condition.clone(),
                         elapsed_ms: final_elapsed_ms,
-                        satisfied: final_satisfied,
+                        satisfied: true,
                         host: observed_host(&selected.url),
                     };
                     let facts = json!({
                         "tab": selected.handle.as_str(),
                         "condition": "duration",
-                        "satisfied": final_satisfied,
+                        "satisfied": true,
                         "elapsed_ms": final_elapsed_ms,
                         "readiness": readiness(selected.readiness),
                         "visual_settle": should_settle,
@@ -884,7 +885,7 @@ impl ApplicationExecutor {
                     return Terminal {
                         result: InvocationResult::new(
                             context.invocation,
-                            status,
+                            Status::Succeeded,
                             Effect::None,
                             readiness(selected.readiness),
                             true,

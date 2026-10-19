@@ -24,6 +24,9 @@ const CONTROL: &str = "locator_a1_1";
 /// A scripted failure: the receipt for a request, or `None` to answer it as the page would.
 type Fault = Box<dyn Fn(&str, &wire::Primitive) -> Option<wire::Receipt> + Send>;
 
+/// A scripted reply: how the browser answers a request, or `None` to answer it as the page would.
+type Script = Box<dyn Fn(&str, &wire::Primitive) -> Option<Reply> + Send>;
+
 fn tab() -> Value {
     json!({"tab_id": TAB, "title": "Example", "url": URL, "active": true,
         "readiness": "complete"})
@@ -151,6 +154,22 @@ fn opened_audited(
     crate::workspace::WorkspaceId,
     Arc<MemoryAudit>,
 ) {
+    opened_replying(
+        Box::new(move |correlation, primitive| fault(correlation, primitive).map(Reply::Now)),
+        governance,
+    )
+}
+
+/// Like [`opened_audited`], with a script that may also hold a reply back or never give one.
+fn opened_replying(
+    script: Script,
+    governance: GovernanceFacade,
+) -> (
+    ApplicationExecutor,
+    FakeExtension,
+    crate::workspace::WorkspaceId,
+    Arc<MemoryAudit>,
+) {
     let audit = Arc::new(MemoryAudit::default());
     let port = Arc::new(RelayBrowserPort::new(
         "service_protocol4".into(),
@@ -164,9 +183,8 @@ fn opened_audited(
         extension,
         &FakeExtension::hello(BROWSER),
         Box::new(move |correlation, primitive| {
-            Reply::Now(
-                fault(correlation, primitive).unwrap_or_else(|| ordinary(correlation, primitive)),
-            )
+            script(correlation, primitive)
+                .unwrap_or_else(|| Reply::Now(ordinary(correlation, primitive)))
         }),
     );
     port.attach(service).unwrap();
@@ -1190,4 +1208,165 @@ fn a_selector_present_wait_over_two_matches_reports_no_size_limit() {
         "{}",
         waited.model_text()
     );
+}
+
+/// An address embedded in the page, on a host of its own.
+const EMBEDDED: &str = "https://embedded.example/inner";
+
+/// A page that embeds [`EMBEDDED`]: the frames list both documents, the embedded document holds a
+/// control named Inside, and a read there answers with the embedded document's own title and URL.
+fn embedding_page() -> Fault {
+    Box::new(|correlation, primitive| match primitive {
+        wire::Primitive::Frames(_) => Some(FakeExtension::ok(
+            correlation,
+            json!({"frames": [
+                {"frame_id": "T", "loader_id": "t1", "parent_frame_id": null, "url": URL},
+                {"frame_id": "C", "loader_id": "c1", "parent_frame_id": "T", "url": EMBEDDED}],
+                "complete": true, "unseen": []}),
+        )),
+        wire::Primitive::Call(call) => {
+            let answers: Vec<Value> = call
+                .calls
+                .iter()
+                .map(|world| {
+                    let embedded = world
+                        .frame
+                        .as_ref()
+                        .is_some_and(|frame| frame.frame_id == "C");
+                    match (embedded, world.message["kind"].as_str()) {
+                        (true, Some("inspect" | "find" | "describe" | "query_semantic")) => {
+                            returned(json!({"targets": [{"locator": "locator_c1_1",
+                                "role": "button", "name": "Inside", "state": [],
+                                "credential_class": false}], "truncated": false}))
+                        }
+                        (true, Some("read_text")) => returned(json!({"text": "Inside",
+                            "truncated": false, "title": "Embedded", "url": EMBEDDED})),
+                        _ => page(world),
+                    }
+                })
+                .collect();
+            Some(FakeExtension::ok(correlation, json!({"answers": answers})))
+        }
+        _ => None,
+    })
+}
+
+/// A read aimed at a control inside an embedded document is the tab's read: the landing check,
+/// the host the agent reads and the durable permission trace all name the tab's own host.
+#[test]
+fn no_embedded_host_reaches_the_permission_trace_from_a_targeted_read() {
+    let (executor, _fake, workspace, audit) =
+        opened_audited(embedding_page(), GovernanceFacade::new(None));
+    let inspected = execute(&executor, &workspace, "browser_inspect", json!({}));
+    assert_eq!(inspected.status, Status::Succeeded, "{}", inspected.summary);
+    let target = inspected.facts["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == "Inside")
+        .map(|item| item["target"].clone())
+        .expect("the embedded control is listed");
+
+    let read = execute(
+        &executor,
+        &workspace,
+        "browser_read",
+        json!({"target": target}),
+    );
+
+    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
+    assert_eq!(
+        read.facts["text"], "Inside",
+        "the read ran in the embedded document"
+    );
+    let answered = serde_json::to_string(&read).unwrap();
+    assert!(!answered.contains("embedded.example"), "{answered}");
+    let traced = serde_json::to_string(
+        &audit
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|record| record.permissions.clone())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    assert!(traced.contains("example.com"), "{traced}");
+    assert!(
+        !traced.contains("embedded.example"),
+        "an embedded document's host never enters the durable audit: {traced}"
+    );
+}
+
+/// The state of the scripted recording, as the extension reports it.
+fn recording(state: &str) -> Value {
+    json!({"recording_id": "recording_1", "tab_id": TAB, "state": state, "frame_count": 3,
+        "bytes_held": 100, "duration_ms": 900, "source_urls": [URL],
+        "source_urls_complete": true})
+}
+
+/// A save to Downloads writes a file in the browser, so when its receipt never comes before the
+/// deadline the file may exist: the agent reads an unknown effect and is told to look first.
+#[test]
+fn a_download_save_that_outlives_its_deadline_is_unknown_and_not_repeat_safe() {
+    let (executor, fake, workspace, _audit) = opened_replying(
+        Box::new(|correlation, primitive| {
+            let wire::Primitive::Recording(op) = primitive else {
+                return None;
+            };
+            let effect = |value: Value| wire::Receipt {
+                dispatched: true,
+                ..FakeExtension::ok(correlation, value)
+            };
+            Some(match op {
+                wire::RecordingOp::Start { .. } => Reply::Now(effect(json!({"result": "started",
+                    "summary": recording("recording"), "existing": false}))),
+                wire::RecordingOp::Stop { .. } => Reply::Now(effect(json!({"result": "stopped",
+                    "summary": recording("frozen"), "changed": true}))),
+                wire::RecordingOp::Export {
+                    destination: wire::RecordingTarget::Download { .. },
+                    ..
+                } => Reply::Never,
+                _ => return None,
+            })
+        }),
+        GovernanceFacade::new(None),
+    );
+    let started = execute(
+        &executor,
+        &workspace,
+        "browser_record",
+        json!({"action": "start"}),
+    );
+    assert_eq!(started.status, Status::Succeeded, "{}", started.summary);
+
+    let saved = execute(
+        &executor,
+        &workspace,
+        "browser_record",
+        json!({"action": "save", "download": true, "timeout_ms": 300}),
+    );
+
+    assert_eq!(saved.status, Status::Unknown, "{}", saved.summary);
+    assert_eq!(saved.effect, Effect::Unknown, "{}", saved.summary);
+    assert!(!saved.repeat_safe, "{}", saved.summary);
+    assert_eq!(saved.facts["phase"], "after_dispatch", "{}", saved.facts);
+    assert!(
+        saved
+            .summary
+            .contains("before the browser confirmed what the sent command did"),
+        "{}",
+        saved.summary
+    );
+    assert!(fake
+        .wait(|seen| !seen.cancels.is_empty())
+        .requests
+        .iter()
+        .any(|(_, primitive)| matches!(
+            primitive,
+            wire::Primitive::Recording(wire::RecordingOp::Export {
+                destination: wire::RecordingTarget::Download { .. },
+                ..
+            })
+        )));
 }

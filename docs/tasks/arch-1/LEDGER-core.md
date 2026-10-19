@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5, C6, C7 and C13 have landed, and C22 landed with C13. C9 is next. ux-2 has
-closed, so every slice whose "After" is met can start.
+C1, C2, C3a, C4, C5, C6, C7, C13 and C9 have landed, and C22 landed with C13. C10a is next. ux-2
+has closed, so every slice whose "After" is met can start.
 
 ## Slices
 
@@ -22,8 +22,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | see Notes | landed (9beb7976) |
 | C6 | fix(language): a held tab is described truthfully | candidate | C2 | see Notes | landed (5122ae5a, review fixup) |
 | C7 | fix(language): a workspace refusal says what is true | candidate | C6 | see Notes | landed (8f2241c0, e2d6b413) |
-| C13 | fix(provenance): the opener is named once | candidate | C7 | see Notes | landed (this commit) |
-| C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | - | todo |
+| C13 | fix(provenance): the opener is named once | candidate | C7 | see Notes | landed (c78d4bd3) |
+| C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | see Notes | landed (this commit) |
 | C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | - | todo |
 | C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | - | todo |
 | C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | - | todo |
@@ -355,3 +355,18 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   none is needed. D2: ARCHITECTURE's opener-claim lines, INTENT's and the installation guide's
   `Ghostlight - <client label>`, LANGUAGE's reuse rule and ACCEPTANCE's Extension product gates
   item 8 now read the opener's agent name.
+- C9, one rule for both cases: the wait computes its end first and refuses at once, as
+  `DeadlineBeforeDispatch`, when that end is past the deadline. A sleep that starts therefore always
+  ends before the deadline, so the loop checks only cancellation, and the after-dispatch deadline
+  goes with no before-dispatch branch in its place. The refusal uses the existing deadline sentence
+  and its `timeout_ms` advice; the duration wait's own sentence stays C17's.
+- C9, tidy-up in the same branch: a duration wait is always satisfied, so its constant
+  `final_satisfied` and the status chosen from it went. The 20 ms poll is the named
+  `DURATION_POLL`.
+- C9, test harness: `work/tests/protocol4.rs` gained `opened_replying`, which takes a script that
+  may hold a reply back or never give one; `opened_audited` now wraps its fault into it.
+- C9, proofs: `a_duration_wait_past_its_deadline_is_repeat_safe_and_says_nothing_was_sent` and
+  `a_duration_longer_than_the_time_left_is_refused_without_sleeping` in `work/tests/execution.rs`;
+  `a_download_save_that_outlives_its_deadline_is_unknown_and_not_repeat_safe` (A2's work-level
+  proof) and `no_embedded_host_reaches_the_permission_trace_from_a_targeted_read` (A1's) in
+  `work/tests/protocol4.rs`. No catalog, result or audit golden changed. No journey is needed.
