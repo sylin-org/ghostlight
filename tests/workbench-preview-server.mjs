@@ -210,6 +210,11 @@ const controlsFixture = {
     label: "Notifications", word: "Send one local checkup notification. Nothing leaves this device.",
     acts: { test_notification: { available: true, why_not: null } }
   },
+  browser: {
+    set_in: "Set in the browser",
+    effects: { label: "Agent activity effects", word: "The cursor, click ripples and scan-lines on a page an agent works in. They start on." },
+    captions: { label: "Action captions", word: "A caption at the bottom of the page names each action. They start off." }
+  },
   service: { word: "Ghostlight is running; 3 agents and 2 browsers connected." },
   you: { context: "control", word: "Shared", sentence: "Others on this computer can watch this view in a browser." }
 };

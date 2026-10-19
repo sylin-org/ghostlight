@@ -22,7 +22,7 @@
     hostReadback, patternCovers,
     escapeHtml, words, duration, ago, agoSaid, shortId,
     OUTCOME_WORD, PHASE_WORD, workCounts, bandFacts, rowBy, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
-    CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
+    CONTINUE_LABEL, POLICY_IN_WINDOW, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine
   } = globalThis.GhostlightWords;
@@ -120,13 +120,13 @@
     const opensLinks = () => access !== null && access.opener !== OPENER_SERVICE;
 
     /**
-     * The one line a panel shows for the acts it cannot offer: the reason, and the way on. A line
-     * that belongs to one screen names its address; the band's line carries none and the page
-     * continues at the screen it is showing.
+     * The one line a panel shows for the acts it cannot offer: the reason, when the panel says
+     * one, and the way on. A line that belongs to one screen names its address; the band's line
+     * carries none and the page continues at the screen it is showing.
      */
     function continueMarkup(why, address) {
       const place = address ? ` data-address="${escapeHtml(address)}"` : "";
-      return `<span>${escapeHtml(why)}</span>`
+      return (why ? `<span>${escapeHtml(why)}</span>` : "")
         + `<button class="link-button" type="button" data-continue${place}>${escapeHtml(CONTINUE_LABEL)}</button>`;
     }
 
@@ -867,8 +867,22 @@
       chip(told);
       el["refresh-integrations"].hidden = !can(ACT.rescan);
       el["setup-integrations"].hidden = !can(ACT.setupAll);
-      el["apply-policy"].textContent = can(ACT.applyPolicy) ? "Apply" : APPLY_IN_WINDOW_LABEL;
-      el["sacred-hosts"].disabled = !can(ACT.applyPolicy);
+      policyAccess();
+    }
+
+    /**
+     * Draw Policy for what this screen may do with it. A screen that cannot write the rules shows
+     * every draft control as the state it holds, read-only, under one line saying where changes
+     * are made; it has no Apply, because it has nothing to apply.
+     */
+    function policyAccess() {
+      const writes = can(ACT.applyPolicy);
+      el["policy-continue"].hidden = writes;
+      el["policy-continue"].innerHTML = writes ? "" : continueMarkup(POLICY_IN_WINDOW, addressOf("policy"));
+      el["apply-policy"].hidden = !writes;
+      el["sacred-hosts"].disabled = !writes;
+      el["add-rule"].hidden = !(writes && applied?.user_layer?.editable);
+      if (draft) renderRules();
     }
 
     /** Take the answer of a service that shows nothing: every data view says why, About shows in full. */
@@ -1373,13 +1387,15 @@
     }
 
     function drawAgents() {
+      drawnOnce.add("integrations");
       const { harnesses, sessions, inUseIds } = lastAgents;
       const agents = harnesses.map((harness) => agentOf(harness, sessions, inUseIds));
       agentsHeading(agents);
-      // One line for the whole page, naming the first change this screen cannot make.
-      const withheld = [ACT.harnessAct, ACT.locate, ACT.setupAll].find((act) => !can(act));
+      // One way on for the whole page while this screen cannot make a change: the controls it
+      // leaves out already say that the change is made elsewhere.
+      const withheld = [ACT.harnessAct, ACT.locate, ACT.setupAll].some((act) => !can(act));
       el["integrations-continue"].hidden = !withheld;
-      el["integrations-continue"].innerHTML = withheld ? continueMarkup(whyNot(withheld), addressOf("integrations")) : "";
+      el["integrations-continue"].innerHTML = withheld ? continueMarkup("", addressOf("integrations")) : "";
       if (!agents.length) {
         el["agents-list"].innerHTML = `<p class="agents-empty">${escapeHtml(AGENTS.noAgents)}</p>`;
         el["agents-pane"].innerHTML = "";
@@ -1481,6 +1497,7 @@
     });
 
     function status(snapshot) {
+      drawnOnce.add("status");
       // The service's own sentence about what is connected, read from the controls part it keeps.
       const service = snapshot.controls?.service?.word ?? "";
       el["status-service"].textContent = service;
@@ -1518,6 +1535,7 @@
      */
     function policy(view, { keepDraft = false } = {}) {
       applied = view;
+      drawnOnce.add("policy");
       el["policy-headline"].textContent = view.headline;
 
       organizationCard(view.organization, view.passport);
@@ -1541,7 +1559,7 @@
 
       const user = view.user_layer;
       el["policy-editor"].hidden = !user.editable;
-      el["add-rule"].hidden = !user.editable;
+      el["add-rule"].hidden = !(user.editable && can(ACT.applyPolicy));
       el["policy-blocked"].hidden = user.editable || !user.blocked_reason;
       if (user.blocked_reason) el["policy-blocked-reason"].textContent = user.blocked_reason;
       el["policy-remove"].hidden = !(user.editable && user.source === "workbench" && hasUserLayer(view)
@@ -1617,7 +1635,7 @@
               + ` <span class="owner">${escapeHtml(setting.owner)}</span></li>`;
           }).join("")
           + `</ul>`
-          + limitNotes(settings.filter((setting) => setting.value === "false").map((setting) => setting.key))
+          + limitNotes(settingLimits(settings.filter((setting) => setting.value === "false").map((setting) => setting.key)))
         : "";
 
       el["policy-documents"].innerHTML = layers.map((layer) => {
@@ -1711,39 +1729,63 @@
      */
     function renderSettings() {
       if (!draft) return;
-      el["setting-groups"].innerHTML = SETTING_GROUPS.map((group) =>
-        `<div class="setting-group"><h3>${escapeHtml(group.title)}</h3>`
-        + group.items.map(settingRow).join("")
-        + limitNotes(group.items.map((item) => item.key))
-        + `</div>`).join("");
+      el["setting-groups"].innerHTML = SETTING_GROUPS.map((group, at) => {
+        // What a group cannot promise leads it, under its heading, and each switch it covers is
+        // described by it too.
+        const limits = settingLimits(group.items.map((item) => item.key));
+        const limitIds = new Map(limits.map((limit, index) => [limit, `setting-group-${at}-limit-${index}`]));
+        return `<div class="setting-group"><h3>${escapeHtml(group.title)}</h3>`
+          + limitNotes(limits, limitIds)
+          + group.items.map((item) => settingRow(item, limitIds)).join("")
+          + `</div>`;
+      }).join("");
       el["sacred-hosts"].value = draft.settings.sacred;
       refreshSacred();
     }
 
-    /** What the settings with these keys cannot promise, each limit said once. */
-    function limitNotes(keys) {
-      return settingLimits(keys).map((limit) => `<p class="setting-limit">${escapeHtml(limit)}</p>`).join("");
+    /**
+     * Say each limit once. With `ids`, a map from a limit to the id it wears, the switches it
+     * covers can point at it.
+     */
+    function limitNotes(limits, ids = new Map()) {
+      return limits.map((limit) => {
+        const id = ids.get(limit);
+        return `<p class="setting-limit"${id ? ` id="${escapeHtml(id)}"` : ""}>${escapeHtml(limit)}</p>`;
+      }).join("");
     }
 
-    function settingRow(item) {
+    /** The id a setting's row parts are named by, made from its registered key. */
+    function settingId(key) {
+      return `setting-${String(key).replace(/[^A-Za-z0-9]+/g, "-")}`;
+    }
+
+    /**
+     * One switch: the permission as the person sees it, named by its row's name and described by
+     * its detail, the browser setting beside it and the limit its group states.
+     */
+    function settingRow(item, limitIds) {
       if (item.kind === "choice") return choiceRow(item);
       const forcedBy = organizationForces(item.key);
       const checked = !forcedBy && !draft.settings.restricted.has(item.key);
       const detail = forcedBy
         ? `${escapeHtml(forcedBy)} already turned this off.`
         : escapeHtml(checked ? item.on : item.off);
+      const id = settingId(item.key);
       // A setting the browser keeps is read here and changed there, so it is a line, not a control.
       const also = item.browser
-        ? `<span class="setting-also">${escapeHtml(item.browser.word)}`
+        ? `<span class="setting-also" id="${id}-also">${escapeHtml(item.browser.word)}`
           + `<span class="chip context-chip">${escapeHtml(item.browser.where)}</span></span>`
         : "";
+      const described = [`${id}-detail`, item.browser ? `${id}-also` : null, limitIds.get(item.limit) ?? null]
+        .filter(Boolean).join(" ");
       return `<div class="setting-row${forcedBy ? " setting-forced" : ""}">`
         + `<label class="toggle">`
         + `<input type="checkbox" data-restriction="${escapeHtml(item.key)}"`
-        + `${checked ? " checked" : ""}${forcedBy ? " disabled" : ""}>`
+        + `${checked ? " checked" : ""}${forcedBy || !can(ACT.applyPolicy) ? " disabled" : ""}`
+        + ` role="switch" aria-labelledby="${id}-name" aria-describedby="${described}">`
         + `<span class="toggle-track"><span class="toggle-thumb"></span></span></label>`
-        + `<div class="setting-body"><span class="setting-name">${escapeHtml(item.name)}</span>`
-        + `<span class="setting-detail">${detail}</span>${also}</div></div>`;
+        + `<div class="setting-body"><span class="setting-name" id="${id}-name">${escapeHtml(item.name)}</span>`
+        + `<span class="setting-detail" id="${id}-detail">${detail}</span>${also}</div></div>`;
     }
 
     /** Render the first closed string setting without turning it into a free-form field. */
@@ -1767,7 +1809,7 @@
         + `<div class="setting-body"><label class="setting-name" for="setting-browser-startup">`
         + `${escapeHtml(item.name)}</label>`
         + `<select class="setting-choice" id="setting-browser-startup" data-setting-choice="${escapeHtml(item.key)}"`
-        + `${forcedBy ? " disabled" : ""}>${options}</select>`
+        + `${forcedBy || !can(ACT.applyPolicy) ? " disabled" : ""}>${options}</select>`
         + `<span class="setting-detail">${detail}</span></div></div>`;
     }
 
@@ -1782,7 +1824,8 @@
       const source = authority?.[item.source ?? `${item.field}_source`];
       const author = source === "organization" ? applied?.organization?.name ?? "Your organization" : source === "user" ? "Your rules" : "Ghostlight default";
       return `<div class="setting-row"><div class="setting-body"><label class="setting-name">${escapeHtml(item.name)}`
-        + `<select class="setting-choice" data-setting-choice="${escapeHtml(item.key)}">${options}</select></label>`
+        + `<select class="setting-choice" data-setting-choice="${escapeHtml(item.key)}"`
+        + `${can(ACT.applyPolicy) ? "" : " disabled"}>${options}</select></label>`
         + `<span class="setting-detail">${escapeHtml(selected.detail)} ${escapeHtml(author)}.</span></div></div>`;
     }
 
@@ -1897,21 +1940,30 @@
       return `On <b>${where}</b>${except}, agents may ${verbs}.`;
     }
 
-    function organizationRow(rule, layer) {
-      const key = `org:${layer.title}:${rule.id}`;
+    /** What an open rule shows when it cannot be edited here: its purpose, its sites and its name. */
+    function ruleDetail(description, allow, deny, id) {
+      return `<div class="rule-detail">`
+        + (description ? `<p>${escapeHtml(description)}</p>` : "")
+        + `<dl><dt>Sites</dt><dd>${allow.map(escapeHtml).join(", ") || "none"}</dd>`
+        + (deny.length ? `<dt>Never</dt><dd>${deny.map(escapeHtml).join(", ")}</dd>` : "")
+        + `<dt>Named</dt><dd>${escapeHtml(id)}</dd></dl></div>`;
+    }
+
+    /** A rule that is read here and not edited: the sentence it reads as, and whose it is. */
+    function readOnlyRow(key, sentence, owner, detail) {
       const open = opened.has(key);
-      const detail = `<div class="rule-detail">`
-        + (rule.description ? `<p>${escapeHtml(rule.description)}</p>` : "")
-        + `<dl><dt>Sites</dt><dd>${rule.allow.map(escapeHtml).join(", ") || "none"}</dd>`
-        + (rule.deny.length ? `<dt>Never</dt><dd>${rule.deny.map(escapeHtml).join(", ")}</dd>` : "")
-        + `<dt>Named</dt><dd>${escapeHtml(rule.id)}</dd></dl></div>`;
       return `<article class="rule rule-theirs${open ? " open" : ""}" data-rule-key="${escapeHtml(key)}">`
         + `<button class="rule-row" type="button" data-rule-toggle="${escapeHtml(key)}"`
         + ` aria-expanded="${open}">`
-        + `<span class="rule-sentence">${sentenceFor(rule.allow, rule.deny, rule.allowed)}</span>`
-        + `<span class="rule-owner">${escapeHtml(layer.title)}</span></button>`
+        + `<span class="rule-sentence">${sentence}</span>`
+        + `<span class="rule-owner">${escapeHtml(owner)}</span></button>`
         + (open ? detail : "")
         + `</article>`;
+    }
+
+    function organizationRow(rule, layer) {
+      return readOnlyRow(`org:${layer.title}:${rule.id}`, sentenceFor(rule.allow, rule.deny, rule.allowed),
+        layer.title, ruleDetail(rule.description, rule.allow, rule.deny, rule.id));
     }
 
     function userRow(rule, index) {
@@ -1919,6 +1971,11 @@
       const open = opened.has(key);
       const capabilities = CAPABILITY_ORDER.filter((capability) => rule.allowed.has(capability));
       const sentence = sentenceFor(splitHosts(rule.hosts), [], capabilities);
+      // A screen that cannot write the rules reads this person's own as it reads an organization's.
+      if (!can(ACT.applyPolicy)) {
+        return readOnlyRow(key, sentence, applied?.layers?.find((layer) => layer.kind === "user")?.title ?? "",
+          ruleDetail(rule.description, splitHosts(rule.hosts), [], rule.id ?? ""));
+      }
       const shadow = shadowedBy(index);
       return `<article class="rule rule-mine${open ? " open" : ""}${shadow ? " rule-inert" : ""}"`
         + ` data-rule-key="${escapeHtml(key)}">`
@@ -2292,15 +2349,25 @@
     /** The line a destination shows while it is being read, where it has one. */
     const LOADING_LINE = Object.freeze({ policy: "policy-headline" });
 
+    /** The destinations that have been drawn at least once, by their LOAD_FAILED key. */
+    const drawnOnce = new Set();
+
     /**
      * Say, in place of what a destination is waiting to show, that it could not be read, with a
      * button that reads it again. `destination` is a key of LOAD_FAILED.
+     *
+     * The view wears `load-failed`, so Try again stands in for its own Refresh, and `unread` while
+     * it has never been drawn, so the headings of what it would show do not sit empty under the
+     * failure.
      */
     function loadFailed(destination) {
       const line = el[`${destination}-failure`];
       line.innerHTML = `<span class="dot" aria-hidden="true"></span><span>${escapeHtml(LOAD_FAILED[destination])}</span>`
         + `<button class="ghost-button" type="button" data-retry="${escapeHtml(destination)}">${escapeHtml(TRY_AGAIN)}</button>`;
       line.hidden = false;
+      const view = el[`view-${destination}`];
+      view.classList.add("load-failed");
+      view.classList.toggle("unread", !drawnOnce.has(destination));
       const loading = LOADING_LINE[destination];
       if (loading) el[loading].hidden = true;
     }
@@ -2308,6 +2375,7 @@
     /** Take a destination's failure line away once it has been read. */
     function loaded(destination) {
       el[`${destination}-failure`].hidden = true;
+      el[`view-${destination}`].classList.remove("load-failed", "unread");
       const loading = LOADING_LINE[destination];
       if (loading) el[loading].hidden = false;
     }

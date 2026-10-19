@@ -54,6 +54,9 @@
   /** The sections that show the service's state, which a screen with nothing to show closes. */
   const SERVICE_SECTIONS = Object.freeze(["sharing", "browser-work", "notifications", "diagnostics"]);
 
+  /** The browser's own settings This screen names, by the key of each in the part's `browser`. */
+  const BROWSER_SETTINGS = Object.freeze(["effects", "captions"]);
+
   /** The data attributes the buttons are found by. */
   const VIEWING_TOGGLE = "toggle";
   const VIEWING_COPY = "copy";
@@ -203,6 +206,19 @@
     }
 
     /**
+     * The browser's own settings, on This screen: what each is and how it starts, and where it is
+     * set. They are lines, never controls, because the browser keeps them.
+     */
+    function drawBrowser(browser) {
+      for (const key of BROWSER_SETTINGS) {
+        say(`controls-${key}-label`, browser?.[key]?.label);
+        say(`controls-${key}-word`, browser?.[key]?.word);
+        say(`controls-${key}-where`, browser?.set_in);
+        show(`controls-${key}`, Boolean(browser?.[key]));
+      }
+    }
+
+    /**
      * One Continue line for each section: the reason the first act this screen may not do in it
      * gives. Only a screen that is not the window has it. In the window, an act the service
      * withholds (the watch view is not served) is a state the window already says, and continuing
@@ -247,6 +263,7 @@
       drawViewing(part.viewing);
       drawDiagnostics(part.diagnostics);
       drawNotifications(part.notifications);
+      drawBrowser(part.browser);
       drawContinue(part);
       drawQuit();
       drawRailState("sharing", part.viewing.word);
@@ -261,6 +278,7 @@
      */
     function closed(sentence) {
       current = null;
+      drawBrowser(null);
       for (const section of SERVICE_SECTIONS) {
         show(`settings-${section}-rows`, false);
         show(`settings-${section}-continue`, false);

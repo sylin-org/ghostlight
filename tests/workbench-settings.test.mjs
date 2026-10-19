@@ -54,6 +54,11 @@ function part({ context = "control", watch = true, runtime = "active", layer = "
       word: on ? `On (${layer})` : "Off", acts: { set_diagnostics: act(), reveal_diagnostics: act() }
     },
     notifications: { label: "Notifications", word: "Send one local checkup notification.", acts: { test_notification: act() } },
+    browser: {
+      set_in: "Set in the browser",
+      effects: { label: "Agent activity effects", word: "The cursor, click ripples and scan-lines on a page an agent works in. They start on." },
+      captions: { label: "Action captions", word: "A caption at the bottom of the page names each action. They start off." }
+    },
     service: { word: "Ghostlight is running; 1 agent connected." },
     you: { context, word: control ? (watch ? "Shared" : null) : "Watching", sentence: control ? (watch ? WATCHED : PRIVATE) : WATCHER }
   };
@@ -79,7 +84,8 @@ class Element {
     this.style = { setProperty() {} };
     this.classes = new Set(String(attributes.class ?? "").split(/\s+/).filter(Boolean));
     for (const [name, value] of Object.entries(attributes)) {
-      if (["aria-current", "aria-expanded", "aria-hidden", "open", "src", "title"].includes(name)) this.attributes[name] = value;
+      if (["aria-current", "aria-expanded", "aria-hidden", "aria-labelledby", "aria-describedby", "role", "open", "src", "title"]
+        .includes(name)) this.attributes[name] = value;
       if (!name.startsWith("data-")) continue;
       this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
     }
@@ -90,7 +96,7 @@ class Element {
       },
       contains: (name) => this.classes.has(name),
       add: (name) => this.classes.add(name),
-      remove: (name) => this.classes.delete(name)
+      remove: (...names) => names.forEach((name) => this.classes.delete(name))
     };
   }
 
@@ -545,6 +551,27 @@ test("each rail entry shows the state of its section, in the service's words", (
   assert.equal(said(shown, "rail-sharing-state"), "Off -- only this window shows Ghostlight");
   assert.equal(said(shown, "rail-browser-work-state"), "Session ended");
   assert.equal(said(shown, "rail-diagnostics-state"), "Off");
+});
+
+test("This screen names the browser's effects and captions as set in the browser, and claims no value", () => {
+  const shown = kit();
+  shown.settings.render(part());
+  for (const key of ["effects", "captions"]) {
+    const row = shown.el(`controls-${key}`);
+    assert.equal(row.hidden, false, key);
+    assert.ok(row.closest("#settings-screen"), `${key} is not on This screen`);
+    assert.equal(said(shown, `controls-${key}-where`), "Set in the browser");
+    assert.ok(shown.el(`controls-${key}-where`).classes.has("context-chip"));
+    assert.equal([...row.descendants()].some((node) => node.tag === "button" || node.tag === "input"), false,
+      `${key} is a line here, never a control`);
+  }
+  assert.equal(said(shown, "controls-effects-label"), "Agent activity effects");
+  assert.equal(said(shown, "controls-captions-label"), "Action captions");
+  assert.match(said(shown, "controls-effects-word"), /They start on\.$/);
+  assert.match(said(shown, "controls-captions-word"), /They start off\.$/);
+  shown.settings.closed(WATCHING_OFF);
+  assert.equal(shown.el("controls-effects").hidden, true, "a screen that shows nothing names nothing of the browser");
+  assert.equal(shown.el("controls-captions").hidden, true);
 });
 
 test("the rail's word for This screen follows the personal settings", () => {
@@ -1802,7 +1829,7 @@ test("the page offers one Copy MCP command, in its header, with the command show
   assert.ok(!shown.el("agents-list").innerHTML.includes("Copy MCP command"));
 });
 
-test("a watching screen sees every agent's state and copies, and is told once where changes are made", () => {
+test("a watching screen sees every agent's state and copies, and is shown once the way to the window", () => {
   const watcher = {
     context: "watch", opener: "anchor", word: "Watching", sentence: WATCHER, product: { version: "2.0.0" },
     acts: Object.fromEntries(Object.values(Transport.ACT).map((act) => [act,
@@ -1811,7 +1838,8 @@ test("a watching screen sees every agent's state and copies, and is told once wh
   const rows = ROSTER.map((row) => ({ ...row, download_url: `https://example.test/${row.id}` }));
   const shown = agentsPage(rows, { context: watcher });
   assert.equal(shown.el("integrations-continue").hidden, false);
-  assert.ok(shown.el("integrations-continue").innerHTML.includes(WHY));
+  assert.ok(shown.el("integrations-continue").innerHTML.includes(`>${Words.CONTINUE_LABEL}</button>`));
+  assert.ok(!shown.el("integrations-continue").innerHTML.includes(WHY), "the link alone says where changes are made");
   for (const row of rows) {
     shown.pick(row.id);
     const html = shown.el("agents-pane").innerHTML;
@@ -3258,4 +3286,138 @@ test("Closing tabs names the browser's Preserve Ghostlight tabs, which is set in
   assert.equal(chip.textContent, "Set in the browser");
   assert.equal([...also.descendants()].some((node) => node.tag === "input" || node.tag === "button"), false,
     "the browser's setting is a line here, never a control");
+});
+
+/** The text an id names in drawn markup, or "" when nothing wears that id. */
+const textOf = (root, id) => [...root.descendants()].find((node) => node.id === id)?.textContent.trim() ?? "";
+
+test("every Policy switch is a named switch, described by its detail and, for a channel, by its limit", () => {
+  const shown = drawing();
+  shown.view.policy(openPolicy());
+  const root = drawn(shown.el("setting-groups").innerHTML).root;
+  const switches = [...root.descendants()].filter((node) => node.tag === "input" && "restriction" in node.dataset);
+  assert.equal(switches.length, 5, "MCP agents, Command line, Closing tabs, Screenshots and Page-authored names");
+  for (const box of switches) {
+    const key = box.dataset.restriction;
+    assert.equal(box.attributes.role, "switch", key);
+    const name = (box.attributes["aria-labelledby"] ?? "").split(/\s+/).map((id) => textOf(root, id)).join(" ").trim();
+    assert.notEqual(name, "", `${key} has no accessible name`);
+    const described = (box.attributes["aria-describedby"] ?? "").split(/\s+/).filter(Boolean);
+    assert.ok(described.length > 0, `${key} has no description`);
+    for (const id of described) assert.notEqual(textOf(root, id), "", `${key} is described by #${id}, which says nothing`);
+  }
+  const limit = Words.settingLimits(["channels.mcp.enabled"])[0];
+  for (const key of ["channels.mcp.enabled", "channels.cli.enabled"]) {
+    const box = switches.find((node) => node.dataset.restriction === key);
+    const texts = box.attributes["aria-describedby"].split(/\s+/).map((id) => textOf(root, id));
+    assert.ok(texts.includes(Words.escapeHtml(limit)), `${key} is not described by the channel limit`);
+  }
+  const names = switches.map((box) => textOf(root, box.attributes["aria-labelledby"]));
+  assert.deepEqual(names, ["MCP agents", "Command line", "Closing tabs", "Screenshots", "Page-authored names"]);
+});
+
+test("the channel limit leads Who may work, under its heading, said plainly and kept to a reading width", () => {
+  const shown = drawing();
+  shown.view.policy(openPolicy());
+  const group = drawn(shown.el("setting-groups").innerHTML).wearing("setting-group")[0];
+  assert.deepEqual(group.children.slice(0, 2).map((node) => node.tag), ["h3", "p"]);
+  assert.equal(group.children[0].textContent, "Who may work");
+  const lead = group.children[1];
+  assert.ok(lead.classes.has("setting-limit"));
+  assert.equal(lead.textContent, Words.escapeHtml("Ghostlight's own program says whether an agent connected through MCP or the command line, "
+    + "and another program running as you could claim otherwise. These switches hold agents that follow the rules; "
+    + "they do not stop harmful software on this account."));
+  assert.equal(drawn(shown.el("setting-groups").innerHTML).wearing("setting-limit").length, 1, "the limit is said once");
+  assert.equal(naming(".setting-limit")[0].declarations["max-width"], "72ch");
+  assert.equal(naming(".setting-group h3 + .setting-limit")[0].declarations.margin, "0 2px 8px");
+});
+
+test("the history choice says what it does, and auto-open speaks of the agent", () => {
+  const items = Words.SETTING_GROUPS.flatMap((group) => group.items);
+  const history = items.find((item) => item.key === "audit.availability");
+  assert.deepEqual(history.choices.map((choice) => [choice.value, choice.label]),
+    [["keep_working", "Keep working"], ["require_audit", "Stop browser work"]]);
+  const manual = items.find((item) => item.key === "browser.startup").choices.find((choice) => choice.value === "manual");
+  assert.match(manual.detail, /tells the agent /);
+  assert.doesNotMatch(JSON.stringify(Words.SETTING_GROUPS), /\bthe model\b/);
+});
+
+/** What a watching screen is told: it may look, search, check a draft and pause, and change nothing. */
+function watcherContext() {
+  const open = [Transport.ACT.search, Transport.ACT.checkPolicy, Transport.ACT.rescan, Transport.ACT.continueInWindow, Transport.ACT.hold];
+  return {
+    context: "watch", opener: "anchor", word: "Watching", sentence: WATCHER, product: { version: "2.0.0" },
+    acts: Object.fromEntries(Object.values(Transport.ACT).map((act) => [act,
+      open.includes(act) ? { available: true, why_not: null } : { available: false, why_not: WHY }]))
+  };
+}
+
+test("a watching page reads Policy: every draft control holds its state, under one line saying where changes are made", () => {
+  const user = {
+    kind: "user", title: "Your rules", policy_name: "Your rules", version: "2026-10-18", path: null, document: "{}",
+    settings: [{ key: "audit.availability", value: "\"require_audit\"", level: "mandatory" }],
+    rules: [{ id: "rule-1", allow: ["example.com"], deny: [], allowed: ["read"], description: "Docs" }]
+  };
+  assert.equal(Words.POLICY_IN_WINDOW, "Changes are made in the Ghostlight window.");
+  for (const order of ["context first", "policy first"]) {
+    const shown = drawing();
+    if (order === "context first") shown.view.context(watcherContext());
+    shown.view.policy(openPolicy([user]));
+    if (order === "policy first") shown.view.context(watcherContext());
+    assert.deepEqual(shown.failures, [], order);
+    const groups = drawn(shown.el("setting-groups").innerHTML).root;
+    const controls = [...groups.descendants()].filter((node) => node.tag === "input" || node.tag === "select");
+    assert.equal(controls.length, 7, `${order}: five switches, the history choice and the startup choice`);
+    for (const control of controls) {
+      assert.equal(control.disabled, true, `${order}: ${control.dataset.restriction ?? control.dataset.settingChoice}`);
+    }
+    assert.equal(shown.el("sacred-hosts").disabled, true, order);
+    assert.equal(shown.el("add-rule").hidden, true, order);
+    assert.equal(shown.el("apply-policy").hidden, true, `${order}: nothing to apply`);
+    const line = shown.el("policy-continue");
+    assert.equal(line.hidden, false, order);
+    const said = drawn(line.innerHTML).root.children.map((node) => node.textContent);
+    assert.deepEqual(said, [Words.POLICY_IN_WINDOW, Words.CONTINUE_LABEL], order);
+    // The person's own rule opens to be read, as an organization's does, with nothing to type into.
+    const row = drawn(shown.el("rule-list").innerHTML).wearing("rule")[0];
+    assert.ok(row.classes.has("rule-theirs"), order);
+    shown.view.toggleRule("mine:0");
+    const opened = shown.el("rule-list").innerHTML;
+    assert.match(opened, /<dt>Sites<\/dt><dd>example\.com<\/dd>/, order);
+    assert.doesNotMatch(opened, /<input|data-rule-action/, order);
+  }
+
+  const window = drawing();
+  window.view.policy(openPolicy([user]));
+  assert.equal(window.el("policy-continue").hidden, true);
+  assert.equal(window.el("apply-policy").hidden, false);
+  assert.equal(window.el("add-rule").hidden, false);
+  const live = [...drawn(window.el("setting-groups").innerHTML).root.descendants()].filter((node) => node.tag === "input");
+  assert.ok(live.every((box) => !box.disabled), "the window's switches stay switches");
+});
+
+test("a destination that cannot be read lets Try again stand in for Refresh, and hides the headings it never filled", () => {
+  const shown = drawing();
+  const policy = shown.el("view-policy");
+  shown.view.loadFailed("policy");
+  assert.ok(policy.classes.has("load-failed"));
+  assert.ok(policy.classes.has("unread"), "a policy never drawn hides its empty headings");
+  for (const id of ["refresh-policy", "refresh-status", "refresh-integrations"]) {
+    assert.ok(shown.el(id).classes.has("refresh"), `#${id} is not a Refresh that Try again stands in for`);
+  }
+  const part = [...parsePage().descendants()].find((node) => node.classes.has("read-part"));
+  assert.ok(part.closest("#view-policy"));
+  assert.equal([...part.descendants()].filter((node) => node.tag === "h2").length, 3,
+    "Right now, Always off limits and Rules sit in the part a failure hides");
+  for (const selector of [".view.load-failed .refresh", ".view.load-failed.unread .read-part"]) {
+    assert.equal(naming(selector)[0]?.declarations.display, "none", selector);
+  }
+  shown.view.loaded("policy");
+  assert.equal(policy.classes.has("load-failed"), false);
+  assert.equal(policy.classes.has("unread"), false);
+
+  shown.view.policy(openPolicy());
+  shown.view.loadFailed("policy");
+  assert.ok(policy.classes.has("load-failed"));
+  assert.equal(policy.classes.has("unread"), false, "a policy drawn before keeps what it showed");
 });

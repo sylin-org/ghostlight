@@ -299,8 +299,8 @@ The H7 source supports `audit.availability` in the schema-4 `config` array:
 
 Keep working is the default. Require audit refuses subsequent browser work during a known
 storage failure. It preserves previous effects and keeps policy explanation, diagnostics, and
-human controls available. The Policy destination offers both choices; an organization requirement
-cannot be relaxed by the user layer. Each invocation retains its original policy snapshot.
+human controls available. The Policy destination offers both choices, as Keep working and Stop
+browser work; an organization requirement cannot be relaxed by the user layer. Each invocation retains its original policy snapshot.
 
 Ghostlight checks a failed destination automatically at most once per five seconds. Recovery
 allows new requests; it never repeats browser actions or backfills missing receipts. At a glance

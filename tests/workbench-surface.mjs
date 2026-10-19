@@ -119,6 +119,11 @@ const controlsPart = ({
       label: "Notifications", word: "Send one local checkup notification. Nothing leaves this device.",
       acts: { test_notification: act() }
     },
+    browser: {
+      set_in: "Set in the browser",
+      effects: { label: "Agent activity effects", word: "The cursor, click ripples and scan-lines on a page an agent works in. They start on." },
+      captions: { label: "Action captions", word: "A caption at the bottom of the page names each action. They start off." }
+    },
     service: { word: "Ghostlight is running; 1 agent and 1 browser connected." },
     you: {
       context, word: control ? (watch ? "Shared" : null) : "Watching",
@@ -1291,7 +1296,9 @@ const watchOpening = {
   rosterLine: watching.text("integrations-continue").innerHTML,
   rosterLineHidden: watching.text("integrations-continue").hidden,
   status: watching.text("diagnostic-grid").innerHTML,
-  apply: watching.text("apply-policy").textContent
+  applyHidden: watching.text("apply-policy").hidden,
+  policyLine: watching.text("policy-continue").innerHTML,
+  policyLineHidden: watching.text("policy-continue").hidden
 };
 watching.clickOn("[data-agent]", { dataset: { agent: "qwen-code" } });
 const watchQwenPane = watching.text("agents-pane").innerHTML;
@@ -1381,7 +1388,8 @@ const controlOpening = {
   rosterLineHidden: controlling.text("integrations-continue").hidden,
   roster: controlling.text("agents-list").innerHTML + controlling.text("agents-pane").innerHTML,
   status: controlling.text("diagnostic-grid").innerHTML,
-  apply: controlling.text("apply-policy").textContent
+  applyHidden: controlling.text("apply-policy").hidden,
+  policyLineHidden: controlling.text("policy-continue").hidden
 };
 const controlPanes = Object.fromEntries(["junie", "codex", "zed", "qwen-code"].map((id) => {
   controlling.clickOn("[data-agent]", { dataset: { agent: id } });
@@ -1618,8 +1626,8 @@ const httpChecks = [
       && watchQwenPane.includes('<a class="primary-button" href="https://example.test/qwen"')
       && !watchQwenPane.includes('data-harness-operation="download"'),
     watchOpening.roster + watchQwenPane],
-  ["a watching page shows one Continue line for the roster, one for each section of Settings and none on Status",
-    watchOpening.rosterLineHidden === false && watchOpening.rosterLine.includes(CONTINUE_SENTENCE)
+  ["a watching page shows one Continue link for the roster, one Continue line for each section of Settings and none on Status",
+    watchOpening.rosterLineHidden === false && !watchOpening.rosterLine.includes(CONTINUE_SENTENCE)
       && watchOpening.rosterLine.includes("data-continue") && watchOpening.rosterLine.includes("Continue in the Ghostlight window")
       && !watchOpening.status.includes("data-continue")
       && watchOpening.sheetContinue === false && watchOpening.sheetContinueWhy === CONTINUE_SENTENCE
@@ -1637,10 +1645,13 @@ const httpChecks = [
       && watchOpening.statusService === "Ghostlight is running; 1 agent and 1 browser connected."
       && watchOpening.statusServiceHidden === false,
     JSON.stringify({ who: watchOpening.who, status: watchOpening.statusService })],
-  ["a watching page draws the wheel while agents are running, and Apply as a way to the window",
+  ["a watching page draws the wheel while agents are running, and Policy with no Apply under one line naming the window",
     watchOpening.wheelHidden === false && watchOpening.bandContinue === true
-      && watchOpening.apply === "Apply in the Ghostlight window",
-    JSON.stringify({ wheel: watchOpening.wheelHidden, continue: watchOpening.bandContinue, apply: watchOpening.apply })],
+      && watchOpening.applyHidden === true && watchOpening.policyLineHidden === false
+      && watchOpening.policyLine.includes("<span>Changes are made in the Ghostlight window.</span>")
+      && watchOpening.policyLine.includes("Continue in the Ghostlight window"),
+    JSON.stringify({ wheel: watchOpening.wheelHidden, continue: watchOpening.bandContinue, apply: watchOpening.applyHidden,
+      line: watchOpening.policyLine })],
   ["a pause from a watching page is one keyless POST and is shown by waiting for its change, not by asking again",
     holdRequest?.method === "POST" && holdRequest.body === '{"intent":"hold"}' && holdRequest.headers.Authorization === undefined
       && holdRequest.credentials === "omit" && holdRequest.cache === "no-store"
@@ -1676,7 +1687,7 @@ const httpChecks = [
     controlOpening.chip === "Shared" && controlOpening.setup === false && controlOpening.endSession === false
       && controlOpening.sendTest === false && controlOpening.wheelHidden === false
       && controlOpening.bandContinue === true && controlOpening.rosterLineHidden === true
-      && controlOpening.apply === "Apply"
+      && controlOpening.applyHidden === false && controlOpening.policyLineHidden === true
       && !(controlOpening.roster + controlOpening.status).includes("data-continue")
       && controlPanes.codex.includes(">Update</button>") && controlPanes.codex.includes('data-harness-state="updatable"')
       && controlPanes.zed.includes(">Remove from Zed</button>")
@@ -2128,9 +2139,9 @@ const checks = [
       && /Work from the command line is refused\. <span class="owner">Example Org<\/span>/.test(settingsShown),
     `permissions: ${JSON.stringify(permissionsOnLoad)}, settings: ${JSON.stringify(settingsShown)}`],
   ["a channel switch states its honest limit wherever it is shown",
-    permissionsOnLoad.includes("any program running as you could say otherwise")
-      && settingsShown.includes("any program running as you could say otherwise")
-      && settingsShown.split("any program running as you").length === 2,
+    permissionsOnLoad.includes("another program running as you could claim otherwise")
+      && settingsShown.includes("another program running as you could claim otherwise")
+      && settingsShown.split("another program running as you").length === 2,
     `permissions: ${JSON.stringify(permissionsOnLoad)}, settings: ${JSON.stringify(settingsShown)}`],
   ["the user layer turns a channel off by authoring its tightening value",
     authoredChannelOff.some((entry) =>

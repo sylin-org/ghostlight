@@ -51,6 +51,20 @@ fn surface_source() -> String {
     .join("\n")
 }
 
+/// Whether `module` uses `reach`: a member of `document` or `window` (a sentence that ends on
+/// the word "window." uses neither), or an element looked up by `el[`.
+fn reaches_for(module: &str, reach: &str) -> bool {
+    if !reach.ends_with('.') {
+        return module.contains(reach);
+    }
+    module.match_indices(reach).any(|(at, _)| {
+        module[at + reach.len()..]
+            .chars()
+            .next()
+            .is_some_and(|next| next.is_ascii_alphabetic() || next == '_' || next == '$')
+    })
+}
+
 #[test]
 fn the_pure_layers_of_the_surface_hold_no_state_and_no_document() {
     let words = include_str!("../../ui/lib/words.js");
@@ -69,7 +83,7 @@ fn the_pure_layers_of_the_surface_hold_no_state_and_no_document() {
     ] {
         for forbidden in ["document.", "window.", "el["] {
             assert!(
-                !module.contains(forbidden),
+                !reaches_for(module, forbidden),
                 "{name} reaches for {forbidden}, so it is no longer a pure layer"
             );
         }
@@ -77,9 +91,13 @@ fn the_pure_layers_of_the_surface_hold_no_state_and_no_document() {
 
     // The negative control: the view is where the document belongs, so a rule that held
     // everywhere would be measuring nothing.
+    assert!(!reaches_for(
+        r#""Changes are made in the Ghostlight window.""#,
+        "window."
+    ));
     let view = include_str!("../../ui/lib/view.js");
     assert!(
-        view.contains("document.querySelectorAll"),
+        reaches_for(view, "document."),
         "the view is where the document belongs, so a rule that held everywhere would be \
          measuring nothing"
     );

@@ -640,6 +640,14 @@ const AVAILABILITY_KEYS: &[&str] = &["available", "why_not"];
 /// The Controls part has the same keys for every audience: only the values of its acts differ.
 fn controls_keys() -> BTreeSet<String> {
     let mut keys = expected(&[&[
+        "browser",
+        "browser.captions",
+        "browser.captions.label",
+        "browser.captions.word",
+        "browser.effects",
+        "browser.effects.label",
+        "browser.effects.word",
+        "browser.set_in",
         "diagnostics",
         "diagnostics.acts",
         "diagnostics.folder",
@@ -1097,6 +1105,15 @@ fn settings_say_what_they_are_told_in_the_service_words() {
     assert_eq!(controls["viewing"]["url"], "http://127.0.0.1:41234/");
     assert_eq!(controls["diagnostics"]["on"], true);
     assert_eq!(controls["diagnostics"]["word"], "On (marker)");
+    assert_eq!(controls["browser"]["set_in"], words::BROWSER_SET_IN);
+    assert_eq!(
+        controls["browser"]["effects"]["word"],
+        words::BROWSER_EFFECTS_WORD
+    );
+    assert_eq!(
+        controls["browser"]["captions"]["label"],
+        words::BROWSER_CAPTIONS_LABEL
+    );
     assert_eq!(
         controls["service"]["word"],
         "Ghostlight is running; 1 agent and 1 browser connected."

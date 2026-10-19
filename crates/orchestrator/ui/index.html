@@ -79,7 +79,7 @@
           </div>
           <div class="agents-heading-side">
             <div class="page-heading-actions">
-              <button class="ghost-button" type="button" id="refresh-integrations"
+              <button class="ghost-button refresh" type="button" id="refresh-integrations"
                       title="Looks for agents again and reads every settings file. Changes nothing.">Re-check</button>
               <button class="primary-button" type="button" id="setup-integrations">Set up everything</button>
               <button class="ghost-button" type="button" id="copy-command" data-harness-operation="copy"
@@ -113,7 +113,7 @@
             <h1 id="status-heading">Status</h1>
             <p>Whether Ghostlight is running, a browser is connected, the rules hold and history is saving.</p>
           </div>
-          <button class="ghost-button" type="button" id="refresh-status">Refresh</button>
+          <button class="ghost-button refresh" type="button" id="refresh-status">Refresh</button>
         </div>
         <p class="load-failure" id="status-failure" hidden></p>
         <p class="service-line" id="status-service"></p>
@@ -129,24 +129,27 @@
             <p id="policy-headline">Reading the policy that applies to this machine.</p>
             <p class="load-failure" id="policy-failure" hidden></p>
           </div>
-          <button class="ghost-button" type="button" id="refresh-policy">Refresh</button>
+          <button class="ghost-button refresh" type="button" id="refresh-policy">Refresh</button>
         </div>
+        <div class="continue-line" id="policy-continue" hidden></div>
 
         <div class="org-card" id="policy-organization" hidden></div>
 
-        <h2 class="subhead">Right now</h2>
-        <div class="cap-board" id="capability-board"></div>
+        <div class="read-part">
+          <h2 class="subhead">Right now</h2>
+          <div class="cap-board" id="capability-board"></div>
 
-        <h2 class="subhead">Always off limits</h2>
-        <ul class="ceilings" id="policy-ceilings"></ul>
+          <h2 class="subhead">Always off limits</h2>
+          <ul class="ceilings" id="policy-ceilings"></ul>
 
-        <div class="rules-head">
-          <h2 class="subhead">Rules</h2>
-          <p id="rules-note" hidden>Checked in this order. The first rule that covers what an agent
-            is doing decides it; anything no rule covers is refused.</p>
-          <button class="ghost-button" type="button" id="add-rule" hidden>Add a rule</button>
+          <div class="rules-head">
+            <h2 class="subhead">Rules</h2>
+            <p id="rules-note" hidden>Checked in this order. The first rule that covers what an agent
+              is doing decides it; anything no rule covers is refused.</p>
+            <button class="ghost-button" type="button" id="add-rule" hidden>Add a rule</button>
+          </div>
+          <div class="rules" id="rule-list"></div>
         </div>
-        <div class="rules" id="rule-list"></div>
 
         <div id="policy-settings"></div>
         <div id="policy-documents"></div>
@@ -244,6 +247,16 @@
                   <button class="choice" type="button" data-personal="motion" data-value="system" data-word="followSystem"></button>
                   <button class="choice" type="button" data-personal="motion" data-value="reduced" data-word="reduced"></button>
                 </span>
+              </div>
+              <div class="settings-row" id="controls-effects" hidden>
+                <span class="settings-label" id="controls-effects-label"></span>
+                <span class="settings-state"><small id="controls-effects-word"></small></span>
+                <span class="settings-acts"><span class="chip context-chip" id="controls-effects-where"></span></span>
+              </div>
+              <div class="settings-row" id="controls-captions" hidden>
+                <span class="settings-label" id="controls-captions-label"></span>
+                <span class="settings-state"><small id="controls-captions-word"></small></span>
+                <span class="settings-acts"><span class="chip context-chip" id="controls-captions-where"></span></span>
               </div>
             </section>
 

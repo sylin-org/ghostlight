@@ -276,6 +276,26 @@ pub const CONTROLS_NOTIFICATIONS_LABEL: &str = "Notifications";
 pub const CONTROLS_NOTIFICATIONS_WORD: &str =
     "Send one local checkup notification. Nothing leaves this device.";
 
+/// Where the browser's own settings that Settings > This screen names are changed. The service
+/// never learns their current values, so their lines say how each starts and claim no more.
+pub const BROWSER_SET_IN: &str = "Set in the browser";
+
+/// The label of the This screen line for the browser's agent activity effects, as the
+/// extension's settings name them.
+pub const BROWSER_EFFECTS_LABEL: &str = "Agent activity effects";
+
+/// What the browser's agent activity effects are, and how they start.
+pub const BROWSER_EFFECTS_WORD: &str =
+    "The cursor, click ripples and scan-lines on a page an agent works in. They start on.";
+
+/// The label of the This screen line for the browser's action captions, as the extension's
+/// settings name them.
+pub const BROWSER_CAPTIONS_LABEL: &str = "Action captions";
+
+/// What the browser's action captions are, and how they start.
+pub const BROWSER_CAPTIONS_WORD: &str =
+    "A caption at the bottom of the page names each action. They start off.";
+
 /// What the page says once Quit has been accepted, until the service ends.
 pub const QUITTING: &str = "Ghostlight is quitting.";
 
@@ -652,6 +672,8 @@ mod tests {
             NOTICE_BLOCKED_BODY,
             NOTICE_CHECKUP_BODY,
             CONTROLS_NOTIFICATIONS_WORD,
+            BROWSER_EFFECTS_WORD,
+            BROWSER_CAPTIONS_WORD,
             WATCHING_NOT_SERVED,
             WATCHING_NOT_SAVED,
             QUITTING,

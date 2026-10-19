@@ -965,8 +965,8 @@ function wire() {
   el["sacred-hosts"].addEventListener("input", (event) => view.setSacred(event.target.value));
   el["add-rule"].addEventListener("click", () => view.addRule());
   el["check-policy"].addEventListener("click", () => checkPolicy());
-  // A screen that cannot write the rules takes the draft to where they are written, and keeps it.
-  el["apply-policy"].addEventListener("click", () => (allowed(ACT.applyPolicy) ? applyPolicy() : continueInWindow()));
+  // Only a screen that may write the rules shows Apply; a watching page reads them.
+  el["apply-policy"].addEventListener("click", () => applyPolicy());
   el["discard-policy"].addEventListener("click", () => discardPolicyDraft());
   el["remove-policy"].addEventListener("click", () => removePolicy());
   el["refresh-policy"].addEventListener("click", () => {

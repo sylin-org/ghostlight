@@ -19,7 +19,7 @@ the push.
 | u2 only-running-work-glows | window | n-d-01, j-25, window-10, window-9 (time format), owner-1 | landed (this commit) |
 | u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | landed (this commit) |
 | u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | landed (this commit) |
-| u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | todo |
+| u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | landed (this commit) |
 | u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | todo |
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
 | n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
@@ -251,3 +251,36 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   that the service gives. governance/mod.rs (the snapshot's switches and the tier word),
   workbench/live.rs and the evidence tests are outside the lane's file list; no other lane owns
   them. INTENT, ACCEPTANCE item 4 and LANGUAGE say what the window shows.
+- u5 (n-s-01): every Policy switch is `role="switch"`, named by its row's name and described by
+  its detail; Closing tabs is also described by its Preserve Ghostlight tabs line, and the two
+  channel switches by the limit note. A view test reads every name and description back.
+- u5 (n-d-03): the channel limit leads Who may work, under its heading, at 72ch. The item's
+  `margin: 8px 2px 0` is kept for the note under Restrictions in force; as the group's lead it
+  sits `0 2px 8px`, so it is spaced from the switches below it rather than from the heading. The
+  agreed sentence began "Each agent's program says ...", but the channel is declared by
+  Ghostlight's own program (the trust page, ARCHITECTURE and ACCEPTANCE all say so), so it reads
+  "Ghostlight's own program says whether an agent connected through MCP or the command line, and
+  another program running as you could claim otherwise." The second sentence is as agreed. It
+  claims what the trust page claims, a guardrail for agents that follow the rules and no barrier
+  to other software on the account, so security-overview.md is unchanged.
+- u5 (j-15): the history choice's label is "Stop browser work"; `require_audit` and its detail
+  stay. No golden held the label. The governance guide names the window's two labels.
+- u5 (n-s-07): on a watching page every switch, both choices and the never-touch field are
+  disabled, Add a rule is hidden, and a person's own rules open read-only, as an organization's
+  do. The line at the top is "Changes are made in the Ghostlight window." with the Continue link,
+  the shape every Settings section uses. Apply is hidden there rather than reading "Apply in the
+  Ghostlight window": with nothing editable there is nothing to apply, and it would point at the
+  window a second time. APPLY_IN_WINDOW_LABEL is deleted. Integrations shows the Continue link
+  alone. The purity test in workbench/surface_tests.rs read the sentence's "window." as the page
+  reaching for `window`; it now looks for a member access, and checks that a sentence passes.
+- u5 (j-16): a destination that cannot be read wears `load-failed`, and Try again stands in for
+  its Refresh (Re-check on Integrations, which is the same look). A Policy never drawn also wears
+  `unread`, which hides Right now, Always off limits and Rules; a Policy drawn before keeps what
+  it showed under the failure line.
+- u5 (j-18): Settings > This screen names the browser's two settings as lines with the "Set in
+  the browser" chip, from a new `browser` group of the controls part worded in
+  language/workbench.rs: "The cursor, click ripples and scan-lines on a page an agent works in.
+  They start on." and "A caption at the bottom of the page names each action. They start off."
+  They are labelled "Agent activity effects" and "Action captions", the names the extension's
+  settings page shows, rather than the item's "Page effects", so a person finds them there. A
+  screen that shows nothing hides them.

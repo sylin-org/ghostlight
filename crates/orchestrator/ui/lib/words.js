@@ -15,8 +15,8 @@
   /** The button that brings the Ghostlight application forward, where a change can be made. */
   const CONTINUE_LABEL = "Continue in the Ghostlight window";
 
-  /** The button that takes a draft of the rules to the Ghostlight application to be applied. */
-  const APPLY_IN_WINDOW_LABEL = "Apply in the Ghostlight window";
+  /** The one line a watching page's Policy shows above its read-only rules and settings. */
+  const POLICY_IN_WINDOW = "Changes are made in the Ghostlight window.";
 
   /** Said after Copy setup puts an agent's entry on the clipboard. */
   const COPIED_SETUP = "Manual setup copied.";
@@ -771,7 +771,7 @@
    * Decision 22a). The channel is what Ghostlight's own program declared when the agent connected,
    * and any program running as the same user could declare another.
    */
-  const CHANNEL_LIMIT = "Ghostlight's own programs say how an agent connected, and any program running as you could say otherwise. These switches keep well-behaved agents in line; they do not stop hostile software on this account.";
+  const CHANNEL_LIMIT = "Ghostlight's own program says whether an agent connected through MCP or the command line, and another program running as you could claim otherwise. These switches hold agents that follow the rules; they do not stop harmful software on this account.";
 
   /**
    * The settings a policy may author, grouped and worded the way a person actually thinks about
@@ -814,7 +814,7 @@
       authority: "audit", field: "mode", source: "source", default: "keep_working",
       choices: [
         { value: "keep_working", label: "Keep working", detail: "Continue browser work and show which history could not be saved." },
-        { value: "require_audit", label: "Require audit", detail: "Stop new browser work during a known saving failure. Check storage automatically." }
+        { value: "require_audit", label: "Stop browser work", detail: "Stop new browser work during a known saving failure. Check storage automatically." }
       ]
     }] },
     {
@@ -851,7 +851,7 @@
             {
               value: "manual",
               label: "Off",
-              detail: "Ghostlight tells the model which eligible browser windows to ask you to open."
+              detail: "Ghostlight tells the agent which eligible browser windows to ask you to open."
             }
           ]
         }
@@ -1143,7 +1143,7 @@
   return Object.freeze({ FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
-    CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
+    CONTINUE_LABEL, POLICY_IN_WINDOW, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun,

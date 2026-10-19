@@ -298,6 +298,8 @@ pub struct ControlsPart {
     pub diagnostics: DiagnosticsControls,
     /// The notification test.
     pub notifications: NotificationControls,
+    /// The browser's own settings that This screen names.
+    pub browser: BrowserControls,
     /// The one sentence about the service.
     pub service: ServiceControls,
     /// The context the part was made for.
@@ -403,6 +405,29 @@ pub struct NotificationActs {
     pub test_notification: Availability,
 }
 
+/// The browser's own settings that Settings > This screen names, read-only.
+///
+/// They are kept in the browser and changed there. The service never learns their current values,
+/// so each line says what the setting is and how it starts, never how it is set now.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct BrowserControls {
+    /// Where these settings are changed.
+    pub set_in: &'static str,
+    /// The agent activity effects a page shows.
+    pub effects: BrowserSetting,
+    /// The captions that name each action on a page.
+    pub captions: BrowserSetting,
+}
+
+/// One browser setting This screen names: its label, and what it is and how it starts.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct BrowserSetting {
+    /// The setting's name, as the browser's settings show it.
+    pub label: &'static str,
+    /// What the setting is, and how it starts.
+    pub word: &'static str,
+}
+
 /// The service line, which Status shows.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ServiceControls {
@@ -502,6 +527,17 @@ impl ControlsPart {
                 word: words::CONTROLS_NOTIFICATIONS_WORD,
                 acts: NotificationActs {
                     test_notification: unavailable,
+                },
+            },
+            browser: BrowserControls {
+                set_in: words::BROWSER_SET_IN,
+                effects: BrowserSetting {
+                    label: words::BROWSER_EFFECTS_LABEL,
+                    word: words::BROWSER_EFFECTS_WORD,
+                },
+                captions: BrowserSetting {
+                    label: words::BROWSER_CAPTIONS_LABEL,
+                    word: words::BROWSER_CAPTIONS_WORD,
                 },
             },
             service: ServiceControls {
