@@ -95,7 +95,9 @@ function Phase([string]$Name, [long]$Elapsed) {
     $report.phases += @{ name = $Name; status = 'passed'; elapsed_ms = $Elapsed }
     Save-Evidence; Write-Host "PASS installed: $Name ($Elapsed ms)"
 }
-function Invoke-Mcp([int]$RequestId, [string]$Method, [hashtable]$Parameters) {
+function Invoke-Mcp([string]$Method, [hashtable]$Parameters) {
+    $script:mcpRequest++
+    $RequestId = $script:mcpRequest
     $frame = @{ jsonrpc = '2.0'; id = $RequestId; method = $Method; params = $Parameters }
     $script:mcp.StandardInput.WriteLine(($frame | ConvertTo-Json -Compress -Depth 10))
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
@@ -112,9 +114,25 @@ function Invoke-Mcp([int]$RequestId, [string]$Method, [hashtable]$Parameters) {
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Initialized MCP connection did not return the requested response.'
 }
+# The browsers the service has a connection to, as the session's list names them. A session that
+# holds no tab answers its list without asking the browser, so the list is polled until the service
+# names the browser it expects: exactly one browser at first, then that same persistent id after the
+# service returns. A name proves the service registered that browser's connection.
+function Wait-ListedBrowser([string]$Expected) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
+    do {
+        $listed = Invoke-Mcp 'tools/call' @{ name = 'browser_tabs'; arguments = @{ action = 'list' } }
+        if ($listed.structuredContent.status -ne 'succeeded') { throw 'The initialized MCP stream could not list its tabs.' }
+        $browsers = @($listed.structuredContent.facts.browsers | ForEach-Object { $_.browser })
+        if ($browsers.Count -eq 1 -and (-not $Expected -or $browsers[0] -eq $Expected)) { return $browsers[0] }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'The service did not name the connected browser within 45 seconds.'
+}
 $restoreOwed = $false
 $registrations = @{}
 $script:mcp = $null
+$script:mcpRequest = 0
 try {
     Save-Evidence
     foreach ($name in @('ghostlight.exe', 'ghostlight-service.exe')) {
@@ -194,18 +212,17 @@ try {
     $info.RedirectStandardInput = $true; $info.RedirectStandardOutput = $true
     $script:mcp = [Diagnostics.Process]::new(); $script:mcp.StartInfo = $info
     $null = $script:mcp.Start()
-    $initialized = Invoke-Mcp 1 'initialize' @{ protocolVersion = '2025-11-25'; capabilities = @{};
+    $initialized = Invoke-Mcp 'initialize' @{ protocolVersion = '2025-11-25'; capabilities = @{};
         clientInfo = @{ name = 'Installed recovery acceptance'; version = '1' } }
     if ($initialized.serverInfo.name -ne 'ghostlight') { throw 'Unexpected MCP server identity.' }
     $script:mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
-    $listed = Invoke-Mcp 2 'tools/call' @{ name = 'browser_tabs'; arguments = @{ action = 'list' } }
-    if ($listed.structuredContent.status -ne 'succeeded') { throw 'MCP browser work failed before service interruption.' }
+    $connected = Wait-ListedBrowser ''
     $report.retained_mcp_pid = $script:mcp.Id
     Stop-Exact $authority $serviceImage
     $timer.Restart()
     # The MCP edge keeps its stream and starts the next service when a request needs it. The browser
     # edge exits once that service answers, and Chrome starts a new one.
-    $relisted = Invoke-Mcp 3 'tools/list' @{}
+    $relisted = Invoke-Mcp 'tools/list' @{}
     if (@($relisted.tools).Count -eq 0 -or $script:mcp.HasExited) { throw 'The initialized MCP stream did not survive the lost service.' }
     Wait-Readiness 'ready'
     $restarted = @(Get-ExactProcess $serviceImage)
@@ -215,10 +232,8 @@ try {
         $reconnected = @(Get-NativeEdge)
     } while (($reconnected.Count -ne 1 -or $reconnected[0].Id -eq $browserEdge.Id) -and $timer.Elapsed.TotalSeconds -lt 45)
     if ($reconnected.Count -ne 1 -or $reconnected[0].Id -eq $browserEdge.Id) { throw 'Chrome did not start a new browser edge after the service returned.' }
-    $listed = Invoke-Mcp 4 'tools/call' @{ name = 'browser_tabs'; arguments = @{ action = 'list' } }
-    if ($listed.structuredContent.status -ne 'succeeded' -or $script:mcp.HasExited) {
-        throw 'Same initialized MCP stream did not complete browser work after recovery.'
-    }
+    $null = Wait-ListedBrowser $connected
+    if ($script:mcp.HasExited) { throw 'The initialized MCP stream did not survive the recovery.' }
     Phase 'service-crash-keeps-the-MCP-stream-and-the-browser-reconnects' $timer.ElapsedMilliseconds
     $script:mcp.StandardInput.Close()
     if (-not $script:mcp.WaitForExit(3000)) { $script:mcp.Kill() }

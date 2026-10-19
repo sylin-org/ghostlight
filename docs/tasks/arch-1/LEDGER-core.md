@@ -17,7 +17,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | --- | --- | --- | --- | --- | --- |
 | C1 | fix(audit): the durable record keeps only what may be retained | candidate | ux-2 closes | see Notes | landed (fe18e597) |
 | C2 | fix(workspace): a tab binding has one lifecycle | candidate | ux-2 closes | see Notes | landed (7bd0bf20) |
-| C3a | fix(work): a session's browser is bound by its first tab | candidate | C2 | see Notes | landed (this commit) |
+| C3a | fix(work): a session's browser is bound by its first tab | candidate | C2 | see Notes | landed (ec15bacb, journey fixup) |
 | C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits | todo |
 | C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | - | todo |
 | C6 | fix(language): a held tab is described truthfully | candidate | C2 | - | todo |
@@ -104,3 +104,10 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `tests/process-journey.mjs` (an empty list asks the browser nothing). D2: LANGUAGE's "refuses
   without one" narrows to sessions that hold tabs, and ARCHITECTURE says the first tab binds the
   browser.
+- C3a, the installed recovery journeys: an empty session's list no longer reaches the browser, so
+  `tests/installed-windows-journey.ps1` and `tests/linux/installed-journey.mjs` poll the list until
+  the service names exactly one connected browser, and after the crashed service returns, that
+  same persistent browser id. That proves the new service registered the reconnected browser's
+  connection. The Linux phase also opens, waits on and reads its fixture page over the same stream
+  before it passes, so it crosses to the reconnected browser; the Windows journey's browser work is
+  `tests/live-journey.mjs`, which it runs next. The coordinator runs both on a test machine.

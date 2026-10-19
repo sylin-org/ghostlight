@@ -82,6 +82,17 @@ async function until(check, label, timeout = 45000) {
   throw new Error(`Timed out: ${label}`);
 }
 async function ready() { return until(() => doctor().readiness?.state === "ready", "installed readiness"); }
+// The browser the service has a connection to, as the session's list names it. A session that holds
+// no tab answers its list without asking the browser, so the list is polled until the service names
+// exactly one browser, and after a lost service that same persistent id. A name proves the service
+// registered that browser's connection.
+async function listedBrowser(expected) {
+  return until(async () => {
+    const listed = await call("browser_tabs", { action: "list" });
+    const browsers = listed.facts.browsers.map(item => item.browser);
+    return browsers.length === 1 && (!expected || browsers[0] === expected) && browsers[0];
+  }, expected ? "the service naming the reconnected browser" : "the service naming the connected browser");
+}
 let browser, restoreOwed = false, mcp, heldResponse, effectCount = 0, activePhase = "preflight";
 const registrations = [];
 const pending = new Map();
@@ -163,7 +174,7 @@ try {
   const initialized = await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "Linux installed recovery", version: "1" } });
   assert.equal(initialized.result?.serverInfo.name, "ghostlight");
   mcp.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
-  await call("browser_tabs", { action: "list" });
+  const connected = await listedBrowser();
   report.identities.retained_mcp = identity(mcp.pid);
   // A service lost to a crash: the MCP edge keeps its stream and starts the next service when a
   // request needs it; the browser edge exits once that service answers and the browser starts a new
@@ -187,14 +198,15 @@ try {
   started = Date.now(); stop(authority);
   ({ replacement: authority, edge: native } = await recoverAfterServiceLoss(authority));
   assert.notEqual(authority.pid, report.identities.initial_authority.pid);
-  await call("browser_tabs", { action: "list" });
-  phase("service-crash-keeps-the-initialized-MCP-stream-and-the-browser-reconnects", started);
-
+  await listedBrowser(connected);
+  // The new service does work in the reconnected browser over the same stream.
   await new Promise(done => fixture.listen(0, "127.0.0.1", done));
   const opened = await call("browser_navigate", { url: `http://127.0.0.1:${fixture.address().port}/`, new_tab: true });
   await call("browser_wait", { tab: opened.facts.tab, condition: "load_ready" });
   const read = await call("browser_read", { tab: opened.facts.tab });
   assert.match(read.facts.text, /Recovery fixture ready/);
+  phase("service-crash-keeps-the-initialized-MCP-stream-and-the-browser-reconnects", started);
+
   const probe = await RelayMcp.open({ path: installedHome });
   const cutOff = probe.reply.templates[templateKind.cut_off]["tools/call"].result.content;
   probe.close();
