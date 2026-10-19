@@ -74,12 +74,17 @@ protocol this extension does not: the popup, the options page and the setup page
 Ghostlight in Browser." with the service's own sentence on how, until a later hello is accepted, and
 the extension reconnects only on its delayed retry. There is no fallback dialect.
 
-The hello is the first frame. It carries this installation's persistent browser id, the browser's
-own product name, and whether it currently holds a focused window. The service answers with
-`hello_accepted`: its epoch, the page assets with an id, and the control state. The extension checks
-the assets against their checksum and installs them into the isolated world `ghostlight` in every
-session, the root page and each out-of-process child. A service that sends assets which fail the
-checksum is refused.
+The hello is the first frame. It carries this installation's persistent browser id, the extension's
+life, the browser's own product name, and whether it currently holds a focused window. The service
+answers with `hello_accepted`: its epoch, the page assets with an id, and the control state. The
+extension checks the assets against their checksum and installs them into the isolated world
+`ghostlight` in every session, the root page and each out-of-process child. A service that sends
+assets which fail the checksum is refused.
+
+The life is an opaque id the worker mints into session storage when none is there. It survives a
+worker restart and a native-host restart. A browser restart, or an extension reload, update or
+disable, clears it. So one life names one browser run, in which Chrome never reuses a tab id, and
+the service can tell a tab it bound in this run from one that took a recycled id.
 
 Custody of a tab follows the service that granted it. The extension keeps the service epoch beside
 its controlled tabs in session storage. A worker restart against the same service keeps them; a new

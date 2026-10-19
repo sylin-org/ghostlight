@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-B2 has landed. B1 is next; it lands in the same candidate as C21, or neither does.
+B2 and B1 have landed. The lane is done; B1 rides in the same candidate as C21, or neither does.
 Open before the candidate: the top-frame diagnostics ring reset for unbound tabs (see Notes).
 
 ## Slices
@@ -15,8 +15,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
-| B2 | fix(extension): custody follows the service that granted it, and an outdated extension says so | candidate | ux-2 closes | package items 2, 3, 4 and 7; see Notes | landed (this commit) |
-| B1 | feat(extension): the browser names its life | candidate | ux-2 closes | package item 1; lands with C21 | todo |
+| B2 | fix(extension): custody follows the service that granted it, and an outdated extension says so | candidate | ux-2 closes | package items 2, 3, 4 and 7; see Notes | landed (c79aef1b) |
+| B1 | feat(extension): the browser names its life | candidate | ux-2 closes | package item 1; lands with C21; see Notes | landed (this commit) |
 
 ## Notes
 
@@ -62,3 +62,17 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   keeps the entries and a top-frame navigation clears them. It changes a packaged file, so the
   same commit regenerates `tests/golden/extension-2.0.0.files.sha256` (ADR-0200 Decision 16). A2's
   candidate gate waits for it; see LEDGER-adapter.md.
+- B1, the life: `state.js` holds `LIFE_KEY` (`ghostlight.life`) and `newLife`, beside the browser
+  id's key and minter, and the life reads `life_` plus 32 hex digits. `initializeLocalState` reads it
+  with the rest of session storage and mints it only when none is there. A failed write of a fresh
+  life still sends it: the next worker then mints another, which proves nothing, so the URL decides.
+- B1, the hello golden: `tests/golden/protocol4/frames/hello.json` is the adapter lane's fixture and
+  C21 adds `life` to it. The worker test therefore compares the hello to the fixture with the life
+  taken from the hello, and passes before and after C21. Until C21 lands the service ignores the
+  field under its tolerant reader (`wire.rs`), so B1 alone changes no behavior.
+- B1, docs: `extension/README.md` says what the hello carries and what the life proves. The
+  adapter-protocol-4 design gains `life` in D2.
+- B1, journeys for the coordinator: none was written or run here. With C21 on a test machine, a
+  worker restart (`chrome://serviceworker-internals` stop) and a service replace should keep a
+  single-page app's tab bound, and a browser restart should leave its handle "no longer open".
+  `tests/golden/agents/native/linux.txt` is unchanged.

@@ -115,6 +115,7 @@ let nativePort = null;
 let nativeConnectionAttempt = null;
 let connectionAttemptNumber = 0;
 let browserId = null;
+let life = null;
 let preferences = { ...stateApi.DEFAULT_PREFERENCES };
 let serviceEpoch = null;
 let negotiation = Promise.resolve();
@@ -332,7 +333,17 @@ async function initializeLocalState() {
   }
   preferences = stateApi.preferencesFromStorage(stored);
   await chrome.storage.local.set(stateApi.preferencesForStorage(preferences));
-  const session = await chrome.storage.session.get([CONTROLLED_KEY, SERVICE_EPOCH_KEY, stateApi.PRESENTATIONS_KEY]);
+  const session = await chrome.storage.session.get([
+    stateApi.LIFE_KEY,
+    CONTROLLED_KEY,
+    SERVICE_EPOCH_KEY,
+    stateApi.PRESENTATIONS_KEY
+  ]);
+  life = session[stateApi.LIFE_KEY];
+  if (typeof life !== "string" || !life) {
+    life = stateApi.newLife(() => crypto.randomUUID());
+    await chrome.storage.session.set({ [stateApi.LIFE_KEY]: life }).catch(() => {});
+  }
   presentationQueue.restore(session[stateApi.PRESENTATIONS_KEY]);
   serviceEpoch = typeof session[SERVICE_EPOCH_KEY] === "string" ? session[SERVICE_EPOCH_KEY] : null;
   await restoreControlled(session[CONTROLLED_KEY]);
@@ -442,6 +453,7 @@ async function establishNativeConnection() {
       kind: FRAME.HELLO,
       protocol: protocol.PROTOCOL,
       browser_id: browserId,
+      life: life ?? undefined,
       browser_name: shared.browserName(navigator.userAgentData?.brands) ?? undefined,
       platform: protocol.PLATFORM,
       engine_version: engine,

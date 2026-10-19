@@ -8,6 +8,10 @@
   "use strict";
 
   const BROWSER_ID_KEY = "ghostlight.browser_id";
+  // The life of this extension in this browser run, kept in session storage. Chrome keeps it across a
+  // worker and a native-host restart and clears it on a browser restart and on an extension reload,
+  // update or disable, so one life names one browser run, in which tab ids are never reused.
+  const LIFE_KEY = "ghostlight.life";
   const PRESENTATIONS_KEY = "ghostlight.presentations";
   const EFFECTS_KEY = "ghostlight_effects";
   const CAPTIONS_KEY = "ghostlight_captions";
@@ -26,6 +30,10 @@
 
   function newBrowserId(randomUuid) {
     return `browser_${randomUuid().replaceAll("-", "")}`;
+  }
+
+  function newLife(randomUuid) {
+    return `life_${randomUuid().replaceAll("-", "")}`;
   }
 
   function preferences(value) {
@@ -66,6 +74,7 @@
 
   return Object.freeze({
     BROWSER_ID_KEY,
+    LIFE_KEY,
     PRESENTATIONS_KEY,
     EFFECTS_KEY,
     CAPTIONS_KEY,
@@ -74,6 +83,7 @@
     DEFAULT_PREFERENCES,
     BADGE_TEXT_COLOR,
     newBrowserId,
+    newLife,
     preferences,
     preferencesFromStorage,
     preferencesForStorage,

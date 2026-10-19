@@ -25,6 +25,8 @@ const VERSION = "2.0.0";
 const CONTROLLED_KEY = "ghostlight.controlled";
 const PRESENTATIONS_KEY = "ghostlight.presentations";
 const SERVICE_EPOCH_KEY = "ghostlight.service_epoch";
+const LIFE_KEY = "ghostlight.life";
+const LIFE = /^life_[0-9a-f]{32}$/;
 const ENGINE = "131.0.6778.86";
 const BRANDS = [{ brand: "Not A;Brand", version: "99" }, { brand: "Chromium", version: "131" }, { brand: "Chrome", version: "131" }];
 const ACCOUNT = { id: TAB, windowId: WINDOW, url: "https://example.com/account", title: "Account", active: true, status: "complete" };
@@ -262,7 +264,7 @@ test("the hello is the first frame and matches the golden hello", async () => {
     assert.equal(worker.port.posted.length, 1);
     const hello = worker.port.posted[0];
     const fixture = golden("frames/hello");
-    assert.deepEqual(hello, { ...fixture, browser_id: hello.browser_id });
+    assert.deepEqual(hello, { ...fixture, browser_id: hello.browser_id, life: hello.life });
     assert.match(hello.browser_id, /^browser_[0-9a-f]{32}$/);
   } finally { worker.dispose(); }
 });
@@ -287,6 +289,43 @@ test("a browser id is created once and kept", async () => {
   const second = await boot({ local: { "ghostlight.browser_id": first.port.posted[0].browser_id } });
   try {
     assert.equal(second.port.posted[0].browser_id, first.port.posted[0].browser_id);
+  } finally { first.dispose(); second.dispose(); }
+});
+
+test("the hello carries the life", async () => {
+  const worker = await boot();
+  try {
+    const hello = worker.port.posted[0];
+    assert.match(hello.life, LIFE);
+    assert.equal(worker.browser.store.session.get(LIFE_KEY), hello.life, "the life is kept in session storage");
+  } finally { worker.dispose(); }
+});
+
+test("a worker restart keeps the life", async () => {
+  const kept = `life_${"a".repeat(32)}`;
+  const worker = await boot({ session: { [LIFE_KEY]: kept } });
+  try {
+    assert.equal(worker.port.posted[0].life, kept);
+    await worker.accept();
+    await worker.close("Native host has exited.");
+    worker.timers.fire(3_000);
+    await flush();
+    assert.equal(worker.ports.length, 2);
+    assert.equal(worker.port.posted[0].life, kept, "a native-host restart keeps the life too");
+    assert.equal(worker.browser.store.session.get(LIFE_KEY), kept);
+  } finally { worker.dispose(); }
+});
+
+test("an extension reload mints a new life", async () => {
+  const first = await boot();
+  const browserId = first.port.posted[0].browser_id;
+  // A reload, an update, a disable and a browser restart clear session storage and keep local storage.
+  const second = await boot({ local: { "ghostlight.browser_id": browserId } });
+  try {
+    const hello = second.port.posted[0];
+    assert.equal(hello.browser_id, browserId);
+    assert.match(hello.life, LIFE);
+    assert.notEqual(hello.life, first.port.posted[0].life);
   } finally { first.dispose(); second.dispose(); }
 });
 
