@@ -132,8 +132,12 @@ Now:
 
 - Coordinator: the browser_dialog wording (an agent reads a dialog's status before it answers),
   then the bundle from `dev`, verified with `scripts/check-release-candidate.ps1`.
-- Owner: Bluefin from that bundle (`docs/testing/linux-other-environments-2026-10-19.md`). CachyOS
-  passed on the bundle of 68419db8 (linux-2); linux-claude re-checks only what changed since.
+- Bluefin passed on the bundle of eba78013 on test-02, with the owner's Chromium
+  (`docs/testing/bluefin-2.0-bundle-2026-10-19.md`), except the first task as the owner's page
+  words it: browser_dialog status does not say what accept answers a prompt with, so the agent
+  asked the person what the bell should say. Owner and coordinator: choose one of the record's two
+  fixes, or keep it. CachyOS passed on the bundle of 68419db8 (linux-2); linux-claude re-checks
+  only what changed since.
 - Owner: the extension's store submission from that bundle: the 2.0 privacy page first, the
   remote-code answer No, the recaptured assets, and what a reviewer is offered while the public
   command still installs 1.x (`docs/release/store-disclosure-2.0.md`). After it, only a release

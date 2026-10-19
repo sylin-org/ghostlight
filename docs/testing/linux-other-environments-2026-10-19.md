@@ -36,7 +36,7 @@ and command-line tools from Homebrew. Ghostlight installs only under the home fo
 | --- | --- | --- |
 | The install above | The install summary, and the window opens on its setup steps | A defect: keep the output |
 | With only Flathub browsers | The install and `ghostlight doctor` say no supported native browser was detected and to install Chrome, Edge, Brave, or Chromium as a native package | 2.0 has no Flatpak browser route (ADR-0197 Decision 22); this result is the design, not a defect |
-| A native browser, to go further | Layer one (`rpm-ostree install chromium`, reboot), then `ghostlight install`; doctor names Chromium as registered | A defect if doctor does not see the layered browser |
+| A native browser, to go further | Layer one (`rpm-ostree install chromium`, reboot), then `ghostlight install`; doctor names Chromium as registered. Applications calls the layered one "Chromium Web Browser" and the Flathub one "Chromium"; use the first, or uninstall the Flathub one | A defect if doctor does not see the layered browser |
 | The extension | In `chrome://extensions`, Developer mode, Load unpacked, the `extension` folder from step 3; the window moves past the browser step | A defect if the window stays on the browser step with the browser open |
 | An agent | Install it as usual (Homebrew is fine), then `ghostlight install`; the agent is listed | A defect if a detected agent is not listed |
 | The first task | Ask the agent: "Open sylin.org/ghostlight/demo/desk and ring the bell." The page shows the answer under the bell | A defect: keep `ghostlight doctor` output |
