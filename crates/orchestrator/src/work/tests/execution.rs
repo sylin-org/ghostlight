@@ -4096,7 +4096,7 @@ fn a_click_that_opens_a_dialog_says_so() {
     assert_eq!(opened.facts["dialog_opened"], "confirm");
     assert_eq!(
         opened.next_steps,
-        vec!["Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing."]
+        vec!["Call browser_dialog with action status to read it, then accept, dismiss, or respond with text for a prompt."]
     );
 
     workspaces.apply_browser_dialog(FAKE_BROWSER, 7, None);

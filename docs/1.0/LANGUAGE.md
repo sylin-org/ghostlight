@@ -895,7 +895,8 @@ Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
 
 Inspect or resolve the current JavaScript dialog.
 
-- `{"action":"status"}` reports whether a dialog is blocking; capability `read`.
+- `{"action":"status"}` reports whether a dialog is blocking, and its kind and message; capability
+  `read`.
 - `{"action":"accept"}` accepts it; capability `action`. A prompt accepted this way is answered
   with the text its field starts with, as OK does.
 - `{"action":"dismiss"}` dismisses it; capability `action`.
@@ -918,14 +919,15 @@ currently visible.`
 
 Any other page work sent while a dialog is open is refused at once instead of waiting out its
 deadline: `A JavaScript dialog is open on this page, so nothing was sent.` The status is `failed`,
-nothing changed, repeating is safe, the `reason` fact is `dialog_open`, and the next step is the
-dialog step above. If the page work had already dispatched an effect, the result is an unknown
+nothing changed, repeating is safe, the `reason` fact is `dialog_open`, and the next step is `Call
+browser_dialog with action status to read it, then accept, dismiss, or respond with text for a
+prompt.` If the page work had already dispatched an effect, the result is an unknown
 effect as for any other failure after dispatch.
 
 A dialog the page opens while an action runs is reported by the browser as it opens. When the
 action completes with a dialog open on its tab, the result keeps the action's own sentence, adds
 `A confirm dialog is now open.` (or alert, prompt, leave-page, or a plain JavaScript dialog), carries a
-`dialog_opened` fact naming the kind, and takes the dialog next step above. This holds for clicks,
+`dialog_opened` fact naming the kind, and takes the read-first step of a refused page call above. This holds for clicks,
 key presses, typing, form fills, drags, uploads, scripts, scrolls, hovers and navigation.
 
 ### `browser_upload`

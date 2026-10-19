@@ -1469,7 +1469,7 @@
   },
   {
     "name": "browser_dialog",
-    "description": "Inspect, accept, dismiss, or answer the open JavaScript dialog. A dialog blocks its page until handled.",
+    "description": "Read the open JavaScript dialog with status, then accept, dismiss, or answer it; it blocks its page.",
     "inputSchema": {
       "additionalProperties": false,
       "examples": [
@@ -1483,7 +1483,7 @@
       ],
       "properties": {
         "action": {
-          "description": "status: Report whether one is open. accept: Accept it. dismiss: Dismiss it. respond: Answer a prompt.",
+          "description": "status: Its kind and message, if open. accept: As OK does. dismiss: Dismiss it. respond: Answer a prompt.",
           "enum": [
             "status",
             "accept",

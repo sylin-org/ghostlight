@@ -361,9 +361,13 @@ impl DialogKind {
     }
 }
 
-/// The one step that clears a dialog, shared by every result that leaves one open.
+/// The step that clears a dialog once its status has been read.
 const HANDLE_DIALOG_FIRST: &str =
     "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.";
+
+/// The step for a dialog the agent has not read yet: its status first, because accept answers a
+/// prompt with its default text, as OK does, and only the message says whether that is wanted.
+const READ_DIALOG_FIRST: &str = "Call browser_dialog with action status to read it, then accept, dismiss, or respond with text for a prompt.";
 
 /// The step after a script whose value is `{}` and that was sent awaited. A promise has resolved
 /// by then, so what remains is a value JSON cannot show.
@@ -1027,7 +1031,7 @@ impl Outcome {
                 ..
             } => vec![EMPTY_OBJECT_NOT_AWAITED.into()],
             Self::DialogOpened { action, .. } => {
-                let mut steps = vec![HANDLE_DIALOG_FIRST.to_owned()];
+                let mut steps = vec![READ_DIALOG_FIRST.to_owned()];
                 steps.extend(action.next_steps());
                 steps.truncate(2);
                 steps
@@ -1911,7 +1915,7 @@ impl Refusal {
             Self::CaptureTooLarge => vec![
                 "Capture the viewport or a smaller region instead of the full page.".into(),
             ],
-            Self::DialogOpen => vec![HANDLE_DIALOG_FIRST.into()],
+            Self::DialogOpen => vec![READ_DIALOG_FIRST.into()],
             Self::RecordingUnavailable => vec![
                 "Call browser_record with action start to begin a recording.".into(),
             ],
@@ -4121,7 +4125,7 @@ Changes are \"unsaved\".".into()),
         .with_open_dialog(DialogKind::Prompt);
         assert_eq!(
             opened.next_steps(),
-            vec!["Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing."]
+            vec!["Call browser_dialog with action status to read it, then accept, dismiss, or respond with text for a prompt."]
         );
         assert_eq!(opened.observed(), Observed::default());
         assert_eq!(

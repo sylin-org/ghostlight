@@ -162,7 +162,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_dialog",
             "Browser dialog",
-            "Inspect, accept, dismiss, or answer the open JavaScript dialog. A dialog blocks its page until handled.",
+            "Read the open JavaScript dialog with status, then accept, dismiss, or answer it; it blocks its page.",
             dialog_schema(),
             Hints::browser_action(true),
         ),
@@ -922,8 +922,8 @@ fn wait_branch(condition: &str, description: &str, input: Option<WaitInput>) -> 
 fn dialog_schema() -> Value {
     union(
         vec![
-            dialog_branch("status", "Report whether one is open.", false),
-            dialog_branch("accept", "Accept it.", false),
+            dialog_branch("status", "Its kind and message, if open.", false),
+            dialog_branch("accept", "As OK does.", false),
             dialog_branch("dismiss", "Dismiss it.", false),
             dialog_branch("respond", "Answer a prompt.", true),
         ],
