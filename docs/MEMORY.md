@@ -560,6 +560,13 @@ Every one of these cost something to learn.
   No waiting periods either: a release is gated by checks that prove a promise, never by elapsed
   time (owner, 2026-10-18, withdrawing the week of daily use as "a fallacy and unnecessary
   bureaucracy").
+- **Tests prove promises, not representations.** A check earns its place by catching a real
+  failure or proving something a person or agent relies on (the file is closed to other users, the
+  agent acts in its own tab, the audit holds no page text). A test that fails on a change that did
+  not touch what it is about is rewritten to check the promise, or removed; it is never patched to
+  the new spelling. Of 42 failed CI runs reviewed on 2026-10-19, 2 caught product defects and 23
+  were test defects (owner, 2026-10-19: "reevaluate the CI for quality, not (fake) correctedness";
+  the proposal should be "minimal and meaningful").
 - **History helps people resume work.** Readable history is the default, with detail on demand
   and policy controlling retention. State what happened plainly; explain uncertainty when it
   changes the next step. Displaying more existing detail never authorizes capturing more content.
