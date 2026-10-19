@@ -64,7 +64,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 - D2, Ghostlight's own ceiling: the docs name non-HTTP(S) schemes and the window's own address,
   not localhost, loopback and link-local as Decision 7.2's text does, because ADR-0155 removed
   those ceilings and P2 did not restore them (LEDGER-policy.md, P2). The trust and governance docs
-  already said local destinations follow policy.
+  already said local destinations follow policy. ADR-0203's amendment of 2026-10-19 now says so
+  too, and corrects its ADR-0122 line.
 - D2, Windows file access: data-flows names the policy keygen seeds, the MCP client locations file
   and the owned user policy. The spec's "a file that already existed keeps its access" is written
   as "keeps its access until Ghostlight next writes it", because those files are replaced through

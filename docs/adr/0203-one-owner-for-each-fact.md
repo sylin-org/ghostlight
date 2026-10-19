@@ -328,7 +328,8 @@ check is on the frame.
 2. **Never-touch refusals.** An authored never-touch refusal is a policy decision with its layer,
    `PolicyRule::SacredHost` and a denial id. Only non-HTTP(S) schemes, localhost, loopback and
    link-local stay Ghostlight's own ceiling, credited to Ghostlight with no authored layer. This
-   amends ADR-0122 Decision 2, item 4.
+   amends ADR-0122 Decision 2, item 4. (Amended 2026-10-19: the ceiling is non-HTTP(S) schemes and
+   the workbench's own origin; see the amendment at the end.)
 3. **One replay.** `AuthoritySnapshot::replay(channel, requirements, host)` checks the channel first,
    treating an undeclared channel as MCP, then the host. The command line's simulate and the window's
    preview both call it.
@@ -715,7 +716,9 @@ managed file path, fifteen event names and `WorkbenchSnapshot`.
   agent name. A client reuses only tabs its own sessions kept, as a courtesy between clients, not for
   a reason about groups.
 - **ADR-0122 Decision 2, item 4:** authored never-touch destinations are the authoring layer's
-  decision; only non-HTTP(S) schemes, localhost, loopback and link-local stay Ghostlight's ceiling.
+  decision; only non-HTTP(S) schemes and the workbench's own origin (ADR-0199) stay Ghostlight's
+  ceiling. Localhost, loopback and link-local follow policy under ADR-0155 (corrected by the
+  amendment of 2026-10-19).
 - **ADR-0144:** the precedence claim is withdrawn. The skill carries no bounds.
 - **ADR-0145 Decision 4:** the unused event names go. Folding the crate is left for 2.x.
 - **ADR-0186, through B2:** a new service epoch releases custody and keeps each entry released until its
@@ -1656,3 +1659,21 @@ candidate.
   - `an_extension_reload_mints_a_new_life`;
   - `the_hello_carries_the_life`;
   - the freeze guard.
+
+## Amendment (2026-10-19): Ghostlight's own ceiling
+
+Decision 7.2 named non-HTTP(S) schemes, localhost, loopback and link-local as Ghostlight's own
+ceiling. That contradicts ADR-0155, which removed the localhost, loopback and link-local refusals
+on the owner's direction so that local destinations follow policy, and ADR-0199, which holds
+ADR-0155 and adds the workbench's own origin as a product-owned ceiling. This record did not mean
+to reverse ADR-0155, and P2 did not restore those refusals.
+
+The ceiling credited to Ghostlight, with no authored layer, is therefore:
+
+- non-HTTP(S) schemes;
+- the workbench's own origin (ADR-0199).
+
+Localhost, loopback and link-local addresses follow policy under ADR-0155. A layer that wants them
+refused lists them as never-touch, and that refusal is the layer's decision under Decision 7.2's
+first sentence. The ADR-0122 line under What this supersedes and amends is corrected to match. The
+rest of Decision 7.2 stands.
