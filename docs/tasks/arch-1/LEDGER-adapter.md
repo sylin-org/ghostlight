@@ -6,7 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-A1 and A2 have landed. A3 is next, then A4. ux-2 has closed, so every slice can start.
+A1 and A2 have landed. A2's top-frame ring reset waits on a package-lane fix (see Notes). A3 is
+next, then A4. ux-2 has closed, so every slice can start.
 
 ## Slices
 
@@ -55,3 +56,14 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `a_restricted_read_still_binds_its_documents`, which replaces
   `the_diagnostics_binding_follows_the_admitted_set`, in `protocol4/translate/tests.rs`. The
   work-level proof is C9's. No journey is needed.
+- A2, review fix, open dependency on the package lane: with no binding sent when the scope does
+  not watch, the default all-open mode binds no tab, and the extension's `beforeNavigate`
+  (`extension/lib/buffers.js`) resets a ring only when it deletes a binding. So a top-frame
+  navigation no longer starts a fresh ring there, and a diagnose after it returns the prior page's
+  console and network entries with the new page's. Decision 6.3 keeps the top-frame reset for every
+  tab, so this is a defect, not a choice. The fix is the extension's: a top-frame `beforeNavigate`
+  starts a fresh ring for any tab with diagnostics capture, bound or not, and deletes the binding
+  if there is one. Its proof is an unbound read in `worker.test.js` or `buffers.test.js`: a
+  subframe navigation keeps the entries and a top-frame navigation clears them. It changes a
+  packaged file, so that commit regenerates the package record (ADR-0200 Decision 16). Recorded in
+  LEDGER-package.md; A2's candidate gate holds until it lands.
