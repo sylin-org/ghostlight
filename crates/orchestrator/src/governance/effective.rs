@@ -250,8 +250,10 @@ pub struct UserLayer {
 pub struct EffectiveAuthority {
     /// The id of the authority this answer was compiled from, the one the audit line records.
     ///
-    /// It is for the service's own readers and is never sent to the window: it is a digest of
-    /// the layers' documents, so a watcher could test guesses about a withheld list against it.
+    /// It is a digest of the layers' documents, so a watcher could test guesses about a withheld
+    /// list against it. It is therefore not part of the serialized policy part, which a watcher
+    /// is sent. The window receives it only as the tag on the policy part's change hint, and the
+    /// watcher projection removes that tag.
     #[serde(skip)]
     pub id: String,
     /// Effective requirement for saving audit receipts, as the snapshot enforces it.
