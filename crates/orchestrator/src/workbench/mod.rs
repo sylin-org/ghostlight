@@ -1777,8 +1777,9 @@ pub struct SessionSummary {
     pub channel: IntakeChannel,
     /// Controlled tab count.
     pub tab_count: usize,
-    /// Current operation count.
-    pub active_operations: usize,
+    /// How many of the session's operations are running now. Work waiting its turn or held by a
+    /// pause is not counted: only running work is shown as working.
+    pub running_operations: usize,
     /// Persistent browser family or product name this session's workspace is pinned to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<String>,

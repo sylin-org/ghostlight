@@ -168,8 +168,9 @@
   const andMore = (count) => `and ${count} more`;
 
   /**
-   * One session of an agent, in words: its tabs and the browser it works in, whether it is working,
-   * and the intake only when it is the command line.
+   * One session of an agent, in words: its tabs and the browser it works in, whether it is working
+   * (running work now; waiting or held work is not), and the intake only when it is the command
+   * line.
    */
   function sessionLine(session) {
     const tabs = session.tab_count ?? 0;
@@ -178,7 +179,7 @@
     if (tabs > 0 && browser) where = `${where} in ${browser}`;
     else if (browser) where = `In ${browser}, ${where}`;
     else where = where.charAt(0).toUpperCase() + where.slice(1);
-    const parts = [where, session.active_operations > 0 ? GLANCE.working : GLANCE.idle];
+    const parts = [where, session.running_operations > 0 ? GLANCE.working : GLANCE.idle];
     if (session.channel === INTAKE.cli) parts.push(GLANCE.fromCommandLine);
     return parts.join(", ");
   }

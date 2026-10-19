@@ -33,8 +33,8 @@ use super::parts::{
 };
 use super::setup::{self, SetupInputs, SetupMachine, ThisComputer};
 use super::{
-    BrowserInstanceSummary, OperationSummary, ReadinessSummary, RuntimeSource, ServiceSummary,
-    SessionSummary, WebFacts, WorkbenchChange, WorkbenchError, WorkbenchProjection,
+    BrowserInstanceSummary, OperationPhase, OperationSummary, ReadinessSummary, RuntimeSource,
+    ServiceSummary, SessionSummary, WebFacts, WorkbenchChange, WorkbenchError, WorkbenchProjection,
     WorkbenchTrayPort,
 };
 use crate::browser::adapter::RuntimeControlState;
@@ -296,9 +296,12 @@ impl Live {
                         .map(BrowserSummary::display_name)
                 });
                 SessionSummary {
-                    active_operations: operations
+                    running_operations: operations
                         .iter()
-                        .filter(|operation| operation.workspace == workspace.id)
+                        .filter(|operation| {
+                            operation.workspace == workspace.id
+                                && operation.phase == OperationPhase::Running
+                        })
                         .count(),
                     id: workspace.id,
                     agent: workspace.opener.agent,

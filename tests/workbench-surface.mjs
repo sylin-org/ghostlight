@@ -560,9 +560,9 @@ const agentRoster = [
 ];
 view.collections({
   sessions: [
-    { id: "w-zed-1", agent: namedAgent("Zed"), channel: "mcp", tab_count: 1, active_operations: 0 },
-    { id: "w-zed-2", agent: namedAgent("Zed"), channel: "mcp", tab_count: 2, active_operations: 1 },
-    { id: "w-cli", agent: namedAgent("Command line"), channel: "cli", tab_count: 1, active_operations: 0 }
+    { id: "w-zed-1", agent: namedAgent("Zed"), channel: "mcp", tab_count: 1, running_operations: 0 },
+    { id: "w-zed-2", agent: namedAgent("Zed"), channel: "mcp", tab_count: 2, running_operations: 1 },
+    { id: "w-cli", agent: namedAgent("Command line"), channel: "cli", tab_count: 1, running_operations: 0 }
   ],
   // The service says which rows are in use; the page draws what it says.
   harnesses_in_use: ["zed"],
@@ -894,14 +894,14 @@ const glanceChecks = [];
 {
   const glanceView = sandbox.globalThis.GhostlightView.create({});
   const claim = (id, agent, extra = {}) => ({
-    id, agent: namedAgent(agent), channel: "mcp", tab_count: 0, active_operations: 0,
+    id, agent: namedAgent(agent), channel: "mcp", tab_count: 0, running_operations: 0,
     connections: [{ connection_id: `connection_${id}`, reported_application: agent, channel: "mcp",
       explanation: `"${agent}" is what the agent calls itself; Ghostlight does not verify it.` }],
     ...extra
   });
   const sessions = [
     ...Array.from({ length: 5 }, (_, at) => claim(`codex_${at}`, "Codex")),
-    claim("claude", "Claude <b>Code</b>", { tab_count: 2, active_operations: 1, browser: "Google Chrome" }),
+    claim("claude", "Claude <b>Code</b>", { tab_count: 2, running_operations: 1, browser: "Google Chrome" }),
     { ...claim("script", "Command line"), channel: "cli",
       connections: [{ connection_id: "connection_script", channel: "cli",
         explanation: "A ghostlight call session is a local program." }] }
@@ -1179,7 +1179,7 @@ function fakeService(kind, { served = true } = {}) {
 /** What a watching screen is shown connected: one agent and no browser, which one starts on request. */
 const WATCHED_CONNECTIONS = {
   sessions: [{ id: "workspace_codex", agent: namedAgent("Codex"), channel: "mcp",
-    tab_count: 0, active_operations: 0,
+    tab_count: 0, running_operations: 0,
     connections: [{ connection_id: "connection_watched", reported_application: "codex-mcp-client",
       channel: "mcp", explanation: "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it." }] }],
   browsers: [],

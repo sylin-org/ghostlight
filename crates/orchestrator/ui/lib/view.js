@@ -600,8 +600,9 @@
       }
       const outcome = outcomeClass(entry);
       resting = rests(entry);
-      // A plain settle holds the live look for the dwell; a refusal or a failure shows at once.
-      const holding = !isRunning(entry) && wasLive && !isBlocked(entry) && !outcome && !resting;
+      // A plain settle holds the live look for the dwell. Work that waits or is held, a refusal and
+      // a failure show at once.
+      const holding = Boolean(entry.settled) && wasLive && !isBlocked(entry) && !outcome && !resting;
       if (holding && !liveHeld) {
         liveHeld = true;
         liveUntil = now() + SWAP_DWELL_MS;
@@ -903,7 +904,7 @@
         const group = groups.get(agent.id) ?? { id: agent.id, name: agent.name, agent, sessions: [], tabs: 0, busy: false };
         group.sessions.push(session);
         group.tabs += session.tab_count ?? 0;
-        group.busy = group.busy || session.active_operations > 0;
+        group.busy = group.busy || session.running_operations > 0;
         groups.set(agent.id, group);
       }
       return [...groups.values()]
@@ -967,7 +968,7 @@
      */
     function cardMarkup(group) {
       const sessions = [...group.sessions]
-        .sort((left, right) => (right.active_operations > 0) - (left.active_operations > 0)
+        .sort((left, right) => (right.running_operations > 0) - (left.running_operations > 0)
           || (right.tab_count ?? 0) - (left.tab_count ?? 0));
       const lines = sessions.slice(0, GLANCE_CARD_LINES).map((session) => {
         const ids = (session.connections ?? []).map((connection) => connection.connection_id).filter(Boolean);
@@ -1063,7 +1064,7 @@
       const own = sessions.filter((session) => session.agent.id === harness.agent.id);
       return {
         sessions: own.length, tabs: own.reduce((sum, session) => sum + (session.tab_count ?? 0), 0),
-        working: own.some((session) => session.active_operations > 0)
+        working: own.some((session) => session.running_operations > 0)
       };
     }
 

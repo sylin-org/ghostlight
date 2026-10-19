@@ -292,11 +292,11 @@ const snapshot = {
   service: { version: "1.0.0", started_at_ms: ago(540000), runtime_state: "active" },
   overview: { active_sessions: 2, active_operations: 2, connected_browsers: 2, blocked_in_history: 1 },
   sessions: [
-    { id: "workspace_codex", agent: agentNamed("Codex"), channel: "mcp", tab_count: 3, active_operations: 1, browser: "Chrome" },
+    { id: "workspace_codex", agent: agentNamed("Codex"), channel: "mcp", tab_count: 3, browser: "Chrome" },
     // Codex starts a session per request, so its card holds more lines than it shows.
-    ...[2, 3, 4, 5, 6].map((at) => ({ id: `workspace_codex_${at}`, agent: agentNamed("Codex"), channel: "mcp", tab_count: 0, active_operations: 0 })),
-    { id: "workspace_claude", agent: agentNamed("Claude Code"), channel: "mcp", tab_count: 1, active_operations: 1, browser: "Edge" },
-    { id: "workspace_script", agent: agentNamed("Command line"), channel: "cli", tab_count: 1, active_operations: 0, browser: "Chrome" }
+    ...[2, 3, 4, 5, 6].map((at) => ({ id: `workspace_codex_${at}`, agent: agentNamed("Codex"), channel: "mcp", tab_count: 0 })),
+    { id: "workspace_claude", agent: agentNamed("Claude Code"), channel: "mcp", tab_count: 1, browser: "Edge" },
+    { id: "workspace_script", agent: agentNamed("Command line"), channel: "cli", tab_count: 1, browser: "Chrome" }
   ],
   operations: [
     { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: ago(12000), phase: "running" },
@@ -485,9 +485,16 @@ const withRuntime = (flat, state) => {
   return changed;
 };
 
-/** The page with nothing in flight: no operation, and every session idle. */
-const idle = (flat) => ({
-  ...flat, operations: [], sessions: flat.sessions.map((session) => ({ ...session, active_operations: 0 }))
+/** The page with nothing in flight. */
+const idle = (flat) => ({ ...flat, operations: [] });
+
+/** How many operations run in `workspace` now, as the service counts a session's (`SessionSummary`). */
+const runningIn = (operations, workspace) =>
+  operations.filter((operation) => operation.workspace === workspace && operation.phase === "running").length;
+
+/** Each session with its running count, from the work the page is shown in flight. */
+const counted = (flat) => ({
+  ...flat, sessions: flat.sessions.map((session) => ({ ...session, running_operations: runningIn(flat.operations, session.id) }))
 });
 
 /** What a held operation shows again: what it was doing, no longer the wait. */
@@ -531,7 +538,8 @@ const pageSnapshot = ({ stage, noBrowsers, connected, capped, scene }) => [
   noBrowsers && withoutBrowsers,
   connected && allConnected,
   capped && withCappedHistory,
-  READINESS_SCENES[scene]
+  READINESS_SCENES[scene],
+  counted
 ].filter(Boolean).reduce((flat, change) => change(flat), { ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] });
 
 const fixtureFor = (choice) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(pageSnapshot(choice))};
@@ -598,12 +606,24 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
     for (const handler of listeners) handler({ payload: event });
   };
 
-  // The status part follows the facts: a changed answer is pushed whole, as the service does.
-  const publishStatus = () => {
+  // The status and connections parts follow the facts: a changed part is pushed whole, as the
+  // service does after work starts, changes phase or settles.
+  const runningIn = ${runningIn.toString()};
+  const publishLive = () => {
     const readiness = resolveReadiness();
-    if (JSON.stringify(readiness) === JSON.stringify(preview.readiness)) return;
-    preview.readiness = readiness;
-    publish({ kind: "status_changed", status: partsOf(preview).status });
+    if (JSON.stringify(readiness) !== JSON.stringify(preview.readiness)) {
+      preview.readiness = readiness;
+      publish({ kind: "status_changed", status: partsOf(preview).status });
+    }
+    let recounted = false;
+    for (const session of preview.sessions) {
+      const running = runningIn(preview.operations, session.id);
+      if (session.running_operations !== running) {
+        session.running_operations = running;
+        recounted = true;
+      }
+    }
+    if (recounted) publish({ kind: "connections_changed", connections: partsOf(preview).connections });
   };
 
   // The sheet follows the service: a change to the runtime, watching or diagnostics is pushed whole.
@@ -663,7 +683,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
         }
       };
       publish({ kind: "operation_settled", record });
-      publishStatus();
+      publishLive();
       next();
     }, spec.ms);
   };
@@ -693,7 +713,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
     };
     preview.operations.push(operation);
     publish({ kind: "operation_started", operation });
-    publishStatus();
+    publishLive();
 
     settle(operation, spec, session, blocked, () => setTimeout(runOne, blocked ? 3000 : 700 + Math.random() * 1300));
   };
@@ -707,6 +727,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
       const session = preview.sessions.find(each => each.id === operation.workspace);
       settle(operation, spec, session, false, () => {});
     }
+    publishLive();
   };
 
   // What the service answers for each command. The page asks over HTTP, as it does in the window.
@@ -758,7 +779,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
       preview.service.runtime_state = state;
       preview.configuration.runtime_state = state;
       publish({ kind: "runtime_changed", runtime_state: state });
-      publishStatus();
+      publishLive();
       publishControls();
       if (state === "active") releaseHeld();
       if (state === "active" && !still && !looping) runOne();

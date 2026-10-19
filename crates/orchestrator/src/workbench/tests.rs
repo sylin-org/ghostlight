@@ -1612,6 +1612,50 @@ fn a_session_card_names_the_agent_its_operations_name() {
 }
 
 #[test]
+fn a_session_counts_only_its_running_work_as_running() {
+    let evidence = Arc::new(crate::provenance::ConnectionEvidence::claimed(
+        "test",
+        crate::intake::session::IntakeChannel::Mcp,
+    ));
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    let workspace = workspaces.connect(Arc::clone(&evidence), None);
+    let (facade, projection) = facade_with(&workspaces);
+    let started = |invocation: &str| DomainEvent::WorkStarted {
+        provenance: evidence.details(),
+        invocation: invocation.into(),
+        workspace: workspace.as_str().into(),
+        tool: "browser_read".into(),
+        activity: PresentationActivity::Read,
+        capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
+    };
+    projection.react(&started("invocation_held"));
+    projection.react(&DomainEvent::HoldEntered {
+        invocation: "invocation_held".into(),
+        workspace: workspace.as_str().into(),
+        physical_id: 1,
+    });
+    projection.react(&DomainEvent::WorkWaiting {
+        provenance: evidence.details(),
+        invocation: "invocation_waiting".into(),
+        workspace: workspace.as_str().into(),
+        tool: "browser_read".into(),
+        activity: PresentationActivity::Read,
+        capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
+    });
+    let shown = facade.snapshot();
+    assert_eq!(shown.operations.len(), 2);
+    assert_eq!(
+        shown.sessions[0].running_operations, 0,
+        "held and waiting work is not running"
+    );
+
+    projection.react(&started("invocation_running"));
+    assert_eq!(facade.snapshot().sessions[0].running_operations, 1);
+}
+
+#[test]
 fn a_command_line_session_keeps_its_name_while_no_call_is_connected() {
     use crate::intake::session::{IntakeChannel, SessionMarker};
     use crate::provenance::ConnectionEvidence;

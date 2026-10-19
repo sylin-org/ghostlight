@@ -680,7 +680,7 @@ pub(super) mod test_support {
             connections: Vec::new(),
             channel: IntakeChannel::Mcp,
             tab_count: 0,
-            active_operations: 0,
+            running_operations: 0,
             browser: None,
         }
     }

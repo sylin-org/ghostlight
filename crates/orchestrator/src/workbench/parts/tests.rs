@@ -198,7 +198,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
             connections: vec![details()],
             channel: IntakeChannel::Mcp,
             tab_count: 2,
-            active_operations: 1,
+            running_operations: 1,
             browser: Some("Chrome".into()),
         }],
         operations: vec![OperationSummary {
@@ -388,7 +388,6 @@ const CONNECTIONS_KEYS: &[&str] = &[
     "harnesses_in_use",
     "no_browser",
     "sessions",
-    "sessions[].active_operations",
     "sessions[].agent",
     "sessions[].agent.id",
     "sessions[].agent.name",
@@ -403,6 +402,7 @@ const CONNECTIONS_KEYS: &[&str] = &[
     "sessions[].connections[].explanation",
     "sessions[].connections[].reported_application",
     "sessions[].id",
+    "sessions[].running_operations",
     "sessions[].tab_count",
 ];
 

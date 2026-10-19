@@ -1024,7 +1024,7 @@ function snapshotAnswer({ history = [settledRead()], sessions, service = { versi
         }
       },
       connections: {
-        sessions: sessions ?? [{ id: "w1", agent: namedAgent("Codex"), channel: "mcp", tab_count: 1, active_operations: 0 }],
+        sessions: sessions ?? [{ id: "w1", agent: namedAgent("Codex"), channel: "mcp", tab_count: 1, running_operations: 0 }],
         browsers: [{ id: "b1", family: "Chrome", adapter_version: "2.0.0" }]
       },
       activity: { operations: [], history, document_coverage: [] },
@@ -1251,7 +1251,7 @@ test("a paint that throws is tried again with the same facts, and one that drew 
 /** A session of the agent named `agent`, as the connections part carries it. */
 function glanceSession(id, agent, { channel = "mcp", tabs = 0, busy = false, browser, reported = agent } = {}) {
   return {
-    id, agent: namedAgent(agent), channel, tab_count: tabs, active_operations: busy ? 1 : 0,
+    id, agent: namedAgent(agent), channel, tab_count: tabs, running_operations: busy ? 1 : 0,
     ...(browser ? { browser } : {}),
     connections: [{
       connection_id: `connection_${id}`, reported_application: reported, channel,
@@ -1455,10 +1455,33 @@ test("an agent on its shelf opens its card: a few sessions in words, and the tru
 });
 
 test("a session line says the command line only for the command line", () => {
-  assert.equal(Words.sessionLine({ tab_count: 1, browser: "Edge", active_operations: 0, channel: "cli" }),
+  assert.equal(Words.sessionLine({ tab_count: 1, browser: "Edge", running_operations: 0, channel: "cli" }),
     "1 tab in Edge, idle, from the command line");
-  assert.equal(Words.sessionLine({ tab_count: 0, browser: "Edge", active_operations: 1, channel: "mcp" }),
+  assert.equal(Words.sessionLine({ tab_count: 0, browser: "Edge", running_operations: 1, channel: "mcp" }),
     "In Edge, no tabs, working");
+});
+
+test("work held while paused is not working: nothing at a glance or in the pane wears the live look", () => {
+  const shown = drawing();
+  const answer = snapshotAnswer({
+    sessions: [glanceSession("w1", "Codex", { tabs: 3, browser: "Chrome" })],
+    service: { version: "2.0.0", started_at_ms: 1, runtime_state: "held" }
+  });
+  answer.parts.activity.operations = ["h1", "h2"].map((invocation) => ({
+    invocation, workspace: "w1", tool: "browser_read", activity: "Reading page", capability: "read",
+    started_at_ms: 1, phase: "held"
+  }));
+  answer.parts.integrations.harnesses = [agent("codex", "Codex", "installed")];
+  answer.parts.connections.harnesses_in_use = ["codex"];
+  shown.view.collections(Transport.flatten(answer), new Set());
+  const glanced = () => drawn(shown.el("connections").innerHTML);
+  shown.click(glanced().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "codex"));
+  const busy = [...glanced().root.descendants()].filter((node) => node.classes?.has("busy"));
+  assert.deepEqual(busy, [], "no face, chip or card head is busy");
+  assert.equal(glanced().wearing("glance-line")[0].children[0].textContent, "3 tabs in Chrome, idle");
+  const entry = drawn(shown.el("agents-list").innerHTML).wearing("agent-entry").find((node) => node.dataset.agent === "codex");
+  assert.ok(!entry.children.find((node) => node.classes.has("agent-dot")).classes.has("d-live"), "the rail is not live");
+  assert.deepEqual(shown.failures, []);
 });
 
 test("each line of a card keeps its connection ids behind Copy id", () => {
@@ -2366,6 +2389,19 @@ test("a burst of quick actions replaces the card in place and keeps it live betw
   refused.view.hero(asked, false);
   refused.view.hero(Entries.entryFromRecord(settledRead({ invocation: "r", status: "failed", summary: "Could not." }), asked), false);
   assert.ok(!refused.el("hero").classes.has("live"), "a failure shows at once");
+  const paused = clocked();
+  const reading = startedRead("p", "running");
+  paused.view.hero(reading, false);
+  paused.view.hero({ ...reading, phase: "held" }, false);
+  assert.ok(!paused.el("hero").classes.has("live"), "running work that is held shows it at once");
+  assert.ok(paused.el("hero").classes.has("held"));
+  const queued = clocked();
+  const runningFirst = startedRead("q", "running");
+  queued.view.rebuildFeed([runningFirst]);
+  queued.pass(100);
+  queued.view.rebuildFeed([startedRead("w", "waiting")]);
+  assert.ok(!queued.el("hero").classes.has("live"), "a waiting card that replaces a running one shows it at once");
+  assert.ok(queued.el("hero").classes.has("waiting"));
 });
 
 test("a card that has led for five minutes with nothing running rests as the last action", () => {
