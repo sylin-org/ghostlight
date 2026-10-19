@@ -8,8 +8,10 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `done` (with commi
 Opened 2026-10-19 by windows-claude. The owner narrowed this machine's part to CachyOS (Notes,
 "Scope, 2026-10-19"): L2-01, L2-03, L2-13 and L2-14 are out of this batch, and the owner validates
 the other Linux environments with L2-15's page. Every other task is done on CachyOS, Part 2 on the
-go head 62bfa224 and its bundle from run 39297671342. test-01 now runs that bundle (release
-channel 2.0.0) with the owner's policy and diagnostics on; the home from before L2-12 was removed at
+go head 62bfa224 and its bundle from run 39297671342. After windows-claude's fixes, test-01 runs
+the bundle of release run 39306759480 on 68419db8 (release channel 2.0.0, installed with `get.sh
+--restore` and `GHOSTLIGHT_FROM`; every job of that run passed, `install-from-bundle` included) with
+the owner's policy and diagnostics on; the home from before L2-12 was removed at
 the owner's request on 2026-10-19. Open for windows-claude: the `AdvertisedCatalog` defect (Notes, "F1
 on the go head") and the observations under L2-12.
 
