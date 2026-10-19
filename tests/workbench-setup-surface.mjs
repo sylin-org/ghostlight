@@ -134,6 +134,12 @@ class Node {
 
   focus() {}
 
+  /** Whether `node` is this node or sits inside it, as a browser's Node.contains answers. */
+  contains(node) {
+    for (let at = node; at; at = at.parent) if (at === this) return true;
+    return false;
+  }
+
   addEventListener(type, handler) {
     if (!this.handlers.has(type)) this.handlers.set(type, []);
     this.handlers.get(type).push(handler);

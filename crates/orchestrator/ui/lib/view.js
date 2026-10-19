@@ -2378,10 +2378,18 @@
       if (standsIn) line.querySelector("[data-retry]").focus();
     }
 
-    /** Take a destination's failure line away once it has been read. */
+    /**
+     * Take a destination's failure line away once it has been read. The view's Refresh comes back
+     * in place of Try again, so the keyboard focus on Try again moves to it rather than falling
+     * back to the page.
+     */
     function loaded(destination) {
-      el[`${destination}-failure`].hidden = true;
-      el[`view-${destination}`].classList.remove("load-failed", "unread");
+      const line = el[`${destination}-failure`];
+      const view = el[`view-${destination}`];
+      const retried = line.contains(document.activeElement);
+      view.classList.remove("load-failed", "unread");
+      if (retried) view.querySelector(".refresh")?.focus();
+      line.hidden = true;
       const loading = LOADING_LINE[destination];
       if (loading) el[loading].hidden = false;
     }

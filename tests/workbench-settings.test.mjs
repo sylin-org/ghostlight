@@ -3447,3 +3447,20 @@ test("the keyboard focus on a Refresh the failure hides, or on the Try again it 
   shown.view.loadFailed("policy");
   assert.equal(shown.document.activeElement, elsewhere, "focus outside the destination stays where it is");
 });
+
+test("the keyboard focus on Try again moves to the Refresh that comes back once the read works", () => {
+  const shown = focusable();
+  live(shown.el("policy-failure"));
+  const view = shown.el("view-policy");
+  view.querySelector = (selector) => [...view.descendants()].find((found) => found.matches(selector)) ?? null;
+  shown.view.loadFailed("policy");
+  shown.el("policy-failure").querySelector("[data-retry]").focus();
+  shown.view.loaded("policy");
+  assert.equal(shown.document.activeElement, shown.el("refresh-policy"), "Try again hands its focus to Refresh");
+
+  const elsewhere = shown.el("refresh-status");
+  shown.view.loadFailed("policy");
+  elsewhere.focus();
+  shown.view.loaded("policy");
+  assert.equal(shown.document.activeElement, elsewhere, "focus outside the failure line stays where it is");
+});
