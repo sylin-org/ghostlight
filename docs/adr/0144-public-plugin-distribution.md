@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-08-29
 - Builds on: ADR-0141, ADR-0142
+- Amended by [ADR-0203](0203-one-owner-for-each-fact.md) (2026-10-19): the precedence claim is
+  withdrawn, and the skill carries no bounds.
 
 ## Context
 

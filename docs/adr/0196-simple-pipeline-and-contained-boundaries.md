@@ -3,6 +3,8 @@
 Decision 7 superseded by ADR-0197 Decision 5 (the break is strict, with no transition level).
 Decision 12 amended 2026-10-17: a session's own browser that stays gone is started again under
 `on_demand` (amendment at the end).
+Decision 12's amendment of 2026-10-17 amended by ADR-0203 (2026-10-19): a pinned wait reads its own
+installed browser's evidence, not the evidence the unbound path reads.
 
 Date: 2026-10-13. Status: Accepted by owner direction.
 

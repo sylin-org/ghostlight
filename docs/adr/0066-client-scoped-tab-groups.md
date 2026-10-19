@@ -7,6 +7,12 @@ that the visible Chrome tab group is keyed on the per-process session GUID and i
 per live session. Builds on ADR-0061 (extension-owned browser identity) and ADR-0030 Decision 6
 (the SERVICE is the isolation boundary; the extension's group checks are defense-in-depth).
 
+## Amendment by ADR-0203 (2026-10-19)
+
+Decisions 1 and 2: "the client label" becomes the opener's agent name, as `language::provenance`
+names it. A client reuses only tabs its own sessions kept, as a courtesy between clients, not for a
+reason about groups. See ADR-0203 Decision 9.
+
 ## Amendment by ADR-0201 (2026-10-18)
 
 Chromium now saves every tab group, and a group still open when its window closes or the browser

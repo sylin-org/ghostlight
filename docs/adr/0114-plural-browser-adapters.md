@@ -17,6 +17,10 @@ deadline, and is never handed to browser recovery. If the browser does not retur
 says it is not answering, not connected, or not connected while a different browser is. Only that
 last case names another profile.
 
+Amendment, 2026-10-19: D2 is amended by ADR-0203 Decision 2.2. A session's browser binding is
+taken when its first tab binds, not by its first crossing; a crossing that binds no tab binds no
+browser.
+
 ## Context
 
 The 1.0 service held exactly one browser adapter, in one slot:

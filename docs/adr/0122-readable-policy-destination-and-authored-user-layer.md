@@ -3,6 +3,9 @@
 - Status: Accepted
 - Date: 2026-08-14
 - Decision 2's local-address ceilings superseded by [ADR-0155](0155-policy-owned-local-destinations.md).
+- Decision 2, item 4, amended by [ADR-0203](0203-one-owner-for-each-fact.md) (2026-10-19): authored
+  never-touch destinations are the authoring layer's decision; only non-HTTP(S) schemes, localhost,
+  loopback and link-local stay Ghostlight's own ceiling.
 - Amends: ADR-0102's amended destination list (A3), ADR-0121 Decision 2 (an additive manifest block)
   and its registered setting list
 - Builds on: ADR-0013, ADR-0060, ADR-0079, ADR-0102, ADR-0103, ADR-0119, ADR-0121

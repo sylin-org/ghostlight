@@ -2,6 +2,8 @@
 
 Decision 8 popup diagnostics toggle superseded by ADR-0197 Decision 22 (which calls it the Decision 2 popup route); the workbench and CLI keep the toggle.
 
+Decision 4 amended by ADR-0203 (2026-10-19): the event names no 2.0 process writes go; folding the crate is left for 2.x.
+
 - Status: Accepted
 - Date: 2026-08-29
 - Amended: 2026-08-29, pre-implementation: Decision 2 became layered activation (environment

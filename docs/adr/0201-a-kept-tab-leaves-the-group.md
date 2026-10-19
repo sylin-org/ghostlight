@@ -8,6 +8,9 @@ and Decision 6, the ADR-0137 correction of 2026-10-13 (a reused tab already sits
 group), and how the service sends the reuse ADR-0196 Decision 9 chooses. Lands with the ADR-0200
 amendment of 2026-10-18, which unfroze the extension for it.
 
+Amended by ADR-0203 (2026-10-19): Decision 2. Reuse is keyed on the opener's agent, and a client
+reuses only tabs its own sessions kept, as a courtesy between clients, not for a reason about groups.
+
 ## Context
 
 The owner found saved tab groups piling up in Chromium's bookmarks bar on the Linux test machine:
