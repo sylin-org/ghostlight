@@ -113,17 +113,11 @@ The seams stay stable by default; one changes only when a separation-of-concerns
 meaningful architecture change needs it, never because of a freeze (ADR-0197 amendment of
 2026-10-18).
 
-Release order (`docs/RELEASE.md`, The 2.0 cutover; `docs/release/store-disclosure-2.0.md`;
-ADR-0200). There is no prerelease tag (the owner, 2026-10-19): the release candidate is the bundle
-the release workflow builds from the candidate commit. First the install proof on that bundle on
-Windows PowerShell 5.1, PowerShell 7 and a Linux shell, a 1.x upgrade on another machine while the
-store still serves 1.x, the 2.0 privacy text on the public page, the staged store submission and
-its approval. Then in one sitting: `v2.0.0` as latest, `main` fast-forwarded, the npm launcher
-published, the frozen install strings proved, the staged extension published, a clean-profile run
-of the public path on Windows and Linux, the public-state commit with a second fast-forward of
-`main` and a website rebuild, the MCP Registry record and the WinGet manifests, and once
-winget-pkgs merges them, the README and installation guide lines that say WinGet carries 2.0. Not
-before approval.
+The release path is simple (the owner, 2026-10-19): the scope is closed, so only fixes for something
+a person would hit go in, each one commit with its test. One bundle, built by the release workflow
+from `dev`, is what every machine tests, and `v2.0.0` is tagged on that exact commit. A fix after
+that rebuilds the bundle and re-runs only the check it touches. The steps of the cutover are in
+`docs/RELEASE.md`.
 
 ## CI
 
@@ -134,52 +128,33 @@ cancels a run in progress, and cargo audit runs daily (audit.yml) and in the rel
 
 ## Release checklist
 
-Each line names who does it: the coordinator (the agent session that integrates and deploys) or
-the owner. The ledgers keep the detail; this is what still gates the release.
+Now:
 
-Before the release candidate's bundle:
+- Coordinator: the browser_dialog wording (an agent reads a dialog's status before it answers),
+  then the bundle from `dev`, verified with `scripts/check-release-candidate.ps1`.
+- Owner: Bluefin from that bundle (`docs/testing/linux-other-environments-2026-10-19.md`). CachyOS
+  passed on the bundle of 68419db8 (linux-2); linux-claude re-checks only what changed since.
+- Owner: the extension's store submission from that bundle: the 2.0 privacy page first, the
+  remote-code answer No, the recaptured assets, and what a reviewer is offered while the public
+  command still installs 1.x (`docs/release/store-disclosure-2.0.md`). After it, only a release
+  blocker reopens the extension.
+- Owner: JQ3 (keep or drop the extension's host permissions) and the installer's wait times, each
+  decided or kept.
 
-- linux-claude: linux-2 Part 2 on CachyOS, from the release workflow's bundle (the go was sent on
-  62bfa224).
-- Coordinator: one MCPB install in Claude Desktop from the rehearsed unit, on a clean Windows test
-  machine. The rehearsal, the candidate check and `winget validate` passed on 26e48ad0.
-- Coordinator: a Windows Chrome and Edge check of the extension: a session end with preserve-tabs
-  on, a reuse, and the popup states.
-- Owner: JQ3, keep or drop the extension's host permissions, recorded as a decision.
-- Owner: the installer's wait times (90 s and 120 s), one timed cold run or "keep" recorded.
-- Coordinator: the release workflow's bundle from the candidate commit, verified with
-  `scripts/check-release-candidate.ps1`. Nothing is tagged or published.
+Before the tag, checks that prove a promise:
 
-Between the bundle and the cutover:
+- A 1.x upgrade on another machine while the store still serves 1.x.
+- On Windows: a restart and a sign-out with an agent session, the browser and the window open: no
+  shutdown block, and one service afterwards. One `.mcpb` install in Claude Desktop from the
+  bundle, and the extension in Chrome and Edge.
+- The owner's look at the window on a light-mode Windows account at 100% and 150%.
+- The three 1.x users told directly, the sylin.org redirects to the scripts on `main`, and the
+  website's 2.0 pages.
 
-- Coordinator: the install proof on the bundle (`GHOSTLIGHT_FROM`) on Windows PowerShell 5.1,
-  PowerShell 7 and a Linux shell, and clean installs from it on a Windows test machine and the
-  Linux test machine.
-- Coordinator: a 1.x upgrade on another machine while the store still serves 1.x
-  (`docs/RELEASE.md`, The 2.0 cutover, step 3).
-- Owner: on Windows, a restart and a sign-out with an agent session, the browser and the window
-  open: no shutdown block, and one service afterwards.
-- Owner: the daily machine on the candidate build, one check on a light-mode Windows account at
-  150% (frame, height, tray), and the desktop shell's checkpoint 2.
-- Owner: tell the three 1.x users directly: remove the 1.x Claude Desktop extension or install the
-  2.0 `.mcpb`, and do not run `npx ghostlight` until the cutover.
-- Owner: the sylin.org redirects `/ghostlight/get.ps1` and `/ghostlight/get.sh` to the scripts
-  on `main`, and the website's 2.0 pages (separate repository).
-- Owner: what a store reviewer is offered while the item is in review. With no prerelease, the
-  public command installs 1.x until the cutover (`docs/release/store-disclosure-2.0.md`, Notes for
-  certification).
-- Owner: the 2.0 privacy page published, then the staged store submission with the remote-code
-  answer (No) and the recaptured assets, and its approval.
+The cutover, in one sitting after the store approves (`docs/RELEASE.md`): `v2.0.0` as latest on
+the tested commit, `main` fast-forwarded, the npm launcher, the store publish, a clean run of the
+public path on Windows and Linux, the public-state commit and the website, the MCP Registry record
+and the WinGet manifests.
 
-The cutover, in one sitting (`docs/RELEASE.md`, The 2.0 cutover):
-
-- Owner: `v2.0.0` as latest, `main` fast-forwarded, the npm launcher, the frozen strings and the
-  restore commands, and the store publish.
-- Coordinator: the clean-profile run of the public path on Windows and Linux.
-- Coordinator drafts, owner pushes: the public-state commit, the second fast-forward of `main`
-  and the website rebuild.
-- Owner: the MCP Registry record and the WinGet manifests.
-- Coordinator drafts, owner pushes: once winget-pkgs merges the 2.0.0 manifest, the README and
-  installation guide lines that say WinGet carries 2.0, and a fast-forward of `main`.
-
-Tags, publication and store actions are the owner's call.
+After 2.0: Alpine in 2.0.1 with musl images (linux-claude; a musl build already runs on test-03),
+ADR-0203's sixteen deferred slices, and the CI review's deferred items.

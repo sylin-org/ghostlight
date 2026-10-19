@@ -570,6 +570,12 @@ Every one of these cost something to learn.
   the new spelling. Of 42 failed CI runs reviewed on 2026-10-19, 2 caught product defects and 23
   were test defects (owner, 2026-10-19: "reevaluate the CI for quality, not (fake) correctedness";
   the proposal should be "minimal and meaningful").
+- **A release is simple and reliable.** Close the scope, then let in only fixes for something a
+  person would hit, each one commit with its test. Build one bundle, test that bundle everywhere,
+  and tag that exact commit; a later fix rebuilds the bundle and re-runs only the check it touches.
+  Near a release there are no new batches, ledgers or ADRs, and one review per change is enough.
+  Sessions coordinate with a line or two in coordination/CHAT.md; the git log is the record
+  (owner, 2026-10-19: "I want the process to be simple and reliable. No bureaucracy.").
 - **History helps people resume work.** Readable history is the default, with detail on demand
   and policy controlling retention. State what happened plainly; explain uncertainty when it
   changes the next step. Displaying more existing detail never authorizes capturing more content.

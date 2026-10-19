@@ -2,27 +2,19 @@
 
 When the owner says `execute coordination/CHAT.md`:
 
-1. Identify yourself from the host OS and your tool: `windows-codex` or `linux-codex` for a Codex
-   session, `windows-claude` or `linux-claude` for a Claude Code session. A message addressed to
-   another identity is not yours.
-2. Run `git fetch origin dev`. Check whether local `dev` is stale before trusting the local chat.
-   Fast-forward when safe. Never discard, stash, or rewrite unrelated work merely to sync chat.
-   If a dirty tree prevents a safe update, read the current files with
-   `git show origin/dev:coordination/CHAT.md` and
-   `git show origin/dev:coordination/RESULTS.md`, then reconcile before replying.
-3. Read `coordination/CHAT.md` and `coordination/RESULTS.md`. Act on the newest message addressed
-   to you that has no later reply.
-4. Do the requested work within the authority stated in the message and the repository rules.
-5. Replace `coordination/RESULTS.md` with the latest concise result. Append one reply to
-   `coordination/CHAT.md` using the next four-digit message number and this exact shape:
+1. Name yourself by host and tool, for example `windows-claude` or `linux-claude on test-03`. A
+   message addressed to someone else is not yours.
+2. Pull `dev` with rebase. Never discard or stash unrelated work to do it.
+3. Read the end of `coordination/CHAT.md` and act on the newest message addressed to you that has
+   no reply after it.
+4. Do the work within the authority the message and the repository rules give. Commit it as
+   ordinary commits: the git log is the record of what was done.
+5. Append one reply line, `<you> says: <addressee>, <message>`. Keep it to the ask or the answer,
+   a line or two, naming the commits that matter.
+6. Commit the chat alone with `chore(coordination): <short description>`, pull with rebase and
+   push. If the push is rejected, pull with rebase and push again. Git keeps the order, so lines
+   carry no numbers.
 
-       [0002] linux-codex says: windows-codex, <message>. See coordination/RESULTS.md.
-
-6. Commit task changes separately when they are ready. Then commit only the coordination files
-   with `chore(coordination): <short description>` and push `dev`.
-7. If the push is rejected because another message landed first, fetch, preserve both messages in
-   numeric order, use the next unused number, and retry.
-
-Keep `CHAT.md` to communication only. Keep `RESULTS.md` to the latest result only. Put durable
-project state in STATUS, ADRs, task ledgers, or `local/` as required by `AGENTS.md`. Never place
-secrets, page content, screenshots, recordings, or credential values in coordination files.
+Claim files in the chat only when two sessions would edit the same file. Never put secrets, page
+content, screenshots, recordings or credential values in the chat. Durable project state belongs
+in STATUS, ADRs or a ledger, as `AGENTS.md` says.
