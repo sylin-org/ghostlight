@@ -1,6 +1,6 @@
 // The real executables on relay protocol 4: an MCP session through `ghostlight mcp`, a synthetic
 // browser through `ghostlight chrome-extension://<id>/`, a service killed and restarted under
-// both, Quit holding the next browser start back, ten racing starts leaving one service, and, on
+// both, a browser restart that hands the agent's tab id to the person's page, Quit holding the next browser start back, ten racing starts leaving one service, and, on
 // Linux, the edge and the service each leaving on SIGTERM, the session's end there.
 // Every process runs in a fresh test home under the temp directory; nothing touches the real one.
 import assert from "node:assert/strict";
@@ -23,6 +23,8 @@ const catalog = JSON.parse(process.platform === "win32"
   ? goldenText
   : goldenText.replaceAll(JSON.stringify(GOLDEN_UPLOAD_PATH), JSON.stringify(PLATFORM_UPLOAD_PATH)));
 const DENIED_HOST = "blocked.localhost";
+// The person's own page that a restarted browser shows under the agent's old tab id.
+const PERSONS_URL = "https://example.com/the-persons-own";
 const BROWSER_ABSENT = (frame) => frame.kind === "backend_unavailable" && frame.service === "absent";
 const CONTENDERS = 10;
 // How long each binary may take to leave once it hears the end of the session, the budgets of
@@ -150,12 +152,27 @@ async function mainFlow() {
     assert.equal(reread.facts.text, "Example Domain");
     console.log("PASS the next call resumes by token, the tab handle survives and the browser reconnects");
 
+    // The browser restarts and hands the agent's old tab id to the person's own page.
+    reborn.close();
+    await within(reborn.ended, 20_000, "the browser edge exits with its browser");
+    world.navigate(world.tabs[0].tab_id, PERSONS_URL);
+    const restartedBrowser = SyntheticBrowser.viaEdge(home, world);
+    browsers.push(restartedBrowser);
+    await restartedBrowser.connect();
+    const stale = await mcp.facts("browser_read", { tab: handle });
+    assert.notEqual(stale.status, "succeeded");
+    assert.equal(stale.summary, "That tab is no longer open.");
+    assert.equal(restartedBrowser.requested("call").length, 0, "nothing reads the person's tab");
+    const afterRestart = await mcp.facts("browser_tabs", { action: "list" });
+    assert.deepEqual(afterRestart.facts.tabs, [], "the person's tab is not listed under the agent's handle");
+    console.log("PASS a browser restart never hands the agent's tab handle the person's tab");
+
     // Quit holds.
     const quitting = await home.control({ op: controlOp.quit, reason: quitReason.quit });
     assert.deepEqual(quitting.value, { quitting: true });
     await until(async () => !(await home.status()), "the service is gone after quit", 20_000);
     assert.equal(existsSync(home.file(...QUIT_LATCH)), true, "quit leaves its latch");
-    await reborn.waitFor(BROWSER_ABSENT, 15_000, "the browser edge reports the quit");
+    await restartedBrowser.waitFor(BROWSER_ABSENT, 15_000, "the browser edge reports the quit");
     const afterQuit = SyntheticBrowser.viaEdge(home, world);
     browsers.push(afterQuit);
     afterQuit.send(afterQuit.helloFrame());
@@ -168,7 +185,7 @@ async function mainFlow() {
     const revived = await home.serviceUp();
     assert.equal(revived.started_by, startReason.agent);
     assert.equal(existsSync(home.file(...QUIT_LATCH)), false, "an agent start clears the latch");
-    await within(reborn.ended, 20_000, "the browser edge that heard the quit exits when a service accepts");
+    await within(restartedBrowser.ended, 20_000, "the browser edge that heard the quit exits when a service accepts");
     console.log("PASS Quit holds a browser start back and the next MCP request starts the service");
 
     // A browser and a heartbeat on the revived service.

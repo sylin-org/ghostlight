@@ -9,6 +9,7 @@ mod interaction;
 mod invocation_id;
 mod item;
 mod navigation;
+mod pending;
 mod pointer;
 mod policy;
 mod reading;
@@ -393,7 +394,7 @@ impl ApplicationExecutor {
         let snapshot = self.governance.snapshot();
         let frame = Frame::of(operation);
         let context = InvocationContext::of(prepared, operation, &snapshot, &frame);
-        let terminal = if capacity_refused {
+        let mut terminal = if capacity_refused {
             let refusal = Refusal::Capacity;
             Terminal {
                 result: InvocationResult::new(
@@ -483,6 +484,9 @@ impl ApplicationExecutor {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .running_or_finished = true;
+        if let Some(lease) = lease.as_ref() {
+            pending::report_forgotten(lease, &mut terminal);
+        }
         self.finish(&gate, terminal, Completion::of(&context, tool, started))
     }
 
@@ -494,6 +498,9 @@ impl ApplicationExecutor {
     ) -> Terminal {
         if !matches!(operation, Operation::ExplainPolicy(_)) {
             if let Some(terminal) = self.audit_preflight(context) {
+                return terminal;
+            }
+            if let Some(terminal) = self.confirm_pending(context, lease) {
                 return terminal;
             }
         }
@@ -1412,7 +1419,7 @@ impl ApplicationExecutor {
     /// browser connected at all.
     ///
     /// The session's browser is the one its first tab bound, when [`WorkspaceLease::add_tab`] or
-    /// [`WorkspaceLease::restore_tab`] took it. A crossing reads that binding and never writes it,
+    /// [`WorkspaceLease::restore_tab`] took it, or [`WorkspaceLease::confirm`] kept a pending one. A crossing reads that binding and never writes it,
     /// so a crossing that binds no tab, such as a recording status, leaves the session free to
     /// open its first tab in any browser. Until a tab binds one, the frame keeps its own first
     /// choice, so one frame never crosses to two browsers. When the chosen browser is gone, the
@@ -3114,6 +3121,7 @@ mod tests {
     mod provenance;
     mod rebound;
     mod replacement;
+    mod restarts;
     mod tabs;
     use std::fs;
     use std::io;

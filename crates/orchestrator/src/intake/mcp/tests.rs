@@ -547,6 +547,7 @@ fn resume_state_round_trips_through_the_token() {
             browser_id: "browser_a".into(),
             tab_id: 42,
             handle: "tab_1".into(),
+            url_digest: Some("digest".into()),
         }])
         .unwrap();
     let token = state.encode();
@@ -618,6 +619,7 @@ fn a_resume_token_written_with_the_retired_fields_still_resumes() {
             browser_id: "browser_a".into(),
             tab_id: 42,
             handle: "tab_1".into(),
+            url_digest: None,
         }]
     );
 

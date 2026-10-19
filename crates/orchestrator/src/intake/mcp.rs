@@ -551,6 +551,11 @@ pub struct OwnedTab {
     pub tab_id: u64,
     /// The model-facing tab handle.
     pub handle: String,
+    /// The digest of the URL the session last knew for the tab, never the URL itself. The resumed
+    /// binding waits until its browser lists a tab with this id at that URL. A token written
+    /// before digests carries none, and its tab resumes stale.
+    #[serde(default)]
+    pub url_digest: Option<String>,
 }
 
 /// What a session needs to continue after a service restart (ADR-0197 Decision 12).
