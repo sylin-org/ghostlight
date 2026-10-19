@@ -351,6 +351,33 @@ test("a launch installs when the edge or the service it would run is missing", a
   }
 });
 
+test("a launch installs when the shell of the same version is missing, so the install puts it back", async () => {
+  const f = await launcherFixture();
+  try {
+    await f.install(PACKAGE_VERSION);
+    await rm(join(f.bin, "ghostlight-desktop"));
+    const launch = await f.prepareLaunch({ ...f.options, arguments_: [] });
+    assert.equal(launch.executable, join(f.bin, "ghostlight"));
+    assert.equal(f.activity.installs.length, 1);
+    assert.match(await readFile(join(f.bin, "ghostlight-desktop"), "utf8"), /^2\.0\.0:/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a newer installed set whose shell is missing runs as it is, since this package cannot install over it", async () => {
+  const f = await launcherFixture();
+  try {
+    await f.install("2.1.0");
+    await rm(join(f.bin, "ghostlight-desktop"));
+    const launch = await f.prepareLaunch({ ...f.options, arguments_: [], fetchImpl: NO_DOWNLOAD });
+    assert.equal(launch.executable, join(f.bin, "ghostlight"));
+    assert.equal(f.activity.installs.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("the development channel keeps the installed set whatever its version", async () => {
   const f = await launcherFixture();
   try {

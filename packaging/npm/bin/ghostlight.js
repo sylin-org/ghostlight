@@ -22,9 +22,10 @@ const EXECUTABLES = [
   "ghostlight-service",
   "ghostlight-desktop",
 ];
-/** Positions in `EXECUTABLES` of the two images every launch needs. */
+/** Positions in `EXECUTABLES` of the edge, the service and the shell. */
 const EDGE = 0;
 const SERVICE = 1;
+const SHELL = 2;
 /** The edge command that starts the MCP stdio relay; a launch with no arguments means it. */
 const MCP_COMMAND = "mcp";
 
@@ -155,13 +156,16 @@ export async function readInstallRecord(directory) {
 }
 
 /**
- * True when the installed service is the same as or newer than the package. An absent,
- * unreadable or unordered record counts as older, so the next launch installs.
+ * True when the installed service is newer than the package, or the same version with the shell
+ * at `shell` in place. The service treats a missing shell of its own version as damage and puts
+ * it back, so that launch installs; it never installs over a newer service, so that set runs
+ * without its shell. An absent, unreadable or unordered record counts as older, so the next
+ * launch installs.
  */
-export async function installedSetIsCurrent(directory, packageVersion) {
+export async function installedSetIsCurrent(directory, packageVersion, shell) {
   const record = await readInstallRecord(directory);
   const order = compareVersions(record?.service_version, packageVersion);
-  return order !== null && order >= 0;
+  return order !== null && (order > 0 || (order === 0 && existsSync(shell)));
 }
 
 export function validateChecksums(manifest, version, names) {
@@ -284,12 +288,12 @@ async function stageDownloads({ indexes, packageJson, manifest, platform, archit
  * Decides what to run and makes it ready. `deployment` (`deployment install`, also with
  * `--restore`) runs this package's own verified service from a staged copy, never the installed
  * one, because the installer installs the images it belongs to. Every other command except the
- * never-install ones (see `neverInstalls`) runs the installed edge when `install.json` is the
- * same as or newer than this package, or records the development channel; otherwise the verified
- * download installs itself first. The edge hands every command but `mcp` to the service beside
- * it, and a launch with no arguments is `mcp`. The never-install commands run the installed edge,
- * or with nothing installed the verified staged service itself, which answers them and installs
- * nothing.
+ * never-install ones (see `neverInstalls`) runs the installed edge when `install.json` records
+ * the development channel, or when the installed edge and service are in `bin` and the set is
+ * current (see `installedSetIsCurrent`); otherwise the verified download installs itself first.
+ * The edge hands every command but `mcp` to the service beside it, and a launch with no arguments
+ * is `mcp`. The never-install commands run the installed edge, or with nothing installed the
+ * verified staged service itself, which answers them and installs nothing.
  *
  * Resolves to the executable, its arguments, and `cleanup` for any staged files.
  */
@@ -307,6 +311,7 @@ export async function prepareLaunch({
   const executables = executableNames(platform, architecture);
   const installedEdge = join(directory, executables[EDGE]);
   const installedService = join(directory, executables[SERVICE]);
+  const installedShell = join(directory, executables[SHELL]);
   const launch = !neverInstalls(arguments_);
   const nothingToClean = async () => {};
   const readPackage = async () => {
@@ -335,7 +340,7 @@ export async function prepareLaunch({
     if (development && !existsSync(installedEdge)) {
       throw new Error(developmentExecutableMissing(installedEdge));
     }
-    if (development || (present && await installedSetIsCurrent(directory, packageVersion))) {
+    if (development || (present && await installedSetIsCurrent(directory, packageVersion, installedShell))) {
       return { executable: installedEdge, arguments_: edgeArguments(arguments_), cleanup: nothingToClean };
     }
     const { packageJson, manifest } = await readPackage();

@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1 and I3 have landed. ux-2 has closed, so I7, I9a, I9b, I4, I5, I6, I8, I10, I12 and I13 can start,
+I1, I3 and I7 have landed. ux-2 has closed, so I9a, I9b, I4, I5, I6, I8, I10, I12 and I13 can start,
 and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
 registers) and the live check on a test machine.
 
@@ -18,7 +18,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | --- | --- | --- | --- | --- | --- |
 | I1 | fix(install): one owner-private creator for secrets and records | candidate | none | see Notes | landed (this commit) |
 | I3 | fix(install): Ghostlight owns the command, and the client keeps its own keys | candidate | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
-| I7 | fix(deployment): a same-version install restores a missing shell | candidate | none | - | todo |
+| I7 | fix(deployment): a same-version install restores a missing shell | candidate | none | see Notes | landed (this commit) |
 | I9a | docs(plugin): the plugin README withdraws the precedence claim | candidate | none | - | todo |
 | I9b | fix(plugin): the skill says only what the catalog cannot | candidate | none | - | todo |
 | I11 | fix(plugin): the plugin registers what question 1 decides | candidate | owner question 1 (the plugin) and the live check | held for the owner | todo (held for the owner's question 1) |
@@ -56,3 +56,14 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 - I3, an extra proof: `a_dialect_that_needs_a_type_is_updatable_without_it_and_the_update_keeps_the_rest`.
 - I3 changes no native golden: they seed no Ghostlight entry, so `linux.txt` is unaffected. It
   needs no journey.
+- I7, the launchers: they check the shell only when the installed record is this package's own
+  version. A newer installed set whose shell is missing still runs as it is, because the service
+  refuses to install an older payload over it; installing there would turn a missing window into
+  a launch that fails. A changed shell is not seen by the launchers, which never hash the
+  installed set; the service's same-version install finds it. Not a changed decision.
+- I7, the service: `shell_changes` is read once per plan and passed to `place_in_bin`, so a
+  same-version plan with a missing or changed shell takes the place-in-bin arm and restarts, as a
+  damaged service image does. An extra proof covers the second `Same` arm (a retired development
+  directory left to remove): `a_same_version_install_with_a_missing_shell_and_a_migration_restores_the_shell`.
+- I7 changes no golden. It needs no new journey: the installer journeys on a test machine cover
+  the place-in-bin path it reuses. `linux.txt` is unaffected.

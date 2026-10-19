@@ -852,6 +852,7 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
         Channel::Release
     };
     let edge = edge_replacement(context, installed.as_ref(), channel)?;
+    let shell = shell_changes(context);
     match mode {
         Mode::Release => {
             if installed
@@ -867,8 +868,11 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
                     let installed = installed.as_ref().expect("a newer standing has a record");
                     return Err(PayloadRefused::new(installed, &payload_record).into());
                 }
+                // Only an intact set is left alone: a missing or changed edge or shell is damage,
+                // and the install puts it back.
                 Standing::Same
                     if edge.is_none()
+                        && !shell
                         && plan.migration.is_empty()
                         && retired.is_empty()
                         && version_directories.is_empty() =>
@@ -877,14 +881,14 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
                     plan.restart = false;
                     return Ok(plan);
                 }
-                Standing::Same if edge.is_none() => {}
+                Standing::Same if edge.is_none() && !shell => {}
                 Standing::Absent | Standing::Older | Standing::Damaged | Standing::Same => {
-                    place_in_bin(context, &mut plan, installed.as_ref(), edge, channel)?;
+                    place_in_bin(context, &mut plan, installed.as_ref(), edge, shell, channel)?;
                 }
             }
         }
         Mode::Development | Mode::Restore => {
-            place_in_bin(context, &mut plan, installed.as_ref(), edge, channel)?;
+            place_in_bin(context, &mut plan, installed.as_ref(), edge, shell, channel)?;
         }
     }
     plan.processes_to_stop = plan.migration.images_to_stop.clone();
@@ -1138,17 +1142,19 @@ fn edge_replacement(
 }
 
 /// Add the swaps that place the payload in `bin` to `plan`, and set the record `bin` holds once
-/// they are done: the service always, the shell when the payload has one `bin` does not, and the
-/// edge when `edge` gives a reason (the edge it leaves is the payload's, or the installed one).
+/// they are done: the service always, the shell when `shell` says the payload has one `bin` does
+/// not ([`shell_changes`]), and the edge when `edge` gives a reason (the edge it leaves is the
+/// payload's, or the installed one).
 fn place_in_bin(
     context: &Context<'_>,
     plan: &mut InstallPlan,
     installed: Option<&InstallRecord>,
     edge: Option<EdgeReplacement>,
+    shell: bool,
     channel: Channel,
 ) -> anyhow::Result<()> {
     plan.swaps.push(service_swap(context));
-    if shell_changes(context) {
+    if shell {
         plan.swaps.push(desktop_swap(context));
     }
     plan.edge_replaced = edge;
@@ -3582,6 +3588,70 @@ mod tests {
             .run(Mode::Release, VERSION, &FakeControl::new())
             .unwrap();
         assert!(!fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME).exists());
+    }
+
+    /// Install the release with a shell, `damage` the shell in `bin`, and install the same
+    /// version again: the shell is put back beside the service, the intact edge stays, and the
+    /// next install of that version is a no-op again.
+    fn assert_a_same_version_install_restores_the_shell(damage: impl Fn(&Path)) {
+        let fixture = Fixture::new();
+        add_shell(&fixture, "shell");
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        let shell = fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME);
+        damage(&shell);
+
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(!outcome.plan.unchanged);
+        assert_eq!(
+            placed_names(&outcome.plan),
+            [SERVICE_EXECUTABLE_NAME, DESKTOP_EXECUTABLE_NAME]
+        );
+        assert_eq!(fixture.read(shell), "shell");
+        assert_eq!(outcome.service_started, Some(true));
+
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(outcome.plan.unchanged);
+    }
+
+    #[test]
+    fn a_same_version_install_restores_a_missing_shell() {
+        assert_a_same_version_install_restores_the_shell(|shell| fs::remove_file(shell).unwrap());
+    }
+
+    #[test]
+    fn a_same_version_install_restores_a_changed_shell() {
+        assert_a_same_version_install_restores_the_shell(|shell| {
+            fs::write(shell, "another shell").unwrap();
+        });
+    }
+
+    #[test]
+    fn a_same_version_install_with_a_missing_shell_and_a_migration_restores_the_shell() {
+        // The second `Same` arm: the set is the same version, but what earlier builds left
+        // still goes, so the install does not take the unchanged shortcut.
+        let fixture = Fixture::new();
+        add_shell(&fixture, "shell");
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        fs::remove_file(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME)).unwrap();
+        fs::create_dir_all(fixture.layout.retired_development_directory()).unwrap();
+
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(placed_names(&outcome.plan).contains(&DESKTOP_EXECUTABLE_NAME));
+        assert_eq!(
+            fixture.read(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
+            "shell"
+        );
+        assert!(!fixture.layout.retired_development_directory().exists());
     }
 
     /// A temporary home with its `bin` and retired development directories.

@@ -15,6 +15,8 @@ const INSTALL_RECORD_PATH = path.join("bin", "install.json");
 const EDGE_IMAGE = "ghostlight";
 /** The service: the bundled copy installs the set, and the installed copy serves the edge. */
 const SERVICE_IMAGE = "ghostlight-service";
+/** The shell: the window the installed service opens. */
+const SHELL_IMAGE = "ghostlight-desktop";
 /** The edge command that starts the MCP stdio relay. */
 const MCP_COMMAND = "mcp";
 /** The channel `install.json` records for a build the development loop installed. */
@@ -98,12 +100,16 @@ function developmentExecutableMissing(executable) {
 }
 
 /**
- * True when the installed service is the same as or newer than this bundle. An absent,
- * unreadable or unordered `install.json` counts as older, so the bundle installs itself.
+ * True when the installed service is newer than this bundle, or the same version with its shell
+ * in place. The service treats a missing shell of its own version as damage and puts it back, so
+ * that start installs; it never installs over a newer service, so that set runs without its
+ * shell. An absent, unreadable or unordered `install.json` counts as older, so the bundle
+ * installs itself.
  */
-function installIsCurrent(home, version) {
+function installIsCurrent(home, version, platform = process.platform) {
   const order = compareVersions(readInstallRecord(home)?.service_version, version);
-  return order !== null && order >= 0;
+  return order !== null
+    && (order > 0 || (order === 0 && fs.existsSync(installedImage(home, platform, SHELL_IMAGE))));
 }
 
 function detail(label, result) {
@@ -139,7 +145,7 @@ function run(options = {}) {
   let current;
   try {
     current = development || (fs.existsSync(edge) && fs.existsSync(installedService)
-      && installIsCurrent(home, options.version ?? bundleVersion(serverDirectory)));
+      && installIsCurrent(home, options.version ?? bundleVersion(serverDirectory), platform));
   } catch (error) {
     standardError.write(`Ghostlight MCPB setup failed: ${error.message}\n`);
     return 1;

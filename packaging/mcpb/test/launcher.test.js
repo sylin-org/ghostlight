@@ -34,15 +34,15 @@ test("versions order numerically and a pre-release sorts below its release", () 
 });
 
 /**
- * A temporary Ghostlight home, optionally holding an install record and the edge and service a
- * finished install leaves beside it. `missing` names an installed image to leave out.
+ * A temporary Ghostlight home, optionally holding an install record and the edge, service and
+ * shell a finished install leaves beside it. `missing` names an installed image to leave out.
  */
 function homeWithRecord(record, { missing } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ghostlight-mcpb-"));
   if (record !== undefined) {
     fs.mkdirSync(path.join(home, "bin"));
     fs.writeFileSync(path.join(home, "bin", "install.json"), record);
-    for (const name of ["ghostlight", "ghostlight-service"]) {
+    for (const name of ["ghostlight", "ghostlight-service", "ghostlight-desktop"]) {
       if (name !== missing) fs.writeFileSync(path.join(home, "bin", `${name}.exe`), "");
     }
   }
@@ -119,6 +119,20 @@ test("a current record whose installed edge or service is missing installs first
   }
 });
 
+test("a same-version record whose shell is missing installs first, so the install puts it back", () => {
+  const { status, calls } = launch(JSON.stringify({ service_version: BUNDLE_VERSION }), { missing: "ghostlight-desktop" });
+  assert.equal(status, 0);
+  assert.deepEqual(calls.map((call) => call.args), [["deployment", "install"], ["mcp"]]);
+});
+
+test("a newer record whose shell is missing starts the installed MCP relay, since the bundle cannot install over it", () => {
+  const { status, calls, home } = launch(JSON.stringify({ service_version: "2.1.0" }), { missing: "ghostlight-desktop" });
+  assert.equal(status, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, path.join(home, "bin", "ghostlight.exe"));
+  assert.deepEqual(calls[0].args, ["mcp"]);
+});
+
 test("a development record starts the installed MCP relay without installing, whatever its version", () => {
   const { status, calls, errors, home } = launch(JSON.stringify({ service_version: "1.0.0", channel: "development" }));
   assert.equal(status, 0);
@@ -146,8 +160,8 @@ test("a development record whose edge is gone names the way back and installs no
 test("the install record is read from the bin directory of the Ghostlight home", () => {
   const home = homeWithRecord(JSON.stringify({ service_version: "2.0.0" }));
   try {
-    assert.equal(installIsCurrent(home, "2.0.0"), true);
-    assert.equal(installIsCurrent(path.join(home, "missing"), "2.0.0"), false);
+    assert.equal(installIsCurrent(home, "2.0.0", "win32"), true);
+    assert.equal(installIsCurrent(path.join(home, "missing"), "2.0.0", "win32"), false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
