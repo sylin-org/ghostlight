@@ -6,10 +6,10 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::governance::Decision;
-use crate::language::audit::AuditRefusal;
 use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
 use crate::language::coverage::{qualify, Coverage};
-use crate::language::outcome::{BlockedReason, BrowserUnavailableReason, CheckFailure, Outcome};
+use crate::language::history::OutcomeClass;
+use crate::language::outcome::Outcome;
 
 use super::result::Readiness;
 use super::{Effect, InvocationContext, InvocationResult, Status, Terminal};
@@ -240,67 +240,19 @@ pub(super) fn unexecuted_row(step: usize, status: UnexecutedStatus) -> Value {
     json!({"step":step,"status":status,"effect":Effect::None,"repeat_safe":false})
 }
 
+/// The cause a flow keeps for a child, derived from the child's one outcome class.
 fn child_cause(terminal: &Terminal) -> Option<StepCause> {
-    use AuditRefusal as A;
-    Some(match terminal.audit.refusal() {
-        Some(A::AuthorityBlocked {
-            cause: BlockedReason::AuditUnavailable,
-        }) => StepCause::AuditUnavailable,
-        Some(A::AuthorityBlocked {
-            cause: BlockedReason::Hold,
-        }) => StepCause::Paused,
-        Some(A::AuthorityBlocked {
-            cause: BlockedReason::SessionEnded,
-        }) => StepCause::SessionEnded,
-        Some(A::CredentialHandoff | A::CredentialAuthorization) => StepCause::Failed,
-        Some(A::LocalInterlock) => StepCause::AttentionRequired,
-        Some(A::DeadlineBeforeStart | A::DeadlineExpired { .. }) => StepCause::Deadline,
-        Some(A::CancelledBeforeStart | A::CancelledBeforeDispatch | A::CancelledAfterDispatch) => {
-            StepCause::Cancelled
-        }
-        Some(
-            A::ConnectionLost
-            | A::BrowserUnavailable {
-                cause:
-                    BrowserUnavailableReason::NotConnected | BrowserUnavailableReason::NotAnswering,
-            },
-        ) => StepCause::ConnectionLost,
-        Some(A::ActionUnconfirmed { cause }) => unconfirmed_cause(*cause),
-        _ => match terminal.result.status {
-            Status::Succeeded => return None,
-            Status::Blocked => StepCause::PolicyBlocked,
-            Status::Failed => StepCause::Failed,
-            Status::Cancelled => StepCause::Cancelled,
-            Status::Unknown => StepCause::Unconfirmed,
-        },
-    })
-}
-
-/// The flow cause of an applied child whose requested check did not confirm it.
-///
-/// It is the cause the check would have had on its own, so a Pause, Stop, cancellation, or
-/// deadline during a check still stops the flow the way it stops any other step.
-const fn unconfirmed_cause(cause: CheckFailure) -> StepCause {
-    match cause {
-        CheckFailure::Blocked(BlockedReason::AuditUnavailable) => StepCause::AuditUnavailable,
-        CheckFailure::Blocked(BlockedReason::Hold) => StepCause::Paused,
-        CheckFailure::Blocked(BlockedReason::SessionEnded) => StepCause::SessionEnded,
-        CheckFailure::Blocked(_) => StepCause::PolicyBlocked,
-        CheckFailure::Cancelled => StepCause::Cancelled,
-        CheckFailure::DeadlineExpired => StepCause::Deadline,
-        CheckFailure::Disconnected => StepCause::ConnectionLost,
-        CheckFailure::Unmet
-        | CheckFailure::BrowserUnavailable
-        | CheckFailure::DocumentUnavailable
-        | CheckFailure::BrowserRefused => StepCause::Failed,
-    }
+    let refusal = terminal.audit.refusal();
+    OutcomeClass::of(terminal.result.status, refusal).step_cause(refusal)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::governance::GovernanceFacade;
-    use crate::language::outcome::{Refusal, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE};
+    use crate::language::outcome::{
+        BlockedReason, Refusal, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE,
+    };
 
     use crate::intake::session::IntakeChannel;
     use crate::language::page_refusal::PageGesture;

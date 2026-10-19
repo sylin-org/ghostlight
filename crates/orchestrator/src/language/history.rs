@@ -1,18 +1,191 @@
-//! Closed composition receipt identities and readable retained-history explanations.
+//! Closed composition receipt identities, each record's outcome class, and readable
+//! retained-history explanations.
 //!
-//! History is read by a person in the window. A record keeps the summary the model was told, and
-//! a few of those speak to the model about "the user": the human controls' directives, the
-//! channel refusal, the refusal that leaves opening a browser to the person, and the credential
-//! refusal. [`for_the_person`] gives the window its own sentence for them, and the permission
-//! explanations name a refusal's reason in words rather than as a code.
+//! History is read by a person in the window. Each record has one closed [`OutcomeClass`],
+//! computed here from its typed status and refusal, and a flow's account of each step derives
+//! its cause from the same class ([`OutcomeClass::step_cause`]). A record keeps the summary the
+//! model was told, and a few of those speak to the model about "the user": the human controls'
+//! directives, the channel refusal, the refusal that leaves opening a browser to the person, and
+//! the credential refusal. [`for_the_person`] gives the window its own sentence for them, and the
+//! permission explanations name a refusal's reason in words rather than as a code.
 
+use crate::audit::AuditRecord;
 use crate::governance::evidence::PermissionCheck;
 use crate::governance::{ReasonCode, MANAGED_TIER};
 use crate::intake::session::IntakeChannel;
 use crate::language::audit::AuditRefusal;
 use crate::language::channel_switch;
-use crate::language::outcome::{PolicyAuthor, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE};
+use crate::language::composition::StepCause;
+use crate::language::outcome::{
+    BlockedReason, BrowserUnavailableReason, CheckFailure, PolicyAuthor, HUMAN_PAUSE_DIRECTIVE,
+    HUMAN_STOP_DIRECTIVE,
+};
+use crate::work::result::Status;
 use serde::{Deserialize, Serialize};
+
+/// What a settled call came to, as history shows it (ADR-0203 Decision 12.2).
+///
+/// The window draws each row from this class and never re-derives it from the decision and the
+/// status words.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeClass {
+    /// It did what it was asked.
+    Succeeded,
+    /// Policy or the person's runtime controls refused it.
+    Refused,
+    /// The person's own browser setting kept a tab open that the call would have closed.
+    Kept,
+    /// It waits on something only the person can give, such as a secret they had not allowed
+    /// Ghostlight to type.
+    NeedsYou,
+    /// It could not do what it was asked, or could not start.
+    Failed,
+    /// What it did cannot be confirmed.
+    Unknown,
+    /// It was cancelled before it finished.
+    Cancelled,
+}
+
+impl OutcomeClass {
+    /// The class of a call that settled with `status` and, when it did not succeed, the closed
+    /// `refusal` its record keeps.
+    #[must_use]
+    pub const fn of(status: Status, refusal: Option<&AuditRefusal>) -> Self {
+        match refusal {
+            Some(AuditRefusal::CredentialHandoff | AuditRefusal::CredentialAuthorization) => {
+                Self::NeedsYou
+            }
+            Some(AuditRefusal::LocalInterlock) => Self::Kept,
+            _ => match status {
+                Status::Succeeded => Self::Succeeded,
+                Status::Blocked => Self::Refused,
+                Status::Failed => Self::Failed,
+                Status::Cancelled => Self::Cancelled,
+                Status::Unknown => Self::Unknown,
+            },
+        }
+    }
+
+    /// The class of a durable record, read from its stored status word, its decision, its
+    /// refusal and, for a flow, its step account.
+    ///
+    /// A status word no settled call ends with is a step that could not start, so it failed. A
+    /// flow keeps no refusal of its own. A flow its steps held back is refused when its decision
+    /// or its deciding step was refused, and otherwise takes the class of what held it back
+    /// ([`held_back_by`]).
+    #[must_use]
+    pub fn recorded(record: &AuditRecord) -> Self {
+        let Some(status) = Status::from_stored_name(&record.status) else {
+            return Self::Failed;
+        };
+        let refusal = record.refusal_facts.as_ref();
+        let issue = record.composition.and_then(|progress| progress.issue);
+        match (Self::of(status, refusal), issue) {
+            (Self::Refused, Some(issue)) if refusal.is_none() && record.allowed => {
+                held_back_by(issue.cause)
+            }
+            (class, _) => class,
+        }
+    }
+
+    /// The cause a flow keeps for a step of this class, refined by the step's own refusal.
+    ///
+    /// The person's controls, the deadline, a cancellation and a lost connection keep their own
+    /// cause whatever the class, because they decide whether the flow goes on.
+    #[must_use]
+    pub const fn step_cause(self, refusal: Option<&AuditRefusal>) -> Option<StepCause> {
+        let fallback = match self {
+            Self::Succeeded => return None,
+            // The person's setting kept the tab, and the flow stops for them as for any other
+            // request for their attention.
+            Self::Kept => return Some(StepCause::AttentionRequired),
+            // A refused secret was never typed, so the flow goes on as past a failed step.
+            Self::NeedsYou => return Some(StepCause::Failed),
+            Self::Refused => StepCause::PolicyBlocked,
+            Self::Failed => StepCause::Failed,
+            Self::Unknown => StepCause::Unconfirmed,
+            Self::Cancelled => StepCause::Cancelled,
+        };
+        if let Some(refusal) = refusal {
+            if let Some(cause) = interruption(refusal) {
+                return Some(cause);
+            }
+        }
+        Some(fallback)
+    }
+}
+
+/// The class of a blocked flow that authority admitted, by the cause its account keeps for the
+/// step that decided it.
+///
+/// Such a flow was held back by a step whose check was refused, by a kept tab, or by a step that
+/// needs the person, which is the credential refusal: the only steps blocked without a refusing
+/// decision.
+const fn held_back_by(cause: StepCause) -> OutcomeClass {
+    match cause {
+        StepCause::PolicyBlocked
+        | StepCause::Paused
+        | StepCause::SessionEnded
+        | StepCause::AuditUnavailable => OutcomeClass::Refused,
+        StepCause::AttentionRequired => OutcomeClass::Kept,
+        StepCause::InvalidArguments
+        | StepCause::MissingReference
+        | StepCause::Failed
+        | StepCause::ConnectionLost
+        | StepCause::Deadline
+        | StepCause::Cancelled
+        | StepCause::Unconfirmed => OutcomeClass::NeedsYou,
+    }
+}
+
+/// The cause a refusal gives a step whatever its class: the person's controls, the history
+/// requirement, the deadline, a cancellation, a lost connection, or the check an applied action
+/// did not pass.
+const fn interruption(refusal: &AuditRefusal) -> Option<StepCause> {
+    use AuditRefusal as A;
+    Some(match refusal {
+        A::AuthorityBlocked {
+            cause: BlockedReason::AuditUnavailable,
+        } => StepCause::AuditUnavailable,
+        A::AuthorityBlocked {
+            cause: BlockedReason::Hold,
+        } => StepCause::Paused,
+        A::AuthorityBlocked {
+            cause: BlockedReason::SessionEnded,
+        } => StepCause::SessionEnded,
+        A::DeadlineBeforeStart | A::DeadlineExpired { .. } => StepCause::Deadline,
+        A::CancelledBeforeStart | A::CancelledBeforeDispatch | A::CancelledAfterDispatch => {
+            StepCause::Cancelled
+        }
+        A::ConnectionLost
+        | A::BrowserUnavailable {
+            cause: BrowserUnavailableReason::NotConnected | BrowserUnavailableReason::NotAnswering,
+        } => StepCause::ConnectionLost,
+        A::ActionUnconfirmed { cause } => unconfirmed_cause(*cause),
+        _ => return None,
+    })
+}
+
+/// The flow cause of an applied action whose requested check did not confirm it.
+///
+/// It is the cause the check would have had on its own, so a Pause, Stop, cancellation, or
+/// deadline during a check still stops the flow the way it stops any other step.
+const fn unconfirmed_cause(cause: CheckFailure) -> StepCause {
+    match cause {
+        CheckFailure::Blocked(BlockedReason::AuditUnavailable) => StepCause::AuditUnavailable,
+        CheckFailure::Blocked(BlockedReason::Hold) => StepCause::Paused,
+        CheckFailure::Blocked(BlockedReason::SessionEnded) => StepCause::SessionEnded,
+        CheckFailure::Blocked(_) => StepCause::PolicyBlocked,
+        CheckFailure::Cancelled => StepCause::Cancelled,
+        CheckFailure::DeadlineExpired => StepCause::Deadline,
+        CheckFailure::Disconnected => StepCause::ConnectionLost,
+        CheckFailure::Unmet
+        | CheckFailure::BrowserUnavailable
+        | CheckFailure::DocumentUnavailable
+        | CheckFailure::BrowserRefused => StepCause::Failed,
+    }
+}
 
 /// What the window says in place of the pause directive the model was told.
 const YOU_PAUSED: &str = "You paused Ghostlight.";
@@ -172,6 +345,7 @@ pub fn permission(check: &PermissionCheck, channel: IntakeChannel, tier: Option<
 mod tests {
     use super::*;
     use crate::governance::CapabilitySet;
+    use crate::language::composition::CompositionProgress;
     use crate::language::field_problem::ControlRef;
     use crate::language::outcome::{ExtensionAdvice, Refusal, TargetRole};
 
@@ -308,6 +482,149 @@ mod tests {
             in_the_window(&refusal).as_deref(),
             Some("No browser was connected, so nothing ran. Open a browser window with Ghostlight in Browser installed.")
         );
+    }
+
+    /// A durable record of one settled call, as the audit file keeps it.
+    fn record(
+        status: Status,
+        decision: crate::governance::Decision,
+        audit: &crate::language::audit::AuditProjection,
+    ) -> AuditRecord {
+        AuditRecord::now(
+            "invocation_class",
+            "workspace_class",
+            "browser_type_text",
+            CapabilitySet::WRITE,
+            "authority_class",
+            decision,
+            &status.stored_name(),
+            "none",
+            audit,
+            1,
+        )
+    }
+
+    /// A blocked flow's record whose deciding step had `cause`.
+    fn flow(allowed: bool, cause: StepCause) -> AuditRecord {
+        use crate::language::composition::{StepCounts, StepIssue};
+        use crate::language::outcome::Outcome;
+        let progress = CompositionProgress {
+            counts: StepCounts {
+                total: 2,
+                succeeded: 1,
+                blocked: 1,
+                ..StepCounts::default()
+            },
+            stopped: false,
+            issue: Some(StepIssue { step: 2, cause }),
+            ..CompositionProgress::default()
+        };
+        let decision = if allowed {
+            crate::governance::Decision::permitted()
+        } else {
+            crate::governance::Decision::refused(ReasonCode::CapabilityDenied)
+        };
+        record(
+            Status::Blocked,
+            decision,
+            &Outcome::CompositionRan(progress).audit(),
+        )
+    }
+
+    #[test]
+    fn a_credential_refusal_is_classed_needs_you_and_a_kept_tab_kept() {
+        let permitted = crate::governance::Decision::permitted();
+        let credential = Refusal::CredentialAuthorization {
+            control: ControlRef::new(TargetRole::Textbox, "Password", None, false),
+        }
+        .audit();
+        let kept = Refusal::LocalInterlock.audit();
+        let policy = Refusal::AuthorityBlocked {
+            reason: BlockedReason::Capability,
+            host: None,
+            origin: None,
+        }
+        .audit();
+        for (audit, decision, class) in [
+            (&credential, permitted, OutcomeClass::NeedsYou),
+            (&kept, permitted, OutcomeClass::Kept),
+            (
+                &policy,
+                crate::governance::Decision::refused(ReasonCode::CapabilityDenied),
+                OutcomeClass::Refused,
+            ),
+        ] {
+            assert_eq!(OutcomeClass::of(Status::Blocked, audit.refusal()), class);
+            assert_eq!(
+                OutcomeClass::recorded(&record(Status::Blocked, decision, audit)),
+                class
+            );
+        }
+        // A flow keeps no refusal of its own: it is classed by the step that held it back.
+        assert_eq!(
+            OutcomeClass::recorded(&flow(true, StepCause::Failed)),
+            OutcomeClass::NeedsYou
+        );
+        assert_eq!(
+            OutcomeClass::recorded(&flow(true, StepCause::AttentionRequired)),
+            OutcomeClass::Kept
+        );
+        assert_eq!(
+            OutcomeClass::recorded(&flow(true, StepCause::Paused)),
+            OutcomeClass::Refused
+        );
+        // A refusing decision decides the flow, whatever came after the refused step.
+        assert_eq!(
+            OutcomeClass::recorded(&flow(false, StepCause::Deadline)),
+            OutcomeClass::Refused
+        );
+        // A flow goes on past a refused secret and stops for a kept tab, as before.
+        assert_eq!(
+            OutcomeClass::NeedsYou.step_cause(credential.refusal()),
+            Some(StepCause::Failed)
+        );
+        assert_eq!(
+            OutcomeClass::Kept.step_cause(kept.refusal()),
+            Some(StepCause::AttentionRequired)
+        );
+    }
+
+    #[test]
+    fn every_status_has_its_class_and_a_step_that_never_started_failed() {
+        let permitted = crate::governance::Decision::permitted();
+        let quiet = crate::language::outcome::Outcome::TabsListed { count: 0 }.audit();
+        for (status, class) in [
+            (Status::Succeeded, OutcomeClass::Succeeded),
+            (Status::Blocked, OutcomeClass::Refused),
+            (Status::Failed, OutcomeClass::Failed),
+            (Status::Cancelled, OutcomeClass::Cancelled),
+            (Status::Unknown, OutcomeClass::Unknown),
+        ] {
+            assert_eq!(OutcomeClass::of(status, None), class);
+            assert_eq!(
+                OutcomeClass::recorded(&record(status, permitted, &quiet)),
+                class
+            );
+        }
+        let mut never_started = record(Status::Failed, permitted, &quiet);
+        never_started.status = "not_started".into();
+        assert_eq!(OutcomeClass::recorded(&never_started), OutcomeClass::Failed);
+        assert_eq!(OutcomeClass::Succeeded.step_cause(None), None);
+    }
+
+    #[test]
+    fn the_class_crosses_to_the_window_as_one_closed_word() {
+        for (class, word) in [
+            (OutcomeClass::Succeeded, "succeeded"),
+            (OutcomeClass::Refused, "refused"),
+            (OutcomeClass::Kept, "kept"),
+            (OutcomeClass::NeedsYou, "needs_you"),
+            (OutcomeClass::Failed, "failed"),
+            (OutcomeClass::Unknown, "unknown"),
+            (OutcomeClass::Cancelled, "cancelled"),
+        ] {
+            assert_eq!(serde_json::to_value(class).unwrap(), word);
+        }
     }
 
     #[test]

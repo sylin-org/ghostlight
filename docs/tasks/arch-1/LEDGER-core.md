@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a, C10b and C11 have landed, and C22 landed with C13.
-C12a is next. ux-2 has closed, so every slice whose "After" is met can start.
+C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a, C10b, C11 and C12a have landed, and C22 landed with
+C13. C19a is next. ux-2 has closed, so every slice whose "After" is met can start.
 
 ## Slices
 
@@ -26,8 +26,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | see Notes | landed (565293f6) |
 | C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | see Notes | landed (51d1e05d, review fixup) |
 | C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | see Notes | landed (56d0f7c8) |
-| C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | see Notes | landed (this commit) |
-| C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | - | todo |
+| C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | see Notes | landed (8c216920) |
+| C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | see Notes | landed (this commit) |
 | C19a | fix(audit): a step that never started carries the policy sequence | candidate | ux-2 closes | - | todo |
 | C21 | feat(adapter): the service reads the browser's life | candidate | C4, B1 | lands with B1; cross-lane `protocol4/wire.rs` | todo |
 | C3b | fix(browser): a pinned wait reads its own browser | none | C3a | - | todo |
@@ -467,3 +467,29 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   during a quit is a cancelled tool result with its retry step, and ARCHITECTURE says the token is
   published with the `initialize` answer, bounded, and that an unreadable token resumes at the
   oldest revision with no tab.
+- C12a, the class: `language::history::OutcomeClass` has the ADR's seven words, serialized as
+  `succeeded`, `refused`, `kept`, `needs_you`, `failed`, `unknown` and `cancelled`.
+  `OutcomeClass::of(status, refusal)` classes one settled call: a credential refusal is
+  `needs_you`, the preserve-tabs refusal (`LocalInterlock`) is `kept`, and otherwise the status
+  decides, so a blocked call is `refused`. The window is not changed here; S2 sets
+  `HistoryItem`'s class from `OutcomeClass::recorded`.
+- C12a, the record: `OutcomeClass::recorded` takes the `AuditRecord`, because a flow keeps no
+  refusal of its own. A blocked flow whose decision refused it is `refused`. A blocked flow that
+  authority admitted is classed by its deciding step's cause: a refused check, a pause or an end
+  is `refused`, `attention_required` is `kept`, and any other cause is `needs_you`, because only a
+  credential step blocks without a refusing decision. The stored status is read by the new
+  `Status::from_stored_name`. A word no `Status` names, the step that never started, is `failed`;
+  C19a spells that word once.
+- C12a, the flow causes: `OutcomeClass::step_cause` gives each class its cause, refined by the
+  step's refusal for the person's controls, the history requirement, the deadline, a cancellation,
+  a lost connection and an unconfirmed check. Every cause a flow kept before is kept: a kept tab
+  stops the flow as `attention_required`, and a credential refusal continues as `failed`, as
+  `continue_honors_human_attention_and_invocation_limits` and
+  `credential_guidance_obeys_flow_continue_without_pausing_later_work` pin. The ADR does not decide
+  a change there. The preserve-tabs refusal tells the agent to continue while a flow stops on it,
+  and that was already so before this slice.
+- C12a, proofs: `a_credential_refusal_is_classed_needs_you_and_a_kept_tab_kept` (single calls,
+  their records and flow records), `every_status_has_its_class_and_a_step_that_never_started_failed`
+  and `the_class_crosses_to_the_window_as_one_closed_word` in `language/history.rs`. Composition's
+  own cause mapping and `unconfirmed_cause` moved there. No catalog, result or audit golden
+  changed. No journey is needed.

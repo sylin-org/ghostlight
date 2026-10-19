@@ -32,6 +32,14 @@ impl Status {
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_else(|| "unknown".into())
     }
+
+    /// The status an audit record stored as `name`, or `None` for a word no settled call ends
+    /// with, such as a step that never started.
+    #[must_use]
+    pub fn from_stored_name(name: &str) -> Option<Self> {
+        use serde::de::value::{Error, StrDeserializer};
+        Self::deserialize(StrDeserializer::<Error>::new(name)).ok()
+    }
 }
 
 /// Terminal physical effect classification.
