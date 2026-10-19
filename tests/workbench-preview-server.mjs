@@ -221,7 +221,8 @@ const controlsFixture = {
     effects: { label: "Agent activity effects", word: "The cursor, click ripples and scan-lines on a page an agent works in. They start on." },
     captions: { label: "Action captions", word: "A caption at the bottom of the page names each action. They start off." }
   },
-  service: { word: "Ghostlight is running; 3 agents and 2 browsers connected." },
+  // Said by `summarized` from the sessions and browsers each page shows.
+  service: { word: null },
   you: { context: "control", word: "Shared", sentence: "Others on this computer can watch this view in a browser." }
 };
 
@@ -330,6 +331,13 @@ const NO_BROWSER = "No browser connected";
 /** The browser the `?browsers=none` page starts on request. */
 const STARTS_ON_REQUEST = "Google Chrome";
 
+/**
+ * What the Status Browser check says with no browser connected, mirrored from
+ * `language::workbench::STATUS_BROWSER_WAITING` and `language::readiness::starts_when_asked`.
+ */
+const BROWSER_WAITING = "Waiting for Ghostlight in Browser.";
+const startsWhenAsked = (browser) => `Starts ${browser} when an agent asks.`;
+
 /** What a waiting operation's activity says (`language::outcome::WAITING_FOR_WORK`). */
 const WAITING_FOR_WORK = "Waiting for earlier browser work";
 
@@ -365,7 +373,7 @@ const snapshot = {
     { timestamp_ms: ago(120000), invocation: "invocation_kept", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: true, reason: "browser_local_interlock", status: "blocked", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings.", duration_ms: 60, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
     // Work from a channel your rules switched off, and a call that does not match the catalog.
     { timestamp_ms: ago(150000), invocation: "invocation_channel_off", workspace: "workspace_claude", tool: "browser_read", capability: "read", allowed: false, reason: "channel_denied", policy_tier: "user", status: "blocked", effect: "none", summary: "Your policy turns off work from MCP agents.", permission_explanations: ["Refused. Your policy turns off work from MCP agents."], permissions: { checks: [{ requirements: [], host: null, allowed: false, reason: "channel_denied", layers: [] }], truncated: false }, duration_ms: 4, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
-    { timestamp_ms: ago(180000), invocation: "invocation_invalid", workspace: "workspace_codex", tool: "browser_click", capability: "action", allowed: false, reason: "invalid_request", status: "failed", effect: "none", summary: "The call does not match the Ghostlight catalog.", duration_ms: 2, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
+    { timestamp_ms: ago(180000), invocation: "invocation_invalid", workspace: "workspace_codex", tool: "browser_click", capability: "local", allowed: false, reason: "invalid_request", status: "failed", effect: "none", summary: "The call does not match the Ghostlight catalog.", duration_ms: 2, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
     { timestamp_ms: ago(240000), invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", ...previewDetails({ connection_id: "connection_script", channel: "cli" }) },
     { timestamp_ms: ago(420000), invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored", channel: "mcp" }) },
     { timestamp_ms: ago(480000), invocation: "invocation_restored_claimed", workspace: "workspace_0193f1c2a8b4e7d6826", tool: "browser_read", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Read example.com.", duration_ms: 30, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored_claimed", channel: "mcp", claimed_agent: "claude-code", source: { agent: "cursor", image: "Cursor.exe" } }) }
@@ -515,9 +523,22 @@ const olderHistory = Array.from({ length: CAPPED_HISTORY_LENGTH - snapshot.histo
 });
 const withCappedHistory = (flat) => ({ ...flat, history: [...flat.history, ...olderHistory] });
 
-// `?browsers=none` shows At a glance with no browser connected, as the service words it when
-// Chrome would start on request.
-const withoutBrowsers = (flat) => ({ ...flat, browsers: [], no_browser: `Starts ${STARTS_ON_REQUEST} on request` });
+/**
+ * The page with no browser connected, as the service says it: At a glance names what starts on
+ * request, and the Status Browser check passes when `starts` would start on an agent's request or
+ * warns that it waits for one when nothing would (`gatherStatus` in `workbench/mod.rs`).
+ */
+const disconnected = (flat, starts) => ({
+  ...flat,
+  browsers: [],
+  no_browser: starts ? `Starts ${starts} on request` : NO_BROWSER,
+  diagnostics: flat.diagnostics.map((item) => (item.id !== "browser" ? item : starts
+    ? { ...item, severity: "passing", detail: startsWhenAsked(starts) }
+    : { ...item, severity: "warning", detail: BROWSER_WAITING }))
+});
+
+// `?browsers=none` shows the page with no browser connected and Google Chrome starting on request.
+const withoutBrowsers = (flat) => disconnected(flat, STARTS_ON_REQUEST);
 
 /** What Settings says of the runtime in each of its states (`language::control`). */
 const RUNTIME_WORD = { active: "Running", held: "Paused", ended: "Session ended" };
@@ -529,6 +550,28 @@ const withRuntime = (flat, state) => {
   changed.configuration.runtime_state = state;
   changed.controls.runtime.state = state;
   changed.controls.runtime.word = RUNTIME_WORD[state];
+  return changed;
+};
+
+/**
+ * The one sentence Status and the tray say about the service, mirrored from
+ * `language::workbench::service_line`: the agents connected, each counted once however many
+ * sessions it has, and the browsers.
+ */
+const serviceLine = (agents, browsers) => {
+  const parts = [[agents, "agent", "agents"], [browsers, "browser", "browsers"]]
+    .filter(([count]) => count > 0)
+    .map(([count, one, many]) => `${count} ${count === 1 ? one : many}`);
+  return parts.length === 0 ? "Ghostlight is running; nothing is connected yet."
+    : `Ghostlight is running; ${parts.join(" and ")} connected.`;
+};
+
+/** The page with the overview and the Status summary counting what it shows connected. */
+const summarized = (flat) => {
+  const changed = structuredClone(flat);
+  const agents = new Set(changed.sessions.map((session) => session.agent.id)).size;
+  changed.overview.connected_browsers = changed.browsers.length;
+  changed.controls.service.word = serviceLine(agents, changed.browsers.length);
   return changed;
 };
 
@@ -556,7 +599,7 @@ const heldWork = (operation) => ({ ...operation, phase: "held", activity: HELD_A
 const READINESS_SCENES = {
   working: (flat) => flat,
   ready: (flat) => idle(flat),
-  not_connected: (flat) => ({ ...idle(flat), browsers: [], no_browser: NO_BROWSER }),
+  not_connected: (flat) => disconnected(idle(flat), null),
   paused: (flat) => withRuntime({ ...flat, operations: flat.operations.map(heldWork) }, "held"),
   ended: (flat) => withRuntime(idle(flat), "ended"),
   channel_off: (flat) => switchedOff(idle(flat), CHANNELS_OFF.channel_off),
@@ -619,7 +662,8 @@ const pageSnapshot = ({ stage, noBrowsers, connected, capped, scene }) => [
   connected && allConnected,
   capped && withCappedHistory,
   READINESS_SCENES[scene],
-  counted
+  counted,
+  summarized
 ].filter(Boolean).reduce((flat, change) => change(flat), { ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] });
 
 /**
