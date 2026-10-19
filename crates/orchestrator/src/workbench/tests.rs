@@ -1723,20 +1723,33 @@ fn a_command_line_session_keeps_its_name_while_no_call_is_connected() {
 }
 
 #[test]
-fn the_search_names_the_integrations_page_as_its_tab_does() {
+fn the_search_names_each_page_as_its_tab_does() {
+    use crate::language::workbench as words;
+
     let facade = facade_over(
         GovernanceFacade::new(None, None),
         ControlledBrowser::new(false, false),
     );
-    let hit = facade
-        .search("integrations")
-        .into_iter()
-        .find(|hit| hit.id == "integrations")
-        .expect("the search reaches the Integrations page");
-    assert_eq!(hit.title, "Integrations");
-    assert!(
-        include_str!("../../ui/lib/words.js").contains(&format!("integrations: \"{}\"", hit.title))
-    );
+    let tabs = include_str!("../../ui/lib/words.js");
+    for page in [
+        words::SEARCH_GLANCE,
+        words::SEARCH_INTEGRATIONS,
+        words::SEARCH_STATUS,
+        words::SEARCH_POLICY,
+        words::SEARCH_SETTINGS,
+    ] {
+        let hit = facade
+            .search(page.title)
+            .into_iter()
+            .find(|hit| hit.kind == super::SearchKind::Destination && hit.id == page.id)
+            .expect("the search reaches every page");
+        assert_eq!(hit.title, page.title);
+        assert!(
+            tabs.contains(&format!("{}: \"{}\"", page.id, page.title)),
+            "{}",
+            page.id
+        );
+    }
 }
 
 #[test]
@@ -2467,4 +2480,176 @@ fn each_browser_counts_the_tabs_of_the_sessions_that_work_in_it() {
     let snapshot = facade.snapshot();
     assert_eq!(snapshot.browsers.len(), 1);
     assert_eq!(snapshot.browsers[0].tab_count, 2);
+}
+
+/// A recorded navigation by `invocation` that landed on `host`, settled at `timestamp_ms`.
+fn a_navigation_to(invocation: &str, host: &str, timestamp_ms: u64) -> AuditRecord {
+    let mut record = a_request_that_reached_a_browser("workspace_1");
+    record.invocation = invocation.into();
+    record.tool = "browser_navigate".into();
+    record.summary = format!("Opened {host}.");
+    record.observed.host = Some(host.into());
+    record.timestamp_ms = timestamp_ms;
+    record
+}
+
+/// A facade whose history holds `records`, oldest first.
+fn a_history_of(records: &[AuditRecord]) -> WorkbenchFacade {
+    let (facade, projection) = facade_with(&crate::workspace::WorkspaceStore::default());
+    for record in records {
+        projection.record(record, crate::language::audit_health::Storage::Saved);
+    }
+    facade
+}
+
+#[test]
+fn a_recorded_action_is_found_by_its_host_and_named_by_its_tool_and_its_sentence() {
+    let facade = a_history_of(&[
+        a_navigation_to("invocation_1", "example.com", 1_000),
+        a_navigation_to("invocation_2", "sylin.org", 2_000),
+    ]);
+    let hits = facade.search("SYLIN");
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let hit = &hits[0];
+    assert_eq!(hit.kind, super::SearchKind::History);
+    assert_eq!(hit.id, "invocation_2");
+    assert_eq!(hit.title, "navigate: Opened sylin.org.");
+    assert_eq!(hit.timestamp_ms, Some(2_000));
+    assert_eq!(hit.outcome, None);
+    assert!(hit.detail.ends_with("Google Chrome"), "{}", hit.detail);
+    assert!(!hit.detail.contains("workspace_"), "{}", hit.detail);
+}
+
+#[test]
+fn recorded_actions_are_found_by_their_agent_and_their_tool_newest_first() {
+    let facade = a_history_of(&[
+        a_navigation_to("invocation_1", "example.com", 1_000),
+        a_navigation_to("invocation_2", "sylin.org", 2_000),
+    ]);
+    let agent = crate::language::provenance::EARLIER_SESSION.to_ascii_lowercase();
+    for query in [
+        agent.as_str(),
+        "navigate",
+        "browser_navigate",
+        "google chrome",
+    ] {
+        let found: Vec<String> = facade
+            .search(query)
+            .into_iter()
+            .filter(|hit| hit.kind == super::SearchKind::History)
+            .map(|hit| hit.id)
+            .collect();
+        assert_eq!(found, ["invocation_2", "invocation_1"], "{query}");
+    }
+}
+
+#[test]
+fn a_search_never_matches_on_an_opaque_id() {
+    let facade = a_history_of(&[a_navigation_to("invocation_1", "example.com", 1_000)]);
+    for query in ["invocation_1", "workspace_1", "authority_1"] {
+        assert!(facade.search(query).is_empty(), "{query}");
+    }
+}
+
+#[test]
+fn a_recorded_action_that_did_not_succeed_carries_its_outcome_and_is_found_by_it() {
+    let mut failed = a_navigation_to("invocation_1", "example.com", 1_000);
+    failed.status = "failed".into();
+    let mut kept = a_navigation_to("invocation_2", "example.com", 2_000);
+    kept.status = "blocked".into();
+    let mut blocked = a_navigation_to("invocation_3", "example.com", 3_000);
+    blocked.status = "blocked".into();
+    blocked.allowed = false;
+    blocked.reason = crate::governance::ReasonCode::HostDenied;
+    let facade = a_history_of(&[failed, kept, blocked]);
+    let outcomes: Vec<_> = facade
+        .search("example.com")
+        .into_iter()
+        .map(|hit| (hit.id, hit.outcome))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            ("invocation_3".to_owned(), Some(super::HitOutcome::Blocked)),
+            ("invocation_2".to_owned(), Some(super::HitOutcome::Kept)),
+            ("invocation_1".to_owned(), Some(super::HitOutcome::Failed)),
+        ]
+    );
+    let blocked: Vec<String> = facade
+        .search("blocked")
+        .into_iter()
+        .map(|hit| hit.id)
+        .collect();
+    assert_eq!(blocked, ["invocation_3"]);
+    let wire = serde_json::to_value(&facade.search("example.com")[0]).unwrap();
+    assert_eq!(wire["outcome"], "blocked");
+}
+
+#[test]
+fn a_session_hit_says_its_card_line_and_an_operation_names_no_workspace() {
+    use crate::intake::session::IntakeChannel;
+
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    workspaces.admit("Some Agent".into(), IntakeChannel::Mcp);
+    let (facade, projection) = facade_with(&workspaces);
+    let session = facade.snapshot().sessions[0].clone();
+    projection.react(&DomainEvent::WorkStarted {
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "Some Agent",
+            IntakeChannel::Mcp,
+        )
+        .details(),
+        invocation: "invocation_1".into(),
+        workspace: session.id.clone(),
+        tool: "browser_fill_form".into(),
+        activity: PresentationActivity::Fill,
+        capabilities: Capability::Write.into(),
+        received_at_ms: crate::audit::unix_ms(),
+    });
+    let hits = facade.search("some agent");
+    let line = hits
+        .iter()
+        .find(|hit| hit.kind == super::SearchKind::Session)
+        .expect("the session is found by its agent");
+    assert_eq!(line.detail, "No tabs, working");
+    let operation = facade
+        .search("fill form")
+        .into_iter()
+        .find(|hit| hit.kind == super::SearchKind::Operation)
+        .expect("the work in flight is found by its tool in words");
+    assert_eq!(operation.title, "fill form");
+    assert!(
+        !operation.detail.contains("workspace_"),
+        "{}",
+        operation.detail
+    );
+    assert!(
+        operation.detail.ends_with("running"),
+        "{}",
+        operation.detail
+    );
+}
+
+#[test]
+fn the_search_offers_settings_for_browser_work() {
+    use crate::language::workbench as words;
+
+    let facade = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(false, false),
+    );
+    let hit = facade
+        .search("browser work")
+        .into_iter()
+        .find(|hit| hit.kind == super::SearchKind::Configuration)
+        .expect("the browser-work setting is found by its label");
+    assert_eq!(hit.title, words::CONTROLS_RUNTIME_LABEL);
+    assert_eq!(hit.detail, words::CONTROLS_RUNTIME_ACTIVE);
+    assert_eq!(hit.view, super::SearchDestination::Settings);
+}
+
+#[test]
+fn the_window_keeps_as_many_recorded_actions_as_the_service_holds() {
+    assert!(include_str!("../../ui/lib/words.js")
+        .contains(&format!("const HISTORY_HELD = {};", super::HISTORY_LIMIT)));
 }

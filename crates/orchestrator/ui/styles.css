@@ -80,10 +80,11 @@
   --beat-settle: 420ms;    /* a signature settling on the spring */
   --beat-wait: 1050ms;     /* three waiting lights */
   --beat-key: 1150ms;      /* the keyboard's illumination rhythm */
-  --beat-particle: 1300ms; /* the workwheel's light particles */
+  --beat-particle: 1300ms; /* the gear's light particles */
+  --beat-lens: 1250ms;     /* the lens looking */
   --beat-scan: 1450ms;     /* read_scan_ms */
   --beat-capture: 1500ms;  /* screenshot_ms */
-  --beat-wheel: 2400ms;    /* the workwheel turning */
+  --beat-wheel: 2400ms;    /* the gear turning */
   --beat-breathe: 4000ms;  /* border_breathe_ms; scope remains true */
 
   --band: 58px;
@@ -404,7 +405,15 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 /* ------------------------------- the queue ------------------------------ */
 .queue-head { display: flex; align-items: baseline; justify-content: space-between; margin: 20px 2px 6px; }
 .queue-actions { display: flex; align-items: center; gap: 10px; }
-.queue-clear { height: 24px; padding: 0 9px; }
+.queue-clear, .queue-search { height: 24px; padding: 0 9px; }
+/* Search is the way to every recorded action, so At a glance offers it beside its list, with the
+   key that opens it from anywhere. */
+.queue-search { display: inline-flex; align-items: center; gap: 7px; }
+.queue-search svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.queue-search kbd { padding: 0 5px; letter-spacing: 0; }
+/* A list too long to show whole ends with a quiet way to the rest. */
+.queue-more { display: block; padding: 12px 4px; color: var(--ink-4); font-size: 12px; text-align: left; }
+.queue-more:hover { color: var(--ink-3); }
 .queue { display: flex; flex-direction: column; }
 .row {
   display: grid; grid-template-columns: 24px 168px 34px minmax(0, 1fr) 116px 86px 62px 92px 46px;
@@ -468,9 +477,11 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .hero.live .spin { animation: spin var(--beat-wheel) linear infinite; transform-origin: 12px 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .hero.live .particle { animation: particle var(--beat-particle) ease-in-out infinite; }
-.hero.live .particle:nth-of-type(2) { animation-delay: 433ms; }
-.hero.live .particle:nth-of-type(3) { animation-delay: 866ms; }
+.hero.live .particle:nth-of-type(2) { animation-delay: 180ms; }
+.hero.live .particle:nth-of-type(3) { animation-delay: 360ms; }
 @keyframes particle { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.hero.live .lens { animation: lens var(--beat-lens) ease-in-out infinite; transform-origin: 10.2px 10.2px; }
+@keyframes lens { 0%, 100% { transform: translate(-.8px, -.8px) rotate(-7deg); } 50% { transform: translate(1.6px, 1.6px) rotate(5deg); } }
 .hero.live .keylight { animation: keylight var(--beat-key) ease-in-out infinite; }
 .hero.live .keylight:nth-of-type(2) { animation-delay: var(--beat-glance); }
 .hero.live .keylight:nth-of-type(3) { animation-delay: 300ms; }
@@ -717,13 +728,17 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .palette-input input::placeholder { color: var(--ink-4); }
 kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; color: var(--ink-4); background: rgba(255, 255, 255, .03); font: 11.5px/1.3 var(--mono); }
 .palette-results { max-height: min(420px, 52vh); overflow-y: auto; padding: 6px; }
-.hit { display: grid; width: 100%; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; padding: 9px 10px; border-radius: 6px; color: inherit; text-align: left; }
+.hit { display: grid; width: 100%; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 9px 10px; border-radius: 6px; color: inherit; text-align: left; }
 .hit:hover, .hit:focus-visible { background: rgba(255, 255, 255, .05); }
 .hit:focus-visible { outline: 2px solid rgba(var(--argb), .7); outline-offset: -2px; }
 .hit-kind { padding: 3px 6px; border: 1px solid var(--line-2); border-radius: 4px; }
 .hit strong, .hit small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hit strong { color: var(--ink-2); font-size: 12.5px; font-weight: 400; }
 .hit small { margin-top: 2px; color: var(--ink-4); font-size: 11.5px; }
+/* A recorded action that did not succeed says so as its row does: a refusal or a failure in red,
+   one a browser setting kept back in ink. */
+.hit-outcome { padding-top: 1px; color: var(--ink-3); font-size: 11.5px; }
+.hit-outcome.blocked, .hit-outcome.failed, .hit-outcome.unknown { color: var(--danger); }
 .palette-empty { padding: 22px; color: var(--ink-4); font-size: 12.5px; text-align: center; }
 
 /* ------------------------------ toast, dialog --------------------------- */

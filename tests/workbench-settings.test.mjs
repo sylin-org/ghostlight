@@ -2148,10 +2148,10 @@ test("each catalog tool wears the medallion chosen for it", () => {
   // The tools of docs/1.0/catalog.json and the medallion a person sees on each one's row.
   const chosen = {
     browser_tabs: "navigate", browser_navigate: "navigate", browser_history: "navigate", browser_window: "scan",
-    browser_read: "scan", browser_inspect: "scan", browser_find: "scan", browser_screenshot: "camera",
+    browser_read: "scan", browser_inspect: "scan", browser_find: "lens", browser_screenshot: "camera",
     browser_click: "pointer", browser_scroll: "navigate", browser_hover: "pointer", browser_fill_form: "keyboard",
     browser_type_text: "keyboard", browser_press_key: "keyboard", browser_drag: "pointer", browser_wait: "wait",
-    browser_dialog: "wait", browser_upload: "workwheel", browser_execute: "workwheel", browser_flow: "workwheel",
+    browser_dialog: "wait", browser_upload: "gear", browser_execute: "gear", browser_flow: "gear",
     browser_record: "camera", browser_diagnose: "scan", policy_explain: "scan"
   };
   const catalog = JSON.parse(readFileSync(join(ui, "..", "..", "..", "docs", "1.0", "catalog.json"), "utf8"));
@@ -2854,6 +2854,73 @@ test("the search palette takes focus, keeps Tab inside, and gives focus back to 
   assert.equal(shown.el("app-shell").inert, false);
   assert.equal(Element.focused, opener);
   assert.equal(shown.key("Tab"), false, "once closed, Tab is the page's again");
+});
+
+test("a search hit says what it found in words: its kind, its second line with the age, and how an action ended", () => {
+  const shown = drawing();
+  shown.view.searchResults([
+    { kind: "history", id: "read-1", title: "navigate: Opened sylin.org.", detail: "Claude Code, Google Chrome",
+      timestamp_ms: Date.now() - 4 * 60_000, outcome: "blocked", view: "history" },
+    { kind: "installation", id: "codex", title: "Codex", detail: "Connected", timestamp_ms: null, view: "install" }
+  ]);
+  const hits = drawn(shown.el("palette-results").innerHTML);
+  assert.deepEqual(hits.wearing("hit-kind").map((node) => node.textContent), ["Action", "Agent"]);
+  const lines = [...hits.root.descendants()].filter((node) => node.tag === "small").map((node) => node.textContent);
+  assert.deepEqual(lines, ["Claude Code, Google Chrome, 4m ago", "Connected"]);
+  const outcomes = hits.wearing("hit-outcome");
+  assert.equal(outcomes[0].textContent, "Blocked");
+  assert.ok(outcomes[0].classes.has("blocked"), "a refusal says so in its row's colour");
+  assert.equal(outcomes[1].textContent, "");
+  assert.deepEqual(hits.wearing("hit").map((node) => node.dataset.searchId), ["read-1", "codex"]);
+  // Every kind of hit the service words (workbench SearchKind) has a word of its own here.
+  assert.deepEqual(Object.keys(Words.HIT_KIND).sort(),
+    ["browser", "configuration", "destination", "diagnostic", "history", "installation", "operation", "session"]);
+
+  shown.view.searchResults([]);
+  assert.equal(drawn(shown.el("palette-results").innerHTML).wearing("palette-empty")[0].textContent, Words.SEARCH_FOUND_NOTHING);
+});
+
+test("search is offered beside the list, and a list too long to show whole ends with a way to all of it", () => {
+  assert.match(markup, /<button class="ghost-button queue-search"[^>]*data-open-search[^>]*>[\s\S]*?Search<kbd aria-hidden="true">Ctrl K<\/kbd>/);
+  assert.match(markup, /placeholder="Search agents and history"/);
+  const shown = drawing();
+  const answer = (count) => ({ ...Transport.flatten(snapshotAnswer()), history: Array.from({ length: count }, () => settledRead()) });
+  const end = () => shown.el("queue").children.at(-1);
+  const full = Array.from({ length: Words.FEED_LIMIT }, (_, index) => Entries.entryFromRecord(settledRead({ invocation: `r${index}` }), null));
+  shown.view.rebuildFeed(full);
+  shown.view.band({ connected: true, snapshot: answer(410), runtime: "active", running: 0 });
+  assert.equal(end().hidden, false);
+  assert.equal(end().textContent, "Search all 410 (Ctrl+K)");
+  assert.ok("openSearch" in end().dataset, "the line opens the palette");
+  assert.ok(end().classes.has("queue-more"));
+
+  shown.view.band({ connected: true, snapshot: answer(Words.FEED_LIMIT), runtime: "active", running: 0 });
+  assert.equal(end().hidden, true, "a list that shows every recorded action has nothing more to offer");
+  shown.view.band({ connected: true, snapshot: answer(410), runtime: "active", running: 0 });
+  shown.view.rebuildFeed(full.slice(0, 3));
+  assert.equal(end().hidden, true, "a list that is not full is the whole of what this view shows");
+  assert.ok(naming(".queue-more").some((rule) => rule.declarations.color === "var(--ink-4)"), "the line is quiet");
+});
+
+test("a hit for an action the list holds opens that row's details and gives its button focus", () => {
+  const shown = focusable();
+  shown.view.rebuildFeed([
+    Entries.entryFromRecord(settledRead({ invocation: "newest" }), null),
+    Entries.entryFromRecord(settledRead(), null)
+  ]);
+  const [row] = queueRows(shown);
+  const button = new Element("button", { "data-action-details": "read-1:action" });
+  button.setAttribute("aria-controls", "action-details-read-1");
+  button.getAttribute = (name) => button.attributes[name];
+  const panel = new Element("div", { hidden: "" });
+  row.querySelector = (selector) => (selector === "[data-action-details]" ? button : null);
+  const byId = shown.document.getElementById;
+  shown.document.getElementById = (id) => (id === "action-details-read-1" ? panel : byId(id));
+  assert.equal(shown.view.showAction("read-1"), true);
+  assert.equal(panel.hidden, false);
+  assert.equal(button.attributes["aria-expanded"], "true");
+  assert.equal(Element.focused, button);
+  assert.equal(shown.view.showAction("not-listed"), false, "an action past the list is found, not opened");
 });
 
 test("ArrowDown and ArrowUp walk from the search box through the hits, and a focused hit wears the ring", () => {

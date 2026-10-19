@@ -872,6 +872,11 @@ function openAddress(hash, loading) {
 
 /* -------------------------------- wiring -------------------------------- */
 
+/** Open the search palette, while the window shows data and setup is not standing in for it. */
+function openSearch() {
+  if (showsData() && !setupShown) view.openPalette();
+}
+
 /**
  * Attach every listener the surface needs.
  *
@@ -913,12 +918,15 @@ function wire() {
     if (destination) openDestination(destination.dataset.destination);
     const connectionId = event.target.closest("[data-copy-connection]");
     if (connectionId) copyConnectionId(connectionId.dataset.copyConnection);
+    // A hit goes where what it found is shown, and an action At a glance lists opens there.
     const hit = event.target.closest("[data-search-view]");
     if (hit) {
       view.navigate(SEARCH_VIEWS[hit.dataset.searchView] ?? "monitor");
       view.closePalette();
+      view.showAction(hit.dataset.searchId);
     }
     if (event.target === el.palette) view.closePalette();
+    if (event.target.closest("[data-open-search]")) openSearch();
   });
 
   window.addEventListener("hashchange", () => openAddress(window.location.hash, false));
@@ -932,7 +940,7 @@ function wire() {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       if (view.paletteOpen()) view.closePalette();
-      else if (showsData() && !setupShown) view.openPalette();
+      else openSearch();
       return;
     }
     if (event.key === "Escape" && view.paletteOpen()) view.closePalette();

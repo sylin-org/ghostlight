@@ -64,6 +64,11 @@
           <span>More activity</span>
           <div class="queue-actions">
             <span id="queue-count"></span>
+            <button class="ghost-button queue-search" type="button" id="queue-search" data-open-search
+                    aria-keyshortcuts="Control+K">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+              Search<kbd aria-hidden="true">Ctrl K</kbd>
+            </button>
             <button class="ghost-button queue-clear" type="button" id="clear-monitor" disabled>Clear view</button>
           </div>
         </div>
@@ -458,8 +463,8 @@
     <div class="palette-box" role="dialog" aria-modal="true" aria-label="Search Ghostlight">
       <div class="palette-input">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
-        <label class="sr-only" for="palette-query">Search sessions, operations, and history</label>
-        <input id="palette-query" type="search" maxlength="120" autocomplete="off" placeholder="Search sessions, operations, and history">
+        <label class="sr-only" for="palette-query">Search agents and history</label>
+        <input id="palette-query" type="search" maxlength="120" autocomplete="off" placeholder="Search agents and history">
         <kbd>Esc</kbd>
       </div>
       <div class="palette-results" id="palette-results"></div>

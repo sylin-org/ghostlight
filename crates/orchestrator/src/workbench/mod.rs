@@ -973,7 +973,14 @@ impl WorkbenchFacade {
         Ok(self.setup_view())
     }
 
-    /// Search bounded user-visible workbench records.
+    /// Search what the window shows: its pages, the work in flight, the agents and browsers
+    /// connected now, the agents on this computer, the browser-work setting, the checks, and the
+    /// recorded actions, newest first.
+    ///
+    /// A hit matches on the words a person reads for it, never on an opaque id: a recorded action
+    /// on its tool, its sentence, the host it landed on, its agent, its browser and its outcome,
+    /// so "sylin" finds the actions on sylin.org. Matching allocates nothing per record and only a
+    /// match is worded, so a long history stays quick to search. At most [`SEARCH_LIMIT`] hits.
     #[must_use]
     pub fn search(&self, query: &str) -> Vec<SearchHit> {
         let query = query.trim().to_ascii_lowercase();
@@ -981,144 +988,129 @@ impl WorkbenchFacade {
             return Vec::new();
         }
         let snapshot = self.snapshot();
-        let mut hits = Vec::new();
-        for (id, title, detail, view) in [
-            (
-                "monitor",
-                "At a glance",
-                "Whether Ghostlight is ready, what is running, and what just happened",
-                SearchDestination::Activity,
-            ),
-            (
-                "status",
-                "Status",
-                "Local service, browser, and authority diagnostics",
-                SearchDestination::Checkup,
-            ),
-            (
-                "integrations",
-                "Integrations",
-                "Supported MCP client registrations",
-                SearchDestination::Install,
-            ),
+        let mut hits = Hits::new(&query);
+        for (page, view) in [
+            (&words::SEARCH_GLANCE, SearchDestination::Activity),
+            (&words::SEARCH_INTEGRATIONS, SearchDestination::Install),
+            (&words::SEARCH_STATUS, SearchDestination::Checkup),
+            (&words::SEARCH_POLICY, SearchDestination::Configuration),
+            (&words::SEARCH_SETTINGS, SearchDestination::Settings),
         ] {
-            push_hit(
-                &mut hits,
-                &query,
-                SearchHit {
-                    kind: SearchKind::Destination,
-                    id: id.into(),
-                    title: title.into(),
-                    detail: detail.into(),
-                    timestamp_ms: None,
+            if hits.finds(&[page.title, page.detail]) {
+                hits.push(SearchHit::new(
+                    SearchKind::Destination,
+                    page.id,
+                    page.title,
+                    page.detail.to_owned(),
                     view,
-                },
-            );
+                ));
+            }
         }
-        for operation in snapshot.operations {
-            push_hit(
-                &mut hits,
-                &query,
-                SearchHit {
-                    kind: SearchKind::Operation,
-                    id: operation.invocation,
-                    title: operation.tool,
-                    detail: format!("{} - {}", operation.workspace, operation.phase.label()),
-                    timestamp_ms: operation.started_at_ms,
-                    view: SearchDestination::Activity,
-                },
-            );
+        for operation in &snapshot.operations {
+            let phase = operation.phase.word();
+            if hits.finds_action(&operation.tool, &[&operation.agent.name, phase]) {
+                hits.push(SearchHit::new(
+                    SearchKind::Operation,
+                    &operation.invocation,
+                    &words::tool_words(&operation.tool),
+                    words::search_operation_detail(&operation.agent.name, phase),
+                    SearchDestination::Activity,
+                ));
+            }
         }
-        for session in snapshot.sessions {
-            push_hit(
-                &mut hits,
-                &query,
-                SearchHit {
-                    kind: SearchKind::Session,
-                    id: session.id.clone(),
-                    title: session.agent.name,
-                    detail: format!("{} controlled tabs", session.tab_count),
-                    timestamp_ms: None,
-                    view: SearchDestination::Activity,
-                },
+        for session in &snapshot.sessions {
+            let line = words::session_line(
+                session.tab_count,
+                session.browser.as_deref(),
+                session.running_operations > 0,
+                session.channel == IntakeChannel::Cli,
             );
+            if hits.finds(&[&session.agent.name, &line]) {
+                hits.push(SearchHit::new(
+                    SearchKind::Session,
+                    &session.id,
+                    &session.agent.name,
+                    line,
+                    SearchDestination::Activity,
+                ));
+            }
         }
-        for browser in snapshot.browsers {
-            push_hit(
-                &mut hits,
-                &query,
-                SearchHit {
-                    kind: SearchKind::Browser,
-                    id: browser.id,
-                    title: browser.family,
-                    detail: format!(
-                        "Connected browser adapter {}",
-                        browser.adapter_version.unwrap_or_else(|| "unknown".into())
-                    ),
-                    timestamp_ms: None,
-                    view: SearchDestination::Activity,
-                },
+        for browser in &snapshot.browsers {
+            let detail = words::search_browser_detail(browser.tab_count);
+            if hits.finds(&[&browser.family, &detail]) {
+                hits.push(SearchHit::new(
+                    SearchKind::Browser,
+                    &browser.id,
+                    &browser.family,
+                    detail,
+                    SearchDestination::Activity,
+                ));
+            }
+        }
+        for harness in &snapshot.harnesses {
+            let word = words::harness_state_word(
+                harness.state,
+                harness.copy_only,
+                parts::in_use(harness, &snapshot.sessions),
             );
+            if hits.finds(&[&harness.label, word]) {
+                hits.push(SearchHit::new(
+                    SearchKind::Installation,
+                    &harness.id,
+                    &harness.label,
+                    word.to_owned(),
+                    SearchDestination::Install,
+                ));
+            }
         }
-        for item in snapshot.history {
-            push_hit(
-                &mut hits,
-                &query,
-                SearchHit {
-                    kind: SearchKind::History,
-                    id: item.invocation,
-                    title: item.tool,
-                    detail: format!("{} - {}", item.status, item.reason),
+        let runtime = runtime_state_word(snapshot.configuration.runtime_state);
+        if hits.finds(&[words::CONTROLS_RUNTIME_LABEL, runtime]) {
+            hits.push(SearchHit::new(
+                SearchKind::Configuration,
+                RUNTIME_SETTING_ID,
+                words::CONTROLS_RUNTIME_LABEL,
+                runtime.to_owned(),
+                SearchDestination::Settings,
+            ));
+        }
+        for diagnostic in &snapshot.diagnostics {
+            if hits.finds(&[&diagnostic.label, &diagnostic.detail]) {
+                hits.push(SearchHit::new(
+                    SearchKind::Diagnostic,
+                    &diagnostic.id,
+                    &diagnostic.label,
+                    diagnostic.detail.clone(),
+                    SearchDestination::Checkup,
+                ));
+            }
+        }
+        for item in &snapshot.history {
+            let outcome = HitOutcome::of(item);
+            let browser = item.browser.as_deref().unwrap_or_default();
+            if hits.finds_action(
+                &item.tool,
+                &[
+                    &item.summary,
+                    item.observed.host.as_deref().unwrap_or_default(),
+                    &item.agent.name,
+                    browser,
+                    outcome.map_or("", HitOutcome::as_str),
+                ],
+            ) {
+                hits.push(SearchHit {
+                    outcome,
                     timestamp_ms: Some(item.timestamp_ms),
-                    view: SearchDestination::History,
-                },
-            );
+                    ..SearchHit::new(
+                        SearchKind::History,
+                        &item.invocation,
+                        &words::search_action_title(&item.tool, &item.summary),
+                        words::search_action_detail(&item.agent.name, browser),
+                        SearchDestination::History,
+                    )
+                });
+            }
         }
-        for diagnostic in snapshot.diagnostics {
-            push_hit(
-                &mut hits,
-                &query,
-                SearchHit {
-                    kind: SearchKind::Diagnostic,
-                    id: diagnostic.id,
-                    title: diagnostic.label,
-                    detail: diagnostic.detail,
-                    timestamp_ms: None,
-                    view: SearchDestination::Checkup,
-                },
-            );
-        }
-        push_hit(
-            &mut hits,
-            &query,
-            SearchHit {
-                kind: SearchKind::Configuration,
-                id: "runtime-control".into(),
-                title: "Runtime control".into(),
-                detail: format!(
-                    "Browser work is {}",
-                    runtime_state_label(snapshot.configuration.runtime_state)
-                ),
-                timestamp_ms: None,
-                view: SearchDestination::Configuration,
-            },
-        );
-        for harness in snapshot.harnesses {
-            push_hit(
-                &mut hits,
-                &query,
-                SearchHit {
-                    kind: SearchKind::Installation,
-                    id: harness.id,
-                    title: harness.name,
-                    detail: harness.detail,
-                    timestamp_ms: None,
-                    view: SearchDestination::Install,
-                },
-            );
-        }
-        hits.truncate(SEARCH_LIMIT);
-        hits
+        hits.found
     }
 
     /// Apply an explicit local-human runtime control through the authoritative owners.
@@ -1854,13 +1846,14 @@ pub enum OperationPhase {
 }
 
 impl OperationPhase {
-    const fn label(self) -> &'static str {
+    /// The word the search palette says for where the work stands.
+    const fn word(self) -> &'static str {
         match self {
-            Self::Waiting => "waiting",
-            Self::Running => "running",
-            Self::Held => "held",
-            Self::Blocked => "blocked",
-            Self::Completed => "completed",
+            Self::Waiting => words::SEARCH_WAITING,
+            Self::Running => words::SEARCH_RUNNING,
+            Self::Held => words::SEARCH_HELD,
+            Self::Blocked => words::SEARCH_BLOCKED,
+            Self::Completed => words::SEARCH_FINISHED,
         }
     }
 }
@@ -2264,21 +2257,45 @@ pub struct WorkbenchIntentResult {
     pub message: String,
 }
 
-/// One bounded global-search result.
+/// One search result, worded for the person who searched (`crate::language::workbench`).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SearchHit {
     /// Result category.
     pub kind: SearchKind,
-    /// Opaque result identity.
+    /// Opaque result identity: for a recorded action its invocation, so the window can open its
+    /// row.
     pub id: String,
-    /// Primary fixed or content-free label.
+    /// What the hit is, in a person's words.
     pub title: String,
-    /// Secondary content-free description.
+    /// The second line, in a person's words.
     pub detail: String,
-    /// Optional related time.
+    /// When a recorded action settled; the window says how long ago.
     pub timestamp_ms: Option<u64>,
+    /// How a recorded action ended, present only when it did not succeed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<HitOutcome>,
     /// Workbench destination that owns this result.
     pub view: SearchDestination,
+}
+
+impl SearchHit {
+    fn new(
+        kind: SearchKind,
+        id: &str,
+        title: &str,
+        detail: String,
+        view: SearchDestination,
+    ) -> Self {
+        Self {
+            kind,
+            id: id.to_owned(),
+            title: title.to_owned(),
+            detail,
+            timestamp_ms: None,
+            outcome: None,
+            view,
+        }
+    }
 }
 
 /// Closed search-result categories.
@@ -2303,6 +2320,49 @@ pub enum SearchKind {
     Installation,
 }
 
+/// How a recorded action ended when it did not succeed, in the window's wire words: the outcomes
+/// its row wears (`OUTCOME_WORD` in `ui/lib/words.js`; `isBlocked`, `isFailed` and `isKept` in
+/// `ui/lib/entries.js`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HitOutcome {
+    /// Policy or a person refused it.
+    Blocked,
+    /// It was permitted and failed.
+    Failed,
+    /// It was permitted and what it did cannot be confirmed.
+    Unknown,
+    /// It was permitted and a browser setting held it back.
+    Kept,
+}
+
+impl HitOutcome {
+    /// How `item` ended, or `None` when it succeeded or was cancelled.
+    fn of(item: &HistoryItem) -> Option<Self> {
+        use crate::work::result::Status;
+        use serde::de::IntoDeserializer;
+        let status: Result<Status, serde::de::value::Error> =
+            Status::deserialize(item.status.as_str().into_deserializer());
+        match status.ok()? {
+            Status::Blocked if !item.allowed => Some(Self::Blocked),
+            Status::Blocked => Some(Self::Kept),
+            Status::Failed => Some(Self::Failed),
+            Status::Unknown => Some(Self::Unknown),
+            Status::Succeeded | Status::Cancelled => None,
+        }
+    }
+
+    /// The wire word, which is also what a search for the outcome matches.
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Blocked => "blocked",
+            Self::Failed => "failed",
+            Self::Unknown => "unknown",
+            Self::Kept => "kept",
+        }
+    }
+}
+
 /// Closed workbench destinations used by global search.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -2315,21 +2375,73 @@ pub enum SearchDestination {
     History,
     /// Local diagnostics.
     Checkup,
-    /// The rules and the runtime state that apply here. Runtime controls live in Settings; this
-    /// still maps to the Policy page.
+    /// The rules that apply here, on the Policy page.
     Configuration,
+    /// Settings, where the runtime controls live.
+    Settings,
     /// Supported harness registrations.
     Install,
 }
 
-fn push_hit(hits: &mut Vec<SearchHit>, query: &str, hit: SearchHit) {
-    if hits.len() >= SEARCH_LIMIT {
-        return;
+/// The search identity of the browser-work setting.
+const RUNTIME_SETTING_ID: &str = "runtime-control";
+
+/// The hits of one search: what matches `query`, up to [`SEARCH_LIMIT`].
+struct Hits<'a> {
+    query: &'a str,
+    found: Vec<SearchHit>,
+}
+
+impl<'a> Hits<'a> {
+    const fn new(query: &'a str) -> Self {
+        Self {
+            query,
+            found: Vec::new(),
+        }
     }
-    let haystack = format!("{} {} {}", hit.id, hit.title, hit.detail).to_ascii_lowercase();
-    if haystack.contains(query) {
-        hits.push(hit);
+
+    /// Whether there is room for another hit and one of `fields` holds the query, ignoring ASCII
+    /// case. The query is already lower case.
+    fn finds(&self, fields: &[&str]) -> bool {
+        self.found.len() < SEARCH_LIMIT
+            && fields
+                .iter()
+                .any(|field| holds_folded(field, self.query.as_bytes()))
     }
+
+    /// Whether there is room for another hit and the catalog `tool` or one of `fields` holds the
+    /// query. A tool matches by its name or by its words, so "fill form" and "browser_fill_form"
+    /// both find `browser_fill_form`.
+    fn finds_action(&self, tool: &str, fields: &[&str]) -> bool {
+        self.finds(fields)
+            || (self.found.len() < SEARCH_LIMIT && holds_tool(tool, self.query.as_bytes()))
+    }
+
+    fn push(&mut self, hit: SearchHit) {
+        self.found.push(hit);
+    }
+}
+
+/// Whether the catalog name `tool` holds `needle`, reading an underscore and a space as the same
+/// character, so the tool's words match its name ([`words::tool_words`]).
+fn holds_tool(tool: &str, needle: &[u8]) -> bool {
+    let same = |left: u8, right: u8| {
+        left.eq_ignore_ascii_case(&right) || matches!((left, right), (b'_', b' ') | (b' ', b'_'))
+    };
+    tool.as_bytes().windows(needle.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle)
+            .all(|(&left, &right)| same(left, right))
+    })
+}
+
+/// Whether `field` holds `needle`, comparing ASCII letters without case and allocating nothing.
+fn holds_folded(field: &str, needle: &[u8]) -> bool {
+    field
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn push_bounded(history: &mut VecDeque<HistoryItem>, item: HistoryItem) {
@@ -2369,11 +2481,12 @@ fn activity_label(activity: PresentationActivity) -> &'static str {
     }
 }
 
-fn runtime_state_label(state: RuntimeControlState) -> &'static str {
+/// The word Settings says for the browser-work state.
+const fn runtime_state_word(state: RuntimeControlState) -> &'static str {
     match state {
-        RuntimeControlState::Active => "active",
-        RuntimeControlState::Held => "paused",
-        RuntimeControlState::Ended => "ended",
+        RuntimeControlState::Active => words::CONTROLS_RUNTIME_ACTIVE,
+        RuntimeControlState::Held => words::CONTROLS_RUNTIME_HELD,
+        RuntimeControlState::Ended => words::CONTROLS_RUNTIME_ENDED,
     }
 }
 

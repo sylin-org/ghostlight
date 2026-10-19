@@ -25,7 +25,8 @@
     CONTINUE_LABEL, POLICY_IN_WINDOW, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     CARD, browserChipTitle,
-    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine
+    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine,
+    FEED_LIMIT, HIT_KIND, SEARCH_FOUND_NOTHING, searchAll
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isPending, isUnsettled, isBlocked, isFailed, isKept } = globalThis.GhostlightEntries;
   const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
@@ -294,14 +295,7 @@
         return;
       }
       const button = event.target.closest?.("[data-action-details]");
-      if (!button) return;
-      const key = button.dataset.actionDetails;
-      const panel = document.getElementById(button.getAttribute("aria-controls"));
-      if (!panel) return;
-      const open = !expandedHistory.has(key);
-      if (open) expandedHistory.add(key); else expandedHistory.delete(key);
-      button.setAttribute("aria-expanded", String(open));
-      panel.hidden = !open;
+      if (button) showDetails(button, !expandedHistory.has(button.dataset.actionDetails));
     });
     document.addEventListener("toggle", (event) => {
       const details = event.target;
@@ -314,6 +308,16 @@
       }
       delete details.dataset.historyOpening;
     }, true);
+
+    /** Open or close the details an action's row button controls, and remember which are open. */
+    function showDetails(button, open) {
+      const key = button.dataset.actionDetails;
+      const panel = document.getElementById(button.getAttribute("aria-controls"));
+      if (!panel) return;
+      if (open) expandedHistory.add(key); else expandedHistory.delete(key);
+      button.setAttribute("aria-expanded", String(open));
+      panel.hidden = !open;
+    }
 
     /**
      * Replace a panel's markup and keep the person's place in it: the scroll of its step lists, the
@@ -740,10 +744,48 @@
       }
     }
 
+    /*
+     * The end of a list too long to show whole. The list holds FEED_LIMIT actions and the service
+     * holds more; search reaches every one, so the list ends by saying so, and opens the palette.
+     */
+    let listed = { full: false, settled: 0 };
+    let recorded = 0;
+    const queueMore = document.createElement("button");
+    queueMore.className = "queue-more";
+    queueMore.type = "button";
+    queueMore.hidden = true;
+    queueMore.dataset.openSearch = "";
+    queueMore.setAttribute("aria-keyshortcuts", "Control+K");
+
     function queueCount(feed) {
       const rows = Math.max(0, feed.length - 1);
       el["queue-count"].textContent = rows ? `${rows} ${rows === 1 ? "action" : "actions"}` : "";
       el["clear-monitor"].disabled = !feed.some((entry) => !isUnsettled(entry));
+      listed = { full: feed.length >= FEED_LIMIT, settled: feed.filter((entry) => !isUnsettled(entry)).length };
+      // Rows arrive at the top and a rebuild empties the list, so the end is put back last.
+      queueMore.remove();
+      el.queue.append(queueMore);
+      paintQueueMore();
+    }
+
+    function paintQueueMore() {
+      const capped = listed.full && recorded > listed.settled;
+      queueMore.hidden = !capped;
+      queueMore.textContent = capped ? searchAll(recorded) : "";
+    }
+
+    /**
+     * Show the action `invocation` where the list holds it: its row's details open, in view, with
+     * focus on its button. Answers whether the list holds it; the running card shows its own.
+     */
+    function showAction(invocation) {
+      const node = rowNodes.get(invocation);
+      const button = node?.querySelector("[data-action-details]");
+      if (!button) return false;
+      showDetails(button, true);
+      node.scrollIntoView?.({ block: "nearest" });
+      button.focus();
+      return true;
     }
 
     /** Full rebuild. Only used on first paint and after a detected sequence gap. */
@@ -817,6 +859,8 @@
           work: workCounts({ ...facts, paused: facts.runtime !== "active" }),
           recorded: facts.snapshot.history.length
         });
+        recorded = facts.snapshot.history.length;
+        paintQueueMore();
         el["state-facts"].innerHTML = told.map(([kind, parts], index) =>
           `<span class="fact fact-${kind}">${index ? " &middot; " : ""}`
           + parts.map(([count, word]) => `<b>${count}</b> ${escapeHtml(word)}`).join(", ")
@@ -2497,12 +2541,21 @@
       to.focus();
     });
 
+    /**
+     * Draw the palette's hits as the service worded them. A recorded action adds how long ago it
+     * settled to its second line, and the outcome word its row wears when it did not succeed.
+     */
     function searchResults(hits) {
       el["palette-results"].innerHTML = hits.length
-        ? hits.map((hit) => `<button class="hit" type="button" data-search-view="${escapeHtml(hit.view)}">`
-          + `<span class="hit-kind">${escapeHtml(words(hit.kind))}</span>`
-          + `<span><strong>${escapeHtml(hit.title)}</strong><small>${escapeHtml(hit.detail)}</small></span></button>`).join("")
-        : '<div class="palette-empty">No matching Ghostlight records.</div>';
+        ? hits.map((hit) => {
+          const second = rowBy(hit.detail, hit.timestamp_ms ? agoSaid(hit.timestamp_ms) : "");
+          const outcome = OUTCOME_WORD[hit.outcome] ?? "";
+          return `<button class="hit" type="button" data-search-view="${escapeHtml(hit.view)}" data-search-id="${escapeHtml(hit.id)}">`
+            + `<span class="hit-kind">${escapeHtml(HIT_KIND[hit.kind] ?? words(hit.kind))}</span>`
+            + `<span><strong>${escapeHtml(hit.title)}</strong><small>${escapeHtml(second)}</small></span>`
+            + `<span class="hit-outcome${outcome ? ` ${escapeHtml(hit.outcome)}` : ""}">${escapeHtml(outcome)}</span></button>`;
+        }).join("")
+        : `<div class="palette-empty">${escapeHtml(SEARCH_FOUND_NOTHING)}</div>`;
     }
 
     /** Say in the palette that the search failed, in `sentence`, never an exception's text. */
@@ -2618,7 +2671,7 @@
       setPermission, setChoice, setSacred,
       discardDraft, renderRules, previewResult, previewCleared, editorStatus,
       loadFailed, loaded,
-      openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
+      openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed, showAction,
       confirmRemoval, confirmFix, answerConfirmation,
       tickElapsed, tickAges, armCard
     });

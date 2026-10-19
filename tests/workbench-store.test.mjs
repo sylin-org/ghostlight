@@ -228,3 +228,21 @@ test("a workspace resolves to its own session, even when several share one clien
   assert.equal(store.sessionFor("w3").agent.name, "Zed");
   assert.equal(store.sessionFor("gone"), null);
 });
+
+test("a settled action adds to the recorded count past the list's length, up to what the service holds", () => {
+  const { store } = recording();
+  const held = (count) => Array.from({ length: count }, (_, index) => ({
+    invocation: `old-${index}`, workspace: "w", tool: "browser_read", status: "succeeded", allowed: true, complete: true,
+    timestamp_ms: 1, summary: "Read a page."
+  }));
+  const snapshot = { ...snapshotAt(1), history: held(410) };
+  store.applySnapshot(snapshot, true);
+  const settled = { ...held(1)[0], invocation: "new", timestamp_ms: 2 };
+  assert.equal(store.applyChange({ seq: 2, change: { kind: "operation_settled", record: settled } }), "applied");
+  assert.equal(store.snapshot().history.length, 411, "the band says what the service records, not what the list shows");
+  assert.ok(Words.HISTORY_HELD > Words.FEED_LIMIT);
+
+  store.applySnapshot({ ...snapshotAt(3), history: held(Words.HISTORY_HELD) }, true);
+  store.applyChange({ seq: 4, change: { kind: "operation_settled", record: settled } });
+  assert.equal(store.snapshot().history.length, Words.HISTORY_HELD, "no more than the service holds");
+});

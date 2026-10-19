@@ -10,8 +10,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::install::HarnessState;
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::readiness::Readiness;
+use crate::language::setup::{WORD_BY_HAND, WORD_CONNECTED, WORD_NEEDS_UPDATE};
 
 /// The word the Ghostlight window wears while others can watch it, the state Settings > Sharing
 /// turns off. While watching is off the window wears no word.
@@ -560,6 +562,210 @@ pub fn never_touch_count(count: usize) -> String {
     }
 }
 
+/// A page of the window as the search palette offers it: the tab's own name, and what a person
+/// finds there.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SearchPage {
+    /// The page's opaque search identity.
+    pub id: &'static str,
+    /// The page's name, as its tab says it.
+    pub title: &'static str,
+    /// What the page shows, in a person's words.
+    pub detail: &'static str,
+}
+
+/// At a glance, as the palette offers it.
+pub const SEARCH_GLANCE: SearchPage = SearchPage {
+    id: "monitor",
+    title: "At a glance",
+    detail: "Whether Ghostlight is ready, what is running, and what just happened",
+};
+
+/// Integrations, as the palette offers it.
+pub const SEARCH_INTEGRATIONS: SearchPage = SearchPage {
+    id: "integrations",
+    title: "Integrations",
+    detail: "The agents on this computer and whether they are connected",
+};
+
+/// Status, as the palette offers it.
+pub const SEARCH_STATUS: SearchPage = SearchPage {
+    id: "status",
+    title: "Status",
+    detail: "Whether Ghostlight, the browser, the rules and history are working",
+};
+
+/// Policy, as the palette offers it.
+pub const SEARCH_POLICY: SearchPage = SearchPage {
+    id: "policy",
+    title: "Policy",
+    detail: "The rules for what agents may do, and on which sites",
+};
+
+/// Settings, as the palette offers it.
+pub const SEARCH_SETTINGS: SearchPage = SearchPage {
+    id: "settings",
+    title: "Settings",
+    detail: "This screen, sharing, browser work, notifications and diagnostics",
+};
+
+/// The start every browser tool's name shares, which the window leaves out when it names a tool
+/// (`SHARED_TOOL_PREFIX` in `ui/lib/words.js`).
+const SHARED_TOOL_PREFIX: &str = "browser_";
+
+/// A catalog tool as the window names it, the way its activity list does (`toolWords` in
+/// `ui/lib/words.js`): the shared start left out and the rest in words, so `browser_fill_form`
+/// reads "fill form" and `policy_explain` reads "policy explain".
+#[must_use]
+pub fn tool_words(tool: &str) -> String {
+    tool.strip_prefix(SHARED_TOOL_PREFIX)
+        .unwrap_or(tool)
+        .replace('_', " ")
+}
+
+/// The title of a recorded action in the search palette: the tool in words, then the sentence its
+/// row says, as in "navigate: Opened sylin.org.". A record that kept no sentence is its tool alone.
+#[must_use]
+pub fn search_action_title(tool: &str, sentence: &str) -> String {
+    let tool = tool_words(tool);
+    if sentence.is_empty() {
+        tool
+    } else {
+        format!("{tool}: {sentence}")
+    }
+}
+
+/// The parts of a search hit's second line, joined the way a row joins its agent and age: the
+/// parts it has, in order, between commas.
+fn joined(parts: &[&str]) -> String {
+    parts
+        .iter()
+        .copied()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The second line of a recorded action in the search palette: the agent that drove it and the
+/// browser that did it. The window adds how long ago it settled, and the outcome when it did not
+/// succeed, in its own words.
+#[must_use]
+pub fn search_action_detail(agent: &str, browser: &str) -> String {
+    joined(&[agent, browser])
+}
+
+/// The word a running card says for work that runs now (`PHASE_WORD` in `ui/lib/words.js`).
+pub const SEARCH_RUNNING: &str = "running";
+
+/// The word for accepted work waiting its turn.
+pub const SEARCH_WAITING: &str = "waiting";
+
+/// The word for accepted work a pause holds.
+pub const SEARCH_HELD: &str = "held";
+
+/// The word for work that was refused before its record arrived.
+pub const SEARCH_BLOCKED: &str = "blocked";
+
+/// The word for work that finished before its record arrived.
+pub const SEARCH_FINISHED: &str = "finished";
+
+/// The second line of an action in flight in the search palette: the agent that asked for it and
+/// the word for where it stands (`phase`, one of the `SEARCH_` phase words), as in
+/// "Claude Code, running".
+#[must_use]
+pub fn search_operation_detail(agent: &str, phase: &str) -> String {
+    joined(&[agent, phase])
+}
+
+/// How many tabs a browser or a session holds, as At a glance counts them (`tabsCount`).
+fn tabs_count(count: usize) -> String {
+    match count {
+        0 => "no tabs".to_owned(),
+        1 => "1 tab".to_owned(),
+        _ => format!("{count} tabs"),
+    }
+}
+
+/// What an idle session is, on its line (`GLANCE.idle`).
+const SESSION_IDLE: &str = "idle";
+
+/// What a session running work now is, on its line (`GLANCE.working`).
+const SESSION_WORKING: &str = "working";
+
+/// What a session from the command line adds to its line (`GLANCE.fromCommandLine`).
+const SESSION_FROM_COMMAND_LINE: &str = "from the command line";
+
+/// One session of an agent in words, the line its At a glance card shows (`sessionLine` in
+/// `ui/lib/words.js`): its tabs and the browser it works in, whether it is running work now, and
+/// the command line when that is where it came from, as in "2 tabs in Google Chrome, idle".
+#[must_use]
+pub fn session_line(
+    tabs: usize,
+    browser: Option<&str>,
+    working: bool,
+    command_line: bool,
+) -> String {
+    let counted = tabs_count(tabs);
+    let place = match browser.filter(|name| !name.is_empty()) {
+        Some(browser) if tabs > 0 => format!("{counted} in {browser}"),
+        Some(browser) => format!("In {browser}, {counted}"),
+        None => {
+            let mut letters = counted.chars();
+            letters.next().map_or_else(String::new, |first| {
+                first.to_ascii_uppercase().to_string() + letters.as_str()
+            })
+        }
+    };
+    let state = if working {
+        SESSION_WORKING
+    } else {
+        SESSION_IDLE
+    };
+    let from = if command_line {
+        SESSION_FROM_COMMAND_LINE
+    } else {
+        ""
+    };
+    joined(&[&place, state, from])
+}
+
+/// The second line of a connected browser in the search palette, as in "Connected, 2 tabs".
+#[must_use]
+pub fn search_browser_detail(tabs: usize) -> String {
+    format!("{WORD_CONNECTED}, {}", tabs_count(tabs))
+}
+
+/// The word for an agent that is not installed here (`AGENT_STATE_WORDS.not_detected`).
+const WORD_NOT_HERE: &str = "Not on this computer";
+
+/// The word for an agent installed here that has no Ghostlight entry
+/// (`AGENT_STATE_WORDS.available`).
+const WORD_FOUND: &str = "Found, not connected";
+
+/// The word for an agent whose entry needs a person (`AGENT_STATE_WORDS.needs_attention`).
+const WORD_NEEDS_ATTENTION: &str = "Needs your attention";
+
+/// Where an agent stands, in the word its Integrations entry wears (`agentStanding` and
+/// `AGENT_STATE_WORDS` in `ui/lib/words.js`). Ghostlight never reads a copy-only agent's file, so
+/// such an agent is connected while one of its sessions is live (`in_use`), and one found here
+/// that is not is set up by hand.
+#[must_use]
+pub const fn harness_state_word(
+    state: HarnessState,
+    copy_only: bool,
+    in_use: bool,
+) -> &'static str {
+    match state {
+        _ if copy_only && in_use => WORD_CONNECTED,
+        HarnessState::Available if copy_only => WORD_BY_HAND,
+        HarnessState::Installed => WORD_CONNECTED,
+        HarnessState::NotDetected => WORD_NOT_HERE,
+        HarnessState::Available => WORD_FOUND,
+        HarnessState::Updatable => WORD_NEEDS_UPDATE,
+        HarnessState::NeedsAttention => WORD_NEEDS_ATTENTION,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,6 +780,82 @@ mod tests {
         WindowReason::NoTray,
         WindowReason::DidNotStay,
     ];
+
+    /// The window's own vocabulary, which the search palette's words must say the same way.
+    const PAGE_WORDS: &str = include_str!("../../ui/lib/words.js");
+
+    #[test]
+    fn a_tool_reads_in_words_as_the_activity_list_names_it() {
+        assert_eq!(tool_words("browser_fill_form"), "fill form");
+        assert_eq!(tool_words("policy_explain"), "policy explain");
+        assert_eq!(
+            search_action_title("browser_navigate", "Opened sylin.org."),
+            "navigate: Opened sylin.org."
+        );
+        assert_eq!(search_action_title("browser_read", ""), "read");
+        assert!(PAGE_WORDS.contains(&format!("SHARED_TOOL_PREFIX = \"{SHARED_TOOL_PREFIX}\"")));
+    }
+
+    #[test]
+    fn a_session_line_says_what_its_card_says() {
+        assert_eq!(
+            session_line(2, Some("Google Chrome"), false, false),
+            "2 tabs in Google Chrome, idle"
+        );
+        assert_eq!(
+            session_line(1, Some("Edge"), false, true),
+            "1 tab in Edge, idle, from the command line"
+        );
+        assert_eq!(
+            session_line(0, Some("Edge"), true, false),
+            "In Edge, no tabs, working"
+        );
+        assert_eq!(session_line(0, None, false, false), "No tabs, idle");
+        for (key, word) in [
+            ("working", SESSION_WORKING),
+            ("idle", SESSION_IDLE),
+            ("fromCommandLine", SESSION_FROM_COMMAND_LINE),
+        ] {
+            assert!(PAGE_WORDS.contains(&format!("{key}: \"{word}\"")), "{key}");
+        }
+    }
+
+    #[test]
+    fn an_agent_on_this_computer_wears_the_word_of_its_integrations_entry() {
+        assert_eq!(
+            harness_state_word(HarnessState::Installed, false, false),
+            "Connected"
+        );
+        assert_eq!(
+            harness_state_word(HarnessState::Available, true, false),
+            WORD_BY_HAND
+        );
+        assert_eq!(
+            harness_state_word(HarnessState::Available, true, true),
+            WORD_CONNECTED
+        );
+        for (key, state) in [
+            ("installed", HarnessState::Installed),
+            ("not_detected", HarnessState::NotDetected),
+            ("available", HarnessState::Available),
+            ("updatable", HarnessState::Updatable),
+            ("needs_attention", HarnessState::NeedsAttention),
+        ] {
+            let word = harness_state_word(state, false, false);
+            assert!(PAGE_WORDS.contains(&format!("{key}: \"{word}\"")), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_browser_and_work_in_flight_read_as_a_person_says_them() {
+        assert_eq!(search_browser_detail(2), "Connected, 2 tabs");
+        assert_eq!(search_browser_detail(0), "Connected, no tabs");
+        assert_eq!(
+            search_operation_detail("Claude Code", SEARCH_RUNNING),
+            "Claude Code, running"
+        );
+        assert_eq!(search_action_detail("", "Google Chrome"), "Google Chrome");
+    }
 
     #[test]
     fn the_no_browser_line_names_a_browser_only_when_one_starts_on_request() {

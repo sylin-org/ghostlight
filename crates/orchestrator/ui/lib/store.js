@@ -11,7 +11,7 @@
 })(globalThis, function createGhostlightStoreApi() {
   "use strict";
 
-  const { FEED_LIMIT, WORKING_LATCH_MS, PHASE } = globalThis.GhostlightWords;
+  const { FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, PHASE } = globalThis.GhostlightWords;
   const { entryFromOperation, entryFromRecord, entryTime, isRunning, isPending, isUnsettled } = globalThis.GhostlightEntries;
 
   /**
@@ -191,7 +191,7 @@
         const previous = state.snapshot.history.findIndex((item) => item.invocation === record.invocation);
         if (previous >= 0) state.snapshot.history[previous] = record;
         else state.snapshot.history.unshift(record);
-        state.snapshot.history.length = Math.min(state.snapshot.history.length, FEED_LIMIT);
+        state.snapshot.history.length = Math.min(state.snapshot.history.length, HISTORY_HELD);
       }
       if (state.hidden.has(record.invocation)) return;
       const index = state.feed.findIndex((item) => item.invocation === record.invocation);

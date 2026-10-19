@@ -72,8 +72,10 @@ const EYEBROW_SETUP: &str = "Set up Ghostlight";
 const EYEBROW_READY: &str = "Ready";
 /// A step word for a done first step.
 const WORD_INSTALLED: &str = "Installed";
-/// The word for a connection that is made: a step word without a name, and a row that is done.
-const WORD_CONNECTED: &str = "Connected";
+/// The word for a connection that is made: a step word without a name, a row that is done, and an
+/// agent whose Ghostlight entry is in place, as Integrations says it (`AGENT_STATE_WORDS.installed`
+/// in `ui/lib/words.js`).
+pub const WORD_CONNECTED: &str = "Connected";
 /// The name used for an agent whose label is not known.
 const FALLBACK_AGENT_NAME: &str = "Your agent";
 /// The live line while the person is on the agent step.

@@ -6,8 +6,15 @@
 })(globalThis, function createGhostlightWords() {
   "use strict";
 
-  /** Bound on the retained feed, matching the orchestrator's own bounded history. */
+  /** Bound on the retained feed: the running card and the rows At a glance lists under it. */
   const FEED_LIMIT = 200;
+
+  /**
+   * How many recorded actions the service holds and searches (`HISTORY_LIMIT` in the service's
+   * workbench), so the count the band and the end of the list say stays the service's as work
+   * settles.
+   */
+  const HISTORY_HELD = 500;
 
   /** Said under the rule editor when the applied rules changed elsewhere while edits were unsaved. */
   const POLICY_CHANGED_ELSEWHERE = "The applied rules changed elsewhere. Discard your edits to see them.";
@@ -359,8 +366,21 @@
     history: "monitor",
     checkup: "status",
     configuration: "policy",
+    settings: "settings",
     install: "integrations"
   };
+
+  /** What each kind of search hit is, on the chip at its left, keyed by the service's words. */
+  const HIT_KIND = Object.freeze({
+    destination: "Page", operation: "Running", session: "Session", history: "Action",
+    browser: "Browser", diagnostic: "Check", configuration: "Setting", installation: "Agent"
+  });
+
+  /** What the search palette says when nothing matches. */
+  const SEARCH_FOUND_NOTHING = "No matching Ghostlight records.";
+
+  /** The line that ends a list too long to show whole: every recorded action is a search away. */
+  const searchAll = (count) => `Search all ${count} (Ctrl+K)`;
 
   /* ----------------------------- Integrations ----------------------------- */
 
@@ -633,15 +653,17 @@
 
   /* --------------------------------------------------------------------------
    * The medallion vocabulary, keyed by the orchestrator's fixed activity labels.
-   * These are the same four shapes the renderer draws inside the page, so the
-   * window and the browser tell the same story.
+   * The gear, the lens, the keyboard and the waiting lights are the shapes the
+   * renderer draws inside the page (protocol4/assets/presentation.js), on this
+   * window's 24-unit box, so the window and the browser tell the same story.
    * ----------------------------------------------------------------------- */
   const GLYPHS = {
     scan: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><g class="scanline"><path d="M7 12h10"/></g></svg>',
     navigate: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15.5 8.5 10.6 10.6 8.5 15.5l4.9-2.1z"/></svg>',
     pointer: '<svg viewBox="0 0 24 24"><path d="M6 3.5 18.5 12 13 13.2l-2.2 5.6z"/><path d="M13.2 13.4 17.5 18"/></svg>',
     keyboard: '<svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="19" height="11" rx="2"/><g class="keylight"><path d="M6.5 10.5h.01"/></g><g class="keylight"><path d="M10.5 10.5h.01"/></g><g class="keylight"><path d="M14.5 10.5h.01"/></g><path d="M8 14h8"/></svg>',
-    workwheel: '<svg viewBox="0 0 24 24"><g class="spin"><circle cx="12" cy="12" r="7.5" stroke-dasharray="5 4"/></g><circle class="particle" cx="12" cy="3.4" r="1.25" fill="currentColor" stroke="none"/><circle class="particle" cx="19.4" cy="16" r="1.25" fill="currentColor" stroke="none"/><circle class="particle" cx="4.6" cy="16" r="1.25" fill="currentColor" stroke="none"/></svg>',
+    gear: '<svg viewBox="0 0 24 24"><g class="spin"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.6"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22M4.95 4.95l2.5 2.5M16.55 16.55l2.5 2.5M19.05 4.95l-2.5 2.5M7.45 16.55l-2.5 2.5"/></g><circle class="particle" cx="15.6" cy="3.2" r="1.1" fill="currentColor" stroke="none"/><circle class="particle" cx="20.8" cy="15.6" r="1.1" fill="currentColor" stroke="none"/><circle class="particle" cx="3.2" cy="15.6" r="1.1" fill="currentColor" stroke="none"/></svg>',
+    lens: '<svg viewBox="0 0 24 24"><g class="lens"><circle cx="10.2" cy="10.2" r="6.3"/><path d="M15 15l5.4 5.4"/><path d="M6.6 10.2h7.2" opacity=".45"/></g></svg>',
     camera: '<svg viewBox="0 0 24 24"><path d="M3.5 8.5h4l1.5-2.5h6L16.5 8.5h4v11h-17z"/><circle cx="12" cy="13.5" r="3.4"/><g class="glint"><path d="M9.8 11.4 11 10.4"/></g></svg>',
     wait: '<svg viewBox="0 0 24 24"><circle class="waitdot" cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle class="waitdot" cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle class="waitdot" cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>'
   };
@@ -709,12 +731,12 @@
     "Keyboard": "keyboard",
     "Scrolling": "navigate",
     "Reading page": "scan",
-    "Finding on page": "scan",
+    "Finding on page": "lens",
     "Screenshot": "camera",
     "Zooming": "scan",
     "Filling form": "keyboard",
-    "Uploading file": "workwheel",
-    "Running JavaScript": "workwheel",
+    "Uploading file": "gear",
+    "Running JavaScript": "gear",
     "Waiting": "wait",
     "Browser dialog": "wait"
   };
@@ -1030,7 +1052,7 @@
     browser_window: "scan",
     browser_read: "scan",
     browser_inspect: "scan",
-    browser_find: "scan",
+    browser_find: "lens",
     browser_screenshot: "camera",
     browser_click: "pointer",
     browser_scroll: "navigate",
@@ -1041,9 +1063,9 @@
     browser_drag: "pointer",
     browser_wait: "wait",
     browser_dialog: "wait",
-    browser_upload: "workwheel",
-    browser_execute: "workwheel",
-    browser_flow: "workwheel",
+    browser_upload: "gear",
+    browser_execute: "gear",
+    browser_flow: "gear",
     browser_record: "camera",
     browser_diagnose: "scan",
     policy_explain: "scan"
@@ -1153,7 +1175,7 @@
     ]]
   ];
 
-  return Object.freeze({ FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
+  return Object.freeze({ FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS, HIT_KIND, SEARCH_FOUND_NOTHING, searchAll,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, POLICY_IN_WINDOW, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,

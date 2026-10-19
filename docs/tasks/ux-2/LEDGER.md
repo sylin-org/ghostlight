@@ -21,7 +21,7 @@ the push.
 | u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | landed (this commit) |
 | u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | landed (this commit) |
 | u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | landed (this commit); the tray tooltip's period (j-32) needs crates/desktop, see Notes |
-| u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
+| u7 search-finds-rows | window | n-d-04, j-30, j-31 | landed (this commit) |
 | n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
 | n2 the-tray-keeps-the-mascot | native | j-11 (owner) | landed (this commit) |
 | e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit), j-24 (options switches) | landed (6b8f1d56, this commit); j-33 needs the window lane's breakpoint change, see Notes |
@@ -362,3 +362,28 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   "succeeded"; a row's details still say failed, unknown or kept, which nothing else on them says
   in words, and the running card says it beside its clock. A flow's steps no longer repeat the
   flow's connection. docs/1.0/ARCHITECTURE.md names the earlier session and the quoting rule.
+- u7 (n-d-04): the service words every hit in language/workbench.rs and matches on those words,
+  never on an id. A recorded action's title is its tool in words and its row's sentence
+  ("navigate: Opened sylin.org."); it is found by its tool, sentence, host, agent, browser and
+  outcome, newest first. Its second line is the agent and the browser from the service, and the
+  window adds the age with the row's own clock, so the age agrees with the list. Failed, Unknown,
+  Kept or Blocked comes as a wire word (`outcome`) the window words with its row's OUTCOME_WORD,
+  at the hit's right, in the row's colour. The kind chip reads Page, Running, Session, Action,
+  Browser, Check, Setting or Agent instead of the raw kind. Beyond the item: Policy and Settings are
+  offered as pages, the browser-work hit opens Settings (a new `settings` destination) instead of
+  Policy, a browser hit says "Connected, 2 tabs" instead of "Connected browser adapter 2.0.0", and
+  a hit for an action the list holds opens that row's details and gives it focus. The session line
+  and the agent-state words are composed in Rust for the hits and in words.js for the cards; tests
+  pin both to the same words.
+- u7 (j-30): the recorded count dropped from 410 to 200 at the first settle, because the store
+  trimmed the service's history to the list's length. It now keeps up to HISTORY_HELD (500, the
+  service's HISTORY_LIMIT, pinned by a Rust test), so the band and "Search all 410 (Ctrl+K)" say
+  what search reaches. The end line shows only while the list is full and the service holds more
+  than it shows.
+- u7 (j-31): the page's 48-unit gear and 40-unit lens are scaled onto the window's 24-unit box
+  (ring r6, hub r1.6, eight spokes; lens r6.3 with a 5.4-unit handle), so the item's r12 and 9px
+  are the page's own units. The lens moves as the page's does while running (--beat-lens 1250ms);
+  reduced motion stills it with everything else. The particle delays were at styles.css
+  .hero.live .particle, not :397-398. The browser pane could not open the preview in this lane, so
+  the look was checked by the stylesheet guards, the surface journeys and the headless history
+  journey, not by eye.
