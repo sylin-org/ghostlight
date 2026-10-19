@@ -399,6 +399,12 @@ async function viewChecks() {
         && page.companion.getAttribute("data-light") === "waiting"
         && page.segments().join() === "false,false",
       show({ discs: page.discs(), segments: page.segments() }));
+    add("the one-column step line says every step under the eyebrow, the current one marked, and is hidden from a screen reader",
+      page.el("setup-stepline").textContent === "01 This computer, 02 Your browser, 03 Your agent"
+        && page.el("setup-stepline").children.filter((child) => child.classes?.has("is-current"))
+          .map((child) => child.textContent).join() === "02 Your browser"
+        && page.el("setup-stepline").getAttribute("aria-hidden") === "true",
+      show({ line: page.el("setup-stepline").textContent }));
     add("the skip button says its words and shows while there is something to do",
       page.text("setup-skip") === "Skip for now" && !page.el("setup-skip").hidden);
   }
@@ -785,7 +791,7 @@ async function bootPage({ setup, hash = "", context = "control", focused = true,
         if (refusal) return said(refusal.status, { error: { code: "refused", message: refusal.message } });
         if (route === "GET /api/context") {
           return said(200, {
-            context, word: "Full control", sentence: "Others can watch.", instance: "i1", opener: "service",
+            context, word: "Shared", sentence: "Others can watch.", instance: "i1", opener: "service",
             acts: Object.fromEntries(CONTROL_CONTEXT_ACTS.map((act) => [act, { available: true, why_not: null }])),
             product: { version: "2.0.0", license: "Apache-2.0 OR MIT" }, links: {}
           });

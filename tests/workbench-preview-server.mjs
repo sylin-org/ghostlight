@@ -208,7 +208,7 @@ const controlsFixture = {
     acts: { test_notification: { available: true, why_not: null } }
   },
   service: { word: "Ghostlight is running; 3 agents and 2 browsers connected." },
-  you: { context: "control", word: "Full control", sentence: "Others on this computer can watch this view in a browser." }
+  you: { context: "control", word: "Shared", sentence: "Others on this computer can watch this view in a browser." }
 };
 
 /** What an MCP connection seen with no source and no live claim establishes (`language::provenance`). */
@@ -634,6 +634,8 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
     controls.viewing.word = controls.viewing.watch
       ? "On -- anyone on this computer can open this view"
       : "Off -- only this window shows Ghostlight";
+    // The window wears the Sharing word while others can watch, and no chip while only it shows.
+    controls.you.word = controls.viewing.watch ? "Shared" : null;
     controls.you.sentence = controls.viewing.watch
       ? "Others on this computer can watch this view in a browser."
       : "Watching is off: only this window shows Ghostlight.";
@@ -738,7 +740,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
         "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
         "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "setup_act", "quit"];
       return {
-        context: "control", word: "Full control",
+        context: "control", word: "Shared",
         sentence: "Others on this computer can watch this view in a browser.",
         instance: "preview", opener: "service",
         acts: Object.fromEntries(acts.map((act) => [act, { available: true, why_not: null }])),

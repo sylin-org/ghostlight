@@ -21,10 +21,10 @@
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
     escapeHtml, words, duration, ago, agoSaid, shortId,
-    OUTCOME_WORD, PHASE_WORD, workCounts, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
+    OUTCOME_WORD, PHASE_WORD, workCounts, bandFacts, rowBy, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
-    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun
+    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isPending, isUnsettled, isBlocked, isFailed, isKept } = globalThis.GhostlightEntries;
   const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
@@ -221,12 +221,14 @@
     /**
      * The agent's name as text, and the hover it wears. The service names the agent of every
      * action from the action's own connection evidence, including after disconnect or restart; an
-     * agent it does not know keeps its workspace id one hover away, never printed.
+     * agent it does not know keeps its workspace id one hover away, never printed. A cell whose
+     * words a screen reader already hears elsewhere (`heardElsewhere`) is hidden from it.
      */
-    function agentMarkup(tag, className, entry) {
+    function agentMarkup(tag, className, entry, heardElsewhere = false) {
       const agent = entry.agent;
       const hover = agent?.symbol?.glyph === GLYPH.unknown ? ` title="${escapeHtml(entry.workspace ?? "")}"` : "";
-      return `<${tag} class="${className}"${hover}>${escapeHtml(agent?.name ?? "")}</${tag}>`;
+      const hidden = heardElsewhere ? ' aria-hidden="true"' : "";
+      return `<${tag} class="${className}"${hover}${hidden}>${escapeHtml(agent?.name ?? "")}</${tag}>`;
     }
 
     /**
@@ -648,21 +650,37 @@
       // where there is no room for the column. A screen reader hears the whole set on the button.
       const capability = escapeHtml(capabilityWord(entry));
       const heard = capabilitiesSaid(entry);
+      // Who drove it and when it settled have columns of their own where the row has room, and a
+      // line under the activity where it has not. A screen reader hears both on the button.
       return `<div class="med-mini" aria-hidden="true">${glyphFor(entry)}</div>`
         + `<button class="row-tool" type="button" title="${escapeHtml(entry.tool ?? "")}" data-action-details="${escapeHtml(detailsKey)}" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">`
         + `<span class="row-tool-name">${escapeHtml(toolWords(entry.tool))}</span>`
         + (capability ? `<span class="row-tool-cap" aria-hidden="true">${capability}</span>` : "")
         + (heard ? `<span class="sr-only">, ${escapeHtml(heard)}</span>` : "")
+        + `<span class="sr-only row-by-said">${escapeHtml(bySaid(entry))}</span>`
         + (outcome ? `<span class="sr-only">, ${escapeHtml(outcome.toLowerCase())}</span>` : "")
         + "</button>"
         + intakeMarkup(entry)
-        + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
-        + agentMarkup("div", "row-client", entry)
+        + `<div class="row-what"><div class="row-activity">${escapeHtml(describe(entry))}</div>`
+        + `<div class="row-by" aria-hidden="true">${INTAKE_MARK[channelFor(entry)] ? SYMBOL_GLYPHS[GLYPH.commandLine] : ""}`
+        + `<span class="row-by-words">${escapeHtml(byShown(entry))}</span></div></div>`
+        + agentMarkup("div", "row-client", entry, true)
         + `<div class="row-browser">${escapeHtml(browserFor(entry))}</div>`
         + `<div class="row-cap" aria-hidden="true">${capability}</div>`
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${said}</div>`
-        + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
+        + `<div class="row-when" aria-hidden="true">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
         + `<div class="row-history action-details" id="${escapeHtml(detailsId)}"${open ? "" : " hidden"}>${heroMarkup(entry)}</div>`;
+    }
+
+    /** A row's agent and age as its narrow second line shows them: "Claude Code, 4m". */
+    function byShown(entry) {
+      return rowBy(entry.agent?.name, entry.endedAt ? ago(entry.endedAt) : "");
+    }
+
+    /** A row's agent and age as a screen reader hears them on its button: ", Claude Code, 4m ago". */
+    function bySaid(entry) {
+      const said = rowBy(entry.agent?.name, entry.endedAt ? agoSaid(entry.endedAt) : "");
+      return said ? `, ${said}` : "";
     }
 
     function rowClass(entry) {
@@ -770,16 +788,20 @@
       if (!facts.snapshot) {
         el["state-facts"].textContent = "";
       } else {
-        // The agents At a glance shows, grouped the same way, so the band and the pill agree.
-        const agents = agentGroups(facts.snapshot.sessions).length;
-        const browsers = facts.snapshot.browsers.length;
-        // Only running work counts as running; what waits or is held is counted under its own word.
-        const work = workCounts({ ...facts, paused: facts.runtime !== "active" })
-          .map(([count, word]) => `<b>${count}</b> ${word}`).join(", ");
-        el["state-facts"].innerHTML = `<b>${agents}</b> ${noun(agents, "agent", "agents")}`
-          + ` &middot; <b>${browsers}</b> ${noun(browsers, "browser", "browsers")}`
-          + ` &middot; ${work}`
-          + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
+        // Each fact is a whole of its own, its separator inside it, so the band drops whole facts as
+        // it narrows and never cuts one. The agents are the ones At a glance shows, grouped the same
+        // way, so the band and the pill agree. Only running work counts as running; what waits or is
+        // held is counted under its own word.
+        const told = bandFacts({
+          agents: agentGroups(facts.snapshot.sessions).length,
+          browsers: facts.snapshot.browsers.length,
+          work: workCounts({ ...facts, paused: facts.runtime !== "active" }),
+          recorded: facts.snapshot.history.length
+        });
+        el["state-facts"].innerHTML = told.map(([kind, parts], index) =>
+          `<span class="fact fact-${kind}">${index ? " &middot; " : ""}`
+          + parts.map(([count, word]) => `<b>${count}</b> ${escapeHtml(word)}`).join(", ")
+          + "</span>").join("");
       }
 
       // The tab is called Policy and stays called Policy. What changes is the tone it carries and
@@ -2442,8 +2464,13 @@
       }
       for (const entry of feed.slice(1)) {
         if (!entry.endedAt) continue;
-        const cell = rowNodes.get(entry.invocation)?.querySelector(".row-when");
-        if (cell) cell.textContent = ago(entry.endedAt);
+        const node = rowNodes.get(entry.invocation);
+        if (!node) continue;
+        const cells = [[".row-when", ago(entry.endedAt)], [".row-by-words", byShown(entry)], [".row-by-said", bySaid(entry)]];
+        for (const [selector, text] of cells) {
+          const cell = node.querySelector(selector);
+          if (cell) cell.textContent = text;
+        }
       }
     }
 

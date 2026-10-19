@@ -85,8 +85,9 @@
 /* Reduced motion stops what moves, whatever the system asks for. */
 .motion-reduced *, .motion-reduced *::before, .motion-reduced *::after { animation: none !important; transition-duration: .001ms !important; }
 
-/* Below this width the rail stacks above the section and its entries wrap. */
-@container shell (max-width: 880px) {
+/* Below the window's smallest width the rail stacks above the section and its entries wrap: at
+   720px the rail still fits beside the section. Large text reaches it sooner. */
+@container shell (max-width: 719px) {
   .settings { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .settings-rail { flex-direction: row; flex-wrap: wrap; }
   .rail-entry { flex: 1 1 150px; width: auto; }

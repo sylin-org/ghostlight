@@ -1066,7 +1066,7 @@ fn the_window_may_do_every_act_of_the_controls_part_and_a_watcher_only_pauses() 
     let window = projection(Audience::Control).part(Part::Controls, &snapshot, setup_view);
     assert!(available(&window).iter().all(|(_, may)| *may), "{window}");
     assert_eq!(window["you"]["context"], "control");
-    assert_eq!(window["you"]["word"], words::WORD_CONTROL);
+    assert_eq!(window["you"]["word"], words::WORD_SHARED);
     assert_eq!(window["you"]["sentence"], words::SENTENCE_CONTROL_WATCHED);
 
     let watcher = projection(Audience::Watch).part(Part::Controls, &snapshot, setup_view);
@@ -1110,6 +1110,8 @@ fn watching_off_changes_the_word_and_the_sentence_the_window_is_told() {
     let window = projection(Audience::Control).part(Part::Controls, &snapshot, setup_view);
     assert_eq!(window["viewing"]["word"], words::CONTROLS_VIEWING_OFF);
     assert_eq!(window["you"]["sentence"], words::SENTENCE_CONTROL_PRIVATE);
+    // Only this window shows Ghostlight, so the band wears no chip at all.
+    assert!(window["you"]["word"].is_null(), "{window}");
 }
 
 #[test]

@@ -44,13 +44,15 @@ impl WebContext {
         }
     }
 
-    /// The short word for this context.
+    /// The short word for this context, or `None` where the view wears none: the window while
+    /// only it shows Ghostlight.
     #[must_use]
-    pub const fn word(self) -> &'static str {
+    pub const fn word(self, watching: bool) -> Option<&'static str> {
         match self {
-            Self::Control => words::WORD_CONTROL,
-            Self::Watch => words::WORD_WATCH,
-            Self::Closed => words::WORD_CLOSED,
+            Self::Control if watching => Some(words::WORD_SHARED),
+            Self::Control => None,
+            Self::Watch => Some(words::WORD_WATCH),
+            Self::Closed => Some(words::WORD_CLOSED),
         }
     }
 
@@ -221,7 +223,7 @@ fn links() -> Map<String, Value> {
 pub fn context_document(context: WebContext, watching: bool, instance: &str) -> Value {
     let mut document = Map::new();
     document.insert("context".into(), json!(context.token()));
-    document.insert("word".into(), json!(context.word()));
+    document.insert("word".into(), json!(context.word(watching)));
     document.insert("sentence".into(), json!(context.sentence(watching)));
     if context != WebContext::Closed {
         let acts: Map<String, Value> = WebAct::ALL
@@ -324,6 +326,10 @@ mod tests {
         let private = context_document(WebContext::Control, false, "instance_1");
         assert_eq!(watched["sentence"], words::SENTENCE_CONTROL_WATCHED);
         assert_eq!(private["sentence"], words::SENTENCE_CONTROL_PRIVATE);
+        // The window wears the word Settings > Sharing uses while others can watch, and none
+        // while only it shows Ghostlight.
+        assert_eq!(watched["word"], words::WORD_SHARED);
+        assert!(private["word"].is_null());
         assert_eq!(watched["opener"], OPENER_SERVICE);
         assert_eq!(watched["instance"], "instance_1");
         assert_eq!(watched["acts"]["hold"]["available"], true);

@@ -92,6 +92,29 @@
     return counts;
   }
 
+  /**
+   * The band's facts, each a whole that shows or gives way as one, in the order they give way from
+   * the end: what has been recorded first, then the work in flight. Each is a kind and its
+   * [count, word] parts; the work is what workCounts says.
+   */
+  const BAND_FACT = Object.freeze({ agents: "agents", browsers: "browsers", work: "work", recorded: "recorded" });
+
+  /** The band's facts in order, as [kind, parts] pairs, from the counts the band shows. */
+  function bandFacts({ agents, browsers, work, recorded }) {
+    return [
+      [BAND_FACT.agents, [[agents, noun(agents, "agent", "agents")]]],
+      [BAND_FACT.browsers, [[browsers, noun(browsers, "browser", "browsers")]]],
+      [BAND_FACT.work, work],
+      [BAND_FACT.recorded, [[recorded, "recorded"]]]
+    ];
+  }
+
+  /**
+   * Who drove an action and how long ago it settled, as one phrase: "Claude Code, 4m" on the
+   * narrow row's second line, "Claude Code, 4m ago" for a screen reader. A part it lacks is left out.
+   */
+  const rowBy = (...parts) => parts.filter(Boolean).join(", ");
+
   /** The eyebrow of a running card that has rested: nothing has run for a while. */
   const LAST_ACTION = "Last action";
 
@@ -1119,7 +1142,7 @@
 
   return Object.freeze({ FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
-    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, LAST_ACTION, actionSaid,
+    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,

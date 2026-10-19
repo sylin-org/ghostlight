@@ -154,7 +154,14 @@ body.runtime-working .state-word { color: var(--a); }
 body.runtime-held .state-word { color: var(--held); }
 body.runtime-attention .state-word { color: var(--danger); }
 body.runtime-offline .state-word { color: var(--ink-4); }
-.state-facts { min-width: 0; overflow: hidden; color: var(--ink-4); font: 400 11.5px/1 var(--mono); letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
+/* The facts are wholes, each with its separator inside it. The width rules below drop them from the
+   end, and a fact that still has no room wraps onto a line the band never shows, so a fact is
+   either read whole or not shown, never cut. */
+.state-facts {
+  display: flex; flex-wrap: wrap; min-width: 0; height: 1.4em; overflow: hidden;
+  color: var(--ink-4); font: 400 11.5px/1.4 var(--mono); letter-spacing: .02em;
+}
+.fact { white-space: pre; }
 .state-facts b { color: var(--ink-3); font-weight: 400; }
 
 /*
@@ -420,7 +427,12 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
    capability is the coloured chip, and two competing colours in one row would say neither. */
 .row-channel { display: flex; align-items: center; color: var(--ink-4); }
 .row-channel svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.row-what { min-width: 0; }
 .row-activity { min-width: 0; overflow: hidden; color: var(--ink-4); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+/* Who drove it and how long ago, under the activity, where the row has no columns for them. */
+.row-by { display: none; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--ink-4); font: 400 11.5px/1.3 var(--mono); white-space: nowrap; }
+.row-by svg { width: 11px; height: 11px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.row-by-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* A row that did not do what it was asked, refused or failed, says so in its own sentence, in the
    soft red on the red edge; the sentence's words, not the colour, carry the meaning. */
 .row.blocked .row-activity, .row.failed .row-activity { color: var(--danger-soft); }
@@ -668,7 +680,8 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
   .agents-command, .page-heading .agents-caption { text-align: left; }
 }
 
-.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 10px; }
+/* Four checks in a row, or two and two where four do not fit: never three and one alone. */
+.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .card { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
 .card h2 { margin: 9px 0 5px; color: var(--ink); font-size: 14.5px; font-weight: 400; }
 .card p { margin: 0; color: var(--ink-4); font-size: 11.5px; line-height: 1.55; }
@@ -727,16 +740,27 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 
 :focus-visible { outline: 2px solid rgba(var(--argb), .7); outline-offset: 2px; border-radius: 4px; }
 
-/* Narrow: the browser and the agent give way first. The capability word and the age keep their
-   columns, since the edge's colour alone does not say which capability it is. */
-@container shell (max-width: 1040px) {
-  .row { grid-template-columns: 24px 156px 34px minmax(0, 1fr) 62px 92px 46px; }
-  .row-client, .row-browser { display: none; }
+/* The band's facts repeat At a glance, so they give way, whole and from the end, long before the
+   band would cut anything: what was recorded first. A state other than Ready or Working is a word
+   to read, so its facts give way with it. */
+@container shell (max-width: 1279px) {
+  .fact-recorded { display: none; }
+  body.runtime-held .state-facts, body.runtime-attention .state-facts, body.runtime-offline .state-facts { display: none; }
+}
+@container shell (max-width: 1159px) {
+  .fact-work { display: none; }
 }
 
-/* The band's facts repeat At a glance, so they give way before the state word would truncate. */
+/* Narrow: the browser gives way first, since the card names it. The agent, the capability word and
+   the age keep their columns, since the edge's colour alone does not say which capability it is. */
+@container shell (max-width: 1040px) {
+  .row { grid-template-columns: 24px 140px 34px minmax(0, 1fr) 96px 62px 92px 46px; }
+  .row-browser { display: none; }
+}
+
 @container shell (max-width: 1000px) {
   .state-facts { display: none; }
+  .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* The tabs take a line of their own under the state and the wheel, so neither crowds the other. */
@@ -745,16 +769,17 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
   .tabs { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; }
 }
 
-/* Narrowest: which tool ran and what it did outrank who drove it, the intake and the age. The
-   capability word moves under the tool's name. */
+/* Narrowest: the row is two lines. The capability word moves under the tool's name, and the agent
+   and the age, with the command line's mark, under the activity. */
 @container shell (max-width: 820px) {
   .lampband { column-gap: 10px; padding-inline: 10px; }
   .tab { padding-inline: 9px; }
   .hero { grid-template-columns: 54px minmax(0, 1fr) auto; gap: 14px; }
   .row { grid-template-columns: 24px 140px minmax(0, 1fr) 92px; }
-  .row-channel, .row-cap, .row-when { display: none; }
-  .row-tool { line-height: 1.3; }
+  .row-channel, .row-cap, .row-client, .row-when { display: none; }
+  .row-tool, .row-activity { line-height: 1.3; }
   .row-tool-cap { display: block; }
+  .row-by { display: flex; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -899,7 +924,9 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .org-contacts span { color: var(--ink-4); margin-right: 6px; }
 .org-provenance { margin: 9px 0 0; color: var(--ink-4); font: 400 11.5px/1.4 var(--mono); }
 
-.cap-board { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+/* The four capabilities wrap as the checks do: four in a row, or two and two. */
+.cap-board { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@container shell (max-width: 1000px) { .cap-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cap { padding: 13px 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .cap-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .cap h3 { margin: 0; color: var(--ink); font-size: 13px; font-weight: 400; }
@@ -1145,10 +1172,19 @@ a.ghost-button, a.primary-button { text-decoration: none; }
 
 /* The kit centers the companion on its row. A long list of agents makes the row taller than the
    window, which put the mascot and the steps below the fold: center them on the window instead,
-   where they stay while the list scrolls. A short step looks as before. The narrow one-column
-   layout is the kit's alone. */
-@media (min-width: 761px) {
+   where they stay while the list scrolls. A short step looks as before. The one-column layout
+   below the kit's breakpoint (extension/kit.css, 980px) is the kit's alone. */
+@media (min-width: 980px) {
   #setup-root .gl-companion { align-self: start; position: sticky; top: 50%; transform: translateY(-50%); }
+}
+
+/* In one column the steps sit under the instruction, often below the fold, so a line under the
+   eyebrow says them, the current one in ink. The companion still shows them in full below. */
+.setup-stepline { display: none; margin: 8px 0 0; color: var(--ink-4); font: 400 var(--fs-micro)/1.4 var(--mono); }
+.setup-stepline .is-current { color: var(--ink); }
+#setup-root .gl-head > .setup-stepline + .gl-h1 { margin-top: var(--sp-3); }
+@media (max-width: 979px) {
+  #setup-root .setup-stepline { display: block; }
 }
 
 /* "Skip for now": quiet text, never a second primary action. */

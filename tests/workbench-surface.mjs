@@ -121,7 +121,7 @@ const controlsPart = ({
     },
     service: { word: "Ghostlight is running; 1 agent and 1 browser connected." },
     you: {
-      context, word: control ? "Full control" : "Watching",
+      context, word: control ? (watch ? "Shared" : null) : "Watching",
       sentence: control ? (watch ? SHEET_WATCHED : SHEET_PRIVATE) : SHEET_WATCHER
     }
   };
@@ -132,7 +132,7 @@ let feedFixture = false;
 const invoked = [];
 // The window's own context: every act is available, so a page in it draws everything.
 const controlContext = {
-  context: "control", word: "Full control",
+  context: "control", word: "Shared",
   sentence: "Others on this computer can watch this view in a browser.",
   instance: "instance_1", opener: "service",
   acts: Object.fromEntries(["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
@@ -694,6 +694,7 @@ const sheetAfterPush = {
   diagnosticsWord: sheetNode("controls-diagnostics-word").textContent,
   diagnosticsToggle: sheetNode("controls-diagnostics-toggle").textContent,
   chip: sheetNode("context-chip").textContent,
+  chipHidden: sheetNode("context-chip").hidden,
   chipTitle: sheetNode("context-chip").title,
   snapshots: snapshotRequests() - snapshotsBeforeControls
 };
@@ -1024,7 +1025,7 @@ const contextFor = (kind) => {
   }
   const control = kind === "control";
   return {
-    context: kind, word: control ? "Full control" : "Watching",
+    context: kind, word: control ? "Shared" : "Watching",
     sentence: control ? "Others on this computer can watch this view in a browser."
       : "Anyone on this computer can open this view. Changes are made in the Ghostlight window.",
     instance: "instance_1", opener: control ? "service" : "anchor",
@@ -1672,7 +1673,7 @@ const httpChecks = [
     rosterContinue === '{"view":"workbench","address":"integrations"}', String(rosterContinue)],
   ["opening Integrations looks for the clients once", rescanRequests === 1, `rescans=${rescanRequests}`],
   ["a page with the key draws every control the window draws and no Continue line",
-    controlOpening.chip === "Full control" && controlOpening.setup === false && controlOpening.endSession === false
+    controlOpening.chip === "Shared" && controlOpening.setup === false && controlOpening.endSession === false
       && controlOpening.sendTest === false && controlOpening.wheelHidden === false
       && controlOpening.bandContinue === true && controlOpening.rosterLineHidden === true
       && controlOpening.apply === "Apply"
@@ -1795,8 +1796,8 @@ const httpChecks = [
 
 const checks = [
   ...httpChecks,
-  ["the window's page is told it has full control and draws every control",
-    sheetAfterBoot.chip === "Full control"
+  ["the window's page wears the Sharing word while others can watch, and draws every control",
+    sheetAfterBoot.chip === "Shared"
       && nodes.get("setup-integrations").hidden === false && sheetAfterBoot.end === false
       && sheetAfterBoot.test === false && nodes.get("integrations-continue").hidden === true
       && nodes.get("band-continue").hidden === true && sheetAfterBoot.continueLine === true,
@@ -1825,11 +1826,11 @@ const checks = [
       && sheetAfterBoot.diagnosticsToggle === "Turn off" && sheetAfterBoot.diagnosticsToggleHidden === false
       && sheetAfterBoot.diagnosticsReveal === false,
     JSON.stringify(sheetAfterBoot)],
-  ["a pushed controls part updates Settings and redraws the chip from the context it names, with no snapshot",
+  ["a pushed controls part updates Settings and takes the chip away once only the window shows Ghostlight, with no snapshot",
     sheetAfterPush.railSharing === "Off -- only this window shows Ghostlight" && sheetAfterPush.railDiagnostics === "Off"
       && sheetAfterPush.viewingWord === "Off -- only this window shows Ghostlight"
       && sheetAfterPush.viewingToggle === "Turn on" && sheetAfterPush.diagnosticsWord === "Off"
-      && sheetAfterPush.diagnosticsToggle === "Turn on" && sheetAfterPush.chip === "Full control"
+      && sheetAfterPush.diagnosticsToggle === "Turn on" && sheetAfterPush.chip === "" && sheetAfterPush.chipHidden === true
       && sheetAfterPush.chipTitle === SHEET_PRIVATE && sheetAfterPush.snapshots === 0,
     JSON.stringify(sheetAfterPush)],
   ["the Status page draws no process diagnostics, which moved to Settings",

@@ -338,6 +338,26 @@ try {
     await capture(`action-details-${width}`);
   }
   console.log('PASS action name opens hero details; updates retain expansion and focus; mouse, Space, Enter, and Pause order work at both widths');
+  // The band never cuts a word: the state word whole, and each fact either whole on its line or
+  // not shown, at every width in Standard and in Large text.
+  for (const large of [false, true]) {
+    await evaluate(`document.body.classList.toggle('text-large', ${large})`);
+    for (const width of [1400, 1280, 1200, 1180, 1040, 960, 820, 720]) {
+      await resize(width, 900);
+      const band = await evaluate(`(() => {
+        const word = document.getElementById('state-word'), box = document.getElementById('state-facts');
+        const edge = box.getBoundingClientRect();
+        const facts = getComputedStyle(box).display === 'none' ? [] : [...box.querySelectorAll('.fact')]
+          .filter((fact) => getComputedStyle(fact).display !== 'none' && fact.getBoundingClientRect().top < edge.bottom - 2);
+        return { word: word.scrollWidth <= word.clientWidth + 1,
+          cut: facts.filter((fact) => fact.getBoundingClientRect().right > edge.right + 0.5).map((fact) => fact.textContent) };
+      })()`);
+      assert.equal(band.word, true, `the state word is cut at ${width}px${large ? " in Large text" : ""}`);
+      assert.deepEqual(band.cut, [], `a band fact is cut at ${width}px${large ? " in Large text" : ""}`);
+    }
+  }
+  await evaluate("document.body.classList.remove('text-large')");
+  console.log('PASS the band shows its state word and its facts whole, or not at all, at every width in Standard and Large text');
 } finally {
   if (send && socket?.readyState === WebSocket.OPEN) {
     try { await send("Browser.close"); } catch { /* shutdown can close the reply channel */ }

@@ -55,7 +55,7 @@ function part({ context = "control", watch = true, runtime = "active", layer = "
     },
     notifications: { label: "Notifications", word: "Send one local checkup notification.", acts: { test_notification: act() } },
     service: { word: "Ghostlight is running; 1 agent connected." },
-    you: { context, word: control ? "Full control" : "Watching", sentence: control ? (watch ? WATCHED : PRIVATE) : WATCHER }
+    you: { context, word: control ? (watch ? "Shared" : null) : "Watching", sentence: control ? (watch ? WATCHED : PRIVATE) : WATCHER }
   };
 }
 
@@ -978,7 +978,7 @@ const SCRIPTS = [...markup.matchAll(/<script src="([^"]+)"><\/script>/g)]
 const WINDOW_CONTEXT = {
   context: "control",
   opener: Transport.OPENER_SERVICE,
-  word: "Full control",
+  word: null,
   sentence: PRIVATE,
   product: { version: "2.0.0", license: "Apache-2.0 OR MIT" },
   acts: Object.fromEntries(Object.values(Transport.ACT).map((act) => [act, { available: true, why_not: null }]))
@@ -1911,7 +1911,7 @@ test("a row names one capability, the most consequential, and a screen reader he
   assert.equal(cell("row-cap").textContent, "write");
   assert.equal(cell("row-tool-cap").textContent, "write", "the word under the tool, for the narrowest row");
   for (const shown of [cell("row-cap"), cell("row-tool-cap")]) assert.equal(shown.attributes["aria-hidden"], "true");
-  const heard = cell("row-tool").children.filter((node) => node.classes.has("sr-only"));
+  const heard = cell("row-tool").children.filter((node) => node.classes.has("sr-only") && !node.classes.has("row-by-said"));
   assert.deepEqual(heard.map((node) => node.textContent), [", read and write"]);
   assert.equal(cells.wearing("cap-label")[0].textContent, "read + write", "the detail card shows the whole set");
   assert.ok(cells.wearing("hero-meta")[0].textContent.includes("read + write authority"));
@@ -2112,8 +2112,8 @@ test("the capability word keeps a column until the row is narrowest, then sits u
   assert.ok(naming(".row-cap").some((rule) => rule.declarations["white-space"] === "nowrap"), "one word never wraps");
   for (const cell of [".row-cap", ".row-client", ".row-browser", ".row-when"]) assert.notEqual(displayAt(Infinity, cell), "none", cell);
   assert.equal(displayAt(Infinity, ".row-tool-cap"), "none");
-  // A half-snapped window: the browser and the agent give way first.
-  for (const cell of [".row-client", ".row-browser"]) assert.equal(displayAt(1040, cell), "none", cell);
+  // A half-snapped window: the browser gives way first, since the card names it.
+  for (const width of [1040, 960]) assert.equal(displayAt(width, ".row-browser"), "none", `${width}px`);
   for (const width of [1040, 821]) {
     assert.notEqual(displayAt(width, ".row-cap"), "none", `the capability is hidden at ${width}px`);
     assert.equal(displayAt(width, ".row-tool-cap"), "none", `the capability shows twice at ${width}px`);
@@ -2122,6 +2122,56 @@ test("the capability word keeps a column until the row is narrowest, then sits u
     assert.equal(displayAt(width, ".row-cap"), "none", `${width}px`);
     assert.equal(displayAt(width, ".row-tool-cap"), "block", `the capability is gone at ${width}px`);
   }
+});
+
+test("a row names its agent at every width: in its column, then on a second line under the activity", () => {
+  assert.equal(displayAt(Infinity, ".row-by"), "none", "the agent and the age are not said twice");
+  for (const width of [Infinity, 1280, 1040, 960, 821]) {
+    assert.notEqual(displayAt(width, ".row-client"), "none", `the agent's column is gone at ${width}px`);
+    assert.notEqual(displayAt(width, ".row-when"), "none", `the age's column is gone at ${width}px`);
+    assert.equal(displayAt(width, ".row-by"), "none", `the agent shows twice at ${width}px`);
+  }
+  for (const width of [820, 720, 600]) {
+    assert.equal(displayAt(width, ".row-client"), "none", `${width}px`);
+    assert.equal(displayAt(width, ".row-by"), "flex", `the agent is gone at ${width}px`);
+  }
+  // The second line is the quiet mono of a value.
+  const by = naming(".row-by")[0].declarations;
+  assert.equal(by.color, "var(--ink-4)");
+  assert.match(by.font, /11\.5px\/1\.3 var\(--mono\)/);
+});
+
+test("a row's agent and age are drawn on its second line and said on its button", () => {
+  const record = settledRead({ invocation: "by-1", timestamp_ms: Date.now() - 4 * 60_000,
+    channel: "cli", agent: { id: "command_line", name: "Command line", symbol: { glyph: "command_line" } } });
+  const { cell } = rowOf(record);
+  assert.equal(cell("row-by-words").textContent, "Command line, 4m");
+  assert.equal(cell("row-by").attributes["aria-hidden"], "true", "a screen reader hears it on the button");
+  assert.ok(cell("row-by").children.some((node) => node.tag === "svg"), "the command line keeps its mark on the second line");
+  assert.equal(cell("row-by-said").textContent, ", Command line, 4m ago");
+  for (const shownTwice of [cell("row-client"), cell("row-when")]) assert.equal(shownTwice.attributes["aria-hidden"], "true");
+  const mcp = rowOf(settledRead({ invocation: "by-2", timestamp_ms: Date.now() - 4 * 60_000,
+    agent: { id: "codex", name: "Codex", symbol: { glyph: "codex" } } }));
+  assert.ok(!mcp.cell("row-by").children.some((node) => node.tag === "svg"), "only the command line is marked");
+  assert.equal(mcp.cell("row-by-words").textContent, "Codex, 4m");
+  assert.equal(Words.rowBy("Codex", ""), "Codex", "running work has no age yet");
+});
+
+test("Status's checks and Policy's capabilities sit four in a row, or two and two, never three and one alone", () => {
+  // The last rule that applies wins, as in the cascade: a narrow rule must follow the rule it narrows.
+  const columns = (selector, width) => naming(selector, applyingAt(width))
+    .map((rule) => rule.declarations["grid-template-columns"]).filter(Boolean).at(-1);
+  for (const selector of [".card-grid", ".cap-board"]) {
+    for (const width of [Infinity, 1280, 1001]) assert.equal(columns(selector, width), "repeat(4, minmax(0, 1fr))", `${selector} at ${width}px`);
+    for (const width of [1000, 960, 820, 720, 600]) assert.equal(columns(selector, width), "repeat(2, minmax(0, 1fr))", `${selector} at ${width}px`);
+  }
+});
+
+test("Settings keeps its rail beside the section down to the window's 720px minimum", () => {
+  const kitRules = rulesOf(readFileSync(join(ui, "kit", "kit.css"), "utf8"));
+  const stack = kitRules.filter((rule) => rule.selectors.includes(".settings") && rule.declarations["grid-template-columns"] === "minmax(0, 1fr)");
+  assert.equal(stack.length, 1);
+  assert.ok(widthOf(stack[0].media) < 720, `the rail stacks at ${stack[0].media}`);
 });
 
 test("at 600px the narrowest row leaves the activity room to read", () => {
@@ -2134,9 +2184,38 @@ test("at 600px the narrowest row leaves the activity room to read", () => {
   assert.ok(activity >= 200, `the activity has ${activity}px at 600px`);
 });
 
-test("the band's facts give way below 1000px, and below 900px the tabs take a line of their own", () => {
+test("the band's facts give way whole and from the end, all below 1000px, and below 900px the tabs take a line of their own", () => {
   assert.notEqual(displayAt(1001, ".state-facts"), "none");
   assert.equal(displayAt(1000, ".state-facts"), "none");
+  // A fact is never cut: no ellipsis, and one with no room wraps onto a line the band never shows.
+  const facts = naming(".state-facts")[0].declarations;
+  assert.equal(facts["text-overflow"], undefined);
+  assert.equal(facts["flex-wrap"], "wrap");
+  assert.equal(facts.overflow, "hidden");
+  assert.equal(facts.height, "1.4em");
+  assert.match(facts.font, /\/1\.4 /, "the line shown is the one line the facts take");
+  for (const width of [Infinity, 1280]) {
+    for (const fact of [".fact-agents", ".fact-browsers", ".fact-work", ".fact-recorded"]) {
+      assert.notEqual(displayAt(width, fact), "none", `${fact} at ${width}px`);
+    }
+  }
+  // What was recorded goes first, then the work in flight; the agents and the browsers stay longest.
+  for (const width of [1279, 1200, 1180]) assert.equal(displayAt(width, ".fact-recorded"), "none", `${width}px`);
+  assert.notEqual(displayAt(1160, ".fact-work"), "none");
+  assert.equal(displayAt(1159, ".fact-work"), "none");
+  for (const fact of [".fact-agents", ".fact-browsers"]) assert.notEqual(displayAt(1001, fact), "none", fact);
+  // Any state other than Ready or Working is a word to read: Session ended, with the Shared chip
+  // beside it, at the default 1180px window, in Standard and in Large text, shows the word alone.
+  const large = Number(naming(".text-large .app-shell")[0].declarations.zoom);
+  for (const tone of ["held", "attention", "offline"]) {
+    for (const width of [1180, Math.floor(1180 / large)]) {
+      assert.equal(displayAt(width, `body.runtime-${tone} .state-facts`), "none", `${tone} at ${width}px`);
+    }
+    assert.equal(displayAt(Infinity, `body.runtime-${tone} .state-facts`), "", `${tone} keeps its facts where there is room`);
+  }
+  for (const tone of ["quiet", "working"]) {
+    assert.equal(naming(`body.runtime-${tone} .state-facts`).length, 0, `${tone} keeps its facts at 1180px`);
+  }
   const tabs = (width) => Object.assign({}, ...naming(".tabs", applyingAt(width)).map((rule) => rule.declarations));
   assert.equal(tabs(901)["grid-row"], undefined);
   assert.equal(tabs(900)["grid-row"], "2");
@@ -2148,10 +2227,15 @@ test("the band's facts give way below 1000px, and below 900px the tabs take a li
 test("every width rule asks the shell, which Large text draws larger, and the page holds at 600px", () => {
   assert.equal(naming(".app-shell")[0].declarations.container, "shell / inline-size");
   assert.equal(naming("html")[0].declarations["min-width"], "600px");
-  // The one viewport width left is the setup view's, which follows the extension kit's own breakpoint.
+  // The one viewport width left is the setup view's, which follows the extension kit's own
+  // one-column breakpoint, read from the kit so the two cannot drift apart.
   const viewport = (sheet) => [...sheet.matchAll(/@media([^{]*)\{/g)].map(([, condition]) => condition.trim())
     .filter((condition) => /width/.test(condition));
-  assert.deepEqual(viewport(readFileSync(join(ui, "styles.css"), "utf8")), ["(min-width: 761px)"]);
+  const kitSheet = readFileSync(join(ui, "..", "..", "..", "extension", "kit.css"), "utf8");
+  const column = Number(/One column below \d+px[\s\S]*?@media \(max-width: (\d+)px\)/.exec(kitSheet)?.[1]);
+  assert.ok(column > 0, "the kit names its one-column breakpoint");
+  assert.deepEqual(viewport(readFileSync(join(ui, "styles.css"), "utf8")),
+    [`(min-width: ${column + 1}px)`, `(max-width: ${column}px)`]);
   assert.deepEqual(viewport(readFileSync(join(ui, "kit", "kit.css"), "utf8")), []);
   const large = naming(".text-large .app-shell")[0];
   assert.equal(large.declarations.zoom, "1.15");
@@ -2340,9 +2424,9 @@ test("the band counts only running work as running, and what waits or is held un
   assert.deepEqual(Words.workCounts({ running: 0, paused: true }), [[0, "running"]]);
   const shown = glance();
   shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "active", running: 0, waiting: 2, held: 0 });
-  assert.match(shown.el("state-facts").innerHTML, /&middot; <b>0<\/b> running, <b>2<\/b> waiting &middot; /);
+  assert.match(shown.el("state-facts").innerHTML, /<span class="fact fact-work"> &middot; <b>0<\/b> running, <b>2<\/b> waiting<\/span>/);
   shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "held", running: 0, waiting: 0, held: 2 });
-  assert.match(shown.el("state-facts").innerHTML, /&middot; <b>2<\/b> held &middot; /);
+  assert.match(shown.el("state-facts").innerHTML, /<span class="fact fact-work"> &middot; <b>2<\/b> held<\/span>/);
 });
 
 test("every clock in the window reads one way: tenths, then minutes and seconds, then hours", () => {
@@ -3037,7 +3121,8 @@ test("the band, the pill and About count one thing, the agents At a glance group
   // Four sessions of three agents: Claude Code, Codex twice, and the command line.
   const shown = glance();
   shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "active", running: 0 });
-  assert.match(shown.el("state-facts").innerHTML, /^<b>3<\/b> agents &middot; <b>1<\/b> browser &middot; /);
+  assert.match(shown.el("state-facts").innerHTML,
+    /^<span class="fact fact-agents"><b>3<\/b> agents<\/span><span class="fact fact-browsers"> &middot; <b>1<\/b> browser<\/span>/);
   assert.equal(shown.read().wearing("glance-side")[0].textContent, "3 agents");
   const about = drawn(shown.el("about-facts").innerHTML).root.children.map((node) => node.textContent);
   assert.deepEqual(about.slice(2, 4), ["Agents", "3 connected"]);

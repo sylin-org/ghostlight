@@ -12,8 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::language::readiness::Readiness;
 
-/// The word for the context that carries the right key: the Ghostlight window.
-pub const WORD_CONTROL: &str = "Full control";
+/// The word the Ghostlight window wears while others can watch it, the state Settings > Sharing
+/// turns off. While watching is off the window wears no word.
+pub const WORD_SHARED: &str = "Shared";
 
 /// The word for the context of a browser tab while watching is on.
 pub const WORD_WATCH: &str = "Watching";

@@ -415,8 +415,8 @@ pub struct ServiceControls {
 pub struct YouControls {
     /// The context's token.
     pub context: &'static str,
-    /// The short word for the context.
-    pub word: &'static str,
+    /// The short word for the context, or `None` where the view wears none.
+    pub word: Option<&'static str>,
     /// The sentence that says who can see this view.
     pub sentence: &'static str,
 }
@@ -509,7 +509,7 @@ impl ControlsPart {
             },
             you: YouControls {
                 context: WebContext::Control.token(),
-                word: WebContext::Control.word(),
+                word: None,
                 sentence: "",
             },
         };
@@ -552,7 +552,7 @@ impl ControlsPart {
         };
         self.you = YouControls {
             context: context.token(),
-            word: context.word(),
+            word: context.word(self.viewing.watch),
             sentence: context.sentence(self.viewing.watch),
         };
     }

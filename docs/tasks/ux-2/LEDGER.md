@@ -17,7 +17,7 @@ the push.
 | u0 preview-shows-every-state | window | j-38 | landed (this commit) |
 | u1 teal-means-live | window | n-d-02, j-27, j-24, j-34 (window) | landed (this commit) |
 | u2 only-running-work-glows | window | n-d-01, j-25, window-10, window-9 (time format), owner-1 | landed (this commit) |
-| u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | todo |
+| u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | landed (this commit) |
 | u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | todo |
 | u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | todo |
 | u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | todo |
@@ -191,3 +191,30 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   icon line, at every width. The wire, the mascot, MASCOT, their rules and the mascot test are
   deleted; the mascot route stays because setup still shows the mascot. This supersedes j-12's
   50px mascot and the wire part of n-d-02.
+- u3 (j-14): the band's facts are four wholes, each with its separator inside it. "recorded"
+  gives way below 1280px and the work in flight below 1160px (the item said "then running"; at
+  1160 to 1180px "2 running, 1 waiting" still fits), and all of them below 1000px as before. As a
+  guarantee beyond the width rules, the facts box is one line tall and wraps, so a fact with no
+  room (a long count, Large text) falls onto a line the band never shows instead of being cut.
+  Working keeps its facts below 1280px like Ready: its word is short and the running count is
+  the fact worth reading then. Every other state hides them below 1280px. The history journey
+  now measures the band at 720 to 1400px in Standard and Large text.
+- u3 (window-11): the window wears "Shared" while others can watch and no chip while watching
+  is off; the context word is `WebContext::word(watching)` and is null in that case.
+  WORD_CONTROL is renamed WORD_SHARED. workbench/context.rs and workbench/parts.rs carry the
+  change, outside the lane's file list; no other lane owns them.
+- u3 (n-s-04): below 1040px only the browser gives way; the agent keeps a 96px column and the
+  tool's column narrows to 140px, so the activity keeps about 180px at 821px. At 820px and below,
+  the agent and the age sit on a second line under the activity, the command line's mark before
+  them, in 11.5px rather than the item's 11px, because 11px is not on the window's type scale.
+  The button says ", Codex, 4m ago" for a screen reader, so the agent and age cells and the
+  second line are hidden from it. The ages on the second line and on the button tick with the
+  age column.
+- u3 (j-26): the item's ".cap-board" rule needed to follow the base rule in source order to win;
+  a stylesheet test now reads the last applying rule, as the cascade does.
+- u3 (n-d-08): the step line shows wherever the setup view is one column, which is below the
+  kit's 980px breakpoint since e1, not below 761px. With it, the window lane's half of e1's open
+  dependency (j-33) is done: the companion's sticky centering starts at 980px, measured with no
+  overlap at 880 and 720px, and the settings test reads the breakpoint from extension/kit.css.
+- u3 (window-9): the Settings rail stacks below 720px of shell width, so at the 720 minimum in
+  Standard text the rail sits beside the section; Large text stacks it from about 828px.

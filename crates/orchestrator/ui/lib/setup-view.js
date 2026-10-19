@@ -58,6 +58,12 @@
 
   const CONNECTED_WORD_SEPARATOR = " ";
 
+  /** What stands between two steps in the line that says them all. */
+  const STEP_SEPARATOR = ", ";
+
+  /** A step's number as its disc and the step line show it: "01" for the first. */
+  const stepNumber = (index) => `0${index + 1}`;
+
   /*
    * Icons. These strings are constants of this file; nothing from the service or the page is ever
    * parsed as markup.
@@ -218,7 +224,7 @@
           + (step.state === "todo" ? "" : ` is-${step.state}`)
           + (popped.includes(index) && motion() ? " is-pop" : "");
         if (step.state === "done") disc.replaceChildren(svg(ICON.check));
-        else disc.textContent = `0${index + 1}`;
+        else disc.textContent = stepNumber(index);
         const item = names[index];
         item.className = step.state === "todo" ? "" : `is-${step.state}`;
         if (step.state === "current") item.setAttribute("aria-current", "step");
@@ -231,6 +237,22 @@
       segments.forEach((segment, index) => {
         segment.classList.toggle("is-lit", done[index] && done[index + 1]);
       });
+      drawStepLine(steps);
+    }
+
+    /**
+     * The steps in one line under the eyebrow, for the one-column layout that puts the companion
+     * below the instruction: "01 This computer, 02 Your browser, 03 Your agent", the current one
+     * marked. A screen reader hears the steps from the companion, so the line is hidden from it.
+     */
+    function drawStepLine(steps) {
+      const line = el("setup-stepline");
+      const parts = [];
+      steps.forEach((step, index) => {
+        if (index) parts.push(STEP_SEPARATOR);
+        parts.push(element("span", step.state === "current" ? "is-current" : "", `${stepNumber(index)} ${step.name}`));
+      });
+      line.replaceChildren(...parts);
     }
 
     function companionOf(view, popped = []) {
