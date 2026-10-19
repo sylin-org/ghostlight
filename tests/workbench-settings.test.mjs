@@ -3421,3 +3421,29 @@ test("a destination that cannot be read lets Try again stand in for Refresh, and
   assert.ok(policy.classes.has("load-failed"));
   assert.equal(policy.classes.has("unread"), false, "a policy drawn before keeps what it showed");
 });
+
+test("the keyboard focus on a Refresh the failure hides, or on the Try again it redraws, moves to the new Try again", () => {
+  const shown = focusable();
+  const line = shown.el("policy-failure");
+  let retry;
+  line.querySelector = (selector) => {
+    assert.equal(selector, "[data-retry]");
+    retry = new Element("button", { class: "ghost-button", "data-retry": "policy" });
+    line.append(retry);
+    return retry;
+  };
+
+  shown.el("refresh-policy").focus();
+  shown.view.loadFailed("policy");
+  assert.equal(shown.document.activeElement, retry, "Refresh hands its focus to Try again");
+
+  const before = retry;
+  shown.view.loadFailed("policy");
+  assert.notEqual(retry, before);
+  assert.equal(shown.document.activeElement, retry, "a Try again redrawn by a second failure keeps the focus");
+
+  const elsewhere = shown.el("refresh-status");
+  elsewhere.focus();
+  shown.view.loadFailed("policy");
+  assert.equal(shown.document.activeElement, elsewhere, "focus outside the destination stays where it is");
+});

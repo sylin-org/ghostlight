@@ -2362,14 +2362,20 @@
      */
     function loadFailed(destination) {
       const line = el[`${destination}-failure`];
+      const view = el[`view-${destination}`];
+      // Try again stands in for the Refresh the failure hides and for the Try again it redraws, so
+      // the keyboard focus on either moves to it rather than falling back to the page.
+      const focused = document.activeElement;
+      const standsIn = Boolean(focused) && view.contains(focused)
+        && (focused.classList.contains("refresh") || focused.matches("[data-retry]"));
       line.innerHTML = `<span class="dot" aria-hidden="true"></span><span>${escapeHtml(LOAD_FAILED[destination])}</span>`
         + `<button class="ghost-button" type="button" data-retry="${escapeHtml(destination)}">${escapeHtml(TRY_AGAIN)}</button>`;
       line.hidden = false;
-      const view = el[`view-${destination}`];
       view.classList.add("load-failed");
       view.classList.toggle("unread", !drawnOnce.has(destination));
       const loading = LOADING_LINE[destination];
       if (loading) el[loading].hidden = true;
+      if (standsIn) line.querySelector("[data-retry]").focus();
     }
 
     /** Take a destination's failure line away once it has been read. */
