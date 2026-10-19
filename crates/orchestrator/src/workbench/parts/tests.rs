@@ -724,7 +724,7 @@ fn activity_keys(audience: Audience) -> BTreeSet<String> {
 fn authority(path: &Path) -> EffectiveAuthority {
     let mut authority = GovernanceFacade::new(Some(path.to_owned()), None).effective_authority();
     authority.organization = Some(crate::governance::effective::OrganizationIdentity {
-        name: "Example Org".into(),
+        name: Some("Example Org".into()),
         statement: Some("Because.".into()),
         url: Some("https://example.org/".into()),
         contacts: vec![crate::governance::effective::ContactView {

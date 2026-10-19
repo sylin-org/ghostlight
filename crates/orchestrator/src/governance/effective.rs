@@ -155,16 +155,57 @@ pub struct LayerView {
 }
 
 /// The organization named by the policy in force.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+///
+/// A publication resolves it once, and every surface that names the organization reads that one
+/// answer: the snapshot, the chip, the channel switches, the compiled view and the passport.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct OrganizationIdentity {
-    /// Display name.
-    pub name: String,
+    /// Display name, when either carrier names the organization.
+    pub name: Option<String>,
     /// The organization's own explanation.
     pub statement: Option<String>,
     /// A page the organization publishes. Rendered as text, never as a reachable link.
     pub url: Option<String>,
     /// Channels a governed person may use.
     pub contacts: Vec<ContactView>,
+}
+
+impl OrganizationIdentity {
+    /// The one organization a publication names, resolved with ADR-0122 Decision 3's precedence:
+    /// what the signed presentation says wins, and the manifest's `organization` block fills what
+    /// it lacks. A contact list is taken whole from whichever carrier wins. `None` when neither
+    /// carrier says anything.
+    pub(super) fn resolve(
+        signed: Option<Self>,
+        block: Option<&manifest::OrganizationBlock>,
+    ) -> Option<Self> {
+        let signed = signed.unwrap_or_default();
+        let authored = block.map_or_else(Self::default, |block| Self {
+            name: Some(block.name.clone()),
+            statement: block.statement.clone(),
+            url: block.url.clone(),
+            contacts: block
+                .contacts
+                .iter()
+                .map(|contact| ContactView {
+                    kind: contact.kind.clone(),
+                    value: contact.value.clone(),
+                    label: contact.label.clone(),
+                })
+                .collect(),
+        });
+        let resolved = Self {
+            name: signed.name.or(authored.name),
+            statement: signed.statement.or(authored.statement),
+            url: signed.url.or(authored.url),
+            contacts: if signed.contacts.is_empty() {
+                authored.contacts
+            } else {
+                signed.contacts
+            },
+        };
+        (resolved != Self::default()).then_some(resolved)
+    }
 }
 
 /// One organization contact channel.
@@ -257,26 +298,15 @@ pub struct PolicyChip {
     pub tone: ChipTone,
 }
 
-/// Author the policy tab's state.
+/// Author the policy tab's state, naming the organization its publication resolved.
 #[must_use]
 pub fn chip(
     situation: Situation,
-    organization: Option<&str>,
+    organization: Option<&OrganizationIdentity>,
     stale: bool,
     channels_off: ChannelsOff<'_>,
 ) -> PolicyChip {
-    let detail = headline(
-        situation,
-        organization
-            .map(|name| OrganizationIdentity {
-                name: name.to_owned(),
-                statement: None,
-                url: None,
-                contacts: Vec::new(),
-            })
-            .as_ref(),
-        channels_off,
-    );
+    let detail = headline(situation, organization, channels_off);
     let tone = match situation {
         Situation::FailingClosed => ChipTone::Failing,
         Situation::AllOpen => ChipTone::Open,
@@ -347,7 +377,7 @@ const fn layer_word(kind: LayerKind) -> &'static str {
 
 /// Build the compiled answer.
 pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
-    let organization = inputs.organization.and_then(identity);
+    let organization = inputs.snapshot.organization().cloned();
     let situation = situation(inputs);
     let headline = headline(situation, organization.as_ref(), inputs.channels_off);
     let capabilities = Capability::ALL
@@ -358,10 +388,10 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
     if let Some(policy) = inputs.organization {
         layers.push(layer_view(
             LayerKind::Organization,
-            organization.as_ref().map_or_else(
-                || "Your organization".to_owned(),
-                |named| named.name.clone(),
-            ),
+            organization
+                .as_ref()
+                .and_then(|named| named.name.clone())
+                .unwrap_or_else(|| "Your organization".to_owned()),
             policy,
             None,
             inputs.organization_source.clone(),
@@ -416,24 +446,6 @@ pub(super) fn browser_startup(inputs: &Inputs<'_>) -> BrowserStartupView {
     }
 }
 
-fn identity(policy: &manifest::Manifest) -> Option<OrganizationIdentity> {
-    let block = policy.organization.as_ref()?;
-    Some(OrganizationIdentity {
-        name: block.name.clone(),
-        statement: block.statement.clone(),
-        url: block.url.clone(),
-        contacts: block
-            .contacts
-            .iter()
-            .map(|contact| ContactView {
-                kind: contact.kind.clone(),
-                value: contact.value.clone(),
-                label: contact.label.clone(),
-            })
-            .collect(),
-    })
-}
-
 fn situation(inputs: &Inputs<'_>) -> Situation {
     if !inputs.valid {
         return Situation::FailingClosed;
@@ -460,7 +472,7 @@ fn headline(
 }
 
 fn situation_sentence(situation: Situation, organization: Option<&OrganizationIdentity>) -> String {
-    let named = organization.map(|identity| identity.name.as_str());
+    let named = organization.and_then(|identity| identity.name.as_deref());
     match situation {
         Situation::AllOpen => {
             "No rules apply. Agents may work on ordinary websites, within the limits below.".into()
@@ -510,7 +522,7 @@ fn capability_line(
         .map(|tier| layer_kind(*tier))
         .collect();
 
-    let named = organization.map(|identity| identity.name.clone());
+    let named = organization.and_then(|identity| identity.name.clone());
     let word = |kind: LayerKind| match (kind, named.as_deref()) {
         (LayerKind::Organization, Some(name)) => name.to_owned(),
         (kind, _) => layer_word(kind).to_owned(),
@@ -772,8 +784,8 @@ fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
 #[cfg(test)]
 mod tests {
     use super::{
-        compile, pattern_covers, CapabilityState, Inputs, LayerKind, RuleNote, Situation,
-        UserLayerSource, OWN_CONTROL_PAGE_CEILING,
+        compile, pattern_covers, CapabilityState, Inputs, LayerKind, OrganizationIdentity,
+        RuleNote, Situation, UserLayerSource, OWN_CONTROL_PAGE_CEILING,
     };
     use std::sync::Arc;
 
@@ -815,6 +827,10 @@ mod tests {
                 (organization.cloned(), AuthorityTier::Managed),
                 (user.cloned(), AuthorityTier::User),
             ],
+            OrganizationIdentity::resolve(
+                None,
+                organization.and_then(|policy| policy.organization.as_ref()),
+            ),
             None,
             true,
             &OwnOrigin::default(),

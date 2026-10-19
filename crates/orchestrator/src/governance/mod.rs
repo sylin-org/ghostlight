@@ -400,6 +400,8 @@ pub struct AuthoritySnapshot {
     tab_close_source: Option<u16>,
     preserve_target_names: bool,
     valid: bool,
+    /// The organization this publication names, resolved once from its carriers.
+    organization: Option<effective::OrganizationIdentity>,
     own_origin: OwnOrigin,
 }
 
@@ -553,7 +555,8 @@ impl AuthoritySnapshot {
 
     /// The channel switches this authority turns off, read through [`Self::channel_refusal`], the
     /// check the executor makes per request, so what a person is told and what is enforced are one
-    /// answer. The organization's name comes from its layer, for the sentences that name it.
+    /// answer. The organization's name is this publication's one identity, for the sentences that
+    /// name it.
     #[must_use]
     pub fn channels_off(&self) -> ChannelsOff<'_> {
         let author = |channel| self.channel_refusal(channel).map(|(_, author)| author);
@@ -561,12 +564,17 @@ impl AuthoritySnapshot {
             mcp: author(IntakeChannel::Mcp),
             cli: author(IntakeChannel::Cli),
             organization: self
-                .layers
-                .iter()
-                .find(|layer| layer.tier == AuthorityTier::Managed)
-                .and_then(|layer| layer.manifest.organization.as_ref())
-                .map(|organization| organization.name.as_str()),
+                .organization
+                .as_ref()
+                .and_then(|organization| organization.name.as_deref()),
         }
+    }
+
+    /// The organization this publication names: the signed presentation over the organization
+    /// manifest's own block (ADR-0122 Decision 3). `None` when neither names one.
+    #[must_use]
+    pub fn organization(&self) -> Option<&effective::OrganizationIdentity> {
+        self.organization.as_ref()
     }
 
     /// Opaque version recorded in audit.
@@ -1399,11 +1407,12 @@ impl Published {
                 (managed.clone(), AuthorityTier::Managed),
                 (sources.user.active.clone(), AuthorityTier::User),
             ],
+            sources.managed_organization(),
             managed_sequence,
             valid,
             own_origin,
         ));
-        let passport = sources.managed_passport();
+        let passport = sources.managed_passport().naming(snapshot.organization());
         let user = sources.user.active.as_ref();
         let organization = managed.as_ref();
 
@@ -1417,13 +1426,10 @@ impl Published {
                 (false, false) => effective::Situation::AllOpen,
             }
         };
-        let name = organization
-            .and_then(|policy| policy.organization.as_ref())
-            .map(|organization| organization.name.clone());
         let channels_off = snapshot.channels_off();
         let chip = effective::chip(
             situation,
-            name.as_deref(),
+            snapshot.organization(),
             matches!(passport.freshness, ManagedPolicyFreshness::LastKnownGood),
             channels_off,
         );
@@ -1488,6 +1494,7 @@ struct RemoteView {
     valid: bool,
     manifest: Option<manifest::Manifest>,
     sequence: Option<u64>,
+    organization: Option<effective::OrganizationIdentity>,
     passport: ManagedPolicyPassport,
 }
 
@@ -1498,6 +1505,7 @@ impl RemoteView {
             valid: remote.valid(),
             manifest: remote.manifest().cloned(),
             sequence: remote.sequence(),
+            organization: remote.organization().cloned(),
             passport: remote.passport(),
         }
     }
@@ -1612,6 +1620,22 @@ impl PolicySources {
             .as_ref()
             .and_then(|remote| remote.manifest.as_ref())
             .or(self.managed.active.as_ref())
+    }
+
+    /// The organization the managed layer names, from the same source
+    /// [`Self::managed_manifest`] reads. A signed publication was resolved when it was verified; a
+    /// plain file has no presentation, so its own block is the whole answer.
+    fn managed_organization(&self) -> Option<effective::OrganizationIdentity> {
+        match self
+            .remote
+            .as_ref()
+            .filter(|remote| remote.manifest.is_some())
+        {
+            Some(remote) => remote.organization.clone(),
+            None => self.managed.active.as_ref().and_then(|policy| {
+                effective::OrganizationIdentity::resolve(None, policy.organization.as_ref())
+            }),
+        }
     }
 
     fn managed_sequence(&self) -> Option<u64> {
@@ -1799,11 +1823,11 @@ pub struct ManagedPolicyPassport {
     pub freshness: ManagedPolicyFreshness,
     /// Monotonic signed publish sequence, when active.
     pub sequence: Option<u64>,
-    /// Signed organization display name, when supplied.
+    /// The organization's display name, as its publication resolved it.
     pub organization: Option<String>,
-    /// Signed organization explanation, when supplied.
+    /// The organization's own explanation, as its publication resolved it.
     pub rationale: Option<String>,
-    /// Signed organization contact channels.
+    /// The organization's contact channels, as its publication resolved them.
     pub contacts: Vec<ManagedPolicyContact>,
     /// Content-free source class.
     pub source_class: ManagedPolicySource,
@@ -1811,6 +1835,31 @@ pub struct ManagedPolicyPassport {
     pub last_success_ms: Option<u64>,
     /// Last source attempt time.
     pub last_attempt_ms: Option<u64>,
+}
+
+impl ManagedPolicyPassport {
+    /// This passport naming `organization`, the one identity its publication resolved, so the
+    /// passport never names the organization differently from the snapshot.
+    fn naming(self, organization: Option<&effective::OrganizationIdentity>) -> Self {
+        Self {
+            organization: organization.and_then(|identity| identity.name.clone()),
+            rationale: organization.and_then(|identity| identity.statement.clone()),
+            contacts: organization
+                .map(|identity| {
+                    identity
+                        .contacts
+                        .iter()
+                        .map(|contact| ManagedPolicyContact {
+                            kind: contact.kind.clone(),
+                            value: contact.value.clone(),
+                            label: contact.label.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ..self
+        }
+    }
 }
 
 /// Current managed-policy freshness.
@@ -2044,6 +2093,7 @@ impl GovernanceFacade {
                     (published.managed.clone(), AuthorityTier::Managed),
                     (Some(candidate), AuthorityTier::User),
                 ],
+                published.snapshot.organization().cloned(),
                 published.managed_sequence,
                 published.managed_valid,
                 &self.own_origin,
@@ -2126,6 +2176,7 @@ impl GovernanceFacade {
 /// Fold resolved policy layers into one immutable snapshot.
 fn assemble(
     sources: [(Option<manifest::Manifest>, AuthorityTier); 2],
+    organization: Option<effective::OrganizationIdentity>,
     managed_sequence: Option<u64>,
     valid: bool,
     own_origin: &OwnOrigin,
@@ -2156,6 +2207,7 @@ fn assemble(
         tab_close_source,
         preserve_target_names,
         valid,
+        organization,
         own_origin: own_origin.clone(),
     }
 }

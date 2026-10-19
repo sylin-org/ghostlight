@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use url::Url;
 
+use super::effective::{ContactView, OrganizationIdentity};
 use super::file_state::FileState;
 use super::{
     manifest, ManagedPolicyContact, ManagedPolicyFreshness, ManagedPolicyPassport,
@@ -84,8 +85,43 @@ pub(super) struct Bootstrap {
 struct ActivePolicy {
     manifest: manifest::Manifest,
     sequence: u64,
-    presentation: Option<bundle::Presentation>,
+    /// The organization this publication names, resolved once when it was verified.
+    organization: Option<OrganizationIdentity>,
     envelope_hash: [u8; 32],
+}
+
+impl ActivePolicy {
+    /// A verified publication, its organization resolved from the signed presentation over the
+    /// manifest's own block.
+    fn verified(
+        manifest: manifest::Manifest,
+        verified: bundle::VerifiedBundle,
+        envelope_hash: [u8; 32],
+    ) -> Self {
+        let signed = verified
+            .presentation
+            .map(|presentation| OrganizationIdentity {
+                name: presentation.org_name,
+                statement: presentation.rationale,
+                url: None,
+                contacts: presentation
+                    .contacts
+                    .into_iter()
+                    .map(|contact| ContactView {
+                        kind: contact.kind,
+                        value: contact.value,
+                        label: contact.label,
+                    })
+                    .collect(),
+            });
+        let organization = OrganizationIdentity::resolve(signed, manifest.organization.as_ref());
+        Self {
+            manifest,
+            sequence: verified.sequence,
+            organization,
+            envelope_hash,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -281,11 +317,15 @@ impl ManagedAuthority {
         self.active.as_ref().map(|active| active.sequence)
     }
 
-    pub(crate) fn passport(&self) -> ManagedPolicyPassport {
-        let presentation = self
-            .active
+    /// The organization the active publication names.
+    pub(crate) fn organization(&self) -> Option<&OrganizationIdentity> {
+        self.active
             .as_ref()
-            .and_then(|active| active.presentation.as_ref());
+            .and_then(|active| active.organization.as_ref())
+    }
+
+    /// Provenance of the active publication, naming the organization it resolved.
+    pub(crate) fn passport(&self) -> ManagedPolicyPassport {
         ManagedPolicyPassport {
             configured: self.configured,
             verified: self.active.is_some(),
@@ -299,21 +339,9 @@ impl ManagedAuthority {
                 ManagedPolicyFreshness::Fresh
             },
             sequence: self.active.as_ref().map(|active| active.sequence),
-            organization: presentation.and_then(|value| value.org_name.clone()),
-            rationale: presentation.and_then(|value| value.rationale.clone()),
-            contacts: presentation
-                .map(|value| {
-                    value
-                        .contacts
-                        .iter()
-                        .map(|contact| ManagedPolicyContact {
-                            kind: contact.kind.clone(),
-                            value: contact.value.clone(),
-                            label: contact.label.clone(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
+            organization: None,
+            rationale: None,
+            contacts: Vec::new(),
             source_class: self
                 .bootstrap
                 .as_ref()
@@ -327,6 +355,7 @@ impl ManagedAuthority {
             last_success_ms: self.last_success_ms,
             last_attempt_ms: self.last_attempt_ms,
         }
+        .naming(self.organization())
     }
 
     fn accept_bootstrap(&mut self, bootstrap: Bootstrap, hash: [u8; 32]) {
@@ -411,12 +440,7 @@ impl ManagedAuthority {
                 return;
             }
         }
-        self.active = Some(ActivePolicy {
-            manifest,
-            sequence: verified.sequence,
-            presentation: verified.presentation,
-            envelope_hash,
-        });
+        self.active = Some(ActivePolicy::verified(manifest, verified, envelope_hash));
         if let Some(path) = &self.paths.cache {
             if let Err(error) = atomic_replace(path, bytes) {
                 self.last_error = Some(format!(
@@ -468,12 +492,11 @@ impl ManagedAuthority {
         let bytes = fs::read(self.paths.cache.as_ref()?).ok()?;
         let verified = bundle::verify(&bytes, &key).ok()?;
         let text = serde_json::to_string(&verified.manifest).ok()?;
-        Some(ActivePolicy {
-            manifest: manifest::parse(&text, "verified managed policy cache").ok()?,
-            sequence: verified.sequence,
-            presentation: verified.presentation,
-            envelope_hash: digest(&bytes),
-        })
+        Some(ActivePolicy::verified(
+            manifest::parse(&text, "verified managed policy cache").ok()?,
+            verified,
+            digest(&bytes),
+        ))
     }
 
     fn local_source_changed(&mut self, source: &str) -> bool {
@@ -990,5 +1013,165 @@ mod tests {
 
         fs::remove_file(&paths.bootstrap).unwrap();
         assert!(authority.needs_refresh());
+    }
+
+    /// A facade enforcing one signed bundle, and the status file the managed authority wrote.
+    fn published(
+        name: &str,
+        manifest: serde_json::Value,
+        presentation: Option<bundle::Presentation>,
+    ) -> (Scratch, super::super::GovernanceFacade, String) {
+        let root = directory(name);
+        let paths = ManagedPaths::under(&root);
+        let seed = [41_u8; 32];
+        fs::write(
+            root.join("org.bundle"),
+            bundle::sign(&seed, None, 3, manifest, presentation),
+        )
+        .unwrap();
+        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
+        let status = paths.status.clone().unwrap();
+        let facade = super::super::GovernanceFacade::with_managed_paths(paths);
+        let status = fs::read_to_string(status).unwrap();
+        (root, facade, status)
+    }
+
+    /// An organization manifest that turns MCP agents off, so the switch sentence names it too.
+    fn switched(organization: Option<serde_json::Value>) -> serde_json::Value {
+        let mut manifest = manifest("org", "read");
+        manifest["config"] = serde_json::json!([{
+            "key": super::super::MCP_CHANNEL_ENABLED_KEY,
+            "value": false,
+            "level": "mandatory"
+        }]);
+        if let Some(organization) = organization {
+            manifest["organization"] = organization;
+        }
+        manifest
+    }
+
+    fn contact(value: &str) -> bundle::Contact {
+        bundle::Contact {
+            kind: "email".into(),
+            value: value.into(),
+            label: None,
+        }
+    }
+
+    #[test]
+    fn a_bundle_named_only_in_its_presentation_names_the_organization_on_every_surface() {
+        let (_root, facade, status) = published(
+            "presentation-only",
+            switched(None),
+            Some(bundle::Presentation {
+                org_name: Some("Example Org".into()),
+                rationale: Some("Keeps browser work inside approved sites.".into()),
+                contacts: vec![contact("security@example.com")],
+            }),
+        );
+        let snapshot = facade.snapshot();
+        let authority = facade.effective_authority();
+
+        let organization = snapshot.organization().expect("the presentation names it");
+        assert_eq!(organization.name.as_deref(), Some("Example Org"));
+        assert_eq!(authority.organization.as_ref(), Some(organization));
+        assert_eq!(snapshot.channels_off().organization, Some("Example Org"));
+        assert_eq!(
+            authority.headline,
+            "Example Org sets the rules on this machine. MCP agents are turned off. Command-line work may continue."
+        );
+        assert_eq!(facade.policy_chip().detail, authority.headline);
+        assert_eq!(authority.layers[0].title, "Example Org");
+        for passport in [&authority.passport, &facade.diagnostics().managed_policy] {
+            assert_eq!(passport.organization.as_deref(), Some("Example Org"));
+            assert_eq!(passport.contacts[0].value, "security@example.com");
+        }
+        assert!(status.contains("Example Org"), "{status}");
+    }
+
+    #[test]
+    fn a_manifest_block_alone_names_the_refusal_row() {
+        let (_root, facade, status) = published(
+            "block-only",
+            switched(Some(serde_json::json!({
+                "name": "Northwind",
+                "statement": "Keeps support work on support sites.",
+                "contacts": [{"kind": "email", "value": "it@northwind.example"}]
+            }))),
+            None,
+        );
+        let authority = facade.effective_authority();
+
+        // The refusal row names whoever the passport names, and lists its contacts.
+        let passport = &authority.passport;
+        assert_eq!(passport.organization.as_deref(), Some("Northwind"));
+        assert_eq!(
+            passport.rationale.as_deref(),
+            Some("Keeps support work on support sites.")
+        );
+        assert_eq!(passport.contacts[0].value, "it@northwind.example");
+        assert_eq!(
+            authority
+                .organization
+                .as_ref()
+                .and_then(|organization| organization.name.as_deref()),
+            Some("Northwind")
+        );
+        assert_eq!(
+            facade.snapshot().channels_off().organization,
+            Some("Northwind")
+        );
+        assert!(status.contains("Northwind"), "{status}");
+        assert!(status.contains("it@northwind.example"), "{status}");
+    }
+
+    #[test]
+    fn on_conflict_the_signed_presentation_wins() {
+        let (_root, facade, status) = published(
+            "conflict",
+            switched(Some(serde_json::json!({
+                "name": "Northwind",
+                "statement": "The manifest's own words.",
+                "url": "https://northwind.example/policy",
+                "contacts": [{"kind": "email", "value": "it@northwind.example"}]
+            }))),
+            Some(bundle::Presentation {
+                org_name: Some("Example Org".into()),
+                rationale: Some("The signed presentation's words.".into()),
+                contacts: vec![contact("security@example.com")],
+            }),
+        );
+        let authority = facade.effective_authority();
+
+        let organization = authority.organization.as_ref().expect("both name it");
+        assert_eq!(organization.name.as_deref(), Some("Example Org"));
+        assert_eq!(
+            organization.statement.as_deref(),
+            Some("The signed presentation's words.")
+        );
+        // The presentation carries no address, so the manifest fills it.
+        assert_eq!(
+            organization.url.as_deref(),
+            Some("https://northwind.example/policy")
+        );
+        assert_eq!(organization.contacts.len(), 1);
+        assert_eq!(organization.contacts[0].value, "security@example.com");
+        assert_eq!(facade.snapshot().organization(), Some(organization));
+        assert_eq!(
+            facade.snapshot().channels_off().organization,
+            Some("Example Org")
+        );
+        assert!(facade.policy_chip().detail.starts_with("Example Org sets"));
+        assert_eq!(
+            authority.passport.organization.as_deref(),
+            Some("Example Org")
+        );
+        assert_eq!(
+            authority.passport.rationale.as_deref(),
+            Some("The signed presentation's words.")
+        );
+        assert!(status.contains("Example Org"), "{status}");
+        assert!(!status.contains("Northwind"), "{status}");
+        assert!(!status.contains("it@northwind.example"), "{status}");
     }
 }

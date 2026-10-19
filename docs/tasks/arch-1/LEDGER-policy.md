@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-P10, P1, P2 and P3 landed. Next: P4.
+P10, P1, P2, P3 and P4 landed. Next: P9. S4a is unblocked.
 
 ## Slices
 
@@ -17,8 +17,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | P10 | feat(governance): the runtime state names the acts it accepts | candidate | ux-2 closes | - | landed (570528ad, 4476fda8) |
 | P1 | fix(governance): one evaluator says whether a capability can be used anywhere | candidate | ux-2 closes | see Notes | landed (3373e274, e45f09ed) |
 | P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | flatten already gone, see Notes | landed (bc00a84b) |
-| P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | see Notes | landed (this commit) |
-| P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | - | todo |
+| P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | see Notes | landed (9c705f86) |
+| P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | see Notes | landed (this commit) |
 | P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | - | todo |
 | P5 | refactor(governance): one publication is read whole | none | ux-2 closes | - | todo |
 | P6 | refactor(governance): the unsigned managed file path goes | none | ux-2 closes | cross-lane core and surface call sites | todo |
@@ -75,3 +75,19 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `simulate_refuses_the_recorded_requests_of_a_channel_the_candidate_turns_off`: it now also holds
   that an undeclared line is refused with the MCP one. No departure. The window's preview still
   decides by host alone until S4a moves it onto `replay` with each item's channel.
+- P4: `OrganizationIdentity::resolve` is the one precedence: the signed presentation's name,
+  rationale and contacts win, and the manifest's block fills what it lacks (its URL always, since a
+  presentation carries none). A contact list is taken whole from the carrier that has one. A signed
+  publication is resolved once, when it is verified, and kept on the managed authority's active
+  policy; the unsigned managed file (P6's) resolves from its block alone. The snapshot carries the
+  identity, and `channels_off`, the chip and the compiled view read it from there. The passport is
+  named from the same identity, by the managed authority (so the status file) and again at
+  publication (`ManagedPolicyPassport::naming`), so the refusal row, which reads the passport,
+  names a manifest-only organization. `effective::identity` is deleted, and the passport no longer
+  reads the presentation alone. One departure in shape, none in decision:
+  `OrganizationIdentity.name` is now optional, because a valid presentation may give a rationale
+  and contacts without a name, and ADR-0122 Decision 3 keeps such bundles behaving as they did; the
+  window's `authority.organization.name` can therefore be null, which every page reader already
+  falls back from. Cross-lane: surface's `workbench/parts/tests.rs` fixture wraps its name in
+  `Some`. The proofs live in `governance/managed/mod.rs`, beside the signed-bundle helpers. The
+  catalog and result goldens are unchanged.
