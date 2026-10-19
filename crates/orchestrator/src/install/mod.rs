@@ -64,6 +64,12 @@ const ARGS_KEY: &str = "args";
 const TYPE_KEY: &str = "type";
 /// The arguments that make the edge the MCP relay, in every client's entry.
 const MCP_ARGUMENTS: [&str; 1] = [MCP_ARGUMENT];
+/// How a client's detail names an owned entry that starts the retired MCP connector.
+const RETIRED_ENTRY: words::RetiredEntry<'static> = words::RetiredEntry {
+    connector: RETIRED_MCP_CONNECTOR_NAME,
+    edge: EDGE_COMMAND_NAME,
+    argument: MCP_ARGUMENT,
+};
 /// The package name of the Claude desktop app, which reads the Claude Desktop configuration.
 const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
 /// The package name of the Codex desktop app.
@@ -283,7 +289,7 @@ impl HarnessRegistry {
                     id: definition.id.into(),
                     name: definition.label,
                     detail: bounded_disclosure(&error.to_string())
-                        .unwrap_or_else(|| "The target could not be changed.".into()),
+                        .unwrap_or_else(|| words::CLIENT_CHANGE_FAILED.into()),
                 }),
             }
         }
@@ -293,7 +299,7 @@ impl HarnessRegistry {
             .iter()
             .filter(|summary| summary.state == HarnessState::NeedsAttention)
             .count();
-        let message = setup_message(set_up, updated, needs_attention, failures.len());
+        let message = words::setup_message(set_up, updated, needs_attention, failures.len());
         Ok(HarnessSetupResult {
             set_up,
             updated,
@@ -373,10 +379,7 @@ impl HarnessRegistry {
         let message = if matches!(definition.dialect, ConfigDialect::Manual(_)) {
             manual_setup_sentence(&definition)
         } else {
-            format!(
-                "Ghostlight will use the located {} path after you choose Set up.",
-                summary.label
-            )
+            words::client_location_kept(&summary.label)
         };
         Ok(HarnessActionResult {
             changed: true,
@@ -444,18 +447,6 @@ pub enum HarnessState {
 }
 
 impl HarnessState {
-    /// The plain words a person reads for this state.
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::NotDetected => "not detected",
-            Self::Available => "detected, not connected",
-            Self::Installed => "connected",
-            Self::Updatable => "connected, needs an update",
-            Self::NeedsAttention => "needs attention",
-        }
-    }
-
     /// Whether an install writes an entry for a target in this state: one that has none yet,
     /// detected or not, or one an older Ghostlight wrote.
     #[must_use]
@@ -688,35 +679,6 @@ pub struct HarnessSetupFailure {
     pub name: String,
     /// Bounded typed failure rendered by the existing harness boundary.
     pub detail: String,
-}
-
-fn setup_message(set_up: usize, updated: usize, needs_attention: usize, failed: usize) -> String {
-    let changed = set_up + updated;
-    let mut message = if changed == 0 {
-        "Everything Ghostlight can set up is already ready.".to_owned()
-    } else {
-        format!(
-            "Ghostlight set up {set_up} and updated {updated} MCP integration{}.",
-            if changed == 1 { "" } else { "s" }
-        )
-    };
-    if changed > 0 {
-        message.push_str(" Restart or reconnect those clients to load the tools.");
-    }
-    if needs_attention > 0 {
-        message.push_str(&format!(
-            " {needs_attention} target{} still need{} attention.",
-            if needs_attention == 1 { "" } else { "s" },
-            if needs_attention == 1 { "s" } else { "" }
-        ));
-    }
-    if failed > 0 {
-        message.push_str(&format!(
-            " {failed} target{} could not be changed.",
-            if failed == 1 { "" } else { "s" }
-        ));
-    }
-    message
 }
 
 #[derive(Clone)]
@@ -1801,55 +1763,26 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     let mut detail: String = match (&registration, private) {
         (_, Some(container)) if !manual => words::client_kept_private(&container.app),
         (Ok(RegistrationState::Launcher(launcher)), _) => words::launcher_detail(launcher),
-        (Ok(RegistrationState::Foreign(_)), _) => {
-            "A foreign entry holds this target's Ghostlight registration; it was left untouched."
-                .into()
-        }
+        (Ok(RegistrationState::Foreign(_)), _) => words::CLIENT_FOREIGN_ENTRY.into(),
         (Err(error @ HarnessError::Malformed(_)), _) => error.to_string(),
-        (Err(_), _) => "This configuration could not be read; it was left untouched.".into(),
+        (Err(_), _) => words::CLIENT_UNREADABLE.into(),
         _ if manual => manual_setup_sentence(definition),
-        _ => match state {
-            HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
-            HarnessState::Updatable if retired => format!(
-                "This entry starts {RETIRED_MCP_CONNECTOR_NAME}, which Ghostlight no longer \
-                 installs. Set up points it at {EDGE_COMMAND_NAME} {MCP_ARGUMENT}."
-            ),
-            HarnessState::Updatable => "Ghostlight's saved registration needs an update.".into(),
-            HarnessState::Available if edge_ready => {
-                "Detected and ready for an explicit Ghostlight registration.".into()
-            }
-            HarnessState::Available => "Detected, but the Ghostlight program is missing.".into(),
-            HarnessState::NotDetected if edge_ready => {
-                "Not detected. You can prepare its user configuration before installing it.".into()
-            }
-            HarnessState::NotDetected => {
-                "Not detected, and the Ghostlight program is missing.".into()
-            }
-            HarnessState::NeedsAttention => String::new(),
-        },
+        _ => words::client_detail(state, edge_ready, retired.then_some(RETIRED_ENTRY)),
     };
     let evidence: Option<String> = match &registration {
         Ok(RegistrationState::Launcher(launcher)) => {
             Some(words::launcher_evidence(launcher, &context.edge))
         }
         Ok(RegistrationState::Foreign(found_command)) => Some(match found_command {
-            Some(found) => format!(
-                "Found another program, `{}` with {}, where Ghostlight's entry belongs; \
-                 Ghostlight maintains `{}` there and changed nothing.",
-                found.program,
-                argument_count_phrase(found.arguments),
-                context.edge.display()
-            ),
-            None => format!(
-                "Found an entry without a usable command where Ghostlight's entry belongs; \
-                 Ghostlight maintains `{}` there and changed nothing.",
-                context.edge.display()
-            ),
+            Some(found) => {
+                words::other_program_evidence(&found.program, found.arguments, &context.edge)
+            }
+            None => words::no_command_evidence(&context.edge),
         }),
         _ => None,
     };
     if definition.located_stale {
-        detail.push_str(" A previously located path is missing; the normal location is shown.");
+        detail = words::with_located_path_missing(&detail);
     }
     let changeable = private.is_none();
     let can_fix = changeable
@@ -1896,12 +1829,8 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             .map(|path| path.to_string_lossy().into_owned())
             .collect(),
         connector_command: mcp_command_line(&context.edge),
-        manual_setup: manual_setup(context, definition).unwrap_or_else(|_| {
-            format!(
-                "Use this command as a local stdio MCP server:\n{}",
-                mcp_command_line(&context.edge)
-            )
-        }),
+        manual_setup: manual_setup(context, definition)
+            .unwrap_or_else(|_| words::manual_setup_command(&mcp_command_line(&context.edge))),
     };
     summary.can_uninstall = changeable && summary.has_entry_to_remove();
     summary
@@ -2096,14 +2025,6 @@ fn unowned_entry_refusal(command: Option<&str>, args: Option<&[&str]>) -> Harnes
 }
 
 /// "no arguments", "1 argument" or "<n> arguments".
-fn argument_count_phrase(count: usize) -> String {
-    match count {
-        0 => "no arguments".into(),
-        1 => "1 argument".into(),
-        many => format!("{many} arguments"),
-    }
-}
-
 fn registration_state(
     context: &HarnessContext,
     definition: &HarnessDefinition,
@@ -2320,15 +2241,9 @@ fn apply_install(
     Ok(HarnessActionResult {
         changed,
         message: if changed {
-            format!(
-                "Ghostlight was registered with {}. Restart or reconnect it to load the tools.",
-                summary.label
-            )
+            words::client_registered(&summary.label)
         } else {
-            format!(
-                "{} already has the current Ghostlight registration.",
-                summary.label
-            )
+            words::client_already_current(&summary.label)
         },
         summary,
     })
@@ -2358,15 +2273,9 @@ fn apply_uninstall(
     Ok(HarnessActionResult {
         changed,
         message: if changed {
-            format!(
-                "Ghostlight was removed from {}. Restart or reconnect it to unload the tools.",
-                summary.label
-            )
+            words::client_removed(&summary.label)
         } else {
-            format!(
-                "{} had no owned Ghostlight registration to remove.",
-                summary.label
-            )
+            words::client_had_no_entry(&summary.label)
         },
         summary,
     })
@@ -2445,10 +2354,7 @@ fn apply_fix(
         message: if launcher {
             words::launcher_fixed(&summary.label)
         } else {
-            format!(
-                "Ghostlight replaced the incorrect entry for {}. Restart or reconnect it to load the tools.",
-                summary.label
-            )
+            words::client_fixed(&summary.label)
         },
         summary,
     })
@@ -2879,11 +2785,11 @@ fn json_entry_args(entry: &Value, dialect: JsonDialect) -> Option<Vec<&str>> {
 
 /// The sentence a person reads for a client whose file Ghostlight never edits.
 fn manual_setup_sentence(definition: &HarnessDefinition) -> String {
-    let file = definition.path.file_name().map_or_else(
-        || "its configuration file".into(),
-        |name| name.to_string_lossy(),
-    );
-    format!("Ghostlight does not edit this client's file. Copy setup and paste it into {file}.")
+    let file = definition
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy());
+    words::manual_setup(file.as_deref())
 }
 
 fn manual_refusal(definition: &HarnessDefinition) -> HarnessError {
@@ -3058,17 +2964,6 @@ fn jsonc_options() -> ParseOptions {
         allow_comments: true,
         allow_loose_object_property_names: false,
         allow_trailing_commas: true,
-    }
-}
-
-/// What a person reads when a harness configuration cannot be parsed. It names the line of
-/// the parse error and nothing the file says.
-fn malformed_sentence(line: Option<usize>) -> String {
-    match line {
-        Some(line) => {
-            format!("This configuration could not be parsed at line {line}; it was left untouched.")
-        }
-        None => "This configuration could not be parsed; it was left untouched.".into(),
     }
 }
 
@@ -3256,43 +3151,41 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[derive(Debug, Error)]
 pub enum HarnessError {
     /// Unsupported identifier supplied by the presentation adapter.
-    #[error("unknown supported harness `{0}`")]
+    #[error("{}", words::unknown_client_id(.0))]
     UnknownHarness(String),
     /// The selected host does not have an official download on this platform.
-    #[error("supported harness `{0}` has no official download for this platform")]
+    #[error("{}", words::no_client_download(.0))]
     NoDownload(String),
     /// The installed edge is unavailable.
-    #[error("the Ghostlight program is missing")]
+    #[error("{}", words::EDGE_MISSING)]
     EdgeMissing,
     /// The harness config could not be read.
-    #[error("could not read harness configuration: {0}")]
+    #[error("{}", words::configuration_unreadable(&.0.to_string()))]
     Read(io::Error),
     /// The harness config could not be written.
-    #[error("could not write harness configuration: {0}")]
+    #[error("{}", words::configuration_unwritable(&.0.to_string()))]
     Write(io::Error),
     /// The config is not structurally safe to edit. The payload is the 1-indexed line of the
     /// parse error, when the parser located one. Nothing the file says is ever carried.
-    #[error("{}", malformed_sentence(*.0))]
+    #[error("{}", words::configuration_malformed(*.0))]
     Malformed(Option<usize>),
     /// The client's file is never edited by Ghostlight; the person pastes the setup.
     #[error("{0}")]
     ManualSetup(String),
     /// A foreign server uses Ghostlight's registration name.
-    #[error("a foreign `ghostlight` entry is present; Ghostlight left it untouched")]
+    #[error("{}", words::FOREIGN_ENTRY_LEFT)]
     ForeignEntry,
     /// Ghostlight's npm launcher holds Ghostlight's registration name; only Fix changes it.
     #[error("{}", words::LAUNCHER_ENTRY_LEFT)]
     LauncherEntry,
     /// The explicit fix no longer points at one foreign entry.
-    #[error(
-        "the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations"
-    )]
+    #[error("{}", words::NOT_FIXABLE)]
     NotFixable,
     /// A located path is neither a matching configuration nor an executable.
-    #[error("the selected path is not a usable harness executable or configuration: {0}")]
+    #[error("{}", words::located_path_invalid(.0))]
     LocatedPathInvalid(PathBuf),
     /// Ghostlight's own located-path state is malformed.
-    #[error("Ghostlight's harness location state is malformed: {0}")]
+    #[error("{}", words::location_state_malformed(.0))]
     MalformedLocationState(String),
     /// The change would reach only the private view of the app container named here.
     #[error("{}", words::client_kept_private(.0))]

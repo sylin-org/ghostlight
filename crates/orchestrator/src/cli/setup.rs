@@ -25,7 +25,7 @@ use ghostlight_relay::protocol::{Control, QuitReason};
 
 use crate::cli::desktop::{self, Detached};
 use crate::cli::parse::{NativeHostCommand, SetupOptions};
-use crate::install::container::{self, AppContainer, Residence};
+use crate::install::container::{AppContainer, Residence};
 use crate::install::deployment::{stop_found_strays, StrayStop, SystemProcessControl};
 use crate::install::layout::Layout;
 use crate::install::native_host::{BrowserRegistration, NativeHostReport, NativeHostState};
@@ -37,7 +37,7 @@ use crate::install::{client_ids, setup_state, version_directories};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessRegistry, HarnessState, HarnessSummary,
 };
-use crate::language::deployment as deployment_words;
+use crate::language::deployment::{self as deployment_words, NativeHostRun};
 use crate::language::environment::{self, Environment};
 use crate::language::setup::{
     self as setup_words, BrowserFact, InstallAgent, InstallFacts, RunningAfterUninstall,
@@ -228,7 +228,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
         collected.removed_browsers = removed_browsers(&initial_browser_report, &result.report);
         for browser in &result.report.browsers {
             if browser.state == NativeHostState::NeedsAttention {
-                println!("{}", browser_line(browser));
+                println!("{}", deployment_words::browser_line(browser));
             }
         }
     }
@@ -274,9 +274,8 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
         let state = result.report.state;
         if state == UserAssetState::NeedsAttention {
             println!(
-                "Documentation: {} -- {}",
-                state.label(),
-                result.report.detail
+                "{}",
+                deployment_words::documentation_line(state, &result.report.detail)
             );
         }
     }
@@ -490,7 +489,7 @@ fn browser_attention_lines(
             .browsers
             .iter()
             .filter(|browser| not_checkable(report, browser))
-            .map(|browser| not_visible_line(browser, container))
+            .map(|browser| deployment_words::browser_line_not_visible(browser, container))
             .collect();
     }
     report
@@ -503,19 +502,8 @@ fn browser_attention_lines(
                 NativeHostState::NeedsAttention | NativeHostState::OwnedElsewhere
             ) || (chosen && !install_usable)
         })
-        .map(browser_line)
+        .map(deployment_words::browser_line)
         .collect()
-}
-
-/// One browser's package, registration state and detail, as the reports print it.
-fn browser_line(browser: &BrowserRegistration) -> String {
-    format!(
-        "Browser: {} -- {} -- {} -- {}",
-        browser.name,
-        browser.package_detail,
-        browser.state.label(),
-        browser.detail
-    )
 }
 
 /// Write the Windows Start-menu shortcut and Uninstall key the way a deploy does, or, with
@@ -562,7 +550,7 @@ fn pending_entry_lines(pending: &PendingWindowsEntries, layout: &Layout) -> Vec<
         .collect();
     if let Some(container) = &pending.container {
         if !pending.kept_private.is_empty() {
-            lines.extend(container::kept_private_lines(
+            lines.extend(deployment_words::kept_private_lines(
                 container,
                 &pending.kept_private,
                 layout,
@@ -705,9 +693,11 @@ fn conclude(
         _ => return finish_setup(install, options, install_usable, collected),
     };
     println!();
-    for line in
-        container::kept_private_lines(container, &kept_private.registrations, &Layout::current()?)
-    {
+    for line in deployment_words::kept_private_lines(
+        container,
+        &kept_private.registrations,
+        &Layout::current()?,
+    ) {
         println!("{line}");
     }
     Ok(())
@@ -729,18 +719,14 @@ pub(crate) fn select_install_browsers(
                 .browsers
                 .iter()
                 .find(|browser| browser.id == *id)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "unknown browser '{id}'; expected chrome, edge, brave, or chromium"
-                    )
-                })?;
+                .ok_or_else(|| anyhow::anyhow!("{}", deployment_words::unknown_browser(id)))?;
             if browser.package.sandboxed() {
                 anyhow::bail!("{}", browser.package_detail);
             }
             if browser.package == BrowserPackage::NotDetected {
                 anyhow::bail!(
-                    "{} Install Chrome, Edge, Brave, or Chromium as a native package, then run Ghostlight install again.",
-                    browser.package_detail
+                    "{}",
+                    deployment_words::browser_not_installed(&browser.package_detail)
                 );
             }
         }
@@ -769,9 +755,7 @@ pub(crate) fn select_install_browsers(
         .map(|browser| browser.package_detail.as_str())
         .collect::<Vec<_>>();
     if sandboxed.is_empty() {
-        anyhow::bail!(
-            "No supported native browser was detected. Install Chrome, Edge, Brave, or Chromium as a native package, then run Ghostlight install again."
-        );
+        anyhow::bail!("{}", deployment_words::no_native_browser());
     }
     anyhow::bail!("{}", sandboxed.join(" "))
 }
@@ -1000,17 +984,20 @@ fn left_private(summary: &crate::install::HarnessSummary, install: bool) -> bool
         }
 }
 
-/// Print the line that names the Ghostlight program browsers start.
-fn print_program_line(program: &std::path::Path) {
-    println!("Ghostlight program: {}", program.display());
-}
-
 /// Print the native host registration status report to stdout.
 pub(crate) fn print_native_host_report(report: &NativeHostReport) {
-    print_program_line(&report.connector);
-    for line in browser_report_lines(report) {
+    for line in native_host_report_lines(report) {
         println!("{line}");
     }
+}
+
+/// The lines of the native host registration report: the program browsers start, then one line
+/// per browser. `doctor`, the install's dry run and `ghostlight native-host` all print these, so
+/// each state reads with one word wherever it is printed.
+pub(crate) fn native_host_report_lines(report: &NativeHostReport) -> Vec<String> {
+    std::iter::once(deployment_words::program_line(&report.connector))
+        .chain(browser_report_lines(report))
+        .collect()
 }
 
 /// One line per browser of `report`. Inside an app container each line says the registration
@@ -1020,22 +1007,10 @@ pub(crate) fn browser_report_lines(report: &NativeHostReport) -> Vec<String> {
         .browsers
         .iter()
         .map(|browser| match &report.private_view {
-            Some(container) => not_visible_line(browser, container),
-            None => browser_line(browser),
+            Some(container) => deployment_words::browser_line_not_visible(browser, container),
+            None => deployment_words::browser_line(browser),
         })
         .collect()
-}
-
-/// One browser's line inside `container`: its package, and in place of its registration state
-/// that the state cannot be checked from here, because the registry read is that app's own.
-fn not_visible_line(browser: &BrowserRegistration, container: &AppContainer) -> String {
-    format!(
-        "Browser: {} -- {} -- {} -- {}",
-        browser.name,
-        browser.package_detail,
-        container::NOT_VISIBLE,
-        container::registry_view_detail(container)
-    )
 }
 
 /// Whether an install inside an app container left `browser` unjudged: the value in that app's
@@ -1047,19 +1022,7 @@ fn not_checkable(report: &NativeHostReport, browser: &BrowserRegistration) -> bo
 
 /// Print the command path link status report to stdout.
 pub(crate) fn print_command_path_report(report: &crate::install::command_path::CommandPathReport) {
-    use crate::install::command_path::CommandPathState;
-
-    if report.state == CommandPathState::NotApplicable {
-        // Still name the executable: a person on a system package or on a test home needs the path
-        // as much as anyone else does.
-        println!("Command: {}", report.executable.display());
-        return;
-    }
-    println!(
-        "Command: {} -- {}",
-        report.executable.display(),
-        report.detail
-    );
+    println!("{}", deployment_words::command_line(report));
 }
 
 /// Print the desktop applications entry report to stdout.
@@ -1069,12 +1032,7 @@ pub(crate) fn print_desktop_integration_report(
     report: &crate::install::desktop_entry::DesktopIntegrationReport,
 ) {
     if let Some(entry) = &report.desktop_entry {
-        println!(
-            "Applications: {} -- {} -- {}",
-            report.state.label(),
-            report.detail,
-            entry.display()
-        );
+        println!("{}", deployment_words::applications_line(report, entry));
     }
 }
 
@@ -1084,45 +1042,36 @@ pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
 
     ghostlight_relay::home::home()?;
     let registry = NativeHostRegistry::discover();
-    let (verb, changed, report, private) = match command {
-        NativeHostCommand::Check => ("checked", false, registry.check()?, Vec::new()),
+    let (run, changed, report, private) = match command {
+        NativeHostCommand::Check => (NativeHostRun::Checked, false, registry.check()?, Vec::new()),
         NativeHostCommand::Install => {
             let result = registry.install()?;
-            let verb = if result.private.is_empty() {
-                "installed"
+            let run = if result.private.is_empty() {
+                NativeHostRun::Installed
             } else {
-                "prepared"
+                NativeHostRun::Prepared
             };
-            (verb, result.changed, result.report, result.private)
+            (run, result.changed, result.report, result.private)
         }
         NativeHostCommand::Uninstall => {
             let result = registry.uninstall()?;
-            ("uninstalled", result.changed, result.report, Vec::new())
+            (
+                NativeHostRun::Uninstalled,
+                result.changed,
+                result.report,
+                Vec::new(),
+            )
         }
     };
-    println!("Ghostlight native host {verb}; changed: {changed}");
-    if let Some(container) = &report.private_view {
-        print_native_host_report(&report);
-        if !private.is_empty() {
-            let registrations = private_browser_registrations(&private);
-            for line in
-                container::kept_private_lines(container, &registrations, &Layout::current()?)
-            {
-                println!("{line}");
-            }
+    println!("{}", deployment_words::native_host_ran(run, changed));
+    print_native_host_report(&report);
+    if let (Some(container), false) = (&report.private_view, private.is_empty()) {
+        let registrations = private_browser_registrations(&private);
+        for line in
+            deployment_words::kept_private_lines(container, &registrations, &Layout::current()?)
+        {
+            println!("{line}");
         }
-        return Ok(());
-    }
-    print_program_line(&report.connector);
-    for browser in report.browsers {
-        let state = match browser.state {
-            NativeHostState::Missing => "missing",
-            NativeHostState::Current => "current",
-            NativeHostState::Updatable => "updatable",
-            NativeHostState::OwnedElsewhere => "owned by another installation",
-            NativeHostState::NeedsAttention => "needs attention",
-        };
-        println!("{}: {state} -- {}", browser.name, browser.detail);
     }
     Ok(())
 }
@@ -1159,6 +1108,46 @@ mod tests {
             browsers,
             private_view: None,
         }
+    }
+
+    /// `ghostlight native-host` and `doctor` print the same report, so a browser's state reads with
+    /// one word in both, and every state has a word of its own.
+    #[test]
+    fn native_host_check_and_doctor_say_one_word_per_state() {
+        use std::collections::BTreeSet;
+
+        use crate::language::deployment::browser_state;
+
+        let states = [
+            NativeHostState::Missing,
+            NativeHostState::Current,
+            NativeHostState::Updatable,
+            NativeHostState::OwnedElsewhere,
+            NativeHostState::NeedsAttention,
+        ];
+        let report = browser_report(
+            states
+                .iter()
+                .map(|state| BrowserRegistration {
+                    state: *state,
+                    ..browser(&format!("{state:?}"), BrowserPackage::Native)
+                })
+                .collect(),
+        );
+        let lines = super::native_host_report_lines(&report);
+        assert_eq!(lines.len(), states.len() + 1);
+        assert_eq!(lines[0], "Ghostlight program: /ghostlight");
+        for (state, line) in states.iter().zip(&lines[1..]) {
+            assert_eq!(
+                *line,
+                format!(
+                    "Browser: {state:?} -- {state:?} package detail -- {} -- registration detail",
+                    browser_state(*state)
+                )
+            );
+        }
+        let words: BTreeSet<&str> = states.iter().map(|state| browser_state(*state)).collect();
+        assert_eq!(words.len(), states.len(), "one word per state: {words:?}");
     }
 
     #[test]

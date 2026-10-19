@@ -23,10 +23,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::browser_package::{self, BrowserPackage, BrowserPackageContext, BrowserPackageSpec};
-use super::container::{self, AppContainer, Residence};
+use super::container::{AppContainer, Residence};
 use super::entry::{canonical_path, same_location_on};
 use super::layout::{Layout, EDGE_COMMAND_NAME, MANIFESTS_DIRECTORY_NAME};
 use super::record;
+use crate::language::deployment as words;
 
 /// Stable native-messaging identity used by every supported Chromium browser.
 pub const HOST_NAME: &str = "org.sylin.ghostlight";
@@ -77,18 +78,6 @@ pub enum NativeHostState {
 }
 
 impl NativeHostState {
-    /// The plain words a person reads for this state.
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Missing => "not registered",
-            Self::Current => "registered",
-            Self::Updatable => "registered, needs an update",
-            Self::OwnedElsewhere => "registered to another installation",
-            Self::NeedsAttention => "needs attention",
-        }
-    }
-
     /// Whether the registration is one a Ghostlight manifest makes, which an uninstall removes.
     #[must_use]
     pub const fn owned(self) -> bool {
@@ -218,14 +207,7 @@ impl NativeHostRegistry {
     /// Every supported browser family, in the table's order.
     #[must_use]
     pub fn browser_identities(&self) -> Vec<BrowserIdentity> {
-        BROWSERS
-            .iter()
-            .map(|browser| BrowserIdentity {
-                id: browser.id,
-                name: browser.name,
-                short: browser.short,
-            })
-            .collect()
+        supported_browsers()
     }
 
     /// Install or update every safe per-user registration.
@@ -438,6 +420,20 @@ fn native_host_roots(
     }
 }
 
+/// Every supported browser family, in the table's order. This is the one list of the families
+/// Ghostlight supports; every sentence that names them composes it from here.
+#[must_use]
+pub fn supported_browsers() -> Vec<BrowserIdentity> {
+    BROWSERS
+        .iter()
+        .map(|browser| BrowserIdentity {
+            id: browser.id,
+            name: browser.name,
+            short: browser.short,
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy)]
 struct BrowserSpec {
     id: &'static str,
@@ -452,6 +448,9 @@ struct BrowserSpec {
     package: BrowserPackageSpec,
 }
 
+/// The supported browser families, one row per family. Each row is the family's stable channel:
+/// its executable, its profile directory and its native-messaging location. Beta, Dev and Canary
+/// channels install separately with their own profiles, and Ghostlight does not support them.
 const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "chrome",
@@ -1106,7 +1105,7 @@ fn apply_uninstall_for(
     browsers: &[BrowserSpec],
 ) -> Result<NativeHostActionResult, NativeHostError> {
     if let Some(container) = context.private_registry() {
-        return Err(NativeHostError::PrivateView(container::uninstall_refusal(
+        return Err(NativeHostError::PrivateView(words::uninstall_refusal(
             container,
             &context.layout,
         )));
@@ -1415,7 +1414,7 @@ fn remove_registry_key(_key: &str) -> Result<(), NativeHostError> {
 #[derive(Debug, Error)]
 pub enum NativeHostError {
     /// A command named a browser outside the closed supported set.
-    #[error("unknown browser '{0}'; expected chrome, edge, brave, or chromium")]
+    #[error("{}", words::unknown_browser(.0))]
     UnknownBrowser(String),
     /// The packaged sibling Ghostlight edge is unavailable.
     #[error("the Ghostlight program is missing: {0}")]

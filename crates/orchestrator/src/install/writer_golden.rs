@@ -818,7 +818,7 @@ fn state_words(state: HarnessState) -> String {
     format!(
         "{} ({})",
         wire.as_str().expect("a state is a word"),
-        state.label()
+        crate::language::deployment::client_state(state)
     )
 }
 

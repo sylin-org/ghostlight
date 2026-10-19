@@ -14,6 +14,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use super::record::{Link, Replace};
+use crate::language::deployment as words;
 
 const APPLICATION_ID: &str = "org.sylin.ghostlight";
 const DESKTOP_TEMPLATE: &str = include_str!("../../../../packaging/linux/ghostlight.desktop.hbs");
@@ -34,20 +35,6 @@ pub enum DesktopIntegrationState {
     Updatable,
     /// A foreign file or symlink occupies a product-owned location.
     NeedsAttention,
-}
-
-impl DesktopIntegrationState {
-    /// The plain words a person reads for this state.
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::NotApplicable => "not used on this installation",
-            Self::Missing => "not installed",
-            Self::Current => "installed",
-            Self::Updatable => "installed, needs an update",
-            Self::NeedsAttention => "needs attention",
-        }
-    }
 }
 
 /// Read-only result for the per-user Applications entry.
@@ -146,6 +133,7 @@ fn inspect(
 ) -> Result<DesktopIntegrationReport, DesktopIntegrationError> {
     let desktop_entry = context.desktop_entry();
     let icon = context.icon();
+    let mut icon_only = false;
     let state = if !context.linux || context.system_package() {
         DesktopIntegrationState::NotApplicable
     } else if symlink(&desktop_entry)? || symlink(&icon)? {
@@ -163,6 +151,7 @@ fn inspect(
         } else if existing_entry.is_some() && !entry_owned || !icon_owned {
             DesktopIntegrationState::NeedsAttention
         } else if entry_owned {
+            icon_only = existing_entry.as_deref() == Some(expected_entry.as_bytes());
             DesktopIntegrationState::Updatable
         } else {
             DesktopIntegrationState::Missing
@@ -171,9 +160,9 @@ fn inspect(
     Ok(DesktopIntegrationReport {
         state,
         detail: if context.linux {
-            state_detail(state).into()
+            words::applications_detail(state, icon_only).into()
         } else {
-            OTHER_PLATFORM_DETAIL.into()
+            words::APPLICATIONS_ELSEWHERE.into()
         },
         desktop_entry: context.linux.then_some(desktop_entry),
         icon: context.linux.then_some(icon),
@@ -273,28 +262,6 @@ fn desktop_entry_owned(bytes: &[u8]) -> bool {
         source.lines().any(|line| line == OWNERSHIP_MARKER)
             && source.lines().any(|line| line == "Type=Application")
     })
-}
-
-/// What the report says on a platform that has no XDG application entry.
-const OTHER_PLATFORM_DETAIL: &str =
-    "Linux application-menu integration does not apply on this platform.";
-
-fn state_detail(state: DesktopIntegrationState) -> &'static str {
-    match state {
-        DesktopIntegrationState::NotApplicable => {
-            "Desktop integration is owned by the operating system package."
-        }
-        DesktopIntegrationState::Missing => "Ghostlight is not present in Applications.",
-        DesktopIntegrationState::Current => {
-            "Applications opens this installation's Ghostlight window."
-        }
-        DesktopIntegrationState::Updatable => {
-            "The owned Applications entry points at an older installation."
-        }
-        DesktopIntegrationState::NeedsAttention => {
-            "A foreign file or symlink occupies Ghostlight's Applications location; it was left untouched."
-        }
-    }
 }
 
 fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, DesktopIntegrationError> {
@@ -442,15 +409,35 @@ mod tests {
         .unwrap();
         fs::write(&icon, ICON).unwrap();
 
+        let report = inspect(&context).unwrap();
+        assert_eq!(report.state, DesktopIntegrationState::Updatable);
         assert_eq!(
-            inspect(&context).unwrap().state,
-            DesktopIntegrationState::Updatable
+            report.detail,
+            "The owned Applications entry points at an older installation."
         );
         assert!(apply_install(&context).unwrap().changed);
         assert_eq!(
             fs::read_to_string(entry).unwrap(),
             render_desktop_entry(&context.executable)
         );
+    }
+
+    #[test]
+    fn an_entry_that_lost_only_its_icon_is_not_said_to_be_older() {
+        let (_root, context) = context("icon-only");
+        let entry = context.desktop_entry();
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::write(&entry, render_desktop_entry(&context.executable)).unwrap();
+
+        let report = inspect(&context).unwrap();
+        assert_eq!(report.state, DesktopIntegrationState::Updatable);
+        assert_eq!(
+            report.detail,
+            "The owned Applications entry starts this installation, but its icon is missing."
+        );
+        assert!(!report.detail.contains("older"));
+        assert!(apply_install(&context).unwrap().changed);
+        assert_eq!(fs::read(context.icon()).unwrap(), ICON);
     }
 
     #[test]

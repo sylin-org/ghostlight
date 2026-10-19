@@ -68,21 +68,6 @@ pub enum CommandPathState {
     PrivateView,
 }
 
-impl CommandPathState {
-    /// The plain words a person reads for this state.
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::NotApplicable => "not used on this installation",
-            Self::Missing => "not installed",
-            Self::Current => "installed",
-            Self::Updatable => "installed, needs an update",
-            Self::NeedsAttention => "needs attention",
-            Self::PrivateView => "private to an app",
-        }
-    }
-}
-
 /// Read-only result for the per-user command entry.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct CommandPathReport {

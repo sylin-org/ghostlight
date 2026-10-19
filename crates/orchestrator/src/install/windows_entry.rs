@@ -44,12 +44,6 @@ const SHORTCUT_EXTENSION: &str = "lnk";
 /// The command the installed-apps entry runs to remove Ghostlight's registrations.
 const UNINSTALL_ARGUMENT: &str = "uninstall";
 
-/// What the report calls the Start-menu shortcut.
-pub const START_MENU_SHORTCUT: &str = "Start-menu shortcut";
-
-/// What the report calls the Uninstall key.
-pub const INSTALLED_APPS_ENTRY: &str = "installed-apps entry";
-
 /// Uninstall-key value names.
 mod value {
     pub const DISPLAY_NAME: &str = "DisplayName";
@@ -90,8 +84,9 @@ pub struct WindowsEntryChange {
     pub shortcut: bool,
     /// The Uninstall key was written.
     pub uninstall_key: bool,
-    /// An NSIS install's Uninstall key was removed first.
-    pub nsis_removed: bool,
+    /// The Uninstall key another installation wrote, an NSIS install's or another home's, was
+    /// removed first.
+    pub other_removed: bool,
 }
 
 /// What [`reconcile`] would change, without writing anything.
@@ -110,14 +105,14 @@ pub fn plan(layout: &Layout, version: &str) -> io::Result<WindowsEntryChange> {
         .as_ref()
         .ok()
         .and_then(|key| key.get_value(value::UNINSTALL_STRING).ok());
-    change.nsis_removed = recorded
+    change.other_removed = recorded
         .as_ref()
         .is_some_and(|recorded| *recorded != uninstall);
     let version_recorded: Option<String> = current
         .ok()
         .and_then(|key| key.get_value(value::DISPLAY_VERSION).ok());
     change.uninstall_key =
-        change.nsis_removed || recorded.is_none() || version_recorded.as_deref() != Some(version);
+        change.other_removed || recorded.is_none() || version_recorded.as_deref() != Some(version);
     Ok(change)
 }
 
@@ -136,7 +131,7 @@ pub fn reconcile(layout: &Layout, version: &str) -> io::Result<WindowsEntryChang
             atomic_replace(&shortcut, &shortcut_bytes(&list, &target, layout.home()))?;
         }
     }
-    if change.nsis_removed {
+    if change.other_removed {
         RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(UNINSTALL_KEY)?;
     }
     if change.uninstall_key {

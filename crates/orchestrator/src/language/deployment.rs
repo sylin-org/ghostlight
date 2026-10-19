@@ -1,16 +1,27 @@
-//! The words `ghostlight deployment install` says: what it did, what it left alone, and why it
-//! refused.
+//! The words the install side says: what `ghostlight deployment install`, `install`,
+//! `uninstall`, `doctor` and `native-host` did, what they left alone and why they refused, and
+//! the words for every registration's state, detail and evidence, for browsers and MCP clients
+//! alike.
 //!
 //! The install code decides and the command line prints, and neither words anything itself
-//! (ADR-0199, the development channel amendment). Every sentence of the report and the text of
-//! every refusal a person can meet lives here, so the report says only what was observed and the
-//! way back from a development build is named the same way wherever it is needed.
+//! (ADR-0199, the development channel amendment; ADR-0203 Decision 8). Every sentence of the
+//! reports and the text of every refusal a person can meet lives here, so a report says only what
+//! was observed, one state is said with one word wherever it is printed, and the supported browser
+//! families are named from the one browser table.
 
 use std::path::Path;
 
-use crate::install::command_path::OwnedEntry;
+use crate::install::command_path::{CommandPathReport, CommandPathState, OwnedEntry};
+use crate::install::container::{
+    checking_command, finishing_command, removing_command, AppContainer,
+};
 use crate::install::deployment::{EdgeReplacement, RESTORE_OPTION};
+use crate::install::desktop_entry::{DesktopIntegrationReport, DesktopIntegrationState};
+use crate::install::layout::Layout;
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
+use crate::install::native_host::{supported_browsers, BrowserRegistration, NativeHostState};
+use crate::install::record::InstallRecord;
+use crate::install::user_assets::UserAssetState;
 use crate::install::{
     Attention, HarnessState, LauncherPin, NpmLauncher, ALL_CLIENTS_OPTION, FIRST_LAUNCHER_MAJOR,
 };
@@ -199,7 +210,7 @@ pub fn installed_file(name: &str, directory: &str) -> String {
 pub fn edge_replaced(reason: EdgeReplacement) -> String {
     let because = match reason {
         EdgeReplacement::PreEdgeLayout => {
-            "bin still holds the layout of an earlier development build"
+            "bin still holds an older layout that kept its connectors there"
         }
         EdgeReplacement::Unrecorded => "nothing records which edge is installed",
         EdgeReplacement::RelayRevision => "this build speaks another relay revision",
@@ -559,6 +570,667 @@ pub fn link_refused(path: &str) -> String {
     format!("{path} is a link, and Ghostlight does not write its own files through a link")
 }
 
+/// Names joined as the list a sentence ends on: `a, b, c, or d`.
+fn either_of(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [first, second] => format!("{first} or {second}"),
+        [head @ .., last] => format!("{}, or {last}", head.join(", ")),
+    }
+}
+
+/// The ids of the supported browser families, as `--browser` accepts them and in the browser
+/// table's order: `chrome, edge, brave, or chromium`.
+#[must_use]
+pub fn browser_ids() -> String {
+    either_of(
+        &supported_browsers()
+            .iter()
+            .map(|browser| browser.id)
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The supported browser families by their short names, in the browser table's order:
+/// `Chrome, Edge, Brave, or Chromium`.
+#[must_use]
+pub fn browser_families() -> String {
+    either_of(
+        &supported_browsers()
+            .iter()
+            .map(|browser| browser.short)
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The refusal of a `--browser` value that names no supported family.
+#[must_use]
+pub fn unknown_browser(id: &str) -> String {
+    format!("unknown browser '{id}'; expected {}", browser_ids())
+}
+
+/// The step that gives a computer a browser Ghostlight can start: one of the supported families,
+/// installed as a native package.
+#[must_use]
+pub fn install_a_native_browser() -> String {
+    format!("Install {} as a native package", browser_families())
+}
+
+/// What `--browser` selects, as the help names it.
+#[must_use]
+pub fn browser_option_help() -> String {
+    format!("Select {}", browser_families())
+}
+
+/// The refusal of an install whose named browser is not installed, after the package's own
+/// `detail`.
+#[must_use]
+pub fn browser_not_installed(detail: &str) -> String {
+    format!(
+        "{detail} {}, then run Ghostlight install again.",
+        install_a_native_browser()
+    )
+}
+
+/// The refusal of an install that found no supported browser installed as a native package.
+#[must_use]
+pub fn no_native_browser() -> String {
+    format!(
+        "No supported native browser was detected. {}, then run Ghostlight install again.",
+        install_a_native_browser()
+    )
+}
+
+/// The words a person reads for a browser's native-host registration in `state`. `doctor`, the
+/// install's reports and `ghostlight native-host` all say a state with these words.
+#[must_use]
+pub const fn browser_state(state: NativeHostState) -> &'static str {
+    match state {
+        NativeHostState::Missing => "not registered",
+        NativeHostState::Current => "registered",
+        NativeHostState::Updatable => "registered, needs an update",
+        NativeHostState::OwnedElsewhere => "registered to another installation",
+        NativeHostState::NeedsAttention => "needs attention",
+    }
+}
+
+/// What `doctor` says of a registration whose state only another app can see.
+pub const NOT_VISIBLE: &str = "cannot be checked from here";
+
+/// The line that names the Ghostlight program browsers start.
+#[must_use]
+pub fn program_line(program: &Path) -> String {
+    format!("Ghostlight program: {}", program.display())
+}
+
+/// One browser's package, registration state and detail, as the reports print it.
+#[must_use]
+pub fn browser_line(browser: &BrowserRegistration) -> String {
+    format!(
+        "Browser: {} -- {} -- {} -- {}",
+        browser.name,
+        browser.package_detail,
+        browser_state(browser.state),
+        browser.detail
+    )
+}
+
+/// One browser's line inside `container`: its package, and in place of its registration state
+/// that the state cannot be checked from here, because the registry read is that app's own.
+#[must_use]
+pub fn browser_line_not_visible(browser: &BrowserRegistration, container: &AppContainer) -> String {
+    format!(
+        "Browser: {} -- {} -- {NOT_VISIBLE} -- {}",
+        browser.name,
+        browser.package_detail,
+        registry_view_detail(container)
+    )
+}
+
+/// What `ghostlight native-host` did.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeHostRun {
+    /// It read every registration and changed nothing.
+    Checked,
+    /// It registered every browser it could.
+    Installed,
+    /// It wrote the manifest, and an app container kept the registry values it needed private.
+    Prepared,
+    /// It removed every registration Ghostlight owns.
+    Uninstalled,
+}
+
+/// The first line `ghostlight native-host` prints: what it did, and whether a registration
+/// changed.
+#[must_use]
+pub fn native_host_ran(run: NativeHostRun, changed: bool) -> String {
+    let verb = match run {
+        NativeHostRun::Checked => "checked",
+        NativeHostRun::Installed => "installed",
+        NativeHostRun::Prepared => "prepared",
+        NativeHostRun::Uninstalled => "uninstalled",
+    };
+    format!("Ghostlight native host {verb}; changed: {changed}")
+}
+
+/// The lines an install prints when it left `registrations` unwritten because `container` keeps
+/// them private.
+#[must_use]
+pub fn kept_private_lines(
+    container: &AppContainer,
+    registrations: &[String],
+    layout: &Layout,
+) -> Vec<String> {
+    vec![
+        format!(
+            "Windows keeps these registrations private to {}, so no other app sees them: {}.",
+            container.app,
+            registrations.join(", ")
+        ),
+        format!(
+            "To finish them, run this from a regular terminal: {}",
+            finishing_command(layout)
+        ),
+    ]
+}
+
+/// The line `doctor` prints in place of a registration state it cannot see.
+#[must_use]
+pub fn cannot_see_line(container: &AppContainer, layout: &Layout) -> String {
+    format!(
+        "This terminal runs inside {}, and Windows gives that app its own view of the registry \
+         and AppData, so Ghostlight cannot see what other apps see there. To check the real \
+         registrations, run this from a regular terminal: {}",
+        container.app,
+        checking_command(layout)
+    )
+}
+
+/// The line `doctor` prints for an MCP client whose configuration only another app can see.
+#[must_use]
+pub fn client_cannot_see_line(client: &str) -> String {
+    format!(
+        "MCP client: {client} -- {NOT_VISIBLE} -- Windows gives the app this terminal runs in \
+         its own view of this configuration."
+    )
+}
+
+/// What `doctor` and the install dry run say of a browser registration inside `container`, in
+/// place of its state: the registry they read is that app's own.
+#[must_use]
+pub fn registry_view_detail(container: &AppContainer) -> String {
+    format!(
+        "{}'s own view of the registry; run ghostlight doctor from a regular terminal.",
+        container.app
+    )
+}
+
+/// The refusal when an uninstall would only change the private view.
+#[must_use]
+pub fn uninstall_refusal(container: &AppContainer, layout: &Layout) -> String {
+    format!(
+        "This terminal runs inside {}, and Windows gives that app its own view of the registry \
+         and AppData, so removing registrations here would not remove them for other apps. Run \
+         this from a regular terminal: {}",
+        container.app,
+        removing_command(layout)
+    )
+}
+
+/// What the reports call the Start-menu shortcut.
+pub const START_MENU_SHORTCUT: &str = "Start-menu shortcut";
+
+/// What the reports call the Uninstall key.
+pub const INSTALLED_APPS_ENTRY: &str = "installed-apps entry";
+
+/// What the reports call the Uninstall key when writing it replaces the one another installation
+/// left, an earlier installer's or another home's. It reads after both "Updated the" and "Would
+/// update the".
+pub const INSTALLED_APPS_ENTRY_REPLACING_OTHER: &str =
+    "installed-apps entry, replacing another installation's";
+
+/// The words a person reads for the per-user `ghostlight` command entry in `state`.
+#[must_use]
+pub const fn command_state(state: CommandPathState) -> &'static str {
+    match state {
+        CommandPathState::NotApplicable => "not used on this installation",
+        CommandPathState::Missing => "not installed",
+        CommandPathState::Current => "installed",
+        CommandPathState::Updatable => "installed, needs an update",
+        CommandPathState::NeedsAttention => "needs attention",
+        CommandPathState::PrivateView => "private to an app",
+    }
+}
+
+/// The line that names the `ghostlight` command, with its entry's detail when this installation
+/// keeps one.
+#[must_use]
+pub fn command_line(report: &CommandPathReport) -> String {
+    if report.state == CommandPathState::NotApplicable {
+        // Still name the executable: a person on a system package or on a test home needs the path
+        // as much as anyone else does.
+        return format!("Command: {}", report.executable.display());
+    }
+    format!(
+        "Command: {} -- {}",
+        report.executable.display(),
+        report.detail
+    )
+}
+
+/// The words a person reads for the per-user documentation and completion files in `state`.
+#[must_use]
+pub const fn documentation_state(state: UserAssetState) -> &'static str {
+    match state {
+        UserAssetState::NotApplicable => "not used on this installation",
+        UserAssetState::Missing => "not installed",
+        UserAssetState::Current => "installed",
+        UserAssetState::NeedsAttention => "needs attention",
+    }
+}
+
+/// The line about the documentation and completion files in `state`, with their `detail`.
+#[must_use]
+pub fn documentation_line(state: UserAssetState, detail: &str) -> String {
+    format!("Documentation: {} -- {detail}", documentation_state(state))
+}
+
+/// The words a person reads for the Linux Applications entry in `state`.
+#[must_use]
+pub const fn applications_state(state: DesktopIntegrationState) -> &'static str {
+    match state {
+        DesktopIntegrationState::NotApplicable => "not used on this installation",
+        DesktopIntegrationState::Missing => "not installed",
+        DesktopIntegrationState::Current => "installed",
+        DesktopIntegrationState::Updatable => "installed, needs an update",
+        DesktopIntegrationState::NeedsAttention => "needs attention",
+    }
+}
+
+/// What the report says of the Applications entry on a platform that has none.
+pub const APPLICATIONS_ELSEWHERE: &str =
+    "Linux application-menu integration does not apply on this platform.";
+
+/// What the report says of the Applications entry in `state`. An updatable entry that already
+/// starts this installation lacks only its icon (`icon_only`), and is said so.
+#[must_use]
+pub const fn applications_detail(state: DesktopIntegrationState, icon_only: bool) -> &'static str {
+    match state {
+        DesktopIntegrationState::NotApplicable => {
+            "Desktop integration is owned by the operating system package."
+        }
+        DesktopIntegrationState::Missing => "Ghostlight is not present in Applications.",
+        DesktopIntegrationState::Current => {
+            "Applications opens this installation's Ghostlight window."
+        }
+        DesktopIntegrationState::Updatable if icon_only => {
+            "The owned Applications entry starts this installation, but its icon is missing."
+        }
+        DesktopIntegrationState::Updatable => {
+            "The owned Applications entry points at an older installation."
+        }
+        DesktopIntegrationState::NeedsAttention => {
+            "A foreign file or symlink occupies Ghostlight's Applications location; it was left \
+             untouched."
+        }
+    }
+}
+
+/// The line about the Applications entry `report` names at `entry`.
+#[must_use]
+pub fn applications_line(report: &DesktopIntegrationReport, entry: &Path) -> String {
+    format!(
+        "Applications: {} -- {} -- {}",
+        applications_state(report.state),
+        report.detail,
+        entry.display()
+    )
+}
+
+/// The words a person reads for an MCP client's Ghostlight entry in `state`.
+#[must_use]
+pub const fn client_state(state: HarnessState) -> &'static str {
+    match state {
+        HarnessState::NotDetected => "not detected",
+        HarnessState::Available => "detected, not connected",
+        HarnessState::Installed => "connected",
+        HarnessState::Updatable => "connected, needs an update",
+        HarnessState::NeedsAttention => "needs attention",
+    }
+}
+
+/// What a client's detail says when its configuration could not be read.
+pub const CLIENT_UNREADABLE: &str = "This configuration could not be read; it was left untouched.";
+
+/// What a client's detail says when an entry Ghostlight did not write holds its name.
+pub const CLIENT_FOREIGN_ENTRY: &str =
+    "A foreign entry holds this target's Ghostlight registration; it was left untouched.";
+
+/// The names a client's entry that starts the retired MCP connector is said with.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RetiredEntry<'a> {
+    /// The retired connector the entry starts.
+    pub connector: &'a str,
+    /// The edge Set up points the entry at.
+    pub edge: &'a str,
+    /// The argument that makes the edge the MCP relay.
+    pub argument: &'a str,
+}
+
+/// What a client's detail says of the client in `state` whose entry Ghostlight may write: whether
+/// the edge is `edge_ready`, and the `retired` connector its owned entry starts, when it starts
+/// one. A client that needs attention is said by its cause instead, so its detail here is empty.
+#[must_use]
+pub fn client_detail(
+    state: HarnessState,
+    edge_ready: bool,
+    retired: Option<RetiredEntry<'_>>,
+) -> String {
+    match (state, retired) {
+        (HarnessState::Updatable, Some(retired)) => format!(
+            "This entry starts {}, which Ghostlight no longer installs. Set up points it at {} {}.",
+            retired.connector, retired.edge, retired.argument
+        ),
+        (HarnessState::Installed, _) => "Ghostlight is registered for this user context.".into(),
+        (HarnessState::Updatable, None) => {
+            "Ghostlight's saved registration needs an update.".into()
+        }
+        (HarnessState::Available, _) if edge_ready => {
+            "Detected and ready for an explicit Ghostlight registration.".into()
+        }
+        (HarnessState::Available, _) => "Detected, but the Ghostlight program is missing.".into(),
+        (HarnessState::NotDetected, _) if edge_ready => {
+            "Not detected. You can prepare its user configuration before installing it.".into()
+        }
+        (HarnessState::NotDetected, _) => {
+            "Not detected, and the Ghostlight program is missing.".into()
+        }
+        (HarnessState::NeedsAttention, _) => String::new(),
+    }
+}
+
+/// A client's `detail`, followed by the note that a path a person located is gone.
+#[must_use]
+pub fn with_located_path_missing(detail: &str) -> String {
+    format!("{detail} A previously located path is missing; the normal location is shown.")
+}
+
+/// The number of arguments an entry's command carries.
+fn argument_count(count: usize) -> String {
+    match count {
+        0 => "no arguments".into(),
+        1 => "1 argument".into(),
+        many => format!("{many} arguments"),
+    }
+}
+
+/// What inspection found where Ghostlight's entry belongs: another `program` with `arguments`
+/// arguments, beside the installed `edge` Ghostlight maintains there.
+#[must_use]
+pub fn other_program_evidence(program: &str, arguments: usize, edge: &Path) -> String {
+    format!(
+        "Found another program, `{program}` with {}, where Ghostlight's entry belongs; \
+         Ghostlight maintains `{}` there and changed nothing.",
+        argument_count(arguments),
+        edge.display()
+    )
+}
+
+/// What inspection found where Ghostlight's entry belongs: an entry without a usable command,
+/// beside the installed `edge` Ghostlight maintains there.
+#[must_use]
+pub fn no_command_evidence(edge: &Path) -> String {
+    format!(
+        "Found an entry without a usable command where Ghostlight's entry belongs; Ghostlight \
+         maintains `{}` there and changed nothing.",
+        edge.display()
+    )
+}
+
+/// The sentence a person reads for a client whose file Ghostlight never edits, named `file` when
+/// its configuration has a file name.
+#[must_use]
+pub fn manual_setup(file: Option<&str>) -> String {
+    format!(
+        "Ghostlight does not edit this client's file. Copy setup and paste it into {}.",
+        file.unwrap_or("its configuration file")
+    )
+}
+
+/// The setup a person copies when the client's own form of it could not be written: the
+/// `command` that starts Ghostlight as a local stdio MCP server.
+#[must_use]
+pub fn manual_setup_command(command: &str) -> String {
+    format!("Use this command as a local stdio MCP server:\n{command}")
+}
+
+/// What a person reads when a client's configuration cannot be parsed. It names the `line` of
+/// the parse error and nothing the file says.
+#[must_use]
+pub fn configuration_malformed(line: Option<usize>) -> String {
+    match line {
+        Some(line) => {
+            format!("This configuration could not be parsed at line {line}; it was left untouched.")
+        }
+        None => "This configuration could not be parsed; it was left untouched.".into(),
+    }
+}
+
+/// An install wrote `client`'s entry.
+#[must_use]
+pub fn client_registered(client: &str) -> String {
+    format!("Ghostlight was registered with {client}. Restart or reconnect it to load the tools.")
+}
+
+/// An install found `client`'s entry current.
+#[must_use]
+pub fn client_already_current(client: &str) -> String {
+    format!("{client} already has the current Ghostlight registration.")
+}
+
+/// An uninstall removed Ghostlight from `client`.
+#[must_use]
+pub fn client_removed(client: &str) -> String {
+    format!("Ghostlight was removed from {client}. Restart or reconnect it to unload the tools.")
+}
+
+/// An uninstall found no entry of Ghostlight's in `client`.
+#[must_use]
+pub fn client_had_no_entry(client: &str) -> String {
+    format!("{client} had no owned Ghostlight registration to remove.")
+}
+
+/// Fix replaced the entry that held Ghostlight's name in `client`.
+#[must_use]
+pub fn client_fixed(client: &str) -> String {
+    format!(
+        "Ghostlight replaced the incorrect entry for {client}. Restart or reconnect it to load \
+         the tools."
+    )
+}
+
+/// A path a person located for `client` is kept for its Set up.
+#[must_use]
+pub fn client_location_kept(client: &str) -> String {
+    format!("Ghostlight will use the located {client} path after you choose Set up.")
+}
+
+/// A client's change failed with nothing Ghostlight may show of the failure.
+pub const CLIENT_CHANGE_FAILED: &str = "The target could not be changed.";
+
+/// What setting up every detected client did: `set_up` new entries and `updated` older ones,
+/// with how many clients still need attention and how many `failed`.
+#[must_use]
+pub fn setup_message(
+    set_up: usize,
+    updated: usize,
+    needs_attention: usize,
+    failed: usize,
+) -> String {
+    let changed = set_up + updated;
+    let mut message = if changed == 0 {
+        "Everything Ghostlight can set up is already ready.".to_owned()
+    } else {
+        format!(
+            "Ghostlight set up {set_up} and updated {updated} MCP integration{}.",
+            if changed == 1 { "" } else { "s" }
+        )
+    };
+    if changed > 0 {
+        message.push_str(" Restart or reconnect those clients to load the tools.");
+    }
+    if needs_attention > 0 {
+        message.push_str(&format!(
+            " {needs_attention} target{} still need{} attention.",
+            if needs_attention == 1 { "" } else { "s" },
+            if needs_attention == 1 { "s" } else { "" }
+        ));
+    }
+    if failed > 0 {
+        message.push_str(&format!(
+            " {failed} target{} could not be changed.",
+            if failed == 1 { "" } else { "s" }
+        ));
+    }
+    message
+}
+
+/// The refusal of a client id outside the roster.
+#[must_use]
+pub fn unknown_client_id(id: &str) -> String {
+    format!("unknown supported harness `{id}`")
+}
+
+/// The refusal of a download for a client with no official download here.
+#[must_use]
+pub fn no_client_download(id: &str) -> String {
+    format!("supported harness `{id}` has no official download for this platform")
+}
+
+/// The refusal of a client change while the installed edge is missing.
+pub const EDGE_MISSING: &str = "the Ghostlight program is missing";
+
+/// A client's configuration could not be read, for the system's `reason`.
+#[must_use]
+pub fn configuration_unreadable(reason: &str) -> String {
+    format!("could not read harness configuration: {reason}")
+}
+
+/// A client's configuration could not be written, for the system's `reason`.
+#[must_use]
+pub fn configuration_unwritable(reason: &str) -> String {
+    format!("could not write harness configuration: {reason}")
+}
+
+/// The refusal of a change while an entry Ghostlight did not write holds its name.
+pub const FOREIGN_ENTRY_LEFT: &str =
+    "a foreign `ghostlight` entry is present; Ghostlight left it untouched";
+
+/// The refusal of a Fix whose entry changed since it was offered.
+pub const NOT_FIXABLE: &str =
+    "the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations";
+
+/// The refusal of a located `path` that is neither the client's configuration nor an executable.
+#[must_use]
+pub fn located_path_invalid(path: &Path) -> String {
+    format!(
+        "the selected path is not a usable harness executable or configuration: {}",
+        path.display()
+    )
+}
+
+/// Ghostlight's record of located paths could not be read, for `reason`.
+#[must_use]
+pub fn location_state_malformed(reason: &str) -> String {
+    format!("Ghostlight's harness location state is malformed: {reason}")
+}
+
+/// The first line `doctor` prints, naming this build's `version`.
+#[must_use]
+pub fn doctor_heading(version: &str) -> String {
+    format!("Ghostlight {version} diagnostics")
+}
+
+/// The line that names the Ghostlight home.
+#[must_use]
+pub fn home_line(home: &Path) -> String {
+    format!("Home: {}", home.display())
+}
+
+/// The line that names what the installation record says is installed, or that it says nothing.
+#[must_use]
+pub fn installed_line(record: Option<&InstallRecord>) -> String {
+    match record {
+        Some(record) => format!(
+            "Installed: Ghostlight {} -- relay {}",
+            record.service_version, record.relay_revision
+        ),
+        None => "Installed: nothing recorded in the Ghostlight home".into(),
+    }
+}
+
+/// The line that names the environment Ghostlight runs in, by its `label` and `location`.
+#[must_use]
+pub fn environment_line(label: &str, location: &str) -> String {
+    format!("Environment: {label} -- {location}")
+}
+
+/// The line that says the environment's `caveat`.
+#[must_use]
+pub fn environment_caveat_line(caveat: &str) -> String {
+    format!("Environment: {caveat}")
+}
+
+/// The line that says the running service's readiness, by its `word` and `detail`.
+#[must_use]
+pub fn readiness_line(word: &str, detail: &str) -> String {
+    format!("Readiness: {word} -- {detail}")
+}
+
+/// The line `doctor` prints when a service runs and did not report its readiness.
+pub const READINESS_UNREPORTED: &str =
+    "Readiness: unavailable -- The running Ghostlight service did not report its current state.";
+
+/// The line about one installed executable at `path`, and whether it is there.
+#[must_use]
+pub fn binary_line(path: &Path, ready: bool) -> String {
+    format!(
+        "Binary: {} -- {}",
+        path.display(),
+        if ready { "ready" } else { "missing" }
+    )
+}
+
+/// The line that says the registrations below cannot be seen from here, and why.
+#[must_use]
+pub fn registrations_line(cannot_see: &str) -> String {
+    format!("Registrations: {cannot_see}")
+}
+
+/// The line about one MCP client: its `label`, its entry's `state` and its `detail`.
+#[must_use]
+pub fn client_line(label: &str, state: HarnessState, detail: &str) -> String {
+    format!("MCP client: {label} -- {} -- {detail}", client_state(state))
+}
+
+/// The line about process diagnostics: the `layer` that turned them on or off, and, when they
+/// write into `directory`, how many bytes of log `used` there.
+#[must_use]
+pub fn diagnostics_line(layer: &str, used: u64, directory: Option<&str>) -> String {
+    match directory {
+        Some(directory) => {
+            format!("Process diagnostics: {layer} -- {used} bytes of log in {directory}")
+        }
+        None => {
+            format!("Process diagnostics: {layer} -- run ghostlight diagnostics on to turn them on")
+        }
+    }
+}
+
+/// What `doctor --fix` says before it repairs.
+pub const APPLYING_REPAIRS: &str = "Applying ownership-safe repairs.";
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -864,5 +1536,256 @@ mod tests {
             .iter()
             .chain(&details)
             .all(|sentence| sentence.is_ascii()));
+    }
+
+    #[test]
+    fn the_family_list_is_the_browser_table() {
+        let table = supported_browsers();
+        assert!(!table.is_empty());
+        let ids: Vec<&str> = table.iter().map(|browser| browser.id).collect();
+        let shorts: Vec<&str> = table.iter().map(|browser| browser.short).collect();
+        assert_eq!(browser_ids(), either_of(&ids));
+        assert_eq!(browser_families(), either_of(&shorts));
+        assert_eq!(browser_ids(), "chrome, edge, brave, or chromium");
+        assert_eq!(browser_families(), "Chrome, Edge, Brave, or Chromium");
+
+        // Every sentence that names the families names them all, in the table's order, from the
+        // one list.
+        for sentence in [
+            install_a_native_browser(),
+            browser_option_help(),
+            browser_not_installed("No Brave installation was detected."),
+            no_native_browser(),
+        ] {
+            assert!(sentence.contains(&browser_families()), "{sentence}");
+        }
+        assert!(unknown_browser("opera").ends_with(&browser_ids()));
+        assert_eq!(either_of(&["a"]), "a");
+        assert_eq!(either_of(&["a", "b"]), "a or b");
+    }
+
+    /// Every state a report prints has plain words, never a Rust identifier; the window renders
+    /// the same serialized values.
+    #[test]
+    fn every_reportable_state_has_plain_words() {
+        assert_eq!(client_state(HarnessState::NotDetected), "not detected");
+        assert_eq!(
+            client_state(HarnessState::Available),
+            "detected, not connected"
+        );
+        assert_eq!(client_state(HarnessState::Installed), "connected");
+        assert_eq!(
+            client_state(HarnessState::Updatable),
+            "connected, needs an update"
+        );
+        assert_eq!(
+            client_state(HarnessState::NeedsAttention),
+            "needs attention"
+        );
+
+        assert_eq!(browser_state(NativeHostState::Missing), "not registered");
+        assert_eq!(browser_state(NativeHostState::Current), "registered");
+        assert_eq!(
+            browser_state(NativeHostState::Updatable),
+            "registered, needs an update"
+        );
+        assert_eq!(
+            browser_state(NativeHostState::OwnedElsewhere),
+            "registered to another installation"
+        );
+        assert_eq!(
+            browser_state(NativeHostState::NeedsAttention),
+            "needs attention"
+        );
+
+        for label in [
+            applications_state(DesktopIntegrationState::NotApplicable),
+            applications_state(DesktopIntegrationState::Missing),
+            applications_state(DesktopIntegrationState::Current),
+            applications_state(DesktopIntegrationState::Updatable),
+            applications_state(DesktopIntegrationState::NeedsAttention),
+            command_state(CommandPathState::NotApplicable),
+            command_state(CommandPathState::Missing),
+            command_state(CommandPathState::Current),
+            command_state(CommandPathState::Updatable),
+            command_state(CommandPathState::NeedsAttention),
+            command_state(CommandPathState::PrivateView),
+            documentation_state(UserAssetState::NotApplicable),
+            documentation_state(UserAssetState::Missing),
+            documentation_state(UserAssetState::Current),
+            documentation_state(UserAssetState::NeedsAttention),
+        ] {
+            assert!(!label.is_empty());
+            // A person's word, not an identifier: no capitals and no camel case.
+            assert_eq!(
+                label,
+                label.to_lowercase(),
+                "{label} reads as an identifier"
+            );
+        }
+    }
+
+    #[test]
+    fn an_applications_entry_that_lost_only_its_icon_is_not_called_older() {
+        let icon_only = applications_detail(DesktopIntegrationState::Updatable, true);
+        assert!(!icon_only.contains("older"), "{icon_only}");
+        assert!(icon_only.contains("icon is missing"), "{icon_only}");
+        assert!(applications_detail(DesktopIntegrationState::Updatable, false).contains("older"));
+        for state in [
+            DesktopIntegrationState::NotApplicable,
+            DesktopIntegrationState::Missing,
+            DesktopIntegrationState::Current,
+            DesktopIntegrationState::NeedsAttention,
+        ] {
+            assert_eq!(
+                applications_detail(state, true),
+                applications_detail(state, false)
+            );
+        }
+    }
+
+    #[test]
+    fn the_older_layout_is_said_as_an_older_layout_with_its_connectors() {
+        let line = edge_replaced(EdgeReplacement::PreEdgeLayout);
+        assert_eq!(
+            line,
+            "The edge is replaced because bin still holds an older layout that kept its \
+             connectors there."
+        );
+        assert!(!line.contains("development"));
+    }
+
+    #[test]
+    fn doctor_speaks_of_the_service_and_not_the_authority() {
+        assert!(READINESS_UNREPORTED.contains("The running Ghostlight service"));
+        assert!(!READINESS_UNREPORTED.contains("authority"));
+    }
+
+    #[test]
+    fn the_report_names_the_registrations_and_the_command_with_the_full_path() {
+        let layout = Layout::new(r"C:\Users\person\.ghostlight");
+        let container = AppContainer {
+            app: "Claude".into(),
+        };
+        let lines = kept_private_lines(
+            &container,
+            &["Google Chrome".to_owned(), "Codex".to_owned()],
+            &layout,
+        );
+        assert_eq!(
+            lines[0],
+            "Windows keeps these registrations private to Claude, so no other app sees them: \
+             Google Chrome, Codex."
+        );
+        assert!(lines[1].starts_with("To finish them, run this from a regular terminal: "));
+        assert!(lines[1].ends_with(&format!("{} install", layout.edge().display())));
+        assert!(lines[1].contains("ghostlight"));
+        let cannot_see = cannot_see_line(&container, &layout);
+        assert!(cannot_see.contains("cannot see what other apps see"));
+        assert!(cannot_see.ends_with(&format!("{} doctor", layout.edge().display())));
+        assert!(uninstall_refusal(&container, &layout)
+            .ends_with(&format!("{} uninstall", layout.edge().display())));
+    }
+
+    #[test]
+    fn a_browser_row_names_the_apps_own_view_and_where_to_look_instead() {
+        let container = AppContainer {
+            app: "Claude".into(),
+        };
+        assert_eq!(
+            registry_view_detail(&container),
+            "Claude's own view of the registry; run ghostlight doctor from a regular terminal."
+        );
+    }
+
+    #[test]
+    fn the_client_line_reads_as_one_sentence() {
+        let line = client_cannot_see_line("Claude Desktop");
+        assert_eq!(
+            line,
+            "MCP client: Claude Desktop -- cannot be checked from here -- Windows gives the app \
+             this terminal runs in its own view of this configuration."
+        );
+        assert!(!line.contains("  "));
+    }
+
+    #[test]
+    fn a_retired_connector_entry_names_the_connector_and_the_edge() {
+        let retired = RetiredEntry {
+            connector: "ghostlight-mcp-connector",
+            edge: "ghostlight",
+            argument: "mcp",
+        };
+        assert_eq!(
+            client_detail(HarnessState::Updatable, true, Some(retired)),
+            "This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. \
+             Set up points it at ghostlight mcp."
+        );
+        assert_eq!(
+            client_detail(HarnessState::Updatable, true, None),
+            "Ghostlight's saved registration needs an update."
+        );
+        assert!(client_detail(HarnessState::NeedsAttention, true, None).is_empty());
+    }
+
+    #[test]
+    fn the_setup_message_counts_what_changed_and_what_is_left() {
+        assert_eq!(
+            setup_message(0, 0, 0, 0),
+            "Everything Ghostlight can set up is already ready."
+        );
+        assert_eq!(
+            setup_message(1, 0, 1, 1),
+            "Ghostlight set up 1 and updated 0 MCP integration. Restart or reconnect those \
+             clients to load the tools. 1 target still needs attention. 1 target could not be \
+             changed."
+        );
+        assert_eq!(
+            setup_message(1, 1, 2, 2),
+            "Ghostlight set up 1 and updated 1 MCP integrations. Restart or reconnect those \
+             clients to load the tools. 2 targets still need attention. 2 targets could not be \
+             changed."
+        );
+    }
+
+    #[test]
+    fn the_install_words_are_ascii() {
+        let container = AppContainer {
+            app: "Claude".into(),
+        };
+        let layout = Layout::new("h");
+        let sentences = [
+            browser_ids(),
+            browser_families(),
+            unknown_browser("x"),
+            no_native_browser(),
+            browser_not_installed("d"),
+            native_host_ran(NativeHostRun::Prepared, true),
+            cannot_see_line(&container, &layout),
+            uninstall_refusal(&container, &layout),
+            registry_view_detail(&container),
+            client_cannot_see_line("c"),
+            setup_message(1, 1, 1, 1),
+            manual_setup(None),
+            manual_setup_command("c"),
+            configuration_malformed(Some(3)),
+            other_program_evidence("p", 2, Path::new("e")),
+            no_command_evidence(Path::new("e")),
+            client_registered("c"),
+            client_already_current("c"),
+            client_removed("c"),
+            client_had_no_entry("c"),
+            client_fixed("c"),
+            client_location_kept("c"),
+            with_located_path_missing("d"),
+            doctor_heading("2.0.0"),
+            installed_line(None),
+            binary_line(Path::new("b"), false),
+            diagnostics_line("off", 0, None),
+            READINESS_UNREPORTED.to_owned(),
+            INSTALLED_APPS_ENTRY_REPLACING_OTHER.to_owned(),
+            APPLICATIONS_ELSEWHERE.to_owned(),
+        ];
+        assert!(sentences.iter().all(|sentence| sentence.is_ascii()));
     }
 }

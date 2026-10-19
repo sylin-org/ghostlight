@@ -879,8 +879,8 @@ fn retired_connectors(layout: &Layout) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Whether `bin` still holds the layout of an earlier 2.0 development build, where the service
-/// image had the edge's name: connector images beside it, or an install record that names no
+/// Whether `bin` still holds an older layout, where the service image had the edge's name and
+/// the connectors sat beside it: connector images there, or an install record that names no
 /// edge.
 pub fn pre_edge_layout(layout: &Layout) -> bool {
     !retired_connectors(layout).is_empty()

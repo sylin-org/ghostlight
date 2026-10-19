@@ -5,7 +5,6 @@
 //! the next launch will install again. Every sentence is in [`crate::language::deployment`]; this
 //! module chooses which to print and where.
 
-use crate::install::container;
 use crate::install::deployment::{self, Mode, Outcome, Request, ServiceDidNotStart};
 use crate::install::entry::same_path;
 use crate::install::layout::Layout;
@@ -196,7 +195,7 @@ fn registration_lines(report: &ReconcileReport, layout: &Layout) -> Vec<Line> {
     }
     if let Some(container) = &report.container {
         lines.extend(
-            container::kept_private_lines(container, &report.kept_private, layout)
+            words::kept_private_lines(container, &report.kept_private, layout)
                 .into_iter()
                 .map(Line::output),
         );

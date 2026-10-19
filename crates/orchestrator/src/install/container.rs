@@ -39,14 +39,17 @@ const PROBE_PREFIX: &str = "ghostlight-residence-probe-";
 /// The variable that names this person's `%LOCALAPPDATA%`.
 const LOCAL_APP_DATA_VARIABLE: &str = "LOCALAPPDATA";
 
-/// What `doctor` says of a registration whose state only another app can see.
-pub const NOT_VISIBLE: &str = "cannot be checked from here";
-
 /// The state `doctor --json` gives a registration whose state only another app can see.
 pub const NOT_VISIBLE_STATE: &str = "not_visible";
 
 /// The subcommand of the installed service that registers browsers and clients.
 const FINISHING_SUBCOMMAND: &str = "install";
+
+/// The subcommand of the installed service that checks every registration.
+const CHECKING_SUBCOMMAND: &str = "doctor";
+
+/// The subcommand of the installed service that removes every registration.
+const REMOVING_SUBCOMMAND: &str = "uninstall";
 
 /// The app whose container this process runs in.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -164,68 +167,16 @@ pub fn finishing_command(layout: &Layout) -> String {
     format!("{} {FINISHING_SUBCOMMAND}", layout.edge().display())
 }
 
-/// The lines an install prints when it left `registrations` unwritten because `container` keeps
-/// them private.
+/// The command that checks the real registrations from a regular terminal.
 #[must_use]
-pub fn kept_private_lines(
-    container: &AppContainer,
-    registrations: &[String],
-    layout: &Layout,
-) -> Vec<String> {
-    vec![
-        format!(
-            "Windows keeps these registrations private to {}, so no other app sees them: {}.",
-            container.app,
-            registrations.join(", ")
-        ),
-        format!(
-            "To finish them, run this from a regular terminal: {}",
-            finishing_command(layout)
-        ),
-    ]
+pub fn checking_command(layout: &Layout) -> String {
+    format!("{} {CHECKING_SUBCOMMAND}", layout.edge().display())
 }
 
-/// The line `doctor` prints in place of a registration state it cannot see.
+/// The command that removes the real registrations from a regular terminal.
 #[must_use]
-pub fn cannot_see_line(container: &AppContainer, layout: &Layout) -> String {
-    format!(
-        "This terminal runs inside {}, and Windows gives that app its own view of the registry \
-         and AppData, so Ghostlight cannot see what other apps see there. To check the real \
-         registrations, run this from a regular terminal: {} doctor",
-        container.app,
-        layout.edge().display()
-    )
-}
-
-/// The line `doctor` prints for an MCP client whose configuration only another app can see.
-#[must_use]
-pub fn client_cannot_see_line(client: &str) -> String {
-    format!(
-        "MCP client: {client} -- {NOT_VISIBLE} -- Windows gives the app this terminal runs in \
-         its own view of this configuration."
-    )
-}
-
-/// What `doctor` and the install dry run say of a browser registration inside `container`, in
-/// place of its state: the registry they read is that app's own.
-#[must_use]
-pub fn registry_view_detail(container: &AppContainer) -> String {
-    format!(
-        "{}'s own view of the registry; run ghostlight doctor from a regular terminal.",
-        container.app
-    )
-}
-
-/// The refusal when an uninstall would only change the private view.
-#[must_use]
-pub fn uninstall_refusal(container: &AppContainer, layout: &Layout) -> String {
-    format!(
-        "This terminal runs inside {}, and Windows gives that app its own view of the registry \
-         and AppData, so removing registrations here would not remove them for other apps. Run \
-         this from a regular terminal: {} uninstall",
-        container.app,
-        layout.edge().display()
-    )
+pub fn removing_command(layout: &Layout) -> String {
+    format!("{} {REMOVING_SUBCOMMAND}", layout.edge().display())
 }
 
 #[cfg(test)]
@@ -301,50 +252,5 @@ mod tests {
         let codex = AppContainer::of_family("OpenAI.Codex_2p2nqsd0c76g0");
         assert_eq!(codex.app, "OpenAI.Codex");
         assert!(codex.is_app("openai.codex"));
-    }
-
-    #[test]
-    fn the_report_names_the_registrations_and_the_command_with_the_full_path() {
-        let layout = Layout::new(r"C:\Users\person\.ghostlight");
-        let container = AppContainer {
-            app: "Claude".into(),
-        };
-        let lines = kept_private_lines(
-            &container,
-            &["Google Chrome".to_owned(), "Codex".to_owned()],
-            &layout,
-        );
-        assert_eq!(
-            lines[0],
-            "Windows keeps these registrations private to Claude, so no other app sees them: \
-             Google Chrome, Codex."
-        );
-        assert!(lines[1].starts_with("To finish them, run this from a regular terminal: "));
-        assert!(lines[1].ends_with(&format!("{} install", layout.edge().display())));
-        assert!(lines[1].contains("ghostlight"));
-        assert!(cannot_see_line(&container, &layout).contains("cannot see what other apps see"));
-        assert!(uninstall_refusal(&container, &layout).ends_with("uninstall"));
-    }
-
-    #[test]
-    fn a_browser_row_names_the_apps_own_view_and_where_to_look_instead() {
-        let container = AppContainer {
-            app: "Claude".into(),
-        };
-        assert_eq!(
-            registry_view_detail(&container),
-            "Claude's own view of the registry; run ghostlight doctor from a regular terminal."
-        );
-    }
-
-    #[test]
-    fn the_client_line_reads_as_one_sentence() {
-        let line = client_cannot_see_line("Claude Desktop");
-        assert_eq!(
-            line,
-            "MCP client: Claude Desktop -- cannot be checked from here -- Windows gives the app \
-             this terminal runs in its own view of this configuration."
-        );
-        assert!(!line.contains("  "));
     }
 }

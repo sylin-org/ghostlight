@@ -27,10 +27,13 @@ use super::migration::RegistrationKind;
 use super::native_host::{NativeHostRegistry, NativeHostState, NATIVE_HOST_DIR_VARIABLE};
 use super::user_assets::UserAssets;
 #[cfg(windows)]
-use super::windows_entry::{
-    EntryFate, WindowsEntryChange, WindowsEntryRemoval, INSTALLED_APPS_ENTRY, START_MENU_SHORTCUT,
-};
+use super::windows_entry::{EntryFate, WindowsEntryChange, WindowsEntryRemoval};
 use super::{HarnessAction, HarnessRegistry, HarnessState};
+use crate::language::deployment as words;
+#[cfg(windows)]
+use crate::language::deployment::{
+    INSTALLED_APPS_ENTRY, INSTALLED_APPS_ENTRY_REPLACING_OTHER, START_MENU_SHORTCUT,
+};
 
 /// A registration the next reconcile will write.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -180,7 +183,7 @@ impl Registrations {
                     .map(|browser| PendingRegistration {
                         kind: RegistrationKind::NativeHost,
                         id: browser.id,
-                        state: browser.state.label().to_owned(),
+                        state: words::browser_state(browser.state).to_owned(),
                     }),
             );
         }
@@ -193,7 +196,7 @@ impl Registrations {
                     .map(|summary| PendingRegistration {
                         kind: RegistrationKind::McpClient,
                         id: summary.id,
-                        state: summary.state.label().to_owned(),
+                        state: words::client_state(summary.state).to_owned(),
                     }),
             );
         }
@@ -375,9 +378,10 @@ fn reconcile_platform(
 ) {
     match CommandPath::in_residence(residence).install() {
         Ok(result) if result.changed => {
-            report
-                .platform
-                .push(format!("command link: {}", result.report.state.label()));
+            report.platform.push(format!(
+                "command link: {}",
+                words::command_state(result.report.state)
+            ));
             report.needs_new_terminal |= result.needs_new_terminal;
         }
         Ok(result) if result.report.state == CommandPathState::PrivateView => {
@@ -387,16 +391,17 @@ fn reconcile_platform(
         Err(error) => report.failures.push(format!("Command link: {error}")),
     }
     match UserAssets::discover().install() {
-        Ok(result) if result.changed => report
-            .platform
-            .push(format!("manual pages: {}", result.report.state.label())),
+        Ok(result) if result.changed => report.platform.push(format!(
+            "manual pages: {}",
+            words::documentation_state(result.report.state)
+        )),
         Ok(_) => {}
         Err(error) => report.failures.push(format!("Manual pages: {error}")),
     }
     match DesktopIntegration::discover().install() {
         Ok(result) if result.changed => report.platform.push(format!(
             "applications entry: {}",
-            result.report.state.label()
+            words::applications_state(result.report.state)
         )),
         Ok(_) => {}
         Err(error) => report.failures.push(format!("Applications entry: {error}")),
@@ -446,12 +451,6 @@ fn reconcile_entries(
     }
 }
 
-/// What the reports call the installed-apps entry when writing it replaces the one an NSIS
-/// install left. It reads after both "Updated the" and "Would update the".
-#[cfg(windows)]
-const INSTALLED_APPS_ENTRY_REPLACING_NSIS: &str =
-    "installed-apps entry, replacing the earlier installer's";
-
 /// How the reports name what `change` wrote.
 #[cfg(windows)]
 fn entry_names(change: &WindowsEntryChange) -> Vec<String> {
@@ -461,8 +460,8 @@ fn entry_names(change: &WindowsEntryChange) -> Vec<String> {
     }
     if change.uninstall_key {
         names.push(
-            if change.nsis_removed {
-                INSTALLED_APPS_ENTRY_REPLACING_NSIS
+            if change.other_removed {
+                INSTALLED_APPS_ENTRY_REPLACING_OTHER
             } else {
                 INSTALLED_APPS_ENTRY
             }
@@ -776,7 +775,7 @@ mod tests {
         const STALE: WindowsEntryChange = WindowsEntryChange {
             shortcut: false,
             uninstall_key: true,
-            nsis_removed: false,
+            other_removed: false,
         };
 
         fn container() -> Residence {
@@ -848,7 +847,7 @@ mod tests {
             let change = WindowsEntryChange {
                 shortcut: true,
                 uninstall_key: true,
-                nsis_removed: false,
+                other_removed: false,
             };
             assert_eq!(
                 entry_names(&change),
@@ -858,25 +857,25 @@ mod tests {
         }
 
         #[test]
-        fn an_earlier_installers_entry_is_named_in_words_that_read_after_updated_and_would_update()
+        fn another_installations_entry_is_named_in_words_that_read_after_updated_and_would_update()
         {
             let change = WindowsEntryChange {
                 shortcut: false,
                 uninstall_key: true,
-                nsis_removed: true,
+                other_removed: true,
             };
             let names = entry_names(&change);
             assert_eq!(
                 names,
-                ["installed-apps entry, replacing the earlier installer's"]
+                ["installed-apps entry, replacing another installation's"]
             );
             assert_eq!(
                 crate::language::deployment::platform_entry_updated(&names[0]),
-                "Updated the installed-apps entry, replacing the earlier installer's."
+                "Updated the installed-apps entry, replacing another installation's."
             );
             assert_eq!(
                 crate::language::deployment::platform_entry_would_update(&names[0]),
-                "Would update the installed-apps entry, replacing the earlier installer's."
+                "Would update the installed-apps entry, replacing another installation's."
             );
         }
 

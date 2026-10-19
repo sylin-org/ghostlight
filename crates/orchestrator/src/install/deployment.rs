@@ -559,8 +559,8 @@ pub struct Swap {
 /// Why an install replaces the edge in `bin`. The plan prints it as the sentence a person reads.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EdgeReplacement {
-    /// `bin` still holds the layout of an earlier development build, where the service image had
-    /// the edge's name.
+    /// `bin` still holds an older layout, where the service image had the edge's name and the
+    /// connectors sat beside it.
     PreEdgeLayout,
     /// There is no installation record, or it names no edge.
     Unrecorded,

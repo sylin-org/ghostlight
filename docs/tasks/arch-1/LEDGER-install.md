@@ -6,8 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a, I9b, I4, I5, I2, I6 and I8 have landed. ux-2 has closed, so I10, I12 and I13
-can start. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
+I1, I3, I7, I9a, I9b, I4, I5, I2, I6, I8 and I10 have landed. I12 and I13 can start. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
 a test machine.
 
 ## Slices
@@ -27,7 +26,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I2 | fix(install): one atomic replace and one same-location rule | none | I1 | see Notes | landed (this commit) |
 | I6 | fix(install): the roster cache follows the acts, and a command reads it once | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I8 | fix(packaging): the carriers agree with the service's rule and words | none | none | cross-lane the installer journeys; see Notes | landed (this commit) |
-| I10 | refactor(install): install words in language/deployment, and the browser list composed once | none | ux-2 closes (`install/mod.rs`) | cross-lane `language/outcome.rs` | todo |
+| I10 | refactor(install): install words in language/deployment, and the browser list composed once | none | ux-2 closes (`install/mod.rs`) | cross-lane `language/outcome.rs`; see Notes | landed (this commit) |
 | I12 | refactor(diagnostics): one spelling of the edge's logs, and no name nobody writes | none | none | - | todo |
 | I13 | refactor(win-peer): one token module for its two callers | none | none | - | todo |
 
@@ -250,3 +249,43 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   downloaded service. Ran here: both launcher tests, `tests/installer-checksums.ps1` offline in
   PowerShell 7 and 5.1, and `sh -n scripts/*.sh`.
 - I8 changes no golden. `linux.txt` is unaffected.
+- I10, what moved: the harness details, evidence, apply and locate messages, `setup_message`, the
+  `HarnessError` texts, the container sentences (`NOT_VISIBLE`, the kept-private lines, the
+  cannot-see lines, the registry-view detail and the uninstall refusal), the doctor lines, and the
+  word tables of all five registries (`HarnessState`, `NativeHostState`, `CommandPathState`,
+  `DesktopIntegrationState`, `UserAssetState`), whose `label()` methods went. `container.rs` keeps
+  the commands the sentences name (`finishing_command`, `checking_command`, `removing_command`)
+  and `NOT_VISIBLE_STATE`, a JSON state word. The Windows entry nouns moved with them. Within
+  Decision 8.
+- I10, what stayed: the native-host details and the other `NativeHostError` texts, the
+  command-path and documentation details, the reconcile report's prefixes (`command link:` and
+  the like) and the rest of `cli/setup.rs`'s lines are not on the slice's list and keep their
+  words in place. A later slice can move them the same way.
+- I10, "the service": only doctor's readiness line spoke of the authority; it now says "The
+  running Ghostlight service". "The Ghostlight program" in the client details and refusals names
+  the edge, not the service, so it stays.
+- I10, `ghostlight native-host`: it now prints the report doctor prints (`Ghostlight program:`
+  and one `Browser:` line per browser, with `browser_state`'s word), after its first line. Its own
+  state table (`missing`, `current`, `updatable`, `owned by another installation`) went. No test or
+  journey parsed the old lines.
+- I10, the family list: `install::native_host::supported_browsers()` reads the browser table, and
+  `language::deployment` composes `browser_ids` and `browser_families` from it. The literals that
+  went: `NativeHostError::UnknownBrowser`, the three in `select_install_browsers`, the `--browser`
+  help line and the outcome's `BrowserAbsent` step (core's file, named cross-lane). Every sentence
+  reads byte for byte as before, so the man page (`packaging/linux/man/ghostlight.1`) and the
+  catalog and result goldens are unchanged.
+- I10, the Windows key: `WindowsEntryChange::nsis_removed` is now `other_removed`, because it is
+  set for any Uninstall key whose command is not this home's, and the entry reads "replacing
+  another installation's". Windows-only code, compiled and tested here.
+- I10, the desktop entry: an owned entry that already starts this installation and lacks only its
+  icon reads "starts this installation, but its icon is missing". Proved in `desktop_entry.rs`
+  (`an_entry_that_lost_only_its_icon_is_not_said_to_be_older`) and `language/deployment.rs`.
+- I10, the older layout: `edge_replaced(PreEdgeLayout)` says "bin still holds an older layout that
+  kept its connectors there", and the doc comments of `pre_edge_layout` and `PreEdgeLayout` no
+  longer say only a development build left it. For D2: `docs/1.0/ARCHITECTURE.md` line 97 still
+  says "the layout of an earlier development build".
+- I10, the proofs: `native_host_check_and_doctor_say_one_word_per_state` (`cli/setup.rs`) and
+  `the_family_list_is_the_browser_table` (`language/deployment.rs`), with the moved word tests. The
+  writer golden was regenerated with `GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1` and is byte-identical:
+  the state words and details did not change. The native goldens are unaffected, so `linux.txt`
+  is unaffected. No journey is needed.

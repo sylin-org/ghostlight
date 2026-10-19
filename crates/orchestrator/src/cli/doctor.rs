@@ -144,16 +144,16 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string(&doctor_document(&observation))?);
         return Ok(());
     }
-    println!("Ghostlight {} diagnostics", env!("CARGO_PKG_VERSION"));
-    println!("Home: {}", observation.home.display());
+    println!(
+        "{}",
+        deployment_words::doctor_heading(env!("CARGO_PKG_VERSION"))
+    );
+    println!("{}", deployment_words::home_line(&observation.home));
     println!("{}", words::endpoint_line(&observation.runtime.endpoint));
-    match &observation.installed {
-        Some(record) => println!(
-            "Installed: Ghostlight {} -- relay {}",
-            record.service_version, record.relay_revision
-        ),
-        None => println!("Installed: nothing recorded in the Ghostlight home"),
-    }
+    println!(
+        "{}",
+        deployment_words::installed_line(observation.installed.as_ref())
+    );
     if observation
         .installed
         .as_ref()
@@ -165,53 +165,55 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         println!("{line}");
     }
     println!(
-        "Environment: {} -- {}",
-        observation.environment.label(),
-        observation.environment.location()
+        "{}",
+        deployment_words::environment_line(
+            observation.environment.label(),
+            observation.environment.location()
+        )
     );
     if let Some(caveat) = observation.environment.caveat() {
-        println!("Environment: {caveat}");
+        println!("{}", deployment_words::environment_caveat_line(caveat));
     }
     if let Some(readiness) = &observation.readiness {
         println!("{}", readiness_line(readiness));
     } else if observation.runtime.running() {
-        println!(
-            "Readiness: unavailable -- The running Ghostlight authority did not report its current state."
-        );
+        println!("{}", deployment_words::READINESS_UNREPORTED);
     }
     for (path, ready) in &observation.binaries {
-        println!(
-            "Binary: {} -- {}",
-            path.display(),
-            if *ready { "ready" } else { "missing" }
-        );
+        println!("{}", deployment_words::binary_line(path, *ready));
     }
     if let Some(container) = &observation.native_host.private_view {
         println!(
-            "Registrations: {}",
-            container::cannot_see_line(container, &Layout::new(observation.home.clone()))
+            "{}",
+            deployment_words::registrations_line(&deployment_words::cannot_see_line(
+                container,
+                &Layout::new(observation.home.clone())
+            ))
         );
     }
     print_native_host_report(&observation.native_host);
     print_command_path_report(&observation.command_path);
     if observation.user_assets.state != crate::install::user_assets::UserAssetState::NotApplicable {
         println!(
-            "Documentation: {} -- {}",
-            observation.user_assets.state.label(),
-            observation.user_assets.detail
+            "{}",
+            deployment_words::documentation_line(
+                observation.user_assets.state,
+                &observation.user_assets.detail
+            )
         );
     }
     print_desktop_integration_report(&observation.desktop);
     for harness in &observation.harnesses {
         if harness.private_view {
-            println!("{}", container::client_cannot_see_line(&harness.label));
+            println!(
+                "{}",
+                deployment_words::client_cannot_see_line(&harness.label)
+            );
             continue;
         }
         println!(
-            "MCP client: {} -- {} -- {}",
-            harness.label,
-            harness.state.label(),
-            harness.detail
+            "{}",
+            deployment_words::client_line(&harness.label, harness.state, &harness.detail)
         );
         if let Some(evidence) = &harness.evidence {
             println!("  {evidence}");
@@ -238,17 +240,16 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         );
     }
     let report = &observation.diagnostics;
-    match (report.layer, &report.directory) {
-        (layer, Some(directory)) => println!(
-            "Process diagnostics: {layer} -- {} bytes of log in {directory}",
-            report.used_bytes
-        ),
-        (layer, None) => println!(
-            "Process diagnostics: {layer} -- run ghostlight diagnostics on to turn them on"
-        ),
-    }
+    println!(
+        "{}",
+        deployment_words::diagnostics_line(
+            report.layer,
+            report.used_bytes,
+            report.directory.as_deref()
+        )
+    );
     if fix {
-        println!("Applying ownership-safe repairs.");
+        println!("{}", deployment_words::APPLYING_REPAIRS);
         run_setup(
             true,
             &SetupOptions {
@@ -312,7 +313,7 @@ fn browsers_document(report: &NativeHostReport) -> serde_json::Value {
         .map(|browser| {
             let mut row = serde_json::json!(browser);
             row["state"] = container::NOT_VISIBLE_STATE.into();
-            row["detail"] = container::registry_view_detail(container).into();
+            row["detail"] = deployment_words::registry_view_detail(container).into();
             row
         })
         .collect()
@@ -337,7 +338,7 @@ fn icon_document(agent: &AgentIcon) -> serde_json::Value {
 
 /// Format a readiness summary line for output.
 pub fn readiness_line(readiness: &crate::workbench::ReadinessSummary) -> String {
-    format!("Readiness: {} -- {}", readiness.word, readiness.detail)
+    deployment_words::readiness_line(&readiness.word, &readiness.detail)
 }
 
 #[cfg(test)]
@@ -642,60 +643,6 @@ mod tests {
                 readiness_line(&readiness),
                 format!("Readiness: {} -- {}", state.word(), state.detail()),
                 "{state:?}"
-            );
-        }
-    }
-
-    /// Every state doctor reports has plain words, never a Rust identifier; the workbench renders
-    /// the same serialized values.
-    #[test]
-    fn every_reportable_state_has_plain_words() {
-        use crate::install::command_path::CommandPathState;
-        use crate::install::desktop_entry::DesktopIntegrationState;
-        use crate::install::native_host::NativeHostState;
-        use crate::install::user_assets::UserAssetState;
-        use crate::install::HarnessState;
-
-        assert_eq!(HarnessState::NotDetected.label(), "not detected");
-        assert_eq!(HarnessState::Available.label(), "detected, not connected");
-        assert_eq!(HarnessState::Installed.label(), "connected");
-        assert_eq!(
-            HarnessState::Updatable.label(),
-            "connected, needs an update"
-        );
-        assert_eq!(HarnessState::NeedsAttention.label(), "needs attention");
-
-        assert_eq!(NativeHostState::Missing.label(), "not registered");
-        assert_eq!(NativeHostState::Current.label(), "registered");
-        assert_eq!(
-            NativeHostState::Updatable.label(),
-            "registered, needs an update"
-        );
-        assert_eq!(NativeHostState::NeedsAttention.label(), "needs attention");
-
-        for label in [
-            DesktopIntegrationState::NotApplicable.label(),
-            DesktopIntegrationState::Missing.label(),
-            DesktopIntegrationState::Current.label(),
-            DesktopIntegrationState::Updatable.label(),
-            DesktopIntegrationState::NeedsAttention.label(),
-            CommandPathState::NotApplicable.label(),
-            CommandPathState::Missing.label(),
-            CommandPathState::Current.label(),
-            CommandPathState::Updatable.label(),
-            CommandPathState::NeedsAttention.label(),
-            CommandPathState::PrivateView.label(),
-            UserAssetState::NotApplicable.label(),
-            UserAssetState::Missing.label(),
-            UserAssetState::Current.label(),
-            UserAssetState::NeedsAttention.label(),
-        ] {
-            assert!(!label.is_empty());
-            // A person's word, not an identifier: no capitals and no camel case.
-            assert_eq!(
-                label,
-                label.to_lowercase(),
-                "{label} reads as an identifier"
             );
         }
     }
