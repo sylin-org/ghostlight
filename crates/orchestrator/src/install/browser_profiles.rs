@@ -3,10 +3,14 @@
 //! The service cannot tell "the extension is added but the browser is closed" from "the extension
 //! is missing" by asking the browser, because a closed browser answers nothing. A Chromium
 //! browser keeps each profile in a directory of its user data directory and lists them in
-//! `Local State`; an installed extension has a directory under the profile's `Extensions`. This
-//! module reads only those names. It is local, bounded and read-only, and it runs only when
-//! asked: nothing is written, no profile name is logged, stored or sent, and a scan that cannot
-//! read what it needs falls back to the one profile every browser starts with.
+//! `Local State`; an installed extension has a directory under the profile's `Extensions`. A
+//! turned-off extension keeps that directory, and the profile's preferences mark it disabled, so
+//! a profile holds the extension only when it has the directory and no preferences file marks it
+//! disabled. A browser does not load a disabled extension, so a profile that only has it turned
+//! off cannot connect. This module reads only those names and that one setting. It is local,
+//! bounded and read-only, and it runs only when asked: nothing is written, no profile name is
+//! logged, stored or sent, and a scan that cannot read what it needs falls back to the one
+//! profile every browser starts with.
 //!
 //! An extension installed from the Chrome Web Store has the same id in Chrome, Edge, Brave and
 //! Chromium, so one id finds them all. An unpacked development extension has another id and is
@@ -29,14 +33,27 @@ const DEFAULT_PROFILE_DIRECTORY: &str = "Default";
 const LOCAL_STATE_FILE: &str = "Local State";
 /// Where a profile keeps its installed extensions, one directory per extension id.
 const EXTENSIONS_DIRECTORY: &str = "Extensions";
+/// The profile files that may hold an extension's settings: the protected copy the browser keeps
+/// on some systems, and the plain one.
+const PREFERENCES_FILES: [&str; 2] = ["Secure Preferences", "Preferences"];
+/// The settings key whose value says why an extension is disabled: a number of flags in older
+/// browsers, a list of reasons in newer ones. Absent, zero or empty means enabled.
+const DISABLE_REASONS_KEY: &str = "disable_reasons";
+/// The settings key older browsers used for an extension's state.
+const STATE_KEY: &str = "state";
+/// The [`STATE_KEY`] value of a disabled extension.
+const DISABLED_STATE: i64 = 0;
 /// The most of `Local State` that is read. A larger file is treated as unusable.
 const LOCAL_STATE_LIMIT: u64 = 8 * 1024 * 1024;
+/// The most of a preferences file that is read. A larger file is treated as unusable, and then
+/// it marks nothing disabled.
+const PREFERENCES_LIMIT: u64 = 32 * 1024 * 1024;
 /// The longest profile directory name that is used.
 const DIRECTORY_NAME_LIMIT: usize = 64;
 /// The longest profile name that is shown.
 const SHOWN_NAME_LIMIT: usize = 40;
 
-/// A profile that holds the extension.
+/// A profile that holds the extension, turned on.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExtensionProfile {
     /// The profile's directory name inside the user data directory, such as `Profile 1`.
@@ -50,7 +67,8 @@ pub struct ExtensionProfile {
 pub struct ProfileScan {
     /// How many profiles the browser has.
     pub profiles: usize,
-    /// The profiles that hold the extension, in the order the browser lists its profiles.
+    /// The profiles that hold the extension turned on, in the order the browser lists its
+    /// profiles. A profile where it is turned off is not one of them.
     pub with_extension: Vec<ExtensionProfile>,
 }
 
@@ -83,21 +101,23 @@ pub fn scan(registry: &NativeHostRegistry) -> Vec<BrowserProfiles> {
 }
 
 /// Find the profiles of the browser whose user data directory is `user_data` that hold the
-/// extension `extension_id`.
+/// extension `extension_id` turned on.
 ///
 /// Never fails: a missing, oversize or unreadable `Local State` falls back to the `Default`
-/// profile alone, counted when its directory exists and carrying no name.
+/// profile alone, counted when its directory exists and carrying no name. A preferences file
+/// that cannot be read marks nothing disabled.
 #[must_use]
 pub fn scan_user_data(user_data: &Path, extension_id: &str) -> ProfileScan {
     let listed = read_listed_profiles(user_data).unwrap_or_else(|| fallback_profiles(user_data));
     let with_extension = listed
         .iter()
         .filter(|(directory, _)| {
-            user_data
-                .join(directory)
+            let profile = user_data.join(directory);
+            profile
                 .join(EXTENSIONS_DIRECTORY)
                 .join(extension_id)
                 .is_dir()
+                && !marked_disabled(&profile, extension_id)
         })
         .map(|(directory, name)| ExtensionProfile {
             directory: directory.clone(),
@@ -115,15 +135,7 @@ pub fn scan_user_data(user_data: &Path, extension_id: &str) -> ProfileScan {
 /// `None` when the file is missing, too large, unreadable, not the expected shape or lists no
 /// usable profile.
 fn read_listed_profiles(user_data: &Path) -> Option<Vec<(String, Option<String>)>> {
-    let mut bytes = Vec::new();
-    File::open(user_data.join(LOCAL_STATE_FILE))
-        .ok()?
-        .take(LOCAL_STATE_LIMIT + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    if bytes.len() as u64 > LOCAL_STATE_LIMIT {
-        return None;
-    }
+    let bytes = read_bounded(&user_data.join(LOCAL_STATE_FILE), LOCAL_STATE_LIMIT)?;
     let state: LocalState = serde_json::from_slice(&bytes).ok()?;
     let listed: Vec<(String, Option<String>)> = state
         .profile?
@@ -140,6 +152,39 @@ fn read_listed_profiles(user_data: &Path) -> Option<Vec<(String, Option<String>)
         })
         .collect();
     (!listed.is_empty()).then_some(listed)
+}
+
+/// Whether a preferences file of `profile` marks the extension `extension_id` disabled.
+fn marked_disabled(profile: &Path, extension_id: &str) -> bool {
+    PREFERENCES_FILES.iter().any(|file| {
+        read_bounded(&profile.join(file), PREFERENCES_LIMIT)
+            .and_then(|bytes| serde_json::from_slice::<Preferences>(&bytes).ok())
+            .and_then(|preferences| preferences.extensions?.settings?.remove(extension_id))
+            .is_some_and(|settings| settings_say_disabled(&settings))
+    })
+}
+
+/// Whether one extension's settings say it is disabled: a disable reason is recorded, or the
+/// older state says disabled.
+fn settings_say_disabled(settings: &Value) -> bool {
+    let has_reason = match settings.get(DISABLE_REASONS_KEY) {
+        Some(Value::Number(flags)) => flags.as_u64().is_none_or(|flags| flags != 0),
+        Some(Value::Array(reasons)) => !reasons.is_empty(),
+        _ => false,
+    };
+    has_reason || settings.get(STATE_KEY).and_then(Value::as_i64) == Some(DISABLED_STATE)
+}
+
+/// The bytes of the file at `path`, or `None` when it is missing, unreadable or larger than
+/// `limit`.
+fn read_bounded(path: &Path, limit: u64) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    File::open(path)
+        .ok()?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 <= limit).then_some(bytes)
 }
 
 /// The one profile assumed when `Local State` cannot be used.
@@ -187,6 +232,18 @@ struct LocalState {
 #[derive(Deserialize)]
 struct ProfileSection {
     info_cache: Option<InfoCache>,
+}
+
+/// The parts of a profile's preferences file a scan reads.
+#[derive(Deserialize)]
+struct Preferences {
+    extensions: Option<ExtensionsSection>,
+}
+
+#[derive(Deserialize)]
+struct ExtensionsSection {
+    /// Each extension's settings, by extension id.
+    settings: Option<serde_json::Map<String, Value>>,
 }
 
 /// The `info_cache` object as key and value pairs in file order. A JSON map type would sort or
@@ -453,12 +510,74 @@ mod tests {
         );
     }
 
+    /// A profile file holding `settings` as the settings of the extension `id`.
+    fn extension_settings(id: &str, settings: &str) -> String {
+        format!(r#"{{"extensions":{{"settings":{{"{id}":{settings}}}}}}}"#)
+    }
+
     #[test]
-    fn scanning_finds_installed_browsers_and_leaves_the_others_out() {
+    fn a_turned_off_copy_does_not_hold_the_extension() {
         let scratch = Scratch::new();
+        local_state(
+            scratch.path(),
+            &listing(
+                r#""Default":{"name":"Reasons"},"Profile 1":{"name":"Flags"},
+                "Profile 2":{"name":"Old"},"Profile 3":{"name":"On"},"Profile 4":{"name":"Clear"}"#,
+            ),
+        );
+        // Turned off, as newer browsers record it, in the protected file.
+        install_extension(scratch.path(), "Default");
+        write(
+            &scratch.path().join("Default").join("Secure Preferences"),
+            &extension_settings(ID, r#"{"disable_reasons":[1],"path":"x"}"#),
+        );
+        // Turned off, as older browsers record it, in the plain file.
+        install_extension(scratch.path(), "Profile 1");
+        write(
+            &scratch.path().join("Profile 1").join("Preferences"),
+            &extension_settings(ID, r#"{"disable_reasons":1}"#),
+        );
+        install_extension(scratch.path(), "Profile 2");
+        write(
+            &scratch.path().join("Profile 2").join("Preferences"),
+            &extension_settings(ID, r#"{"state":0}"#),
+        );
+        // On: only another extension is turned off.
+        install_extension(scratch.path(), "Profile 3");
+        write(
+            &scratch.path().join("Profile 3").join("Secure Preferences"),
+            &extension_settings(
+                "otherotherotherotherotherotherot",
+                r#"{"disable_reasons":[1]}"#,
+            ),
+        );
+        // On: the reasons are cleared.
+        install_extension(scratch.path(), "Profile 4");
+        write(
+            &scratch.path().join("Profile 4").join("Preferences"),
+            &extension_settings(ID, r#"{"state":1,"disable_reasons":0}"#),
+        );
+        write(
+            &scratch.path().join("Profile 4").join("Secure Preferences"),
+            &extension_settings(ID, r#"{"disable_reasons":[]}"#),
+        );
+
+        let scan = scan_user_data(scratch.path(), ID);
+
+        assert_eq!(scan.profiles, 5);
+        assert_eq!(
+            scan.with_extension,
+            vec![
+                found("Profile 3", Some("On")),
+                found("Profile 4", Some("Clear"))
+            ]
+        );
+    }
+
+    /// A registry for `scratch` in which Chrome is installed.
+    fn registry_with_chrome(scratch: &Scratch) -> NativeHostRegistry {
         let connector = scratch.path().join("ghostlight");
         let registry = NativeHostRegistry::isolated(scratch.path(), &connector);
-        // Chrome is installed; Edge has data but no executable.
         let executable = scratch
             .path()
             .join("browser-packages")
@@ -470,6 +589,44 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
         }
+        registry
+    }
+
+    #[test]
+    fn a_browser_with_only_a_turned_off_copy_sends_the_person_to_the_store() {
+        let scratch = Scratch::new();
+        let registry = registry_with_chrome(&scratch);
+        let chrome = registry.user_data_directory("chrome").unwrap();
+        local_state(&chrome, &listing(r#""Default":{"name":"Person 1"}"#));
+        fs::create_dir_all(
+            chrome
+                .join("Default")
+                .join("Extensions")
+                .join(STORE_EXTENSION_ID),
+        )
+        .unwrap();
+        write(
+            &chrome.join("Default").join("Preferences"),
+            &extension_settings(STORE_EXTENSION_ID, r#"{"disable_reasons":[1]}"#),
+        );
+
+        // What the executor asks before it words a refusal while setup is incomplete.
+        let held = scan(&registry)
+            .iter()
+            .any(|browser| !browser.scan.with_extension.is_empty());
+
+        assert!(!held);
+        assert_eq!(
+            crate::language::outcome::ExtensionAdvice::resolve(false, held),
+            crate::language::outcome::ExtensionAdvice::AddFromStore
+        );
+    }
+
+    #[test]
+    fn scanning_finds_installed_browsers_and_leaves_the_others_out() {
+        let scratch = Scratch::new();
+        // Chrome is installed; Edge has data but no executable.
+        let registry = registry_with_chrome(&scratch);
         let chrome = registry.user_data_directory("chrome").unwrap();
         local_state(&chrome, TWO_PROFILES);
         fs::create_dir_all(

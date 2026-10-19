@@ -356,3 +356,18 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   person's shell and see it); a machine-wide Windows value is not read; Claude Code's legacy
   `.config.json`, which it prefers when that file exists and is not empty, is not handled. No
   journey needed.
+- F4, a turned-off copy (linux-2's Notes, seen for windows-claude): the profile scan counted a
+  profile as holding the extension when its `Extensions/<id>` directory existed, so a disabled 1.x
+  store copy made the executor's probe answer yes and the refusal said to open a window of the
+  browser, which cannot help: a browser does not load a disabled extension. A profile now holds
+  the extension only when no preferences file (`Secure Preferences`, then `Preferences`) marks it
+  disabled: a `disable_reasons` list that is not empty or number that is not zero, or the older
+  `state` of 0. An unreadable or oversize file marks nothing. With no other copy turned on, the
+  probe answers no and, while setup is incomplete, the refusal names the store listing (where a
+  disabled copy can be turned back on) and the Ghostlight window. The workbench's setup reads the
+  same scan, so it no longer offers to open a browser whose copy is off. Proof:
+  `a_turned_off_copy_does_not_hold_the_extension` (each spelling, in each file, beside copies that
+  are on) and `a_browser_with_only_a_turned_off_copy_sends_the_person_to_the_store` (the probe's
+  own question over an installed browser, and the advice it resolves to). Limits: with setup
+  complete the refusal stays the plain one, as before. No golden, catalog or wording changes;
+  `linux.txt` is unaffected. No journey needed.
