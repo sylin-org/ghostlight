@@ -42,9 +42,9 @@ page, not every branch the renderer has.
 | Target glow | `click` target, and a `scroll` target | "this element was the target" | rounded halo hugging the element, 720ms |
 | Click ripple | `click` target | "clicked here, this many times, with this button" | one expanding ring per click, at most three, 150ms apart, 620ms each; dashed for a secondary button |
 | Drag trail | `drag` target | "dragged along this path" | twelve fading sky dots from the last pointer position to the target |
-| Field splash | `fill` targets, one per field, and an `upload` target; an image dropped at a point names no field and shows only the caption, when it is on | "the agent just set this field" | ring and interior wash hugging the field, settling then releasing outward, 700ms |
+| Field splash | `fill` targets, one per field once the page has set them, and an `upload` target once the files are attached; an image dropped at a point names no field, and an input with no box on screen (hidden or zero-size) draws nothing | "the agent just set this field" | ring and interior wash hugging the field, settling then releasing outward, 700ms |
 | Field shimmer | `type` target | "typing into this field" | soft outline pulse on the field, 900ms |
-| Scroll cue | `scroll` start, or a `scroll` target when the call names one | "scrolled", or "scrolled to this element" | three cascading chevrons, 1100ms: at the viewport centre on start, or on the element with a target glow; a targeted scroll draws only the second |
+| Scroll cue | `scroll` start, or a `scroll` target when the call names one | "scrolled", or "scrolled to this element" | three cascading chevrons, 1100ms: at the viewport centre on start, or, once the page has scrolled to the element, on it with a target glow; a targeted scroll draws only the second |
 | Read scan | `read` start | "the agent is reading, not touching" | a sky band sweeping down the viewport, 1450ms |
 | Navigate pill | `navigate` completion | "arrived at this destination" | top-centre pill: a small sky right arrow (shaft and head), drawn as SVG, then the host and path (58 characters at most), 1600ms |
 | Keycap | each `key` start | "a key was pressed" | one unlabelled glowing keycap in a bottom-centre lozenge, 1250ms; it never names the key |
@@ -68,10 +68,11 @@ A click is the one action whose confirmation has to match what actually landed, 
 indication that carries a shape.
 
 `ClickShape { clicks, button }` rides on `PresentationSignal`, populated from
-`DomainEvent::TargetIndicated` at the click emit site in
-`crates/orchestrator/src/work/pointer.rs`. The other target indications -- hover, drag, type, fill, upload and
-scroll -- pass `None`, because they have no click to describe. The renderer draws one ring per click on the 150ms
-stagger unit and dashes the ring when the button is secondary.
+`DomainEvent::TargetIndicated`. The click site in `crates/orchestrator/src/work/pointer.rs` builds
+the shape and sends it through the executor's one target helper, `indicate_target` in
+`crates/orchestrator/src/work/mod.rs`. The other target indications -- hover, drag, type, fill,
+upload and scroll -- pass `None`, because they have no click to describe. The renderer draws one
+ring per click on the 150ms stagger unit and dashes the ring when the button is secondary.
 
 The field is optional on the wire with a serde default, so an adapter that predates it renders one
 primary ring, exactly as every click did before. The shape carries how the click landed and never

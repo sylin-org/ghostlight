@@ -169,8 +169,12 @@ impl ApplicationExecutor {
             value.target.as_deref(),
             Capability::Read,
             |selected, locator, revealed_role, decision| {
-                if let Some(locator) = &locator {
-                    self.indicate_target(context, selected.physical_id, locator, None);
+                // A scroll to a target cues the target once the page has scrolled to it, so its
+                // own start draws no chevrons at the viewport centre first.
+                let revealed = locator.clone();
+                if revealed.is_some() {
+                    self.presentation
+                        .bind_for_target(context.invocation.as_str(), selected.physical_id);
                 }
                 match self.dispatch(
                     context,
@@ -195,6 +199,9 @@ impl ApplicationExecutor {
                     }) if tab_id == selected.physical_id => {
                         if let Err(error) = lease.invalidate_views(&selected.handle) {
                             return self.workspace_failure(context, error);
+                        }
+                        if let Some(locator) = &revealed {
+                            self.indicate_target(context, tab_id, locator, None);
                         }
                         self.succeeded(
                             context,
@@ -504,6 +511,7 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let mut dragged_from = None;
         let mut dragged_onto = None;
+        let mut dragged_source = None;
         let (selected, command, facts) = if let (Some(source), Some(destination)) = (
             value.source_target.as_deref(),
             value.destination_target.as_deref(),
@@ -522,7 +530,7 @@ impl ApplicationExecutor {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             };
-            self.indicate_target(context, selected.physical_id, &source.locator, None);
+            dragged_source = Some(source.locator.clone());
             dragged_from = Some(source.role);
             dragged_onto = Some(destination.role);
             let facts = json!({"tab":selected.handle.as_str(),"source_target":source.handle.as_str(),"destination_target":destination.handle.as_str(),"dragged":true});
@@ -583,6 +591,9 @@ impl ApplicationExecutor {
                 true,
                 json!({"reason":decision.reason.as_str()}),
             );
+        }
+        if let Some(locator) = &dragged_source {
+            self.indicate_target(context, selected.physical_id, locator, None);
         }
         match self.dispatch(context, command) {
             Ok(BrowserOutcome::Dragged {

@@ -63,13 +63,16 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   and perform_scroll would emit TargetIndicated for their resolved targets; if that lands, the
   table's rows return.
 - t1 (k1 follow-up): the owner asked for it on 2026-10-19 ("Do this task here"). A fill now
-  names each field it sets, an upload names its input, and a scroll names its target when the
-  call gives one, all through one executor helper that the click, hover, drag and type sites now
-  share. A target also binds the invocation's feedback to its tab, so the scroll command that
-  follows does not start the activity again: a targeted scroll draws its chevrons and glow on the
-  element only, not a second set at the viewport centre. The vocabulary table's field splash,
-  scroll cue and target glow rows say so. An image dropped at a point and the zoom frame still
-  name no element.
+  names each field once the page has set it, an upload names its input once the files are
+  attached, and a scroll names its target once the page has scrolled to it, all through one
+  executor helper that the click, hover, drag and type sites now share. Naming them after the
+  browser acts keeps the cue where the control now is (a scroll centres its target, a fill
+  scrolls field by field) and off work that did not happen. A targeted scroll binds its tab
+  quietly before the command, so it draws its chevrons and glow on the element only, not a
+  second set at the viewport centre. A drag now names its source after authorization, so a
+  denied drag draws no trail. The vocabulary table's field splash, scroll cue and target glow
+  rows say so. An image dropped at a point and the zoom frame still name no element. Review:
+  three reviewers found the first version cued a targeted scroll before it scrolled; fixed.
 - n1 (j-11): both light-taskbar frames, 16 and 32 pixels, are now the monochrome tray glyph
   in crates/desktop/assets (tray-glyph-16.png drawn by hand, tray-glyph-32.png smooth): one
   silhouette in the night colour with its eyes cut out and no sparkles. Since no light frame is

@@ -165,14 +165,71 @@ fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
     }
 }
 
-/// Every action with a control under it tells the page which one, so its feedback lands there: a
-/// fill names each field, an upload its input and a targeted scroll its target. The target binds
-/// the feedback to its tab, so the scroll that follows draws no second cue in the middle of the
-/// page. A scroll with no target names nothing and cues the page itself.
+/// What the page is told and the browser commands already sent when it is told, in one order.
+struct OrderedSignals {
+    browser: Arc<FakeBrowser>,
+    log: Mutex<Vec<(usize, PresentationSignal)>>,
+}
+
+impl PresentationPort for OrderedSignals {
+    fn present(&self, _: &str, signal: PresentationSignal) -> Result<(), PresentationError> {
+        let sent = self.browser.calls().len();
+        self.log.lock().unwrap().push((sent, signal));
+        Ok(())
+    }
+}
+
+impl OrderedSignals {
+    /// The targets named for `invocation`: how many browser commands had been sent when the page
+    /// was told, and each target's activity, tab and locator.
+    fn targets(&self, invocation: &str) -> Vec<(usize, PresentationActivity, Option<u64>, String)> {
+        self.log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, signal)| {
+                signal.invocation == invocation && signal.signal == PresentationKind::Target
+            })
+            .map(|(sent, signal)| {
+                (
+                    *sent,
+                    signal.activity,
+                    signal.tab_id,
+                    signal.locator.clone().unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
+    /// The starts `invocation` drew on tab `tab`, with how many commands had been sent by then.
+    fn starts_on(&self, invocation: &str, tab: u64) -> Vec<(usize, PresentationActivity)> {
+        self.log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, signal)| {
+                signal.invocation == invocation
+                    && signal.signal == PresentationKind::Start
+                    && signal.tab_id == Some(tab)
+            })
+            .map(|(sent, signal)| (*sent, signal.activity))
+            .collect()
+    }
+}
+
+/// A fill names each field once the page has set it, an upload its input once the files are
+/// attached, and a scroll its target once the page has scrolled to it, so the feedback lands
+/// where the control now is and only on work that happened. A targeted scroll draws no cue at
+/// the viewport centre before its own; a scroll with no target cues the page itself. A fill the
+/// browser does not complete and an image dropped at a point name nothing, and typing still
+/// starts its signature on the field's tab before it names the field.
 #[test]
-fn fill_upload_and_a_targeted_scroll_indicate_their_targets() {
+fn fill_upload_and_scroll_name_their_targets_once_the_browser_has_acted() {
     let (mut executor, browser, _, workspace, _) = fixture();
-    let signals = Arc::new(PageSignals::default());
+    let signals = Arc::new(OrderedSignals {
+        browser: browser.clone(),
+        log: Mutex::default(),
+    });
     executor.presentation = PresentationReactor::new(signals.clone());
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
@@ -206,19 +263,34 @@ fn fill_upload_and_a_targeted_scroll_indicate_their_targets() {
         &CancellationToken::default(),
     );
     let handle = |index: usize| inspected.facts["items"][index]["target"].clone();
-    let targets = |signals: &[PresentationSignal],
-                   invocation: &str|
-     -> Vec<(PresentationActivity, Option<u64>, Option<String>)> {
-        signals
+    let fields = json!([
+        {"target":handle(0),"value":"Ada"},
+        {"target":handle(1),"value":"ada@example.com"}
+    ]);
+    let sent = |command: fn(&BrowserCommand) -> bool| {
+        browser
+            .calls()
             .iter()
-            .filter(|signal| {
-                signal.invocation == invocation && signal.signal == PresentationKind::Target
-            })
-            .map(|signal| (signal.activity, signal.tab_id, signal.locator.clone()))
-            .collect()
+            .rposition(command)
+            .expect("the command was sent")
+            + 1
     };
 
-    signals.0.lock().unwrap().clear();
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
+        tab_id: 7,
+        targets: controls[..2].to_vec(),
+    }));
+    browser.push(Err(BrowserError::DeadlineBeforeDispatch));
+    let unfilled = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({"tab":tab_handle,"fields":fields}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(unfilled.status, Status::Failed, "{unfilled:?}");
+    assert!(signals.targets(unfilled.invocation.as_str()).is_empty());
+
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
         rebound: false,
         tab_id: 7,
@@ -235,24 +307,29 @@ fn fill_upload_and_a_targeted_scroll_indicate_their_targets() {
     let filled = executor.execute(
         &workspace,
         "browser_fill_form",
-        json!({"tab":tab_handle,"fields":[{"target":handle(0),"value":"Ada"},{"target":handle(1),"value":"ada@example.com"}]}),
+        json!({"tab":tab_handle,"fields":fields}),
         &CancellationToken::default(),
     );
     assert_eq!(filled.status, Status::Succeeded, "{filled:?}");
-    let fill_signals = signals.0.lock().unwrap().clone();
+    let after_fill = sent(|call| matches!(call, BrowserCommand::Fill { .. }));
     assert_eq!(
-        targets(&fill_signals, filled.invocation.as_str()),
+        signals.targets(filled.invocation.as_str()),
         [
-            (PresentationActivity::Fill, Some(7), Some("name-1".into())),
-            (PresentationActivity::Fill, Some(7), Some("email-1".into())),
+            (
+                after_fill,
+                PresentationActivity::Fill,
+                Some(7),
+                "name-1".into()
+            ),
+            (
+                after_fill,
+                PresentationActivity::Fill,
+                Some(7),
+                "email-1".into()
+            ),
         ]
     );
-    assert!(fill_signals.iter().all(|signal| signal.click.is_none()));
-    assert!(!serde_json::to_string(&fill_signals)
-        .unwrap()
-        .contains("ada@example.com"));
 
-    signals.0.lock().unwrap().clear();
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
         rebound: false,
         tab_id: 7,
@@ -271,12 +348,17 @@ fn fill_upload_and_a_targeted_scroll_indicate_their_targets() {
         &CancellationToken::default(),
     );
     assert_eq!(uploaded.status, Status::Succeeded, "{uploaded:?}");
+    let after_upload = sent(|call| matches!(call, BrowserCommand::UploadFiles { .. }));
     assert_eq!(
-        targets(&signals.0.lock().unwrap(), uploaded.invocation.as_str()),
-        [(PresentationActivity::Upload, Some(7), Some("file-1".into()))]
+        signals.targets(uploaded.invocation.as_str()),
+        [(
+            after_upload,
+            PresentationActivity::Upload,
+            Some(7),
+            "file-1".into()
+        )]
     );
 
-    signals.0.lock().unwrap().clear();
     browser.push(Ok(BrowserOutcome::Scrolled {
         tab_id: 7,
         x: 0.0,
@@ -290,19 +372,23 @@ fn fill_upload_and_a_targeted_scroll_indicate_their_targets() {
         &CancellationToken::default(),
     );
     assert_eq!(revealed.status, Status::Succeeded, "{revealed:?}");
-    let scroll_signals = signals.0.lock().unwrap().clone();
+    let after_scroll = sent(|call| matches!(call, BrowserCommand::Scroll { .. }));
     assert_eq!(
-        targets(&scroll_signals, revealed.invocation.as_str()),
-        [(PresentationActivity::Scroll, Some(7), Some("file-1".into()))]
+        signals.targets(revealed.invocation.as_str()),
+        [(
+            after_scroll,
+            PresentationActivity::Scroll,
+            Some(7),
+            "file-1".into()
+        )]
     );
     assert!(
-        !scroll_signals
-            .iter()
-            .any(|signal| signal.signal == PresentationKind::Start && signal.tab_id == Some(7)),
-        "a targeted scroll cues only its target: {scroll_signals:?}"
+        signals
+            .starts_on(revealed.invocation.as_str(), 7)
+            .is_empty(),
+        "a targeted scroll cues only its target"
     );
 
-    signals.0.lock().unwrap().clear();
     browser.push(Ok(BrowserOutcome::Scrolled {
         tab_id: 7,
         x: 0.0,
@@ -316,11 +402,81 @@ fn fill_upload_and_a_targeted_scroll_indicate_their_targets() {
         &CancellationToken::default(),
     );
     assert_eq!(scrolled.status, Status::Succeeded, "{scrolled:?}");
-    let page_signals = signals.0.lock().unwrap().clone();
-    assert!(targets(&page_signals, scrolled.invocation.as_str()).is_empty());
-    assert!(page_signals
-        .iter()
-        .any(|signal| signal.signal == PresentationKind::Start
-            && signal.activity == PresentationActivity::Scroll
-            && signal.tab_id == Some(7)));
+    assert!(signals.targets(scrolled.invocation.as_str()).is_empty());
+    assert_eq!(
+        signals
+            .starts_on(scrolled.invocation.as_str(), 7)
+            .iter()
+            .map(|(_, activity)| *activity)
+            .collect::<Vec<_>>(),
+        [PresentationActivity::Scroll]
+    );
+
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
+        tab_id: 7,
+        targets: controls[..1].to_vec(),
+    }));
+    browser.push(Ok(BrowserOutcome::Typed {
+        tab: tab(7, "https://example.com/"),
+        character_count: 3,
+        subject: None,
+        committed_urls: Vec::new(),
+    }));
+    let typed = executor.execute(
+        &workspace,
+        "browser_type_text",
+        json!({"tab":tab_handle,"target":handle(0),"text":"Ada"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(typed.status, Status::Succeeded, "{typed:?}");
+    let started = signals.starts_on(typed.invocation.as_str(), 7);
+    let named = signals.targets(typed.invocation.as_str());
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0].1, PresentationActivity::Type);
+    assert_eq!(named.len(), 1);
+    assert!(started[0].0 <= named[0].0);
+
+    browser.push(Ok(BrowserOutcome::Screenshot {
+        tab_id: 7,
+        mime_type: "image/png".into(),
+        data: "QQ==".into(),
+        width: 800,
+        height: 600,
+        viewport: ViewportGeometry {
+            scope: CaptureScope::Viewport,
+            page_x: 0.0,
+            page_y: 0.0,
+            css_width: 800.0,
+            css_height: 600.0,
+            visual_page_x: 0.0,
+            visual_page_y: 0.0,
+            visual_css_width: 800.0,
+            visual_css_height: 600.0,
+            device_scale: 1.0,
+            zoom: 1.0,
+            output_scale: 1.0,
+        },
+    }));
+    let shot = executor.execute(
+        &workspace,
+        "browser_screenshot",
+        json!({"tab":tab_handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(shot.status, Status::Succeeded, "{shot:?}");
+    browser.push(Ok(BrowserOutcome::FilesUploaded {
+        tab_id: 7,
+        uploaded_count: 1,
+        uploaded_bytes: 1,
+        subject: None,
+    }));
+    let dropped = executor.execute(
+        &workspace,
+        "browser_upload",
+        json!({"tab":tab_handle,"source_image":shot.facts["image"],"view":shot.facts["view"],"x":10,"y":10}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(dropped.status, Status::Succeeded, "{dropped:?}");
+    assert!(signals.targets(dropped.invocation.as_str()).is_empty());
 }

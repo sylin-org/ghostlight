@@ -217,28 +217,15 @@ impl PresentationReactor {
                 physical_id,
                 locator,
                 ..
-            } => {
-                // The target binds the feedback to its tab, so the command that follows does
-                // not start the activity there again: a targeted scroll keeps its cue on the
-                // target and draws no second one in the middle of the page.
-                if let Some(active) = self
-                    .activities
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .get_mut(event.invocation())
-                {
-                    active.tab = Some(*physical_id);
-                }
-                (
-                    PresentationKind::Target,
-                    current(),
-                    activity_label(current()),
-                    None,
-                    Some(*physical_id),
-                    Some(locator.clone()),
-                    false,
-                )
-            }
+            } => (
+                PresentationKind::Target,
+                current(),
+                activity_label(current()),
+                None,
+                Some(*physical_id),
+                Some(locator.clone()),
+                false,
+            ),
             DomainEvent::HoldEntered { physical_id, .. } => (
                 PresentationKind::Denial,
                 current(),
@@ -335,6 +322,20 @@ impl PresentationReactor {
                 click: None,
             },
         );
+    }
+
+    /// Bind page feedback to `tab` without starting the activity there, for an action whose one
+    /// cue is the target it names once the browser has acted. A command on that tab then starts
+    /// nothing, so a scroll to a target draws no cue at the viewport centre before its own.
+    pub(crate) fn bind_for_target(&self, invocation: &str, tab: u64) {
+        if let Some(active) = self
+            .activities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(invocation)
+        {
+            active.tab = Some(tab);
+        }
     }
 }
 
@@ -688,7 +689,7 @@ mod tests {
         assert_eq!(shape.button, "secondary");
         assert!(
             signals[1].click.is_none(),
-            "a hover, drag, or type indication has no click to describe"
+            "a hover, drag, type, fill, upload or scroll indication has no click to describe"
         );
 
         // The shape says how the click landed, never what the page holds. The locator is a

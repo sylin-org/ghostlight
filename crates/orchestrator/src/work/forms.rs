@@ -165,9 +165,6 @@ impl ApplicationExecutor {
                 return self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
         };
-        for (target, _) in &resolved {
-            self.indicate_target(context, selected.physical_id, &target.locator, None);
-        }
         let fields = resolved
             .into_iter()
             .map(|(target, value)| PhysicalField {
@@ -199,6 +196,9 @@ impl ApplicationExecutor {
                 let Some(held) = held_fields(context, &held, &given, &described) else {
                     return self.protocol_failure(context, decision, Some(selected.physical_id));
                 };
+                for locator in &locators[..given.len()] {
+                    self.indicate_target(context, selected.physical_id, locator, None);
+                }
                 let mut facts = json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted});
                 if let Some(fields) = field_echo::facts(&held) {
                     facts["fields"] = fields;
@@ -567,9 +567,7 @@ impl ApplicationExecutor {
             }
         };
         let expected_count = files.len();
-        if let Some(locator) = &target_locator {
-            self.indicate_target(context, selected.physical_id, locator, None);
-        }
+        let attached = target_locator.clone();
         let dispatch = if dropping {
             let (point, viewport) = drop.expect("validated drop geometry");
             BrowserCommand::DropImageAt {
@@ -595,6 +593,9 @@ impl ApplicationExecutor {
                 && uploaded_count == expected_count
                 && uploaded_bytes == total =>
             {
+                if let Some(locator) = &attached {
+                    self.indicate_target(context, tab_id, locator, None);
+                }
                 self.succeeded(
                     context,
                     decision,
