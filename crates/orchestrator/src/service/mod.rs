@@ -1384,21 +1384,19 @@ impl McpWire {
     }
 
     /// Hand the edge a fresh resume token when what it would restore has changed.
+    ///
+    /// Each tab is written with its own binding's browser, a pending one included, so a call that
+    /// completes before that browser returns keeps the tab in the token.
     fn publish_resume(&self, workspaces: &WorkspaceStore, workspace: &WorkspaceId) {
-        let browser = workspaces.browser_of(workspace.as_str());
-        let mut owned_tabs: Vec<OwnedTab> = browser
-            .map(|browser_id| {
-                workspaces
-                    .tab_bindings(workspace.as_str())
-                    .into_iter()
-                    .map(|(handle, tab_id)| OwnedTab {
-                        browser_id: browser_id.clone(),
-                        tab_id,
-                        handle,
-                    })
-                    .collect()
+        let mut owned_tabs: Vec<OwnedTab> = workspaces
+            .tab_bindings(workspace.as_str())
+            .into_iter()
+            .map(|binding| OwnedTab {
+                browser_id: binding.browser,
+                tab_id: binding.physical_id,
+                handle: binding.handle,
             })
-            .unwrap_or_default();
+            .collect();
         let unrestored: Vec<OwnedTab> = lock(&self.unrestored)
             .iter()
             .filter(|tab| !owned_tabs.iter().any(|bound| bound.handle == tab.handle))
@@ -2068,8 +2066,8 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 self.workspaces.apply_browser_close(browser, tab_id);
                 self.workbench.refresh_live_parts();
             }
-            // A browser that comes back may have restarted and reused its tab ids, so nothing it
-            // left behind stays reusable.
+            // A browser that comes back may have restarted and reused its tab ids, so every tab
+            // binding it held waits for it to confirm it.
             BrowserEvent::Disconnected => {
                 self.workspaces.apply_browser_disconnect(browser);
                 self.workbench.refresh_live_parts();
@@ -2452,12 +2450,75 @@ mod tests {
         sink.on_event(FAKE_BROWSER, committed(6));
         clean_up_kept_open(&workspaces, &released);
         assert_eq!(reusable_example_tab(&workspaces), None);
+    }
 
-        // A browser that reconnects may have restarted and handed its tab ids out again.
-        let released = release_example_tabs(&workspaces, &[4]);
-        clean_up_kept_open(&workspaces, &released);
+    /// A browser that restarted may have handed the agent's tab id to the person's tab. With
+    /// preserve-tabs off the extension closes any id it is sent, so a release after the gap sends
+    /// no close for a binding the browser has not confirmed.
+    #[test]
+    fn a_release_after_a_browser_restart_never_closes_the_persons_tab() {
+        use crate::browser::adapter::{BrowserEvent, BrowserReadiness, PhysicalTab};
+        use crate::browser::BrowserEventSink;
+        use crate::workspace::WorkspaceStore;
+
+        let workspaces = WorkspaceStore::default();
+        let sink =
+            super::ServiceBrowserEvents::new(test_workbench(&workspaces), workspaces.clone());
+        let workspace = workspaces.admit(RELEASED_CLIENT.into(), IntakeChannel::Mcp);
+        let lease = workspaces.acquire(&workspace).unwrap();
+        let tab = PhysicalTab {
+            tab_id: 4,
+            url: "https://example.com/".into(),
+            title: "Example".into(),
+            active: true,
+            readiness: BrowserReadiness::Complete,
+        };
+        let added = lease.add_tab(FAKE_BROWSER, &tab).unwrap();
+        lease.apply_landing(&added.handle, &tab).unwrap();
+        drop(lease);
+
         sink.on_event(FAKE_BROWSER, BrowserEvent::Disconnected);
+        let released = workspaces.release(&workspace);
+        let browser = FakeBrowser::default();
+        cleanup_released_tabs("released", &released, &browser, &workspaces);
+        assert!(browser.calls().is_empty(), "{:?}", browser.calls());
         assert_eq!(reusable_example_tab(&workspaces), None);
+    }
+
+    /// A hello that registers a browser id again replaces its connection, whether or not the old
+    /// stream's end was seen, so the bindings in that browser wait for it to confirm them.
+    #[test]
+    fn a_registration_that_replaces_a_connection_marks_its_bindings_pending() {
+        use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
+
+        let home = TestHome::new("registration-pending");
+        let served = serve_relayed(&home);
+        let workspaces = served.intake.workspaces.clone();
+        served
+            .relay
+            .set_event_sink(Arc::new(super::ServiceBrowserEvents::new(
+                test_workbench(&workspaces),
+                workspaces.clone(),
+            )));
+        let _first = attach_returning_browser(&served);
+        let workspace = workspaces.admit(RELEASED_CLIENT.into(), IntakeChannel::Mcp);
+        let lease = workspaces.acquire(&workspace).unwrap();
+        let tab = PhysicalTab {
+            tab_id: RETURNING_TAB,
+            url: RETURNING_URL.into(),
+            title: "Example".into(),
+            active: true,
+            readiness: BrowserReadiness::Complete,
+        };
+        let added = lease.add_tab(RETURNING_BROWSER, &tab).unwrap();
+        lease.apply_landing(&added.handle, &tab).unwrap();
+        drop(lease);
+        assert!(!workspaces.tab_bindings(workspace.as_str())[0].pending);
+
+        let _second = attach_returning_browser(&served);
+        let bindings = workspaces.tab_bindings(workspace.as_str());
+        assert_eq!(bindings.len(), 1);
+        assert!(bindings[0].pending, "{bindings:?}");
     }
 
     /// A workbench over `workspaces` and a fresh authority, with no browser connected.
@@ -3737,7 +3798,14 @@ mod tests {
     fn bound_tabs(served: &Served) -> Vec<(String, u64)> {
         let summaries = served.intake.workspaces.summaries();
         assert_eq!(summaries.len(), 1);
-        served.intake.workspaces.tab_bindings(&summaries[0].id)
+        served
+            .intake
+            .workspaces
+            .tab_bindings(&summaries[0].id)
+            .into_iter()
+            .filter(|binding| !binding.pending)
+            .map(|binding| (binding.handle, binding.physical_id))
+            .collect()
     }
 
     #[test]

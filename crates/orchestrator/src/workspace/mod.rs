@@ -44,6 +44,93 @@ const TARGET_GENERATIONS_KEPT_BEHIND: u64 = 2;
 /// controls within one document stays bounded too.
 const TARGET_RECORD_LIMIT: usize = 2000;
 
+/// The most characters of a tab's URL the browser adapter reports, adapter protocol 4's
+/// `url_chars` limit.
+///
+/// A remembered tab is compared by the URL bounded the same way, so the digest the workspace
+/// remembers and the URL the browser lists read one string.
+pub const TAB_URL_CHARS: usize = 8192;
+
+/// The most characters of a tab title a binding keeps.
+const TAB_TITLE_CHARS: usize = 500;
+
+/// How many hexadecimal characters a [`UrlDigest`] has: one SHA-256 digest.
+const URL_DIGEST_CHARS: usize = 64;
+
+/// A digest of the URL a workspace last knew for one of its tabs.
+///
+/// A physical tab id names one tab only within one browser run, and a restarted browser hands its
+/// ids out again. So a binding the workspace keeps across a gap in what it knows of its browser is
+/// remembered by its id and this digest, and it is confirmed only by a live tab that has the same
+/// id and shows the same URL (ADR-0203 Decision 1). The resume token carries the digest, so the
+/// edge that holds the token holds no page address.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct UrlDigest(String);
+
+impl UrlDigest {
+    /// The digest of `url`, bounded as the adapter bounds a tab's URL.
+    #[must_use]
+    pub fn of(url: &str) -> Self {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
+
+        let bounded: String = url.chars().take(TAB_URL_CHARS).collect();
+        let mut digest = String::with_capacity(URL_DIGEST_CHARS);
+        for byte in Sha256::digest(bounded.as_bytes()) {
+            let _ = write!(digest, "{byte:02x}");
+        }
+        Self(digest)
+    }
+
+    /// Read a digest [`Self::as_str`] wrote, as a resume token carries it. Anything else is no
+    /// digest, and the binding it came with is not restored.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        (text.len() == URL_DIGEST_CHARS
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+        .then(|| Self(text.to_owned()))
+    }
+
+    /// The digest as lowercase hexadecimal.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The live tab that confirms a tab remembered as `physical_id` at this digest: the one with
+    /// that id, when it shows the remembered URL.
+    ///
+    /// This is the one rule for every remembered tab, a pending binding and a released tab alike.
+    /// After a browser restart the id may name another tab, and a tab at another address is never
+    /// taken for the one the workspace knew.
+    #[must_use]
+    pub fn confirmed_in<'a>(
+        &self,
+        physical_id: u64,
+        live: &'a [PhysicalTab],
+    ) -> Option<&'a PhysicalTab> {
+        live.iter()
+            .find(|tab| tab.tab_id == physical_id && Self::of(&tab.url) == *self)
+    }
+}
+
+/// One tab binding a workspace holds, confirmed or pending, as the resume token carries it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TabBinding {
+    /// The model-facing tab handle.
+    pub handle: String,
+    /// The browser holding the tab.
+    pub browser: String,
+    /// The physical tab id inside that browser.
+    pub physical_id: u64,
+    /// The digest of the URL the workspace last knew for the tab.
+    pub url: UrlDigest,
+    /// Whether the binding waits for its browser to confirm it.
+    pub pending: bool,
+}
+
 /// Mint a short handle with `prefix` that `taken` does not already name.
 fn short_handle(prefix: &str, taken: impl Fn(&str) -> bool) -> String {
     loop {
@@ -74,7 +161,7 @@ pub struct WorkspaceSummary {
     /// The browser this workspace works in, once its first work chose one, read under the same
     /// lock as the rest of the summary.
     pub browser: Option<String>,
-    /// Number of controlled tabs.
+    /// Number of controlled tabs, which a binding waiting for its browser is not yet.
     pub tab_count: usize,
 }
 
@@ -92,7 +179,7 @@ impl WorkspaceSummary {
             opener: workspace.opener.details(),
             connections,
             browser: workspace.browser.clone(),
-            tab_count: workspace.tabs.len(),
+            tab_count: workspace.confirmed_tabs().count(),
         }
     }
 }
@@ -299,19 +386,29 @@ pub struct ReleasedTabs {
 pub struct ReleasedTab {
     /// Physical tab id inside the browser the claim named.
     pub physical_id: u64,
-    /// The governed URL the tab held when its workspace released it.
-    pub url: String,
+    /// The digest of the governed URL the tab held when its workspace released it.
+    pub url: UrlDigest,
+}
+
+impl ReleasedTab {
+    /// The live tab that is still this released tab, by the rule every remembered tab follows
+    /// ([`UrlDigest::confirmed_in`]).
+    #[must_use]
+    pub fn confirmed_in<'a>(&self, live: &'a [PhysicalTab]) -> Option<&'a PhysicalTab> {
+        self.url.confirmed_in(self.physical_id, live)
+    }
 }
 
 impl ReleasedTabs {
+    /// The confirmed tabs a leaving workspace held. A pending binding is never closed through the
+    /// browser, because its id may name a tab the person opened since.
     fn from_state(state: WorkspaceState) -> Self {
         Self {
-            browser: state.browser,
             physical_ids: state
-                .tabs
-                .into_values()
-                .map(|tab| tab.physical_id)
+                .confirmed_tabs()
+                .map(|(_, tab)| tab.physical_id)
                 .collect(),
+            browser: state.browser,
         }
     }
 }
@@ -525,12 +622,58 @@ struct ViewState {
 struct TabState {
     /// The kind of JavaScript dialog the browser last reported open on this tab, if one is.
     dialog: Option<DialogKind>,
+    /// The browser holding the tab. A confirmed binding is always in the workspace's browser; a
+    /// pending one a resume token brought back names its own.
+    browser: String,
     physical_id: u64,
     generation: u64,
     url: String,
     title: String,
     readiness: BrowserReadiness,
     held: bool,
+    /// The URL the binding is remembered by while it waits for its browser to confirm it, or none
+    /// once it is confirmed (ADR-0203 Decision 1).
+    ///
+    /// A pending binding is inert. It takes no commit, readiness or dialog event, nothing selects
+    /// it, it counts as nobody's tab, and it is never closed through the browser. It stays in the
+    /// one tabs map only so its handle is never minted again.
+    pending: Option<UrlDigest>,
+}
+
+impl TabState {
+    /// A fresh confirmed binding of `browser`'s tab `physical_id`, at generation 0 with nothing
+    /// known of its page yet.
+    fn bound(browser: &str, physical_id: u64) -> Self {
+        Self {
+            dialog: None,
+            browser: browser.into(),
+            physical_id,
+            generation: 0,
+            url: String::new(),
+            title: String::new(),
+            readiness: BrowserReadiness::Unknown,
+            held: false,
+            pending: None,
+        }
+    }
+
+    /// Whether the binding is confirmed: the browser holding it has shown it since the last gap
+    /// in what the service knew of that browser.
+    const fn is_confirmed(&self) -> bool {
+        self.pending.is_none()
+    }
+
+    /// Whether this is the confirmed binding of `browser`'s tab `physical_id`.
+    fn is_confirmed_tab(&self, browser: &str, physical_id: u64) -> bool {
+        self.is_confirmed() && self.physical_id == physical_id && self.browser == browser
+    }
+
+    /// The digest of the URL this binding is remembered by.
+    fn remembered_url(&self) -> UrlDigest {
+        self.pending
+            .clone()
+            .unwrap_or_else(|| UrlDigest::of(&self.url))
+    }
 }
 
 #[derive(Debug)]
@@ -547,8 +690,9 @@ struct WorkspaceState {
     session: Option<SessionMarker>,
     /// Which browser this workspace works in, once its first tab bound one.
     ///
-    /// Only binding a tab writes it ([`WorkspaceLease::add_tab`] and
-    /// [`WorkspaceLease::restore_tab`]), so a call that binds no tab leaves the choice open.
+    /// Only binding a tab writes it ([`WorkspaceLease::add_tab`], [`WorkspaceLease::restore_tab`]
+    /// and a confirmed pending binding, [`WorkspaceLease::confirm`]), so a call that binds no tab
+    /// leaves the choice open.
     /// A workspace lives in one browser for its whole life. Its tabs, targets, and views are all
     /// physical things inside that one browser, and physical tab ids only mean anything there, so
     /// a workspace that could span two browsers could not name its own tabs unambiguously. When
@@ -557,7 +701,11 @@ struct WorkspaceState {
     /// for (ADR-0084 D4).
     browser: Option<String>,
     leased: bool,
+    /// Every tab binding, confirmed or pending.
     tabs: HashMap<TabHandle, TabState>,
+    /// Pending bindings of another browser that this workspace forgot when its first tab bound
+    /// its browser, until the call that bound it reports them.
+    forgotten: Vec<TabHandle>,
     targets: TargetBook,
     views: HashMap<ViewHandle, ViewState>,
     snapshots: HashMap<SnapshotHandle, SnapshotState>,
@@ -565,6 +713,63 @@ struct WorkspaceState {
 }
 
 impl WorkspaceState {
+    /// The bindings the browser has confirmed, which are the workspace's controlled tabs.
+    fn confirmed_tabs(&self) -> impl Iterator<Item = (&TabHandle, &TabState)> {
+        self.tabs.iter().filter(|(_, tab)| tab.is_confirmed())
+    }
+
+    /// The confirmed binding `handle` names. A pending binding answers as a stale handle: nothing
+    /// reads or acts on a tab its browser has not confirmed.
+    fn confirmed(&self, handle: &TabHandle) -> Result<&TabState, WorkspaceError> {
+        self.tabs
+            .get(handle)
+            .filter(|tab| tab.is_confirmed())
+            .ok_or(WorkspaceError::StaleTab)
+    }
+
+    /// The confirmed binding `handle` names, to change it.
+    fn confirmed_mut(&mut self, handle: &TabHandle) -> Result<&mut TabState, WorkspaceError> {
+        self.tabs
+            .get_mut(handle)
+            .filter(|tab| tab.is_confirmed())
+            .ok_or(WorkspaceError::StaleTab)
+    }
+
+    /// Bind the workspace to `browser` when no tab has bound it yet. The pending bindings of every
+    /// other browser are then forgotten, because a workspace lives in one browser, and kept in
+    /// `forgotten` until the call reports them.
+    fn bind_browser(&mut self, browser: &str) {
+        if self.browser.is_some() {
+            return;
+        }
+        self.browser = Some(browser.into());
+        let elsewhere: Vec<TabHandle> = self
+            .tabs
+            .iter()
+            .filter(|(_, tab)| !tab.is_confirmed() && tab.browser != browser)
+            .map(|(handle, _)| handle.clone())
+            .collect();
+        for handle in elsewhere {
+            self.forget_tab(&handle);
+            self.forgotten.push(handle);
+        }
+    }
+
+    /// Forget the pending binding of `browser`'s tab `physical_id`, if this workspace has one.
+    fn forget_pending_tab(&mut self, browser: &str, physical_id: u64) {
+        let stale: Vec<TabHandle> = self
+            .tabs
+            .iter()
+            .filter(|(_, tab)| {
+                !tab.is_confirmed() && tab.physical_id == physical_id && tab.browser == browser
+            })
+            .map(|(handle, _)| handle.clone())
+            .collect();
+        for handle in stale {
+            self.forget_tab(&handle);
+        }
+    }
+
     /// Forget one tab binding and everything minted on it: its target records, which leave
     /// tab-closed tombstones, its views, its snapshots and its images.
     ///
@@ -588,8 +793,9 @@ struct AggregateState {
     /// claimed only after its release close answered that the person's preserve-tabs setting kept
     /// it open, and only by a session of the client that released it. An entry leaves it when the
     /// tab closes, when any page commits in it (the person or the page took it back), when a
-    /// workspace takes it, when its release close did anything but keep it, and when its browser
-    /// disconnects, because a restarted browser reuses tab ids.
+    /// workspace takes it, and when its release close did anything but keep it. A browser that
+    /// reconnects may have restarted and handed its ids out again, so a claimed tab is reused only
+    /// where the live browser confirms it ([`ReleasedTab::confirmed_in`]).
     released: HashMap<String, HashMap<u64, PooledTab>>,
 }
 
@@ -618,15 +824,16 @@ impl AggregateState {
     ///
     /// None of them is reusable yet: only a cleanup answer that the browser kept a tab open
     /// (`settle_released`) offers it to the next open on its host from a session of the same
-    /// client. A held tab sits on a destination governance refused, and a tab with no governed URL
-    /// never landed, so neither is recorded at all.
+    /// client. A held tab sits on a destination governance refused, a tab with no governed URL
+    /// never landed, and a pending binding may name a tab the person opened, so none of them is
+    /// recorded at all.
     fn remember_released(&mut self, workspace: &WorkspaceState) {
         let Some(browser) = workspace.browser.as_ref() else {
             return;
         };
         let tabs: Vec<_> = workspace
-            .tabs
-            .values()
+            .confirmed_tabs()
+            .map(|(_, tab)| tab)
             .filter(|tab| !tab.held && !tab.url.is_empty())
             .map(|tab| {
                 (
@@ -657,18 +864,18 @@ impl AggregateState {
         }
     }
 
-    /// Whether a workspace other than `current`, working in `browser`, controls the tab.
+    /// Whether a workspace other than `current` holds a confirmed binding of `browser`'s tab.
     ///
     /// Physical tab ids are unique inside one browser and nowhere else: Chrome's tab 5 and Edge's
-    /// tab 5 are different tabs and must not refuse each other.
+    /// tab 5 are different tabs and must not refuse each other. A pending binding is nobody's tab
+    /// yet, so it never refuses another workspace.
     fn controlled_elsewhere(&self, current: &WorkspaceId, browser: &str, physical_id: u64) -> bool {
         self.workspaces.iter().any(|(id, workspace)| {
             id != current
-                && workspace.browser.as_deref() == Some(browser)
                 && workspace
                     .tabs
                     .values()
-                    .any(|known| known.physical_id == physical_id)
+                    .any(|known| known.is_confirmed_tab(browser, physical_id))
         })
     }
 
@@ -703,11 +910,14 @@ impl AggregateState {
         Ok(())
     }
 
-    /// Bind an admitted physical tab of `browser` to `current` under `handle`.
+    /// Bind a physical tab of `browser` that the browser just opened or adopted to `current` under
+    /// `handle`.
     ///
-    /// The tab leaves the released pool, and the first tab binds the workspace's browser, which
-    /// no later tab changes. Whatever the handle carried before goes with it, so the binding
-    /// starts clean at generation 0. Call [`Self::admit_tab`] first.
+    /// The tab leaves the released pool. The browser has just assigned or handed over its id, which
+    /// proves any pending binding of that id stale, so every workspace forgets one. The first tab
+    /// binds the workspace's browser, which no later tab changes. Whatever the handle carried
+    /// before goes with it, so the binding starts clean at generation 0. Call [`Self::admit_tab`]
+    /// first.
     fn bind_tab(
         &mut self,
         current: &WorkspaceId,
@@ -716,14 +926,72 @@ impl AggregateState {
         value: TabState,
     ) -> Result<SelectedTab, WorkspaceError> {
         self.forget_released(browser, value.physical_id);
+        if !self.workspaces.contains_key(current) {
+            return Err(WorkspaceError::UnknownWorkspace);
+        }
+        for workspace in self.workspaces.values_mut() {
+            workspace.forget_pending_tab(browser, value.physical_id);
+        }
         let workspace = self
             .workspaces
             .get_mut(current)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        workspace.browser.get_or_insert_with(|| browser.into());
+        workspace.bind_browser(browser);
         workspace.forget_tab(handle);
         workspace.tabs.insert(handle.clone(), value.clone());
         Ok(selected(handle, &value))
+    }
+
+    /// Confirm or forget `current`'s pending bindings of `browser` against the tabs the browser
+    /// lists now (ADR-0203 Decision 1).
+    ///
+    /// A binding is kept when a live tab has its id and shows the URL it is remembered by, and no
+    /// other workspace holds a confirmed binding of that tab. It then takes the live title and
+    /// readiness, keeps its generation and handles, and the first one binds the workspace's
+    /// browser. Every other pending binding of `browser` is forgotten as closed.
+    fn confirm(
+        &mut self,
+        current: &WorkspaceId,
+        browser: &str,
+        live: &[PhysicalTab],
+    ) -> Result<(), WorkspaceError> {
+        let workspace = self
+            .workspaces
+            .get(current)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let pending: Vec<(TabHandle, u64, UrlDigest)> = workspace
+            .tabs
+            .iter()
+            .filter(|(_, tab)| tab.browser == browser)
+            .filter_map(|(handle, tab)| {
+                Some((handle.clone(), tab.physical_id, tab.pending.clone()?))
+            })
+            .collect();
+        for (handle, physical_id, url) in pending {
+            let shown = url
+                .confirmed_in(physical_id, live)
+                .filter(|_| self.admit_tab(current, browser, physical_id).is_ok())
+                .cloned();
+            if shown.is_some() {
+                self.forget_released(browser, physical_id);
+            }
+            let workspace = self
+                .workspaces
+                .get_mut(current)
+                .ok_or(WorkspaceError::UnknownWorkspace)?;
+            let Some(shown) = shown else {
+                workspace.forget_tab(&handle);
+                continue;
+            };
+            if let Some(tab) = workspace.tabs.get_mut(&handle) {
+                tab.pending = None;
+                tab.url = shown.url;
+                tab.title = bounded(&shown.title, TAB_TITLE_CHARS);
+                tab.readiness = shown.readiness;
+            }
+            workspace.bind_browser(browser);
+        }
+        Ok(())
     }
 }
 
@@ -796,6 +1064,7 @@ impl WorkspaceStore {
                 browser: None,
                 leased: false,
                 tabs: HashMap::new(),
+                forgotten: Vec::new(),
                 targets: TargetBook::default(),
                 views: HashMap::new(),
                 snapshots: HashMap::new(),
@@ -929,7 +1198,8 @@ impl WorkspaceStore {
     /// the group it already sits in, and that group is named for the client that released it. An
     /// exact URL wins, then the lowest tab id. The claim removes the tab from the pool under the
     /// aggregate lock, so two sessions can never claim the same tab, and leaves another client's
-    /// tabs in the pool. The caller still checks the live browser before using it.
+    /// tabs in the pool. The caller still confirms it in the live browser before using it
+    /// ([`ReleasedTab::confirmed_in`]).
     #[must_use]
     pub fn claim_released(
         &self,
@@ -951,18 +1221,58 @@ impl WorkspaceStore {
             .min_by_key(|(physical_id, released)| (released.url != url, **physical_id))
             .map(|(physical_id, released)| ReleasedTab {
                 physical_id: *physical_id,
-                url: released.url.clone(),
+                url: UrlDigest::of(&released.url),
             })?;
         state.forget_released(browser, claimed.physical_id);
         Some(claimed)
     }
 
-    /// Forget every released tab of a browser that disconnected.
+    /// Mark every confirmed binding in `browser` pending, after a gap in what the service knows of
+    /// that browser: its stream ended, or a new connection replaced it (ADR-0203 Decision 1).
     ///
-    /// A browser that comes back may be a restarted one, and a restarted browser hands out tab ids
-    /// again, so a remembered id could name a tab the person just opened.
+    /// A browser that comes back may be a restarted one, and a restarted browser hands its tab ids
+    /// out again, so a remembered id could name a tab the person just opened. Each binding is then
+    /// remembered by its id and the URL the workspace last knew, until the browser lists its tabs
+    /// again. The released pool keeps its tabs: a reuse confirms each one by the same rule.
     pub fn apply_browser_disconnect(&self, browser: &str) {
-        self.lock().released.remove(browser);
+        let mut state = self.lock();
+        for tab in state
+            .workspaces
+            .values_mut()
+            .flat_map(|workspace| workspace.tabs.values_mut())
+            .filter(|tab| tab.is_confirmed() && tab.browser == browser)
+        {
+            tab.pending = Some(UrlDigest::of(&tab.url));
+        }
+    }
+
+    /// Bring back one binding a resume token remembered, pending until `browser` confirms it.
+    ///
+    /// A handle the workspace already holds is left as it is. The binding counts as nobody's tab
+    /// until its browser lists a tab with its id at the URL it is remembered by.
+    pub fn remember_tab(
+        &self,
+        workspace: &WorkspaceId,
+        handle: &str,
+        browser: &str,
+        physical_id: u64,
+        url: UrlDigest,
+    ) {
+        let mut state = self.lock();
+        let Some(workspace) = state.workspaces.get_mut(workspace) else {
+            return;
+        };
+        let handle = TabHandle(handle.into());
+        if workspace.tabs.contains_key(&handle) {
+            return;
+        }
+        workspace.tabs.insert(
+            handle,
+            TabState {
+                pending: Some(url),
+                ..TabState::bound(browser, physical_id)
+            },
+        );
     }
 
     /// Acquire exclusive mutation ownership for one invocation.
@@ -1022,7 +1332,8 @@ impl WorkspaceStore {
         }
     }
 
-    /// The workspace's controlled tabs, ordered by handle.
+    /// The workspace's controlled tabs, ordered by handle. A binding waiting for its browser to
+    /// confirm it is not one yet.
     pub fn tabs(&self, workspace: &WorkspaceId) -> Result<Vec<SelectedTab>, WorkspaceError> {
         let state = self.lock();
         let workspace = state
@@ -1030,8 +1341,7 @@ impl WorkspaceStore {
             .get(workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
         let mut tabs: Vec<_> = workspace
-            .tabs
-            .iter()
+            .confirmed_tabs()
             .map(|(handle, tab)| selected(handle, tab))
             .collect();
         tabs.sort_by(|left, right| left.handle.as_str().cmp(right.handle.as_str()));
@@ -1055,7 +1365,7 @@ impl WorkspaceStore {
     #[must_use]
     pub fn tab_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
         let handle = TabHandle(requested.into());
-        self.labeled_owner(current, |workspace| workspace.tabs.contains_key(&handle))
+        self.labeled_owner(current, |workspace| workspace.confirmed(&handle).is_ok())
     }
 
     /// The client label of another admitted workspace that owns the requested target handle.
@@ -1083,7 +1393,7 @@ impl WorkspaceStore {
         let state = self.lock();
         let workspace = state.workspaces.get(workspace)?;
         let target = workspace.targets.get(&TargetHandle(requested.into()))?;
-        let tab = workspace.tabs.get(&target.tab)?;
+        let tab = workspace.confirmed(&target.tab).ok()?;
         Some(StaleTargetContext {
             physical_id: tab.physical_id,
             url: tab.url.clone(),
@@ -1121,7 +1431,7 @@ impl WorkspaceStore {
         let Some(record) = workspace.targets.get(&TargetHandle(stale.into())) else {
             return Vec::new();
         };
-        let Some(tab) = workspace.tabs.get(&record.tab) else {
+        let Ok(tab) = workspace.confirmed(&record.tab) else {
             return Vec::new();
         };
         if same_document && tab.generation != record.generation {
@@ -1182,18 +1492,25 @@ impl WorkspaceStore {
             .lock()
             .workspaces
             .get(workspace)
-            .map(|state| state.tabs.values().map(|tab| tab.physical_id).collect())
+            .map(|state| {
+                state
+                    .confirmed_tabs()
+                    .map(|(_, tab)| tab.physical_id)
+                    .collect()
+            })
             .unwrap_or_default();
         tabs.sort_unstable();
         tabs
     }
 
-    /// Every tab handle this workspace holds with its physical tab id, sorted by handle.
+    /// Every tab binding this workspace holds, confirmed or pending, each in its own browser and
+    /// with the URL it is remembered by, sorted by handle.
     ///
-    /// Read without a lease, so a session can describe its tabs while its own work runs.
+    /// Read without a lease, so a session can describe its tabs while its own work runs. A pending
+    /// binding is listed too, so a resume token written before its browser returns still names it.
     #[must_use]
-    pub fn tab_bindings(&self, workspace: &str) -> Vec<(String, u64)> {
-        let mut bindings: Vec<(String, u64)> = self
+    pub fn tab_bindings(&self, workspace: &str) -> Vec<TabBinding> {
+        let mut bindings: Vec<TabBinding> = self
             .lock()
             .workspaces
             .get(workspace)
@@ -1201,18 +1518,26 @@ impl WorkspaceStore {
                 state
                     .tabs
                     .iter()
-                    .map(|(handle, tab)| (handle.as_str().to_owned(), tab.physical_id))
+                    .map(|(handle, tab)| TabBinding {
+                        handle: handle.as_str().to_owned(),
+                        browser: tab.browser.clone(),
+                        physical_id: tab.physical_id,
+                        url: tab.remembered_url(),
+                        pending: !tab.is_confirmed(),
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        bindings.sort();
+        bindings.sort_by(|left, right| left.handle.cmp(&right.handle));
         bindings
     }
 
     /// Invalidate agent references after an unrelated page change, without governing browsing.
     ///
     /// A commit in a released tab means the person or the page took it back, since no Ghostlight
-    /// work runs there, so the tab also leaves the released pool and is never reused.
+    /// work runs there, so the tab also leaves the released pool and is never reused. A pending
+    /// binding takes no commit: its id may name another tab now, so only its browser's list
+    /// confirms it.
     pub fn note_browser_landing(
         &self,
         browser: &str,
@@ -1221,15 +1546,11 @@ impl WorkspaceStore {
     ) -> Option<(WorkspaceId, TabHandle)> {
         let mut state = self.lock();
         state.forget_released(browser, physical_id);
-        for (workspace_id, workspace) in state
-            .workspaces
-            .iter_mut()
-            .filter(|(_, workspace)| workspace.browser.as_deref() == Some(browser))
-        {
+        for (workspace_id, workspace) in &mut state.workspaces {
             if let Some((handle, tab)) = workspace
                 .tabs
                 .iter_mut()
-                .find(|(_, tab)| tab.physical_id == physical_id)
+                .find(|(_, tab)| tab.is_confirmed_tab(browser, physical_id))
             {
                 tab.generation = tab.generation.saturating_add(1);
                 tab.readiness = BrowserReadiness::Loading;
@@ -1255,37 +1576,30 @@ impl WorkspaceStore {
         state
             .workspaces
             .iter()
-            .filter(|(_, workspace)| workspace.browser.as_deref() == Some(browser))
             .find_map(|(workspace_id, workspace)| {
                 workspace
                     .tabs
                     .values()
-                    .any(|tab| tab.physical_id == physical_id)
+                    .any(|tab| tab.is_confirmed_tab(browser, physical_id))
                     .then(|| workspace_id.clone())
             })
     }
 
-    /// Apply asynchronous readiness only to a non-held controlled document.
+    /// Apply asynchronous readiness only to a non-held confirmed binding.
     pub fn apply_browser_readiness(
         &self,
         browser: &str,
         physical_id: u64,
         readiness: BrowserReadiness,
     ) {
-        let mut state = self.lock();
-        for workspace in state
+        if let Some(tab) = self
+            .lock()
             .workspaces
             .values_mut()
-            .filter(|workspace| workspace.browser.as_deref() == Some(browser))
+            .flat_map(|workspace| workspace.tabs.values_mut())
+            .find(|tab| tab.is_confirmed_tab(browser, physical_id) && !tab.held)
         {
-            if let Some(tab) = workspace
-                .tabs
-                .values_mut()
-                .find(|tab| tab.physical_id == physical_id && !tab.held)
-            {
-                tab.readiness = readiness;
-                return;
-            }
+            tab.readiness = readiness;
         }
     }
 
@@ -1299,20 +1613,14 @@ impl WorkspaceStore {
         physical_id: u64,
         dialog: Option<DialogKind>,
     ) {
-        let mut state = self.lock();
-        for workspace in state
+        if let Some(tab) = self
+            .lock()
             .workspaces
             .values_mut()
-            .filter(|workspace| workspace.browser.as_deref() == Some(browser))
+            .flat_map(|workspace| workspace.tabs.values_mut())
+            .find(|tab| tab.is_confirmed_tab(browser, physical_id))
         {
-            if let Some(tab) = workspace
-                .tabs
-                .values_mut()
-                .find(|tab| tab.physical_id == physical_id)
-            {
-                tab.dialog = dialog;
-                return;
-            }
+            tab.dialog = dialog;
         }
     }
 
@@ -1322,28 +1630,26 @@ impl WorkspaceStore {
         self.lock()
             .workspaces
             .get(workspace)?
-            .tabs
-            .values()
-            .find(|tab| tab.physical_id == physical_id)?
+            .confirmed_tabs()
+            .find(|(_, tab)| tab.physical_id == physical_id)?
+            .1
             .dialog
     }
 
-    /// Remove a tab closed outside an invocation, including from the released pool.
+    /// Remove a tab closed outside an invocation, including from the released pool. A pending
+    /// binding of the tab is forgotten too.
     pub fn apply_browser_close(&self, browser: &str, physical_id: u64) {
         let mut state = self.lock();
         state.forget_released(browser, physical_id);
-        for workspace in state
-            .workspaces
-            .values_mut()
-            .filter(|workspace| workspace.browser.as_deref() == Some(browser))
-        {
-            let handle = workspace
+        for workspace in state.workspaces.values_mut() {
+            let closed: Vec<TabHandle> = workspace
                 .tabs
                 .iter()
-                .find_map(|(handle, tab)| (tab.physical_id == physical_id).then(|| handle.clone()));
-            if let Some(handle) = handle {
+                .filter(|(_, tab)| tab.physical_id == physical_id && tab.browser == browser)
+                .map(|(handle, _)| handle.clone())
+                .collect();
+            for handle in closed {
                 workspace.forget_tab(&handle);
-                return;
             }
         }
     }
@@ -1373,6 +1679,96 @@ impl WorkspaceLease {
     /// List current governed controlled-tab facts.
     pub fn tabs(&self) -> Result<Vec<SelectedTab>, WorkspaceError> {
         self.store.tabs(&self.workspace)
+    }
+
+    /// The browsers holding this workspace's pending bindings, sorted and each named once.
+    #[must_use]
+    pub fn pending_browsers(&self) -> Vec<String> {
+        let state = self.store.lock();
+        let mut browsers: Vec<String> = state
+            .workspaces
+            .get(&self.workspace)
+            .map(|workspace| {
+                workspace
+                    .tabs
+                    .values()
+                    .filter(|tab| !tab.is_confirmed())
+                    .map(|tab| tab.browser.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        browsers.sort();
+        browsers.dedup();
+        browsers
+    }
+
+    /// The browser of the pending binding a call that names `tab`, or the target `target`, would
+    /// select, if that binding is pending.
+    ///
+    /// A call that names neither selects only a sole confirmed tab, so it selects no pending one.
+    #[must_use]
+    pub fn pending_browser_of(&self, tab: Option<&str>, target: Option<&str>) -> Option<String> {
+        let state = self.store.lock();
+        let workspace = state.workspaces.get(&self.workspace)?;
+        let handle = match (tab, target) {
+            (Some(tab), _) => TabHandle(tab.into()),
+            (None, Some(target)) => workspace
+                .targets
+                .get(&TargetHandle(target.into()))?
+                .tab
+                .clone(),
+            (None, None) => return None,
+        };
+        workspace
+            .tabs
+            .get(&handle)
+            .filter(|binding| !binding.is_confirmed())
+            .map(|binding| binding.browser.clone())
+    }
+
+    /// Confirm or forget this workspace's pending bindings of `browser` against `live`, the tabs
+    /// that browser lists now (ADR-0203 Decision 1).
+    ///
+    /// A binding whose id the browser lists at the URL it is remembered by, and that no other
+    /// workspace holds, is kept: it takes the live title and readiness and keeps its generation,
+    /// handles and captures. The first one binds the workspace's browser. Every other pending
+    /// binding of `browser` is forgotten as closed, and its handle then reads as no longer open.
+    pub fn confirm(&self, browser: &str, live: &[PhysicalTab]) -> Result<(), WorkspaceError> {
+        self.store.lock().confirm(&self.workspace, browser, live)
+    }
+
+    /// Forget every pending binding of `browser` without asking any browser, after that browser
+    /// did not come back for a call that needed it.
+    pub fn forget_pending(&self, browser: &str) -> Result<(), WorkspaceError> {
+        let mut state = self.store.lock();
+        let workspace = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let stale: Vec<TabHandle> = workspace
+            .tabs
+            .iter()
+            .filter(|(_, tab)| !tab.is_confirmed() && tab.browser == browser)
+            .map(|(handle, _)| handle.clone())
+            .collect();
+        for handle in stale {
+            workspace.forget_tab(&handle);
+        }
+        Ok(())
+    }
+
+    /// Take the pending bindings of other browsers this workspace forgot when its first tab bound
+    /// its browser, so the call that bound it can say so. Each is reported once.
+    #[must_use]
+    pub fn take_forgotten(&self) -> Vec<TabHandle> {
+        let mut state = self.store.lock();
+        let mut forgotten = state
+            .workspaces
+            .get_mut(&self.workspace)
+            .map(|workspace| std::mem::take(&mut workspace.forgotten))
+            .unwrap_or_default();
+        forgotten.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        forgotten
     }
 
     /// Select the named controlled tab, or the only one when the call names none.
@@ -1406,11 +1802,11 @@ impl WorkspaceLease {
             .ok_or(WorkspaceError::UnknownWorkspace)?;
         if let Some(requested) = requested {
             let handle = TabHandle(requested.into());
-            if let Some(tab) = workspace.tabs.get(&handle) {
+            if let Ok(tab) = workspace.confirmed(&handle) {
                 return Ok(selected(&handle, tab));
             }
             let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
-                id != &self.workspace && candidate.tabs.contains_key(&handle)
+                id != &self.workspace && candidate.confirmed(&handle).is_ok()
             });
             return Err(if owned_elsewhere {
                 WorkspaceError::NotOwnedTab
@@ -1418,7 +1814,7 @@ impl WorkspaceLease {
                 WorkspaceError::StaleTab
             });
         }
-        let mut tabs = workspace.tabs.iter();
+        let mut tabs = workspace.confirmed_tabs();
         match (tabs.next(), tabs.next()) {
             (None, _) => Err(WorkspaceError::NoTab),
             (Some((handle, tab)), None) => Ok(selected(handle, tab)),
@@ -1440,12 +1836,13 @@ impl WorkspaceLease {
         self.store.target_owner(&self.workspace, requested)
     }
 
-    /// Add a physical tab of `browser` under a new opaque handle.
+    /// Add a physical tab of `browser` that the browser just opened or adopted, under a new opaque
+    /// handle.
     ///
     /// The workspace's first tab binds it to `browser` for its life; a tab of any other browser
     /// is then refused with [`WorkspaceError::BrowserPinned`]. The tab is refused when another
     /// workspace in the same browser already controls it. Once added it is this workspace's tab,
-    /// so it leaves the released pool.
+    /// so it leaves the released pool, and any pending binding of its id is forgotten.
     pub fn add_tab(&self, browser: &str, tab: &PhysicalTab) -> Result<SelectedTab, WorkspaceError> {
         let mut state = self.store.lock();
         state.admit_tab(&self.workspace, browser, tab.tab_id)?;
@@ -1459,15 +1856,7 @@ impl WorkspaceLease {
                 tabs.contains_key(&TabHandle(candidate.into()))
             }))
         };
-        let value = TabState {
-            physical_id: tab.tab_id,
-            generation: 0,
-            url: String::new(),
-            title: String::new(),
-            readiness: BrowserReadiness::Unknown,
-            held: false,
-            dialog: None,
-        };
+        let value = TabState::bound(browser, tab.tab_id);
         state.bind_tab(&self.workspace, browser, &handle, value)
     }
 
@@ -1482,16 +1871,13 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let known = workspace
-            .tabs
-            .get_mut(handle)
-            .ok_or(WorkspaceError::StaleTab)?;
+        let known = workspace.confirmed_mut(handle)?;
         if known.physical_id != tab.tab_id {
             return Err(WorkspaceError::StaleTab);
         }
         known.generation = known.generation.saturating_add(1);
         known.url.clone_from(&tab.url);
-        known.title = bounded(&tab.title, 500);
+        known.title = bounded(&tab.title, TAB_TITLE_CHARS);
         known.readiness = tab.readiness;
         known.held = false;
         let current = selected(handle, known);
@@ -1514,15 +1900,12 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let known = workspace
-            .tabs
-            .get_mut(handle)
-            .ok_or(WorkspaceError::StaleTab)?;
+        let known = workspace.confirmed_mut(handle)?;
         if known.physical_id != tab.tab_id {
             return Err(WorkspaceError::StaleTab);
         }
         known.url.clone_from(&tab.url);
-        known.title = bounded(&tab.title, 500);
+        known.title = bounded(&tab.title, TAB_TITLE_CHARS);
         known.readiness = tab.readiness;
         let current = selected(handle, known);
         workspace.views.retain(|_, view| &view.tab != handle);
@@ -1540,10 +1923,7 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let tab = workspace
-            .tabs
-            .get_mut(handle)
-            .ok_or(WorkspaceError::StaleTab)?;
+        let tab = workspace.confirmed_mut(handle)?;
         tab.readiness = readiness;
         Ok(())
     }
@@ -1558,11 +1938,7 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        workspace
-            .tabs
-            .get_mut(handle)
-            .ok_or(WorkspaceError::StaleTab)?
-            .held = true;
+        workspace.confirmed_mut(handle)?.held = true;
         Ok(())
     }
 
@@ -1578,11 +1954,8 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let known = workspace
-            .tabs
-            .get(&tab.handle)
-            .ok_or(WorkspaceError::StaleTab)?;
-        if known.generation != tab.generation {
+        let generation = workspace.confirmed(&tab.handle)?.generation;
+        if generation != tab.generation {
             return Err(WorkspaceError::StaleTab);
         }
         workspace
@@ -1597,7 +1970,7 @@ impl WorkspaceLease {
             handle.clone(),
             SnapshotState {
                 tab: tab.handle.clone(),
-                generation: known.generation,
+                generation,
                 scope,
                 tree,
             },
@@ -1614,7 +1987,7 @@ impl WorkspaceLease {
     ) -> Option<serde_json::Value> {
         let state = self.store.lock();
         let workspace = state.workspaces.get(&self.workspace)?;
-        let known = workspace.tabs.get(&tab.handle)?;
+        let known = workspace.confirmed(&tab.handle).ok()?;
         if known.generation != tab.generation {
             return None;
         }
@@ -1647,11 +2020,8 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let known = workspace
-            .tabs
-            .get(&tab.handle)
-            .ok_or(WorkspaceError::StaleTab)?;
-        if known.generation != tab.generation {
+        let generation = workspace.confirmed(&tab.handle)?.generation;
+        if generation != tab.generation {
             return Err(WorkspaceError::StaleTab);
         }
         workspace.images.retain(|_, image| image.tab != tab.handle);
@@ -1664,7 +2034,7 @@ impl WorkspaceLease {
             handle.clone(),
             ImageState {
                 tab: tab.handle.clone(),
-                generation: known.generation,
+                generation,
                 mime_type: mime_type.to_string(),
                 data: data.to_string(),
             },
@@ -1677,7 +2047,7 @@ impl WorkspaceLease {
     pub fn take_image(&self, handle: &str, tab: &SelectedTab) -> Option<(String, String)> {
         let state = self.store.lock();
         let workspace = state.workspaces.get(&self.workspace)?;
-        let known = workspace.tabs.get(&tab.handle)?;
+        let known = workspace.confirmed(&tab.handle).ok()?;
         if known.generation != tab.generation {
             return None;
         }
@@ -1724,18 +2094,15 @@ impl WorkspaceLease {
         if state
             .workspaces
             .iter()
-            .any(|(id, candidate)| id != &self.workspace && candidate.tabs.contains_key(&handle))
+            .any(|(id, candidate)| id != &self.workspace && candidate.confirmed(&handle).is_ok())
         {
             return Err(WorkspaceError::NotOwnedTab);
         }
         let value = TabState {
-            physical_id: tab.tab_id,
-            generation: 0,
             url: tab.url.clone(),
             title: tab.title.clone(),
             readiness: tab.readiness,
-            held: false,
-            dialog: None,
+            ..TabState::bound(browser, tab.tab_id)
         };
         state.bind_tab(&self.workspace, browser, &handle, value)
     }
@@ -1753,10 +2120,7 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let known = workspace
-            .tabs
-            .get(&tab.handle)
-            .ok_or(WorkspaceError::StaleTab)?;
+        let known = workspace.confirmed(&tab.handle)?;
         if known.generation != tab.generation {
             return Err(WorkspaceError::StaleTab);
         }
@@ -1796,9 +2160,8 @@ impl WorkspaceLease {
             });
         };
         let tab = workspace
-            .tabs
-            .get(&target.tab)
-            .ok_or(WorkspaceError::StaleTarget {
+            .confirmed(&target.tab)
+            .map_err(|_| WorkspaceError::StaleTarget {
                 reason: StaleReason::TabClosed,
             })?;
         if target.generation != tab.generation {
@@ -1836,10 +2199,7 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let known = workspace
-            .tabs
-            .get(&tab.handle)
-            .ok_or(WorkspaceError::StaleTab)?;
+        let known = workspace.confirmed(&tab.handle)?;
         if known.generation != tab.generation {
             return Err(WorkspaceError::StaleTab);
         }
@@ -1885,9 +2245,8 @@ impl WorkspaceLease {
             });
         };
         let tab = workspace
-            .tabs
-            .get(&view.tab)
-            .ok_or(WorkspaceError::StaleView)?;
+            .confirmed(&view.tab)
+            .map_err(|_| WorkspaceError::StaleView)?;
         if view.generation != tab.generation {
             return Err(WorkspaceError::StaleView);
         }
@@ -1945,9 +2304,8 @@ impl WorkspaceLease {
             });
         };
         let tab = workspace
-            .tabs
-            .get(&view.tab)
-            .ok_or(WorkspaceError::StaleView)?;
+            .confirmed(&view.tab)
+            .map_err(|_| WorkspaceError::StaleView)?;
         if view.generation != tab.generation {
             return Err(WorkspaceError::StaleView);
         }
@@ -2386,7 +2744,7 @@ mod tests {
             store.claim_released(TEST_BROWSER, TEST_CLIENT, "https://example.com/a"),
             Some(super::ReleasedTab {
                 physical_id: 9,
-                url: "https://example.com/a".into(),
+                url: super::UrlDigest::of("https://example.com/a"),
             }),
             "an exact URL wins over a lower id"
         );
@@ -2448,7 +2806,7 @@ mod tests {
     }
 
     #[test]
-    fn released_tabs_leave_the_pool_when_closed_committed_taken_or_disconnected() {
+    fn released_tabs_leave_the_pool_when_closed_committed_or_taken() {
         const SHELL: &str = "shell";
         let store = WorkspaceStore::default();
         let owned = store.resume_or_admit(SHELL.into(), IntakeChannel::Cli, marker(4312, 100));
@@ -2492,14 +2850,280 @@ mod tests {
             claimed_by(&store, TEST_BROWSER, SHELL, "https://example.com/"),
             None
         );
+    }
 
-        let other = workspace_with_tabs(&store, TEST_BROWSER, &[(8, "https://example.com/")]);
-        kept_open(&store, &store.release(&other));
+    /// A released tab outlives its browser's reconnect, and a reuse takes it only where the live
+    /// browser still shows it at its release address, the rule a pending binding follows.
+    #[test]
+    fn a_released_tab_is_reused_after_a_reconnect_only_where_its_browser_still_shows_it() {
+        let url = "https://example.com/kept";
+        let store = WorkspaceStore::default();
+        let released = workspace_with_tabs(&store, TEST_BROWSER, &[(8, url), (9, url)]);
+        kept_open(&store, &store.release(&released));
         store.apply_browser_disconnect(TEST_BROWSER);
+
+        let restarted = [
+            physical(8, "https://bank.example/the-persons-own"),
+            physical(9, url),
+        ];
+        let first = store
+            .claim_released(TEST_BROWSER, TEST_CLIENT, url)
+            .unwrap();
+        let second = store
+            .claim_released(TEST_BROWSER, TEST_CLIENT, url)
+            .unwrap();
+        let (moved, kept) = if first.physical_id == 8 {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        assert_eq!(moved.confirmed_in(&restarted), None);
+        assert_eq!(kept.confirmed_in(&restarted), Some(&restarted[1]));
+    }
+
+    /// The test URL a remembered binding is kept at, and the person's page a restarted browser
+    /// shows under the same id.
+    const AGENT_URL: &str = "https://example.com/agent";
+    const PERSONS_URL: &str = "https://bank.example/the-persons-own";
+
+    /// A workspace in `TEST_BROWSER` with tab 7 landed at [`AGENT_URL`], after its browser's
+    /// stream ended. Returns the workspace and the tab's handle.
+    fn pending_workspace(store: &WorkspaceStore) -> (WorkspaceId, String) {
+        let workspace = workspace_with_tabs(store, TEST_BROWSER, &[(7, AGENT_URL)]);
+        let handle = store.tab_bindings(workspace.as_str())[0].handle.clone();
+        store.apply_browser_disconnect(TEST_BROWSER);
+        (workspace, handle)
+    }
+
+    #[test]
+    fn a_disconnect_makes_every_binding_pending_and_inert() {
+        let store = WorkspaceStore::default();
+        let (workspace, handle) = pending_workspace(&store);
+        let bindings = store.tab_bindings(workspace.as_str());
+        assert_eq!(bindings.len(), 1);
+        assert!(bindings[0].pending);
+        assert_eq!(bindings[0].browser, TEST_BROWSER);
+        assert_eq!(bindings[0].url, super::UrlDigest::of(AGENT_URL));
+
+        // Nothing selects it, lists it or counts it.
+        let lease = store.acquire(&workspace).unwrap();
+        assert_eq!(lease.pending_browsers(), vec![TEST_BROWSER.to_owned()]);
         assert_eq!(
-            claimed(&store, TEST_BROWSER, "https://example.com/"),
-            None,
-            "a reconnected browser may have reused the id"
+            lease.pending_browser_of(Some(&handle), None),
+            Some(TEST_BROWSER.into())
+        );
+        assert_eq!(
+            lease.select_tab(Some(&handle)).unwrap_err(),
+            WorkspaceError::StaleTab
+        );
+        assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
+        assert!(lease.tabs().unwrap().is_empty());
+        drop(lease);
+        assert_eq!(store.summaries()[0].tab_count, 0);
+        assert!(store.physical_tabs(workspace.as_str()).is_empty());
+
+        // It takes no readiness or dialog event, and it is nobody's tab.
+        store.apply_browser_dialog(TEST_BROWSER, 7, Some(DialogKind::Other));
+        assert_eq!(store.dialog_open(&workspace, 7), None);
+        assert_eq!(store.owner_of_physical(TEST_BROWSER, 7), None);
+        let other = workspace_with_tabs(&store, TEST_BROWSER, &[]);
+        assert!(store
+            .acquire(&other)
+            .unwrap()
+            .add_tab(TEST_BROWSER, &physical(9, AGENT_URL))
+            .is_ok());
+
+        // The person's close forgets it.
+        store.apply_browser_close(TEST_BROWSER, 7);
+        assert!(store.tab_bindings(workspace.as_str()).is_empty());
+    }
+
+    #[test]
+    fn a_confirmed_binding_keeps_its_handle_and_a_moved_one_is_forgotten() {
+        let store = WorkspaceStore::default();
+        let workspace = workspace_with_tabs(
+            &store,
+            TEST_BROWSER,
+            &[(7, AGENT_URL), (8, "https://example.com/second")],
+        );
+        let before = store.tab_bindings(workspace.as_str());
+        store.apply_browser_disconnect(TEST_BROWSER);
+        let lease = store.acquire(&workspace).unwrap();
+        let mut live = physical(7, AGENT_URL);
+        live.title = "Live title".into();
+        lease
+            .confirm(TEST_BROWSER, &[live, physical(8, PERSONS_URL)])
+            .unwrap();
+
+        let tabs = lease.tabs().unwrap();
+        assert_eq!(tabs.len(), 1);
+        let kept = before.iter().find(|tab| tab.physical_id == 7).unwrap();
+        assert_eq!(tabs[0].handle.as_str(), kept.handle);
+        assert_eq!(tabs[0].title, "Live title");
+        assert_eq!(tabs[0].generation, 1, "the landed generation is kept");
+        let moved = before.iter().find(|tab| tab.physical_id == 8).unwrap();
+        assert_eq!(
+            lease.select_tab(Some(&moved.handle)).unwrap_err(),
+            WorkspaceError::StaleTab
+        );
+        assert!(lease.pending_browsers().is_empty());
+    }
+
+    #[test]
+    fn a_new_tab_with_a_recycled_id_forgets_the_pending_binding() {
+        let store = WorkspaceStore::default();
+        let (workspace, _) = pending_workspace(&store);
+        // The restarted browser opened a fresh tab under the old id: the id is proved stale even
+        // where the new tab shows the same address.
+        let opener = workspace_with_tabs(&store, TEST_BROWSER, &[]);
+        store
+            .acquire(&opener)
+            .unwrap()
+            .add_tab(TEST_BROWSER, &physical(7, AGENT_URL))
+            .unwrap();
+        assert!(store.tab_bindings(workspace.as_str()).is_empty());
+        let lease = store.acquire(&workspace).unwrap();
+        lease
+            .confirm(TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .unwrap();
+        assert!(lease.tabs().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_commit_never_confirms_a_pending_binding() {
+        let store = WorkspaceStore::default();
+        let (workspace, _) = pending_workspace(&store);
+        // The person's own page commits in the tab that took the old id.
+        assert_eq!(
+            store.note_browser_landing(TEST_BROWSER, 7, PERSONS_URL),
+            None
+        );
+        let bindings = store.tab_bindings(workspace.as_str());
+        assert!(bindings[0].pending);
+        assert_eq!(bindings[0].url, super::UrlDigest::of(AGENT_URL));
+        let lease = store.acquire(&workspace).unwrap();
+        lease
+            .confirm(TEST_BROWSER, &[physical(7, PERSONS_URL)])
+            .unwrap();
+        assert!(lease.tabs().unwrap().is_empty());
+        assert!(store.tab_bindings(workspace.as_str()).is_empty());
+    }
+
+    #[test]
+    fn a_release_after_a_browser_restart_closes_no_pending_tab() {
+        let store = WorkspaceStore::default();
+        let (workspace, _) = pending_workspace(&store);
+        let released = store.release(&workspace);
+        assert_eq!(released.browser.as_deref(), Some(TEST_BROWSER));
+        assert!(released.physical_ids.is_empty());
+        assert_eq!(claimed(&store, TEST_BROWSER, AGENT_URL), None);
+    }
+
+    #[test]
+    fn a_confirmation_never_takes_a_tab_another_workspace_controls() {
+        let store = WorkspaceStore::default();
+        // Another session opened the tab while this one's binding waited in a resume token.
+        let other = workspace_with_tabs(&store, TEST_BROWSER, &[(7, AGENT_URL)]);
+        let workspace = admit_test(&store);
+        store.remember_tab(
+            &workspace,
+            "tab_kept",
+            TEST_BROWSER,
+            7,
+            super::UrlDigest::of(AGENT_URL),
+        );
+        let lease = store.acquire(&workspace).unwrap();
+        lease
+            .confirm(TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .unwrap();
+        assert!(lease.tabs().unwrap().is_empty());
+        assert!(store.tab_bindings(workspace.as_str()).is_empty());
+        assert_eq!(store.tab_bindings(other.as_str()).len(), 1);
+    }
+
+    #[test]
+    fn binding_a_browser_forgets_another_browsers_pending_tabs_and_says_so() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_test(&store);
+        store.remember_tab(
+            &workspace,
+            "tab_away",
+            "browser_away",
+            7,
+            super::UrlDigest::of(AGENT_URL),
+        );
+        let lease = store.acquire(&workspace).unwrap();
+        lease
+            .add_tab(TEST_BROWSER, &physical(3, "https://example.com/"))
+            .unwrap();
+        assert_eq!(
+            lease
+                .take_forgotten()
+                .iter()
+                .map(super::TabHandle::as_str)
+                .collect::<Vec<_>>(),
+            vec!["tab_away"]
+        );
+        assert!(lease.take_forgotten().is_empty(), "reported once");
+        assert!(lease.pending_browsers().is_empty());
+        assert_eq!(
+            store.browser_of(workspace.as_str()).as_deref(),
+            Some(TEST_BROWSER)
+        );
+    }
+
+    #[test]
+    fn a_remembered_tab_is_confirmed_by_its_own_browser_and_binds_it() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_test(&store);
+        store.remember_tab(
+            &workspace,
+            "tab_kept",
+            TEST_BROWSER,
+            7,
+            super::UrlDigest::of(AGENT_URL),
+        );
+        assert_eq!(store.browser_of(workspace.as_str()), None);
+        let lease = store.acquire(&workspace).unwrap();
+        assert_eq!(lease.forget_pending("browser_elsewhere"), Ok(()));
+        lease
+            .confirm(TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .unwrap();
+        let tab = lease.select_tab(Some("tab_kept")).unwrap();
+        assert_eq!(tab.physical_id, 7);
+        assert_eq!(tab.url, AGENT_URL);
+        assert_eq!(
+            store.browser_of(workspace.as_str()).as_deref(),
+            Some(TEST_BROWSER)
+        );
+    }
+
+    #[test]
+    fn a_url_digest_reads_the_url_bounded_as_the_adapter_bounds_it() {
+        let long = format!("https://example.com/{}", "a".repeat(super::TAB_URL_CHARS));
+        let bounded: String = long.chars().take(super::TAB_URL_CHARS).collect();
+        assert_eq!(super::UrlDigest::of(&long), super::UrlDigest::of(&bounded));
+        assert_ne!(
+            super::UrlDigest::of(AGENT_URL),
+            super::UrlDigest::of(PERSONS_URL)
+        );
+        let digest = super::UrlDigest::of(AGENT_URL);
+        assert_eq!(super::UrlDigest::parse(digest.as_str()), Some(digest));
+        assert_eq!(super::UrlDigest::parse(AGENT_URL), None);
+        assert_eq!(super::UrlDigest::parse(""), None);
+
+        let vocabulary: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/golden/protocol4/vocabulary.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            vocabulary["limits"]["url_chars"],
+            serde_json::json!(super::TAB_URL_CHARS),
+            "the digest bounds a URL as the adapter does"
+        );
+        assert_eq!(
+            vocabulary["limits"]["title_chars"],
+            serde_json::json!(super::TAB_TITLE_CHARS)
         );
     }
 

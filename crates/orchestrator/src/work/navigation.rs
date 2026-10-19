@@ -244,8 +244,10 @@ impl ApplicationExecutor {
     /// released by a session whose opener claimed this session's `opener_claim`, so a client
     /// reuses only its own tabs. The kept tab left its group when its session ended (ADR-0201), so `AdoptTab` puts it
     /// back in this client's group as it loads the page. A candidate is used only while the live
-    /// browser still shows it at its release address; one that closed or moved on is dropped and
-    /// the next is tried. Returns None when nothing fits, and the open then creates a fresh tab.
+    /// browser still shows it at its release address, the rule every remembered tab follows, so a
+    /// restarted browser that handed its id to another tab never gives that tab away. One that
+    /// closed or moved on is dropped and the next is tried. Returns None when nothing fits, and
+    /// the open then creates a fresh tab.
     fn reuse_released_tab(
         &self,
         context: &InvocationContext<'_>,
@@ -262,10 +264,7 @@ impl ApplicationExecutor {
             Err(error) => return Some(self.browser_failure(context, decision, error, None)),
         };
         let released = loop {
-            if let Some(tab) = live
-                .iter()
-                .find(|tab| tab.tab_id == candidate.physical_id && tab.url == candidate.url)
-            {
+            if let Some(tab) = candidate.confirmed_in(&live) {
                 break tab.clone();
             }
             candidate = self.workspaces.claim_released(browser, opener_claim, url)?;

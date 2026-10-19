@@ -812,6 +812,11 @@ impl RelayBrowserPort {
     /// Register one accepted connection under its browser identity, retiring the connection it
     /// replaces, and tell the lifecycle observer.
     ///
+    /// Retiring a connection ends its stream, so the event sink hears that browser disconnect
+    /// before the new connection is registered. Its own end then goes unreported, because it is no
+    /// longer the current connection, and a browser whose old stream's end was never seen may have
+    /// restarted all the same (ADR-0203 Decision 1).
+    ///
     /// # Errors
     ///
     /// Refuses a new browser once the port holds its connection capacity.
@@ -821,6 +826,12 @@ impl RelayBrowserPort {
             .browser_name
             .as_deref()
             .and_then(browser_id_named);
+        let replacing = lock(&self.adapters).connections.contains_key(&browser_id);
+        if replacing {
+            if let Some(sink) = lock(&self.event_sink).clone() {
+                sink.on_event(&browser_id, BrowserEvent::Disconnected);
+            }
+        }
         let lifecycle = lock(&self.lifecycle).clone();
         {
             let mut adapters = lock(&self.adapters);
