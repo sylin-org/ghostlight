@@ -422,14 +422,16 @@ test("a dialog records its message and the session that raised it", async () => 
   const lifecycle = sessions.create(chromeDebugger, { installer });
   await lifecycle.acquire(63);
   lifecycle.openDialog(63, { type: "alert" });
-  assert.deepEqual(lifecycle.currentDialog(63), { type: "alert", message: "", url: "", sessionId: null });
+  assert.deepEqual(lifecycle.currentDialog(63), { type: "alert", message: "", defaultPrompt: "", url: "", sessionId: null });
   lifecycle.openDialog(63, {});
   assert.equal(lifecycle.currentDialog(63).type, "unknown");
+  lifecycle.openDialog(63, { type: "prompt", message: "Name?", defaultPrompt: "Ada" });
+  assert.equal(lifecycle.currentDialog(63).defaultPrompt, "Ada");
   lifecycle.openDialog(63, { type: "beforeunload", message: "Leave?", url: "https://example.com/form", sessionId: "child-11" });
   const copy = lifecycle.currentDialog(63);
   copy.message = "changed";
   assert.deepEqual(lifecycle.currentDialog(63),
-    { type: "beforeunload", message: "Leave?", url: "https://example.com/form", sessionId: "child-11" });
+    { type: "beforeunload", message: "Leave?", defaultPrompt: "", url: "https://example.com/form", sessionId: "child-11" });
   await lifecycle.closeDialog(63);
   await lifecycle.release(63);
   assert.equal(lifecycle.currentDialog(63), null);
@@ -457,7 +459,7 @@ test("an open JavaScript dialog retains its debugger session until handled", asy
   lifecycle.openDialog(9, { type: "prompt", message: "Name?", sessionId: null });
   await lifecycle.release(9);
 
-  assert.deepEqual(lifecycle.currentDialog(9), { type: "prompt", message: "Name?", url: "", sessionId: null });
+  assert.deepEqual(lifecycle.currentDialog(9), { type: "prompt", message: "Name?", defaultPrompt: "", url: "", sessionId: null });
   assert.equal(lifecycle.attachedCount(), 1);
   assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "detach").length, 0);
 
@@ -480,7 +482,7 @@ test("an external detach preserves a known dialog for a later handling lease", a
   lifecycle.openDialog(11, { type: "confirm", message: "Sure?", sessionId: "child-1" });
   lifecycle.detached(11);
   await lifecycle.release(11);
-  assert.deepEqual(lifecycle.currentDialog(11), { type: "confirm", message: "Sure?", url: "", sessionId: "child-1" });
+  assert.deepEqual(lifecycle.currentDialog(11), { type: "confirm", message: "Sure?", defaultPrompt: "", url: "", sessionId: "child-1" });
 
   await lifecycle.acquire(11);
   assert.deepEqual(chromeDebugger.calls.filter(([kind]) => kind === "attach"), [

@@ -492,6 +492,31 @@ test("dialog handle on the root session when the dialog has none, and a dismissa
   assert.equal(parts.frames[0].ok.handled, true);
 });
 
+test("accepting a prompt without text answers with its default, as OK does", async () => {
+  const parts = rig();
+  parts.lifecycle.openDialog(TAB, { type: "prompt", message: "What should it say?", defaultPrompt: "hello from the desk" });
+  await parts.primitives.run("p", request("dialog", { tab_id: TAB, op: { op: "handle", accept: true } }));
+  const sent = parts.chrome.calls.find((call) => call.method === "Page.handleJavaScriptDialog");
+  assert.deepEqual(sent.params, { accept: true, promptText: "hello from the desk" });
+  assert.equal(parts.frames[0].ok.accepted, true);
+});
+
+test("a prompt answer keeps its given text, empty included, and a dismissal or another dialog sends none", async () => {
+  const cases = [
+    [{ type: "prompt", defaultPrompt: "hello" }, { op: "handle", accept: true, text: "" }, ""],
+    [{ type: "prompt", defaultPrompt: "hello" }, { op: "handle", accept: true, text: "Ada" }, "Ada"],
+    [{ type: "prompt", defaultPrompt: "hello" }, { op: "handle", accept: false }, undefined],
+    [{ type: "confirm" }, { op: "handle", accept: true }, undefined]
+  ];
+  for (const [dialog, op, expected] of cases) {
+    const parts = rig();
+    parts.lifecycle.openDialog(TAB, { message: "?", ...dialog });
+    await parts.primitives.run("p", request("dialog", { tab_id: TAB, op }));
+    const sent = parts.chrome.calls.find((call) => call.method === "Page.handleJavaScriptDialog");
+    assert.equal(sent.params.promptText, expected, JSON.stringify({ dialog, op }));
+  }
+});
+
 test("dialog handle with nothing to handle answers absent and dispatches nothing, matching the golden receipt", async () => {
   const parts = rig();
   parts.chrome.handlers["Page.handleJavaScriptDialog"] = async () => { throw new Error("No dialog is showing"); };

@@ -340,12 +340,14 @@
     }
 
     /**
-     * Records that a JavaScript dialog is open on a tab, as `{ type, message, url, sessionId }`.
-     * `url` is the url of the frame that raised it, or empty when the browser did not say. An open
-     * dialog keeps the session attached until closeDialog, so the dialog can still be answered.
+     * Records that a JavaScript dialog is open on a tab, as
+     * `{ type, message, defaultPrompt, url, sessionId }`. `defaultPrompt` is the text a prompt's
+     * field starts with, empty for every other dialog. `url` is the url of the frame that raised
+     * it, or empty when the browser did not say. An open dialog keeps the session attached until
+     * closeDialog, so the dialog can still be answered.
      */
-    function openDialog(tabId, { type, message = "", url = "", sessionId = null } = {}) {
-      tabState(tabId).dialog = { type: type || DIALOG_UNKNOWN, message, url, sessionId };
+    function openDialog(tabId, { type, message = "", defaultPrompt = "", url = "", sessionId = null } = {}) {
+      tabState(tabId).dialog = { type: type || DIALOG_UNKNOWN, message, defaultPrompt, url, sessionId };
     }
 
     /**
@@ -360,8 +362,8 @@
     }
 
     /**
-     * Returns a copy of the open dialog of a tab as `{ type, message, url, sessionId }`, or null when
-     * none is open. Changing the copy does not change the recorded dialog.
+     * Returns a copy of the open dialog of a tab as `{ type, message, defaultPrompt, url, sessionId }`,
+     * or null when none is open. Changing the copy does not change the recorded dialog.
      */
     function currentDialog(tabId) {
       const dialog = tabs.get(tabId)?.dialog;

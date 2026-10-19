@@ -54,6 +54,7 @@
   const MESSAGE_CHARS = 500;
   const DIALOG_SETTLE_MS = 50;
   const DIALOG_UNKNOWN = "unknown";
+  const DIALOG_PROMPT = "prompt";
   const NO_DIALOG = /No dialog is showing/;
   const AX_ROLE_CHARS = 100;
   const AX_TEXT_CHARS = 500;
@@ -326,6 +327,13 @@
       };
     }
 
+    // The text a prompt is answered with. Given text is sent as it is, empty included. Accepting a
+    // prompt without text answers with the text its field starts with, as OK does: the browser
+    // would otherwise answer with an empty string and drop the page's default.
+    function promptText(op, dialog) {
+      return op.text ?? (op.accept && dialog?.type === DIALOG_PROMPT ? dialog.defaultPrompt : undefined);
+    }
+
     // The dialog is answered on the session that raised it, so a dialog of an out-of-process frame
     // is answered too.
     async function dialogHandle(request, fx) {
@@ -336,7 +344,7 @@
         fx.watch(tabId);
         fx.dispatched = true;
         const target = dialog?.sessionId ? { tabId, sessionId: dialog.sessionId } : { tabId };
-        await cdp(target, METHOD.HANDLE_DIALOG, { accept: request.op.accept, promptText: request.op.text ?? undefined });
+        await cdp(target, METHOD.HANDLE_DIALOG, { accept: request.op.accept, promptText: promptText(request.op, dialog) });
         await lifecycle.closeDialog(tabId);
         return { present: true, dialog_type: dialog?.type ?? DIALOG_UNKNOWN, handled: true, accepted: request.op.accept, ...dialogUrl(dialog) };
       } catch (error) {

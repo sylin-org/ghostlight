@@ -380,3 +380,24 @@ the candidate.
 
 The order is written out in `docs/RELEASE.md` (The 2.0 cutover) and
 `docs/release/store-disclosure-2.0.md`.
+
+## Amendment (2026-10-19): the extension is unfrozen for the prompt answer
+
+The owner unfroze the extension on 2026-10-19 for a fix found on test-03 ("Can't you work on the
+dialog fix?", answering a proposal that named the unfreeze as the owner's call). `browser_dialog`
+`accept` sent no text to `Page.handleJavaScriptDialog`. Chromium then answers a prompt with an
+empty string, where a person who presses OK sends the text the field starts with
+([record](../testing/alpine-2.0-bundle-2026-10-19.md), finding 1).
+
+The fix:
+
+- The extension keeps a prompt's `defaultPrompt` from `Page.javascriptDialogOpening` with the
+  dialog it records.
+- `accept` with no text answers a prompt with that default.
+- `respond` sends its text as given, empty included. `dismiss` and every other dialog type are
+  unchanged.
+
+The changed packaged files are `worker.js`, `lib/sessions.js` and `lib/primitives.js`. No
+permission, wire field or adapter protocol 4 behavior changes, and the default never leaves the
+extension. The freeze golden is regenerated from the new zip in the same commit, and the version
+stays 2.0.0. The tree records no 2.0 store submission yet. Decision 16's rule is unchanged.

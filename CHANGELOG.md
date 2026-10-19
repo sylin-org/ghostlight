@@ -197,6 +197,9 @@ layout once, when you run the install again. The full release notes are in
 
 ### Fixed
 
+- `browser_dialog` `accept` on a prompt answers with the text its field starts with, as OK does.
+  It answered with an empty string, so a page's default answer was lost. `respond` still sends its
+  text as given, empty included (ADR-0200, amendment of 2026-10-19).
 - A captured screenshot handed back to a page (`browser_upload` with `source_image`, attached to a
   file input or dropped at a point) no longer fails with "file payload size mismatch". The stated
   size ignored base64 padding, so about two images in three were refused; this has been wrong since

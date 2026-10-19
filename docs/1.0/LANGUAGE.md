@@ -896,9 +896,11 @@ Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
 Inspect or resolve the current JavaScript dialog.
 
 - `{"action":"status"}` reports whether a dialog is blocking; capability `read`.
-- `{"action":"accept"}` accepts it; capability `action`.
+- `{"action":"accept"}` accepts it; capability `action`. A prompt accepted this way is answered
+  with the text its field starts with, as OK does.
 - `{"action":"dismiss"}` dismisses it; capability `action`.
-- `{"action":"respond","text":"Ada"}` supplies non-secret prompt text; capability `action`.
+- `{"action":"respond","text":"Ada"}` supplies non-secret prompt text, sent as given, empty
+  included; capability `action`.
 
 `text` is required only for `respond` and is invalid for every other action. Facts: `tab`,
 `dialog_type`, `present`, `accepted`, and `handled` as applicable. Status also reports the dialog's message, one line of at most 500 characters, in its
