@@ -134,23 +134,33 @@ try {
     & pwsh -NoProfile -File $scenario -Repository $repo -Binaries $BinaryDirectory -UserDirectory (Join-Path $area 'user with spaces')
     if ($LASTEXITCODE -ne 0) { throw "PowerShell installer fixture failed: $LASTEXITCODE" }
 } finally {
-    # The install starts the fixture service and presence launches the shell. Stop exactly the
-    # images of this fixture home, by path, before the home is removed.
+    # The install starts the fixture service and presence launches the shell, which can start
+    # again after a first stop. Stop exactly the images of this fixture home, by path, then remove
+    # the home, and repeat both until the removal succeeds or the time runs out.
     $installedBin = Join-Path $area 'user with spaces/.ghostlight/bin'
-    $stopFailures = @()
-    foreach ($name in @('ghostlight-desktop', 'ghostlight-service')) {
-        $image = Join-Path $installedBin "$name.exe"
-        foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Path -ieq $image })) {
-            try {
-                Stop-Process -InputObject $process -Force
-                if (-not $process.WaitForExit(5000)) { $stopFailures += "Fixture process $($process.Id) did not exit." }
-            } catch { $stopFailures += $_.Exception.Message }
-        }
-    }
     $expectedRoot = $repo.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar + '.tmp' + [IO.Path]::DirectorySeparatorChar
     if (-not [IO.Path]::GetFullPath($area).StartsWith($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Unsafe fixture cleanup: $area"
     }
-    Remove-Item -LiteralPath $area -Recurse -Force
+    $stopFailures = @()
+    $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ($true) {
+        foreach ($name in @('ghostlight-desktop', 'ghostlight-service')) {
+            $image = Join-Path $installedBin "$name.exe"
+            foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Path -ieq $image })) {
+                try {
+                    Stop-Process -InputObject $process -Force
+                    if (-not $process.WaitForExit(5000)) { $stopFailures += "Fixture process $($process.Id) did not exit." }
+                } catch { $stopFailures += $_.Exception.Message }
+            }
+        }
+        try {
+            Remove-Item -LiteralPath $area -Recurse -Force -ErrorAction Stop
+            break
+        } catch {
+            if ([DateTime]::UtcNow -ge $cleanupDeadline) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+    }
     if ($stopFailures.Count) { throw ($stopFailures -join '; ') }
 }
