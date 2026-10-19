@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-A1, A2 and A3 have landed. A2's top-frame ring reset waits on a package-lane fix (see Notes). A4
-is next. ux-2 has closed, so every slice can start.
+A1 to A4 have landed. A2's top-frame ring reset waits on a package-lane fix (see Notes). The
+lane has no open slice.
 
 ## Slices
 
@@ -17,8 +17,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | --- | --- | --- | --- | --- | --- |
 | A1 | fix(adapter): an embedded document's change is stale, and a targeted read reports the tab | candidate | none | see Notes | landed (fa3bcb02 and a9d40c83) |
 | A2 | fix(adapter): a Downloads save carries effect, and diagnostics bind only when asked | candidate | none | see Notes | landed (a0dfc56b) |
-| A3 | refactor(adapter): no content command runs without a scope | none | none | see Notes | landed (this commit) |
-| A4 | refactor(adapter): the authority's budgets reach the adapter as values | none | ux-2 closes (`assets.sha256`) | cross-lane work's `DOCUMENT_TREE_NODE_LIMIT` | todo |
+| A3 | refactor(adapter): no content command runs without a scope | none | none | see Notes | landed (8f5722e8) |
+| A4 | refactor(adapter): the authority's budgets reach the adapter as values | none | ux-2 closes (`assets.sha256`) | cross-lane work's `DOCUMENT_TREE_NODE_LIMIT`; see Notes | landed (this commit) |
 
 ## Notes
 
@@ -92,3 +92,34 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `FrameTree::ancestors` and `geometry::output_scale` go with them. The proof is
   `a_content_command_without_a_scope_is_a_protocol_error` in `protocol4/translate/tests.rs`. No
   journey is needed.
+- A4, who owns each number: work names every semantic query's maximum, as it does for find:
+  `SELECTOR_MATCH_MAX` (8) for a selector, `STALE_CANDIDATES_MAX` (3) for a stale handle's
+  candidates, whose `take` goes because the merge already holds the listing to it, and
+  `PRESENCE_MATCH_MAX` (1) for a `selector_present` wait, which only asks whether one matches. The
+  page reads `max_results` and keeps no number of its own.
+- A4, the cut flag: `Listing.truncated` carries the merge's `over`. `Outcome::SelectorUnresolved`
+  gains `more`, and with it the sentence starts "At least". Zero matches keep their sentence. The
+  outcome change is the one edit in `language/` (core's `outcome.rs` and `self_check/hints.rs`).
+- A4, the screenshot budget: `Screenshot` and `ScreenshotRegion` carry `settle_ms` in place of
+  `visual_settle`. The authority's one rule, half of what the deadline leaves and at most
+  `MAX_WAIT_MS`, moves into `preparation_budget_ms` in `work/documents.rs`, which document
+  preparation and capture both call. Zero sends no settle, as `visual_settle: false` did. The
+  adapter's settle call and its 500 ms answer margin are one helper, `observe::settle_top`, shared
+  by describing documents and capturing. The adapter no longer caps a budget the authority sent;
+  the scope test that pinned the cap now pins that the budget is the authority's.
+- A4, the tree: the typed contract is `TreeNode` and `TreeNodeKind` beside `BrowserOutcome`. The
+  kind's words are spelled once, in `TreeNodeKind::as_str`, and the page's word is decoded once, in
+  `world.rs`, where a word outside the set is a container. `TreeValue.nodes`, which nothing read,
+  goes, and `TreeNode::nodes` replaces the merge's `count_nodes` and work's count. The adapter's
+  `TREE_NODE_LIMIT` is the one node bound. Work no longer bounds labels again: the page bounds them
+  to 120 characters in the isolated world, so the label bound went with `bounded_tree`.
+- A4, cross-lane edits: core's `work/mod.rs`, `work/forms.rs`, `work/documents.rs`,
+  `work/reading.rs`, `language/outcome.rs`, `language/self_check/hints.rs` and the tests
+  `work/tests/configured_authority.rs`, `controls.rs`, `documents.rs` and `execution.rs`.
+- A4, proofs: `a_selector_matching_thirty_controls_says_at_least_eight` in
+  `work/tests/controls.rs`, with the page-asset test "a semantic query keeps the service's maximum
+  and says when more matched" for the page's half;
+  `a_screenshot_under_a_short_deadline_keeps_half_for_the_capture` in `work/tests/documents.rs`;
+  `a_target_screenshot_under_one_second_still_measures` in `protocol4/translate/tests/interaction.rs`;
+  `a_tree_over_the_node_budget_is_cut_once_and_says_so` in `protocol4/translate/tests.rs`. The
+  page-asset tests pass with `assets.sha256` regenerated. No journey is needed.

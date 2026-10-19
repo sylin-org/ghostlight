@@ -16,10 +16,9 @@ use super::value;
 use crate::browser::adapter::{BrowserOutcome, Listing, ObservedTarget};
 use crate::browser::BrowserError;
 
-/// The most nodes one structure tree holds across every document.
+/// The most nodes one structure tree holds across every document. Every document is asked
+/// for its share as `max_nodes`, and the merged tree is trimmed to it once.
 pub const TREE_NODE_LIMIT: usize = 400;
-/// The most targets a semantic query returns across every document.
-pub const QUERY_SEMANTIC_CAP: usize = 8;
 
 /// The extraction modes of a document read.
 pub mod mode {
@@ -118,10 +117,12 @@ pub struct Semantic<'a> {
     pub exact: bool,
     /// Whether only controls associated with a form count.
     pub form_scope: bool,
+    /// The most targets to return across every document.
+    pub max_results: usize,
 }
 
-/// Find targets by accessible name and role in every readable document, up to
-/// [`QUERY_SEMANTIC_CAP`].
+/// Find targets by accessible name and role in every readable document, up to the selector's
+/// `max_results`.
 ///
 /// # Errors
 ///
@@ -141,8 +142,9 @@ pub fn query_semantic(
             selector.role,
             selector.exact,
             selector.form_scope,
+            selector.max_results,
         ),
-        QUERY_SEMANTIC_CAP,
+        selector.max_results,
     )
 }
 
@@ -176,6 +178,7 @@ fn targets(
         listing: Listing {
             left_out: merged.left_out,
             modal_open: merged.modal_open,
+            truncated: merged.over,
         },
     })
 }
@@ -268,7 +271,11 @@ pub fn inspect_tree(
         )?;
         let answers = one(l, scope, tab_id, plan)?;
         let tree: TreeValue = value(&answers[0])?;
-        return document_tree(tab_id, Some(tree.tree), tree.truncated);
+        return Ok(BrowserOutcome::DocumentTree {
+            tab_id,
+            tree: Some(tree.tree),
+            truncated: tree.truncated,
+        });
     }
     let docs = scope.content_docs();
     let top = scope.top();
@@ -290,20 +297,10 @@ pub fn inspect_tree(
     }
     let unread = plan.is_none() && !children.is_empty();
     let merged = merge::append_and_trim(root, subtrees, unread, TREE_NODE_LIMIT);
-    document_tree(tab_id, merged.tree, merged.truncated)
-}
-
-/// The tree outcome, with the tree as JSON.
-fn document_tree(
-    tab_id: u64,
-    tree: Option<world::TreeNode>,
-    truncated: bool,
-) -> Result<BrowserOutcome, BrowserError> {
     Ok(BrowserOutcome::DocumentTree {
         tab_id,
-        tree: serde_json::to_string(&tree)
-            .map_err(|error| BrowserError::Protocol(error.to_string()))?,
-        truncated,
+        tree: merged.tree,
+        truncated: merged.truncated,
     })
 }
 

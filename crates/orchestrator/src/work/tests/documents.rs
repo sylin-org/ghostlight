@@ -126,6 +126,37 @@ fn captured_image() -> BrowserOutcome {
 }
 
 #[test]
+fn a_screenshot_under_a_short_deadline_keeps_half_for_the_capture() {
+    for (arguments, settles) in [
+        (json!({"timeout_ms":600}), true),
+        (json!({"timeout_ms":600,"visual_settle":false}), false),
+        (json!({}), true),
+    ] {
+        let (executor, browser, _, workspace, _) = fixture();
+        open(&executor, &browser, &workspace);
+        browser.push(Ok(captured_image()));
+        let result = executor.execute(
+            &workspace,
+            "browser_screenshot",
+            arguments.clone(),
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        let sent = browser
+            .calls()
+            .into_iter()
+            .find_map(|call| match call {
+                BrowserCommand::Screenshot { settle_ms, .. } => Some(settle_ms),
+                _ => None,
+            })
+            .expect("a capture was sent");
+        let ceiling = arguments["timeout_ms"].as_u64().map_or(1_000, |ms| ms / 2);
+        assert!(sent <= ceiling, "{arguments}: {sent} ms of settle");
+        assert_eq!(sent > 0, settles, "{arguments}");
+    }
+}
+
+#[test]
 fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
     for governed in [false, true] {
         let path = governed.then(|| policy_file(false));

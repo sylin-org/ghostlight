@@ -73,6 +73,10 @@ use result::{CompletionGate, Effect, InvocationResult, Readiness, Status};
 /// How many controls a stale-target refusal offers.
 const STALE_CANDIDATES_MAX: usize = 3;
 
+/// The most controls one semantic selector lists. A selector must match exactly one, and past
+/// this many the refusal says at least this many matched.
+const SELECTOR_MATCH_MAX: usize = 8;
+
 /// Cloneable cancellation state forwarded from the MCP edge to physical dispatch.
 ///
 /// It keeps who cancelled beside its flag. The cause is set before the flag, so whoever sees the
@@ -884,11 +888,10 @@ impl ApplicationExecutor {
                 role: Some(info.role_page.clone()),
                 exact: false,
                 form_scope: false,
+                max_results: STALE_CANDIDATES_MAX,
             },
         ) {
-            Ok(BrowserOutcome::Targets { targets, .. }) => {
-                targets.into_iter().take(STALE_CANDIDATES_MAX).collect()
-            }
+            Ok(BrowserOutcome::Targets { targets, .. }) => targets,
             _ => Vec::new(),
         }
     }
@@ -1045,14 +1048,20 @@ impl ApplicationExecutor {
                 role: selector.role.clone(),
                 exact: selector.exact,
                 form_scope: false,
+                max_results: SELECTOR_MATCH_MAX,
             },
         ) {
             Ok(BrowserOutcome::Targets {
-                tab_id, targets, ..
+                tab_id,
+                targets,
+                listing,
             }) if tab_id == selected.physical_id => {
                 if targets.len() != 1 {
                     let matched = targets.len();
-                    let outcome = Outcome::SelectorUnresolved { matched };
+                    let outcome = Outcome::SelectorUnresolved {
+                        matched,
+                        more: listing.truncated,
+                    };
                     return Err(Box::new(Terminal {
                         result: InvocationResult::new(
                             context.invocation,

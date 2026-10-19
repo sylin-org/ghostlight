@@ -286,11 +286,12 @@ fn a_declined_settle_stays_declined_whatever_the_budget() {
 }
 
 #[test]
-fn the_budget_is_capped_and_other_kinds_get_none() {
+fn the_budget_is_the_authoritys_and_other_kinds_get_none() {
     let mut authority = scope_of(two_documents(), &["T.t1"]);
-    authority.settle_ms = 60_000;
+    authority.settle_ms = 700;
     let scope = Scope::admit(&authority).unwrap();
-    assert!(scope.remaining_settle_ms() <= 1_000);
+    assert!(scope.remaining_settle_ms() <= 700);
+    assert!(scope.remaining_settle_ms() > 0);
     let describe = scope
         .call(&doc("T", "t1"), world::describe_focused())
         .unwrap();

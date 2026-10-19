@@ -1,6 +1,6 @@
 //! Reading, inspection, discovery, and screenshot execution.
 
-use crate::browser::adapter::{BrowserCommand, BrowserOutcome};
+use crate::browser::adapter::{BrowserCommand, BrowserOutcome, TreeNode};
 use crate::intake::session::ServiceContent;
 use serde_json::{json, Value};
 
@@ -153,31 +153,27 @@ impl ApplicationExecutor {
                         tree,
                         truncated,
                     }) if tab_id == selected.physical_id => {
-                        let raw: Value = serde_json::from_str(&tree).unwrap_or(Value::Null);
-                        let returned = bounded_tree(&raw, max_depth);
-                        let truncated = truncated || returned.cut;
+                        let nodes = tree.as_ref().map_or(0, TreeNode::nodes);
+                        let tree = json!(tree);
                         let scope = SnapshotScope {
                             root: root.map(str::to_owned),
                             max_depth,
                         };
                         let diff = lease
                             .previous_snapshot(selected, &scope)
-                            .map(|old| diff_trees(&old, &returned.tree));
-                        let handle = match lease.register_snapshot(
-                            selected,
-                            scope,
-                            returned.tree.clone(),
-                        ) {
+                            .map(|old| diff_trees(&old, &tree));
+                        let handle = match lease.register_snapshot(selected, scope, tree.clone())
+                        {
                             Ok(handle) => handle,
                             Err(error) => return self.workspace_failure(context, error),
                         };
                         let mut facts = json!({
                             "tab":selected.handle.as_str(),
                             "snapshot":handle.as_str(),
-                            "nodes":returned.nodes,
+                            "nodes":nodes,
                             "truncated":truncated,
                             "document_generation":selected.generation,
-                            "tree":returned.tree,
+                            "tree":tree,
                         });
                         if let Some(diff) = &diff {
                             facts["diff"] = json!({"added":diff.added,"removed":diff.removed,"changed":diff.changed,"paths":diff.paths});
@@ -190,7 +186,7 @@ impl ApplicationExecutor {
                             readiness(selected.readiness),
                             true,
                             Outcome::DocumentInspected {
-                                nodes: returned.nodes,
+                                nodes,
                                 truncated,
                                 differences: diff.as_ref().map(TreeDiff::total),
                             },
@@ -369,7 +365,8 @@ impl ApplicationExecutor {
                 tab_id: selected.physical_id,
                 region,
                 expected_viewport: view.viewport,
-                visual_settle: value.visual_settle,
+                // The dispatch spends the invocation's preparation budget here.
+                settle_ms: 0,
             };
             (selected, command, CaptureKind::Region)
         } else {
@@ -393,7 +390,8 @@ impl ApplicationExecutor {
                 tab_id: selected.physical_id,
                 locator,
                 full_page: value.full_page,
-                visual_settle: value.visual_settle,
+                // The dispatch spends the invocation's preparation budget here.
+                settle_ms: 0,
             };
             (selected, command, scope)
         };
@@ -476,105 +474,11 @@ impl ApplicationExecutor {
     }
 }
 
-/// The most nodes one document tree returns.
-///
-/// The adapter keeps the same budget. The service keeps it again because the tree is
-/// page-derived and goes to the model as it stands here.
-const DOCUMENT_TREE_NODE_LIMIT: usize = 400;
-
-/// The most characters of one node label in a returned document tree.
-const DOCUMENT_TREE_LABEL_CHARS: usize = 120;
-
 /// The most positions one diff lists.
 const DIFF_PATH_LIMIT: usize = 50;
 
 /// The position of the root node in diff paths. Each level below adds `/` and a child index.
 const TREE_ROOT_PATH: &str = "/";
-
-/// What one document-tree node is, in the closed words the returned tree uses.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TreeNodeKind {
-    /// An interactive control such as a button, link, or field.
-    Control,
-    /// A heading element.
-    Heading,
-    /// Any other rendered element.
-    Container,
-}
-
-impl TreeNodeKind {
-    /// Narrow the adapter's kind to the closed set. Anything unrecognized is a container.
-    fn from_adapter(kind: Option<&str>) -> Self {
-        match kind {
-            Some("control") => Self::Control,
-            Some("heading") => Self::Heading,
-            _ => Self::Container,
-        }
-    }
-
-    /// The word the returned tree uses.
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Control => "control",
-            Self::Heading => "heading",
-            Self::Container => "container",
-        }
-    }
-}
-
-/// A document tree in the bounded shape returned to the caller and kept as a snapshot.
-struct BoundedTree {
-    /// Nodes of `{kind, label, children}` only, or null when the page gave no tree.
-    tree: Value,
-    /// How many nodes `tree` holds.
-    nodes: usize,
-    /// Whether the depth or node budget cut part of what the adapter sent.
-    cut: bool,
-}
-
-/// Rebuild the adapter's tree in the returned shape.
-///
-/// Only closed node kinds, bounded labels, and children survive, within `max_depth` levels and
-/// the node budget. Every node keeps a `children` array, so every position resolves.
-fn bounded_tree(raw: &Value, max_depth: usize) -> BoundedTree {
-    let mut remaining = DOCUMENT_TREE_NODE_LIMIT;
-    let mut cut = false;
-    let tree = if raw.is_object() {
-        bounded_node(raw, 1, max_depth, &mut remaining, &mut cut)
-    } else {
-        Value::Null
-    };
-    BoundedTree {
-        tree,
-        nodes: DOCUMENT_TREE_NODE_LIMIT - remaining,
-        cut,
-    }
-}
-
-fn bounded_node(
-    raw: &Value,
-    level: usize,
-    max_depth: usize,
-    remaining: &mut usize,
-    cut: &mut bool,
-) -> Value {
-    *remaining -= 1;
-    let mut children = Vec::new();
-    for child in tree_children(raw).iter().filter(|child| child.is_object()) {
-        if level >= max_depth || *remaining == 0 {
-            *cut = true;
-            break;
-        }
-        children.push(bounded_node(child, level + 1, max_depth, remaining, cut));
-    }
-    let kind = TreeNodeKind::from_adapter(raw.get("kind").and_then(Value::as_str));
-    let label = raw.get("label").and_then(Value::as_str).unwrap_or_default();
-    json!({
-        "kind":kind.as_str(),
-        "label":bounded(label, DOCUMENT_TREE_LABEL_CHARS),
-        "children":children,
-    })
-}
 
 fn tree_children(node: &Value) -> &[Value] {
     node.get("children")
@@ -673,57 +577,10 @@ fn compare_nodes(old: &Value, new: &Value, path: &str, diff: &mut TreeDiff) {
 mod tests {
     use serde_json::json;
 
-    use super::{bounded_tree, diff_trees, DOCUMENT_TREE_NODE_LIMIT};
+    use super::diff_trees;
 
     fn node(kind: &str, label: &str, children: Vec<serde_json::Value>) -> serde_json::Value {
         json!({"kind":kind,"label":label,"children":children})
-    }
-
-    #[test]
-    fn returned_tree_keeps_only_closed_kinds_bounded_labels_and_the_requested_depth() {
-        let raw = json!({
-            "kind":"container",
-            "label":"Page",
-            "secret":"page-authored field",
-            "children":[
-                {"kind":"heading","label":"Title","children":[]},
-                {"kind":"invented","label":"x".repeat(500),"children":[
-                    {"kind":"control","label":"Too deep","children":[]}
-                ]},
-                "not a node"
-            ]
-        });
-        let returned = bounded_tree(&raw, 2);
-        assert_eq!(
-            returned.tree,
-            node(
-                "container",
-                "Page",
-                vec![
-                    node("heading", "Title", vec![]),
-                    node("container", &"x".repeat(120), vec![]),
-                ],
-            )
-        );
-        assert_eq!(returned.nodes, 3);
-        assert!(returned.cut, "a level past max_depth is reported as cut");
-        let absent = bounded_tree(&serde_json::Value::Null, 6);
-        assert!(absent.tree.is_null());
-        assert_eq!(absent.nodes, 0);
-    }
-
-    #[test]
-    fn returned_tree_stops_at_the_node_budget() {
-        let wide = node(
-            "container",
-            "Page",
-            (0..DOCUMENT_TREE_NODE_LIMIT + 10)
-                .map(|index| node("control", &format!("Item {index}"), vec![]))
-                .collect(),
-        );
-        let returned = bounded_tree(&wide, 6);
-        assert_eq!(returned.nodes, DOCUMENT_TREE_NODE_LIMIT);
-        assert!(returned.cut);
     }
 
     #[test]

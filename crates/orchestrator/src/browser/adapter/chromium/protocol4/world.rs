@@ -18,7 +18,7 @@ use thiserror::Error;
 use super::wire::{CallAnswer, Point};
 use crate::browser::adapter::{
     BrowserOutcome, BrowserReadiness, FieldNow, ObservedTarget, PhysicalActionSubject,
-    PhysicalField, PhysicalFile, StaleLookup,
+    PhysicalField, PhysicalFile, StaleLookup, TreeNode, TreeNodeKind,
 };
 use crate::language::area::LeftOut;
 use crate::language::field_problem::FieldProblems;
@@ -293,14 +293,21 @@ pub fn find(text: &str, find_kind: &str, max_results: usize) -> Message {
     .settling()
 }
 
-/// Find targets by accessible name and optional role.
+/// Find at most `max_results` targets by accessible name and optional role.
 #[must_use]
-pub fn query_semantic(name: &str, role: Option<&str>, exact: bool, form_scope: bool) -> Message {
+pub fn query_semantic(
+    name: &str,
+    role: Option<&str>,
+    exact: bool,
+    form_scope: bool,
+    max_results: usize,
+) -> Message {
     Message::new(
         kind::QUERY_SEMANTIC,
         Content,
         Read,
-        json!({"name": name, "role": role, "exact": exact, "form_scope": form_scope}),
+        json!({"name": name, "role": role, "exact": exact, "form_scope": form_scope,
+               "max_results": max_results}),
     )
     .settling()
 }
@@ -924,16 +931,16 @@ pub struct Targets {
     pub modal_open: bool,
 }
 
-/// One node of a structure tree.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TreeNode {
-    /// `control`, `heading` or `container`.
-    pub kind: String,
-    /// The node's bounded label.
-    pub label: String,
-    /// The node's children.
-    #[serde(default)]
-    pub children: Vec<TreeNode>,
+/// The page names a node's kind in its own word. A word outside the closed set is a container,
+/// so a tree never carries a kind the service does not know.
+impl<'de> Deserialize<'de> for TreeNodeKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let word = String::deserialize(deserializer)?;
+        Ok(TreeNodeKind::ALL
+            .into_iter()
+            .find(|kind| kind.as_str() == word)
+            .unwrap_or(TreeNodeKind::Container))
+    }
 }
 
 /// A structure tree one document built.
@@ -941,8 +948,6 @@ pub struct TreeNode {
 pub struct TreeValue {
     /// The root.
     pub tree: TreeNode,
-    /// How many nodes the tree holds.
-    pub nodes: usize,
     /// Whether the node budget cut the tree.
     #[serde(default)]
     pub truncated: bool,

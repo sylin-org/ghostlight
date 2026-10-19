@@ -733,14 +733,18 @@ pub enum BrowserCommand {
         tab_id: u64,
         locator: Option<String>,
         full_page: bool,
-        visual_settle: Option<bool>,
+        /// The most time the page may take to settle before the capture, in milliseconds.
+        /// The authority sets it from the invocation's preparation budget; zero sends no settle.
+        settle_ms: u64,
     },
     /// Capture and magnify one page rectangle resolved from a governed view handle.
     ScreenshotRegion {
         tab_id: u64,
         region: PhysicalRectangle,
         expected_viewport: ViewportGeometry,
-        visual_settle: Option<bool>,
+        /// The most time the page may take to settle before the capture, in milliseconds.
+        /// The authority sets it from the invocation's preparation budget; zero sends no settle.
+        settle_ms: u64,
     },
     /// Recheck credential classification immediately before a fill.
     DescribeTargets { tab_id: u64, locators: Vec<String> },
@@ -755,6 +759,8 @@ pub enum BrowserCommand {
         exact: bool,
         /// Restrict to controls associated with a form.
         form_scope: bool,
+        /// The most targets to return across every document.
+        max_results: usize,
     },
     /// Activate one target.
     Activate {
@@ -981,6 +987,61 @@ pub struct Listing {
     pub left_out: LeftOut,
     /// Whether a document of the tab has an open modal dialog.
     pub modal_open: bool,
+    /// Whether more items existed than the listing kept, so its count is a lower bound.
+    pub truncated: bool,
+}
+
+/// What one document-tree node is. The adapter decodes the page's word into this closed set.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TreeNodeKind {
+    /// An interactive control such as a button, link, or field.
+    Control,
+    /// A heading element.
+    Heading,
+    /// Any other rendered element.
+    Container,
+}
+
+impl TreeNodeKind {
+    /// Every kind, in the order a decoder tries them.
+    pub const ALL: [Self; 3] = [Self::Control, Self::Heading, Self::Container];
+
+    /// The word the page and the returned tree use for this kind.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Control => "control",
+            Self::Heading => "heading",
+            Self::Container => "container",
+        }
+    }
+}
+
+impl Serialize for TreeNodeKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// One node of a bounded, structure-only document tree.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TreeNode {
+    /// What the node is.
+    pub kind: TreeNodeKind,
+    /// The node's bounded label.
+    pub label: String,
+    /// The node's children, in document order. Every node carries the list, so every position
+    /// in the tree resolves.
+    #[serde(default)]
+    pub children: Vec<TreeNode>,
+}
+
+impl TreeNode {
+    /// How many nodes the tree holds, itself included.
+    #[must_use]
+    pub fn nodes(&self) -> usize {
+        1 + self.children.iter().map(Self::nodes).sum::<usize>()
+    }
 }
 
 /// The observed outcome of a physical primitive.
@@ -1034,8 +1095,9 @@ pub enum BrowserOutcome {
     /// One bounded hierarchical document tree.
     DocumentTree {
         tab_id: u64,
-        /// JSON-encoded semantic tree, bounded and structure-only.
-        tree: String,
+        /// The tree, within the adapter's node bound, or `None` when no document built one.
+        tree: Option<TreeNode>,
+        /// Whether the depth or node bound cut part of the tree.
         truncated: bool,
     },
     /// JPEG screenshot bytes encoded as base64.

@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::browser::adapter::TreeNodeKind;
 use crate::language::field_problem::FieldProblemKind;
 
 fn field(locator: &str, value: &str) -> PhysicalField {
@@ -48,7 +49,7 @@ fn every_kind_has_one_constructor_and_the_classes_of_its_table_row() {
         ),
         (find("Save", "control", 8), kind::FIND, Content, Read, true),
         (
-            query_semantic("Email", None, false, true),
+            query_semantic("Email", None, false, true, 8),
             kind::QUERY_SEMANTIC,
             Content,
             Read,
@@ -232,8 +233,8 @@ fn constructors_build_the_payloads_the_assets_read() {
             json!({"kind":"find","text":"Save changes","find_kind":"control","max_results":8}),
         ),
         (
-            query_semantic("Email address", Some("textbox"), false, true),
-            json!({"kind":"query_semantic","name":"Email address","role":"textbox","exact":false,"form_scope":true}),
+            query_semantic("Email address", Some("textbox"), false, true, 8),
+            json!({"kind":"query_semantic","name":"Email address","role":"textbox","exact":false,"form_scope":true,"max_results":8}),
         ),
         (
             describe(&["locator_a1b2c3d4_3".into(), "locator_a1b2c3d4_4".into()]),
@@ -759,11 +760,18 @@ fn typed_values_read_what_the_asset_returns() {
     assert!(targets.truncated);
 
     let tree: TreeValue = serde_json::from_value(json!({"tree": {"kind": "container",
-        "label": "", "children": [{"kind": "heading", "label": "Title", "children": []}]},
-        "nodes": 2, "truncated": false}))
+        "label": "", "children": [{"kind": "heading", "label": "Title", "children": []},
+        {"kind": "invented", "label": "Panel"}]}, "nodes": 3, "truncated": false}))
     .unwrap();
     assert_eq!(tree.tree.children[0].label, "Title");
-    assert_eq!(tree.nodes, 2);
+    assert_eq!(tree.tree.children[0].kind, TreeNodeKind::Heading);
+    assert_eq!(
+        tree.tree.children[1].kind,
+        TreeNodeKind::Container,
+        "a kind the service does not know is a container"
+    );
+    assert!(tree.tree.children[1].children.is_empty());
+    assert_eq!(tree.tree.nodes(), 3);
 
     let submitted: Submitted = serde_json::from_value(json!({"submitted": true})).unwrap();
     assert!(submitted.submitted);

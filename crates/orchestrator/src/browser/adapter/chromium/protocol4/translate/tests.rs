@@ -582,7 +582,7 @@ fn inspect_tree(max_depth: usize) -> (Value, bool, Vec<(String, u64, u64)>) {
             )
         })
         .collect();
-    (serde_json::from_str(&tree).unwrap(), truncated, asked)
+    (serde_json::to_value(&tree).unwrap(), truncated, asked)
 }
 
 #[test]
@@ -612,6 +612,62 @@ fn a_page_tree_merges_like_the_frames_cases() {
         truncated,
         "a depth of one leaves the embedded documents unread"
     );
+}
+
+#[test]
+fn a_tree_over_the_node_budget_is_cut_once_and_says_so() {
+    let wide = |label: &str, children: usize| {
+        let leaves: Vec<Value> = (0..children)
+            .map(|index| json!({"kind": "control", "label": format!("{label} {index}")}))
+            .collect();
+        json!({"kind": "container", "label": label, "children": leaves})
+    };
+    let (port, fake) = port(
+        inventory(),
+        Box::new(move |call| {
+            frames_of(call)
+                .iter()
+                .map(|frame| match frame.as_str() {
+                    "T" => returned(json!({"tree": wide("top", 99), "truncated": false})),
+                    other => returned(json!({"tree": wide(other, 199), "truncated": false})),
+                })
+                .collect()
+        }),
+    );
+    let (_, result) = unwrap_scoped(
+        call(
+            &port,
+            scoped(
+                scope(&["T.t1", "C.c1", "D.d1"], false),
+                BrowserCommand::InspectTree {
+                    tab_id: 12,
+                    locator: None,
+                    max_depth: 5,
+                },
+            ),
+        )
+        .unwrap(),
+    );
+    let BrowserOutcome::DocumentTree {
+        tree: Some(tree),
+        truncated,
+        ..
+    } = result
+    else {
+        panic!("a document tree");
+    };
+    assert_eq!(
+        tree.nodes(),
+        super::read::TREE_NODE_LIMIT,
+        "two embedded trees asked at once with the whole remainder are trimmed to the bound"
+    );
+    assert!(truncated, "the trim says the tree was cut");
+    let budgets: Vec<u64> = calls_seen(&fake)
+        .iter()
+        .flat_map(|call| call.calls.clone())
+        .map(|world| world.message["max_nodes"].as_u64().unwrap())
+        .collect();
+    assert_eq!(budgets, [400, 300, 300], "each document is told its share");
 }
 
 #[test]

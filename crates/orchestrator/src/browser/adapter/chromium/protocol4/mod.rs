@@ -183,6 +183,7 @@ fn translate(
             role,
             exact,
             form_scope,
+            max_results,
         } => read::query_semantic(
             l,
             reach(scope)?,
@@ -192,6 +193,7 @@ fn translate(
                 role: role.as_deref(),
                 exact,
                 form_scope,
+                max_results,
             },
         ),
         BrowserCommand::DescribeFocused { tab_id } => {
@@ -285,14 +287,14 @@ fn translate(
             tab_id,
             locator,
             full_page,
-            visual_settle,
-        } => capture::screenshot(l, tab_id, locator.as_deref(), full_page, visual_settle),
+            settle_ms,
+        } => capture::screenshot(l, tab_id, locator.as_deref(), full_page, settle_ms),
         BrowserCommand::ScreenshotRegion {
             tab_id,
             region,
             expected_viewport,
-            visual_settle,
-        } => capture::screenshot_region(l, tab_id, &region, &expected_viewport, visual_settle),
+            settle_ms,
+        } => capture::screenshot_region(l, tab_id, &region, &expected_viewport, settle_ms),
         BrowserCommand::Activate {
             tab_id,
             locator,

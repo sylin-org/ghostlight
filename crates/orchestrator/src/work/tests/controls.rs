@@ -147,6 +147,7 @@ fn cut_listing(left_out: LeftOut, modal_open: bool) -> BrowserOutcome {
         listing: Listing {
             left_out,
             modal_open,
+            truncated: true,
         },
     }
 }
@@ -282,5 +283,48 @@ fn repeated_controls_show_their_row_in_the_result_and_never_in_audit_or_history(
                 "{tool}"
             );
         }
+    }
+}
+
+#[test]
+fn a_selector_matching_thirty_controls_says_at_least_eight() {
+    for (truncated, summary) in [
+        (
+            true,
+            "At least 8 visible controls matched the semantic selector; none was chosen.",
+        ),
+        (
+            false,
+            "8 visible controls matched the semantic selector; none was chosen.",
+        ),
+    ] {
+        let (executor, browser, _, workspace, _) = fixture();
+        open_page(&executor, &browser, &workspace);
+        let save = |index: usize| ObservedTarget {
+            locator: format!("0:doc_top:locator_save_{index}"),
+            role: "button".into(),
+            name: "Save".into(),
+            ..Default::default()
+        };
+        browser.push(Ok(BrowserOutcome::Targets {
+            tab_id: 7,
+            targets: (0..8).map(save).collect(),
+            listing: Listing {
+                truncated,
+                ..Listing::default()
+            },
+        }));
+        let result = executor.execute(
+            &workspace,
+            "browser_click",
+            json!({"selector":{"name":"Save"}}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Failed, "{}", result.summary);
+        assert_eq!(result.summary, summary);
+        assert!(browser
+            .calls()
+            .iter()
+            .any(|call| matches!(call, BrowserCommand::QuerySemantic { max_results: 8, .. })));
     }
 }

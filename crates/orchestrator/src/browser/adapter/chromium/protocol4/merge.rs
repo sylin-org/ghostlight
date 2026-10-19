@@ -10,8 +10,8 @@
 
 use std::collections::HashMap;
 
-use super::world::{Text, TreeNode, TreeValue};
-use crate::browser::adapter::ObservedTarget;
+use super::world::{Text, TreeValue};
+use crate::browser::adapter::{ObservedTarget, TreeNode};
 use crate::language::area::{LeftOut, LeftOutKey};
 
 /// What separates the text of two documents.
@@ -281,7 +281,7 @@ pub fn subtree_plan(
     let used = match root {
         None => 0,
         Some(root) if root.truncated => return None,
-        Some(root) => count_nodes(&root.tree),
+        Some(root) => root.tree.nodes(),
     };
     (used < limit).then(|| SubtreePlan {
         max_depth: max_depth - 1,
@@ -327,7 +327,7 @@ pub fn append_and_trim(
             break;
         }
         let Some(result) = result else { continue };
-        nodes += count_nodes(&result.tree);
+        nodes += result.tree.nodes();
         truncated = truncated || result.truncated;
         match tree.as_mut() {
             None => tree = Some(result.tree),
@@ -345,11 +345,6 @@ pub fn append_and_trim(
         }
     }
     MergedTree { tree, truncated }
-}
-
-/// How many nodes a tree holds, itself included.
-fn count_nodes(node: &TreeNode) -> usize {
-    1 + node.children.iter().map(count_nodes).sum::<usize>()
 }
 
 /// Keep the descendants of `node` that fit in `budget`, in pre-order, and drop the rest.

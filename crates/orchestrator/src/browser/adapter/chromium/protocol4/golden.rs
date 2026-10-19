@@ -711,6 +711,7 @@ fn build(kind_name: &str, f: &Value) -> Message {
             optional("role"),
             flag("exact"),
             flag("form_scope"),
+            size("max_results"),
         ),
         kind::DESCRIBE => world::describe(&decode::<Vec<String>>("locators", &f["locators"])),
         kind::DESCRIBE_FOCUSED => world::describe_focused(),

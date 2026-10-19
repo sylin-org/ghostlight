@@ -724,8 +724,18 @@ fn outcome_samples() -> Vec<Outcome> {
             capabilities: 4,
             layers: 0,
         },
-        Outcome::SelectorUnresolved { matched: 0 },
-        Outcome::SelectorUnresolved { matched: 2 },
+        Outcome::SelectorUnresolved {
+            matched: 0,
+            more: false,
+        },
+        Outcome::SelectorUnresolved {
+            matched: 2,
+            more: false,
+        },
+        Outcome::SelectorUnresolved {
+            matched: 8,
+            more: true,
+        },
         Outcome::CompositionProgress {
             completed: 1,
             total: 3,

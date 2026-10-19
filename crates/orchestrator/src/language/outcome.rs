@@ -391,8 +391,9 @@ pub enum Outcome {
     TabsListed { count: usize },
     /// The authority in force was explained to the model (ADR-0136).
     PolicyExplained { capabilities: usize, layers: usize },
-    /// A semantic selector matched zero or several visible controls.
-    SelectorUnresolved { matched: usize },
+    /// A semantic selector matched zero or several visible controls. `more` says the page held
+    /// more matches than the listing kept, so `matched` is a lower bound.
+    SelectorUnresolved { matched: usize, more: bool },
     /// One governed flow or sequence finished with an explicit progress account.
     CompositionRan(super::composition::CompositionProgress),
     /// Confirmed children while the parent is still active.
@@ -615,10 +616,14 @@ impl Outcome {
             Self::CompositionUnrecorded => "Completion was not recorded.".into(),
             Self::StepNotStarted => "This step could not start.".into(),
 
-            Self::SelectorUnresolved { matched } => {
+            Self::SelectorUnresolved { matched, more } => {
                 if *matched == 0 {
                     "No visible control matched the semantic selector in the inspected content."
                         .into()
+                } else if *more {
+                    format!(
+                        "At least {matched} visible controls matched the semantic selector; none was chosen."
+                    )
                 } else {
                     format!(
                         "{matched} visible controls matched the semantic selector; none was chosen."
@@ -1104,7 +1109,7 @@ impl Outcome {
                 count: measured(*completed),
                 ..Observed::default()
             },
-            Self::SelectorUnresolved { matched: count } => Observed {
+            Self::SelectorUnresolved { matched: count, .. } => Observed {
                 count: measured(*count),
                 ..Observed::default()
             },
@@ -4020,7 +4025,11 @@ Changes are \"unsaved\".".into()),
             vec!["Wait for the page to finish loading with browser_wait, or inspect without a root selector."]
         );
         assert_eq!(
-            Outcome::SelectorUnresolved { matched: 0 }.next_steps(),
+            Outcome::SelectorUnresolved {
+                matched: 0,
+                more: false
+            }
+            .next_steps(),
             vec!["Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact."]
         );
         assert_eq!(

@@ -20,8 +20,6 @@ use crate::browser::adapter::documents::{DocumentObservation, DocumentScope};
 use crate::browser::adapter::BrowserOutcome;
 use crate::browser::BrowserError;
 
-/// The most preparation time a request may spend settling pages, in milliseconds.
-const SETTLE_CAP_MS: u64 = 1_000;
 /// The member of an asset's answer that says its output was cut.
 const TRUNCATED_FIELD: &str = "truncated";
 
@@ -118,7 +116,7 @@ impl Scope {
             .iter()
             .filter_map(|id| tree.real_ref(id))
             .collect();
-        let settle = Duration::from_millis(scope.settle_ms.min(SETTLE_CAP_MS));
+        let settle = Duration::from_millis(scope.settle_ms);
         Ok(Self {
             tree,
             allowed,
@@ -347,9 +345,7 @@ impl Scope {
     #[must_use]
     pub fn remaining_settle_ms(&self) -> u64 {
         let remaining = self.settle_until.saturating_duration_since(Instant::now());
-        u64::try_from(remaining.as_millis())
-            .unwrap_or(SETTLE_CAP_MS)
-            .min(SETTLE_CAP_MS)
+        u64::try_from(remaining.as_millis()).unwrap_or(u64::MAX)
     }
 }
 

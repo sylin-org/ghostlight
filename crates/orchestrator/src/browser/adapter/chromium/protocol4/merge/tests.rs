@@ -1,4 +1,5 @@
 use super::*;
+use crate::browser::adapter::TreeNodeKind;
 use crate::language::area::HIDDEN_STATE;
 
 fn target(locator: &str) -> ObservedTarget {
@@ -43,19 +44,14 @@ fn some(sections: &[Text]) -> Vec<Option<&Text>> {
 
 fn node(label: &str, children: Vec<TreeNode>) -> TreeNode {
     TreeNode {
-        kind: "container".into(),
+        kind: TreeNodeKind::Container,
         label: label.into(),
         children,
     }
 }
 
 fn value(tree: TreeNode, truncated: bool) -> TreeValue {
-    let nodes = count_nodes(&tree);
-    TreeValue {
-        tree,
-        nodes,
-        truncated,
-    }
+    TreeValue { tree, truncated }
 }
 
 fn labels(tree: &TreeNode) -> Vec<&str> {
@@ -429,7 +425,7 @@ fn subtrees_share_one_node_bound() {
     );
     let tree = merged.tree.expect("a tree");
     assert_eq!(labels(&tree), ["top", "frame 3", "frame 8"]);
-    assert_eq!(count_nodes(&tree), 5);
+    assert_eq!(tree.nodes(), 5);
     assert!(merged.truncated);
 }
 
@@ -446,7 +442,7 @@ fn subtrees_asked_together_are_trimmed_in_pre_order() {
         5,
     );
     let tree = merged.tree.expect("a tree");
-    assert_eq!(count_nodes(&tree), 5);
+    assert_eq!(tree.nodes(), 5);
     assert_eq!(labels(&tree), ["top", "frame 3", "frame 8"]);
     assert!(tree.children[2].children.is_empty());
     assert_eq!(tree.children[1].children.len(), 1);
@@ -473,7 +469,7 @@ fn a_trim_keeps_the_front_of_a_deep_tree() {
     );
     let tree = merged.tree.expect("a tree");
     assert_eq!(labels(&tree), ["one"]);
-    assert_eq!(count_nodes(&tree), 4);
+    assert_eq!(tree.nodes(), 4);
     assert_eq!(tree.children[0].children.len(), 2);
     assert!(merged.truncated);
 }

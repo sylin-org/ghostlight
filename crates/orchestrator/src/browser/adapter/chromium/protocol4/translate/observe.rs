@@ -22,8 +22,6 @@ use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalPoint};
 use crate::browser::BrowserError;
 use crate::workspace::StaleReason;
 
-/// The most preparation time a description may spend letting the page settle, in milliseconds.
-const SETTLE_CAP_MS: u64 = 1_000;
 /// How much longer than the page's own wait a waiting call may take, so the page answers
 /// before the call gives up.
 const CALL_MARGIN_MS: u64 = 500;
@@ -59,10 +57,39 @@ pub struct Subjects<'a> {
     pub focused: bool,
 }
 
+/// The call that waits up to `settle_ms` for the top document to stop moving. It answers rather
+/// than fails when the page does not settle in time.
+pub(super) fn settle(settle_ms: u64) -> PlannedCall {
+    PlannedCall::top(world::observe(
+        condition::VISUAL_SETTLE,
+        None,
+        None,
+        settle_ms,
+        false,
+    ))
+}
+
+/// Give the top document up to `settle_ms`, the authority's preparation budget, to stop moving,
+/// and go on whatever the answer. A zero budget sends nothing.
+pub(super) fn settle_top(l: &mut Link<'_>, tab_id: u64, settle_ms: u64) {
+    if settle_ms > 0 {
+        let budget = settle_ms + CALL_MARGIN_MS;
+        let _ = l.call(
+            tab_id,
+            &[settle(settle_ms)],
+            CallMode::Sequence,
+            None,
+            0,
+            budget,
+            None,
+        );
+    }
+}
+
 /// Describe the tab's documents and bind the request's subjects to them.
 ///
-/// With a preparation budget the top document first gets up to [`SETTLE_CAP_MS`] to settle,
-/// and a failure there changes nothing. A locator is current only while its frame still holds
+/// With a preparation budget the top document first gets up to `settle_ms` to settle, and a
+/// failure there changes nothing. A locator is current only while its frame still holds
 /// the loader that minted it: a frame that holds another loader, or that a complete inventory
 /// no longer has, replaced or removed the locator's document. A locator whose frame an
 /// incomplete inventory does not show binds nothing, and the incomplete mark says so. A point
@@ -82,18 +109,7 @@ pub fn describe_documents(
     subjects: Subjects<'_>,
     settle_ms: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
-    if settle_ms > 0 {
-        let settle = settle_ms.min(SETTLE_CAP_MS);
-        let budget = settle + CALL_MARGIN_MS;
-        let plan = PlannedCall::top(world::observe(
-            condition::VISUAL_SETTLE,
-            None,
-            None,
-            settle,
-            false,
-        ));
-        let _ = l.call(tab_id, &[plan], CallMode::Sequence, None, 0, budget, None);
-    }
+    settle_top(l, tab_id, settle_ms);
     let inventory = l.send(super::super::link::Frames(tab_id))?;
     let tree = FrameTree::from_inventory(&inventory)?;
     let mut bound: Vec<String> = Vec::new();

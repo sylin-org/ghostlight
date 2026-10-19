@@ -3665,7 +3665,7 @@ fn document_inspection_returns_the_tree_it_describes() {
     ]});
     browser.push(Ok(BrowserOutcome::DocumentTree {
         tab_id: 7,
-        tree: page.to_string(),
+        tree: serde_json::from_value(page.clone()).unwrap(),
         truncated: false,
     }));
     let first = executor.execute(
@@ -3697,7 +3697,7 @@ fn document_inspection_returns_the_tree_it_describes() {
     ]});
     browser.push(Ok(BrowserOutcome::DocumentTree {
         tab_id: 7,
-        tree: changed.to_string(),
+        tree: serde_json::from_value(changed.clone()).unwrap(),
         truncated: false,
     }));
     let second = executor.execute(
@@ -3728,7 +3728,7 @@ fn document_inspection_returns_the_tree_it_describes() {
     ]});
     browser.push(Ok(BrowserOutcome::DocumentTree {
         tab_id: 7,
-        tree: shallow.to_string(),
+        tree: serde_json::from_value(shallow.clone()).unwrap(),
         truncated: false,
     }));
     let third = executor.execute(

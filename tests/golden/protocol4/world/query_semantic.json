@@ -4,6 +4,7 @@
   "role": "textbox",
   "exact": false,
   "form_scope": true,
+  "max_results": 8,
   "settle_ms": 1500,
   "visual_settle": true
 }

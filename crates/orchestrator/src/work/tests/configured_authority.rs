@@ -145,7 +145,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
             } else {
                 assert!(
                     matches!(requested.first(), Some(BrowserCommand::QuerySemantic {
-                    tab_id: 7, name, role: Some(role), exact: true, form_scope: false,
+                    tab_id: 7, name, role: Some(role), exact: true, form_scope: false, ..
                 }) if name == "Visible draft" && role == "textbox"),
                     "{label}: ordinary labeled controls need no form ancestor: {requested:?}"
                 );
@@ -264,7 +264,7 @@ fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
             let requested = &commands[before..];
             assert!(
                 matches!(requested.first(), Some(BrowserCommand::QuerySemantic {
-                tab_id: 7, name, role: Some(role), exact: true, form_scope: false,
+                tab_id: 7, name, role: Some(role), exact: true, form_scope: false, ..
             }) if name == "Attachment" && role == "button"),
                 "standalone file inputs need no form ancestor: {requested:?}"
             );

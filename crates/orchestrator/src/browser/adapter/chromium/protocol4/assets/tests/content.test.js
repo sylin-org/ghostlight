@@ -422,10 +422,24 @@ test("every semantic role is producible", async () => {
   harness.setBody(body);
 
   for (const role of SEMANTIC_ROLES) {
-    const found = await harness.send({ kind: "query_semantic", name: role, role, exact: true });
+    const found = await harness.send({ kind: "query_semantic", name: role, role, exact: true, max_results: 8 });
     assert.equal(found.value.targets.length, 1, role);
     assert.equal(found.value.targets[0].role, role);
   }
+});
+
+test("a semantic query keeps the service's maximum and says when more matched", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  for (let index = 0; index < 30; index += 1) nativeControl(harness, body, "Save", "button");
+  harness.setBody(body);
+
+  const cut = await harness.send({ kind: "query_semantic", name: "Save", exact: true, max_results: 8 });
+  assert.equal(cut.value.targets.length, 8);
+  assert.equal(cut.value.truncated, true);
+  const whole = await harness.send({ kind: "query_semantic", name: "Save", exact: true, max_results: 30 });
+  assert.equal(whole.value.targets.length, 30);
+  assert.equal(whole.value.truncated, false);
 });
 
 test("a hidden input is not a control", async () => {
@@ -438,7 +452,7 @@ test("a hidden input is not a control", async () => {
   const names = (await harness.targets()).map((target) => target.name);
   const all = await harness.send({ kind: "inspect", inspect_kind: "all", max_items: 40, visual_settle: false });
   const found = await harness.send({ kind: "find", text: "Csrf", find_kind: "any", max_results: 5 });
-  const semantic = await harness.send({ kind: "query_semantic", name: "Csrf", exact: true });
+  const semantic = await harness.send({ kind: "query_semantic", name: "Csrf", exact: true, max_results: 8 });
 
   assert.ok(names.includes("Visible"));
   assert.ok(!names.includes("Csrf"));
@@ -615,7 +629,7 @@ test("a field with no label, aria-label or title is found by its placeholder", a
   assert.equal(found.value.targets.length, 1);
   assert.equal(found.value.targets[0].name, "Search the archive");
   assert.equal(found.value.targets[0].role, "textbox");
-  const selected = await harness.send({ kind: "query_semantic", name: "search the archive", exact: true });
+  const selected = await harness.send({ kind: "query_semantic", name: "search the archive", exact: true, max_results: 8 });
   assert.equal(selected.value.targets.length, 1);
   const titledName = await harness.send({ kind: "find", text: "order number", find_kind: "control", max_results: 5 });
   assert.equal(titledName.value.targets[0].name, "Order number");
@@ -3850,7 +3864,7 @@ test("a landmark item names its own area, and find and describe agree with inspe
   assert.equal(found.value.targets[0].area, "nav");
   const described = await harness.send({ kind: "describe", locators: [found.value.targets[0].locator] });
   assert.equal(described.value.targets[0].area, "nav");
-  const semantic = await harness.send({ kind: "query_semantic", name: "Pricing", exact: true });
+  const semantic = await harness.send({ kind: "query_semantic", name: "Pricing", exact: true, max_results: 8 });
   assert.equal(semantic.value.targets[0].area, "nav");
 });
 
@@ -3987,7 +4001,7 @@ test("every targets answer reports how many forms the document holds, kept or no
   assert.equal(inspected.value.forms, 3);
   const found = await harness.send({ kind: "find", text: "In first", find_kind: "control", max_results: 5 });
   assert.equal(found.value.forms, 3);
-  const semantic = await harness.send({ kind: "query_semantic", name: "In first", exact: true });
+  const semantic = await harness.send({ kind: "query_semantic", name: "In first", exact: true, max_results: 8 });
   assert.equal(semantic.value.forms, 3);
 });
 
@@ -4328,7 +4342,7 @@ test("find, inspect and the semantic query agree on context", async () => {
 
   const found = placesOf(await findControls(harness, "More options"), "More options");
   const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 40, visual_settle: false });
-  const queried = await harness.send({ kind: "query_semantic", name: "More options", exact: true });
+  const queried = await harness.send({ kind: "query_semantic", name: "More options", exact: true, max_results: 8 });
 
   assert.deepEqual(found, [["Alpha", 1], ["Alpha", 2], ["Beta", null]]);
   assert.deepEqual(placesOf(inspected.value.targets, "More options"), found);

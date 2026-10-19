@@ -14,6 +14,8 @@ use crate::language::page_refusal::PageRefusal;
 
 const NESTED: &str = "C:c1:locator_a1_1";
 const TOP_LOCATOR: &str = "T:t1:locator_a1_2";
+/// The preparation budget the authority hands a capture in these tests, in milliseconds.
+const SETTLE_MS: u64 = 300;
 
 /// What the scripted extension answers to a primitive other than `frames` and `list_tabs`.
 enum Out {
@@ -714,7 +716,7 @@ fn a_viewport_capture_is_one_primitive_after_a_best_effort_settle() {
             tab_id: 12,
             locator: None,
             full_page: false,
-            visual_settle: None,
+            settle_ms: SETTLE_MS,
         },
     )
     .unwrap();
@@ -737,6 +739,10 @@ fn a_viewport_capture_is_one_primitive_after_a_best_effort_settle() {
     );
     let calls = calls_seen(&fake);
     assert_eq!(calls[0].calls[0].message["condition"], "visual_settle");
+    assert_eq!(
+        calls[0].calls[0].message["timeout_ms"], SETTLE_MS,
+        "the page settles for the authority's budget"
+    );
     assert!(calls[0].calls[0].frame.is_none());
     let captures = captures_seen(&fake);
     assert_eq!(captures[0].clip, CaptureClip::Viewport);
@@ -754,22 +760,22 @@ fn a_capture_goes_on_when_the_settle_fails_and_skips_it_when_asked() {
         }),
         |_| Out::Value(captured(view())),
     );
-    let shot = |full_page, visual_settle| BrowserCommand::Screenshot {
+    let shot = |full_page, settle_ms| BrowserCommand::Screenshot {
         tab_id: 12,
         locator: None,
         full_page,
-        visual_settle,
+        settle_ms,
     };
-    let full = call(&port, shot(true, None)).unwrap();
+    let full = call(&port, shot(true, SETTLE_MS)).unwrap();
     let BrowserOutcome::Screenshot { viewport, .. } = full else {
         panic!("a screenshot");
     };
     assert_eq!(viewport.scope, CaptureScope::FullPage);
-    call(&port, shot(false, Some(false))).unwrap();
+    call(&port, shot(false, 0)).unwrap();
     assert_eq!(
         primitives_seen(&fake),
         ["list_tabs", "call", "capture", "list_tabs", "capture"],
-        "visual_settle false sends no settle"
+        "a zero budget sends no settle"
     );
     assert_eq!(captures_seen(&fake)[0].clip, CaptureClip::FullPage);
 }
@@ -783,7 +789,7 @@ fn a_target_capture_clips_to_the_target_placed_in_the_top_viewport() {
             tab_id: 12,
             locator: Some(NESTED.into()),
             full_page: false,
-            visual_settle: None,
+            settle_ms: SETTLE_MS,
         },
     )
     .unwrap();
@@ -808,6 +814,36 @@ fn a_target_capture_clips_to_the_target_placed_in_the_top_viewport() {
     );
 }
 
+#[test]
+fn a_target_screenshot_under_one_second_still_measures() {
+    let (port, fake) = rig(page(), |_| Out::Value(captured(view())));
+    let cancelled = AtomicBool::new(false);
+    let deadline = Instant::now() + Duration::from_millis(800);
+    let result = port.call(
+        FOUR,
+        WORKSPACE,
+        BrowserCommand::Screenshot {
+            tab_id: 12,
+            locator: Some(NESTED.into()),
+            full_page: false,
+            settle_ms: 400,
+        },
+        deadline,
+        &cancelled,
+    );
+    let Ok(BrowserOutcome::Screenshot { viewport, .. }) = result else {
+        panic!("a target capture inside the deadline, not {result:?}");
+    };
+    assert_eq!(viewport.scope, CaptureScope::Target);
+    let calls = calls_seen(&fake);
+    assert_eq!(kinds(&calls[0]), ["observe", "box", "owner_box"]);
+    assert_eq!(
+        calls[0].calls[0].message["timeout_ms"], 400,
+        "the settle spends the authority's budget, not a second of its own"
+    );
+    assert!(calls[0].timeout_ms < 800, "the call fits in the deadline");
+}
+
 fn region() -> PhysicalRectangle {
     PhysicalRectangle {
         x: 10.0,
@@ -826,7 +862,7 @@ fn a_region_capture_magnifies_the_page_rectangle_of_the_view_it_was_chosen_on() 
             tab_id: 12,
             region: region(),
             expected_viewport: expected_view(),
-            visual_settle: Some(false),
+            settle_ms: 0,
         },
     )
     .unwrap();
@@ -864,13 +900,13 @@ fn a_tab_its_window_does_not_show_is_refused_before_any_capture() {
         tab_id: 12,
         locator: None,
         full_page: false,
-        visual_settle: None,
+        settle_ms: SETTLE_MS,
     };
     let region = BrowserCommand::ScreenshotRegion {
         tab_id: 12,
         region: region(),
         expected_viewport: expected_view(),
-        visual_settle: None,
+        settle_ms: SETTLE_MS,
     };
     assert_eq!(call(&port, viewport), Err(BrowserError::TabNotShowing));
     assert_eq!(call(&port, region), Err(BrowserError::TabNotShowing));
@@ -902,7 +938,7 @@ fn a_region_capture_of_a_moved_view_is_stale_and_drops_the_image() {
                     tab_id: 12,
                     region: region(),
                     expected_viewport: expected_view(),
-                    visual_settle: None,
+                    settle_ms: SETTLE_MS,
                 },
             ),
             Err(BrowserError::StaleView),
@@ -918,7 +954,7 @@ fn a_region_capture_of_a_moved_view_is_stale_and_drops_the_image() {
             tab_id: 12,
             region: region(),
             expected_viewport: expected_view(),
-            visual_settle: None,
+            settle_ms: SETTLE_MS,
         },
     )
     .is_ok());

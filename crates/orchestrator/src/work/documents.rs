@@ -286,12 +286,16 @@ impl ApplicationExecutor {
                 ));
                 return Err(BrowserError::DocumentAccess(decision));
             }
-            if let BrowserCommand::Screenshot { visual_settle, .. }
-            | BrowserCommand::ScreenshotRegion { visual_settle, .. } = &mut command
+            if let BrowserCommand::Screenshot { settle_ms, .. }
+            | BrowserCommand::ScreenshotRegion { settle_ms, .. } = &mut command
             {
                 // Target lookup may already have spent this invocation's preparation.
                 // Direct capture retains its binary permission and avoids document inventory.
-                *visual_settle = Some(context.settlement_pending.swap(false, Ordering::SeqCst));
+                *settle_ms = if context.settlement_pending.swap(false, Ordering::SeqCst) {
+                    preparation_budget_ms(context.deadline)
+                } else {
+                    0
+                };
             }
             return self.dispatch_physical(context, command);
         }
@@ -308,13 +312,7 @@ impl ApplicationExecutor {
                 | BrowserCommand::StartRecording { .. }
         ) && context.settlement_pending.swap(false, Ordering::SeqCst)
         {
-            // Reserve at least half the remaining deadline for actual work.
-            (context
-                .deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis() as u64
-                / 2)
-            .min(language::settlement::MAX_WAIT_MS)
+            preparation_budget_ms(context.deadline)
         } else {
             0
         };
@@ -471,6 +469,18 @@ impl ApplicationExecutor {
             Err(error) => Err(error),
         }
     }
+}
+
+/// The one rule for how long an invocation may let its page settle: half of what its deadline
+/// leaves, at most [`language::settlement::MAX_WAIT_MS`], so the work itself keeps the other half.
+fn preparation_budget_ms(deadline: Instant) -> u64 {
+    let left = deadline
+        .saturating_duration_since(Instant::now())
+        .as_millis()
+        / 2;
+    u64::try_from(left)
+        .unwrap_or(u64::MAX)
+        .min(language::settlement::MAX_WAIT_MS)
 }
 
 fn validate_inventory(inventory: &DocumentInventory) -> Result<(), BrowserError> {

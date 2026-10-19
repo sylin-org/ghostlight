@@ -22,7 +22,6 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tr", "ul"
   ]);
   const TEXT_OMIT_TAGS = new Set(["input", "noscript", "option", "script", "select", "style", "template", "textarea"]);
-  const DOCUMENT_TREE_NODE_LIMIT = 400;
   // Elements the outline walk may visit, kept or pruned, before it stops and reports truncation.
   const DOCUMENT_TREE_VISIT_LIMIT = 4000;
   // What a masked credential value reads as. One short marker keeps masking cheap to read.
@@ -1726,7 +1725,9 @@ ${line}` : line;
     return true;
   }
 
+  // The service names the most targets to return. One match past it says the answer was cut.
   function querySemanticTargets(message) {
+    const maximum = message.max_results;
     const matches = [];
     const pool = candidates("controls");
     const view = observationView();
@@ -1734,13 +1735,13 @@ ${line}` : line;
       if (!element.isConnected) continue;
       if (matchesSemanticSelector(element, message)) {
         matches.push(element);
-        if (matches.length > 8) break;
+        if (matches.length > maximum) break;
       }
     }
-    const kept = matches.slice(0, 8);
+    const kept = matches.slice(0, maximum);
     return {
       targets: annotateRepeats(kept.map((element) => observation(element, view)), kept),
-      truncated: matches.length > 8 || pool.length > 3000,
+      truncated: matches.length > maximum || pool.length > 3000,
       forms: formCount(view)
     };
   }
@@ -1754,7 +1755,7 @@ ${line}` : line;
     return { text: "", truncated: false, article_found: false };
   }
 
-  function inspectTree(rootElement, maxDepth, maximum = DOCUMENT_TREE_NODE_LIMIT) {
+  function inspectTree(rootElement, maxDepth, maximum) {
     const controlRoles = ["button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "tab", "menuitem", "option", "slider", "spinbutton"];
     // `count` holds the nodes kept so far; a node is counted on entry and given back if it is pruned.
     let count = 0;
@@ -2644,7 +2645,7 @@ ${line}` : line;
     }
     if (message.kind === "inspect_tree") {
       const root = message.locator ? resolve(message.locator, ctx) : document.body || document.documentElement;
-      const extract = () => inspectTree(root, message.max_depth ?? 6, message.max_nodes ?? DOCUMENT_TREE_NODE_LIMIT);
+      const extract = () => inspectTree(root, message.max_depth ?? 6, message.max_nodes);
       return sampled(message, ctx, extract, (res) => Boolean(res?.tree && Array.isArray(res.tree.children) && res.tree.children.length > 0));
     }
     if (message.kind === "inspect") {
