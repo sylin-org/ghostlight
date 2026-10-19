@@ -571,3 +571,24 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   a single-page app's tab bound, and a browser restart leaves its handle naming no open tab.
   `tests/golden/agents/native/linux.txt` is unchanged. D2: the adapter-protocol-4 design and
   ARCHITECTURE's hello (`life`), and the confirmation rule with the life.
+
+## Follow-up (2026-10-19)
+
+- F1, one set of tools per agent: landed (this commit). Recorded as ADR-0203's amendment of
+  2026-10-19, which answers question 1. `service/toolset.rs` seats every MCP connection: one whose
+  observed source is the running app (process id and start time) of the agent its client claims,
+  while a connection of that process and agent offers the tools, stands by with
+  `language::STANDBY_INSTRUCTIONS` and an empty catalog; when the holder ends, the first that stands
+  by is promoted and sends `notifications/tools/list_changed`. The source is now read right after
+  the opening's answer for every MCP session, so a fresh `initialize` waits on it (amends ADR-0202
+  Decision 3); `initialize_is_answered_before_the_source_is_read` went with that promise. The
+  relay's ancestor walk returns ids and start times (`ancestors`, `Ancestor`); relay revision 4 is
+  unpublished, so no `RELAY` bump. Proves: `two_connections_from_one_agent_process_get_one_toolset`,
+  `connections_that_are_not_one_agents_each_get_the_toolset` (two processes, an editor that hosts
+  the agent, an unread source) and
+  `the_duplicate_is_promoted_with_list_changed_when_the_holder_ends` in `service/mod.rs`. No
+  catalog, result or audit golden changed, and `tests/golden/agents/native/linux.txt` is unchanged.
+  No journey changes: no journey client claims a catalog agent's name. For the coordinator, on a
+  test machine with Claude Code, the plugin and the installer's entry: the model is offered 23
+  Ghostlight tools, not 46; after the entry that holds them is disabled in `/mcp`, the other
+  entry's 23 arrive on the next turn.

@@ -15,7 +15,8 @@
 //! [`spawn_detached`] creates a process that holds nothing of its starter: no standard handle, no
 //! console, no inherited pipe, file or socket. [`ProcessIdentity`] and the functions around it
 //! (Windows only) bind a process id to its creation time, so a reused id never matches.
-//! [`ancestor_images`] reads the executable paths of a process's ancestors on both systems.
+//! [`ancestors`] reads the ids, start times and executable paths of a process's ancestors on both
+//! systems.
 //! [`PipeStream`], [`PipeListener`], [`connect_pipe`] and [`pipe_pair`] (Windows only) are the
 //! pipe behind `crate::endpoint`; [`current_uid`] and [`peer_credentials`] (Linux only) are its
 //! user check and the peer's process id. [`session`] is the listener every Ghostlight process registers and the process-wide
@@ -52,7 +53,7 @@ use linux::process_facts_reader as platform_facts;
 #[cfg(windows)]
 use windows::process_facts_reader as platform_facts;
 
-pub use ancestry::ancestor_images;
+pub use ancestry::{ancestors, Ancestor};
 #[cfg(target_os = "linux")]
 pub use linux::{current_uid, peer_credentials, spawn_detached, PeerCredentials};
 #[cfg(windows)]

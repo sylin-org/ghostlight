@@ -14,7 +14,9 @@ now enforced on every request), and the schema-4 migration's handling of `channe
 Decided and amended by ADR-0203 (2026-10-19): delegated item 5 (client-written tab bindings) is
 decided there. Decision 1 (the reached browser's id joins the channel as a durable declared fact),
 Decision 15 and slice S4 (the tab-group title reads the opener's agent, and reuse reads the
-claim-derived agent) and Decision 23 (the browser port drops its workspace parameter) are amended.
+claim-derived agent) and Decision 23 (the browser port drops its workspace parameter) are amended. ADR-0203's
+amendment of 2026-10-19 also amends Decision 3: the source is read right after the opening's
+answer for every MCP session, and a fresh session's `initialize` answer waits on it.
 
 Paths without a crate are under `crates/orchestrator/src`, and `ui/` is `crates/orchestrator/ui`.
 Line numbers are the `dev` tree of 2026-10-18, with b3 landed as `feat(provenance): every

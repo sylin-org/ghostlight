@@ -379,6 +379,18 @@ audit, history and flow references. This keeps the edge free of product vocabula
 revision logic. Content-free readiness inspection is a `control` opening that returns before
 workspace creation and never demand-starts the authority or writes audit.
 
+One agent gets one set of tools (`service/toolset.rs`, ADR-0203, amendment of 2026-10-19). An
+agent can reach Ghostlight through two server entries at once, such as Claude Code with both the
+plugin and the installer's entry, and a client never removes a tool it was offered. So an MCP
+connection whose source is the running app (process id and start time) of the agent its client
+claims to be, when a connection of that same process and agent already offers the tools, stands
+by: its `initialize` instructions say Ghostlight is already connected to this agent, and its
+catalog is empty. Its calls are still served. When the connection that offers the tools ends, and
+the service is not ending, the first that stands by is promoted and sends
+`notifications/tools/list_changed`. Two processes, a source that could not be read, a source that
+is not the claimed agent's own app (an editor whose terminal runs the agent) and the command line
+never stand by.
+
 The browser side is adapter protocol 4, carried opaquely by the browser relay. Its messages are
 hello, primitive request, receipt, browser event, cancel, and presentation. It carries a closed
 primitive vocabulary but no model-facing tool names, product defaults, governance decisions,
@@ -396,13 +408,13 @@ and refusal. The workspace lists active connections independently; closing one r
 live details. Receipt storage receives a bounded attribution projection with no reported application
 text, while the bounded live human projection receives that claim separately. Restored history
 never borrows a current session's identity. A connection's attribution is minted when the service
-answers its opening, so its time is the accept time. Once per connection, after that answer and,
-for a fresh session, after the `initialize` answer, the service reads the ancestors of its peer
-process from the operating system and keeps the app it saw start the connection: the first ancestor
-that lies in a catalog agent's installed app, else the first that is not a shell, interpreter or
-other wrapper, as an agent id and an executable file name (ADR-0161, amendment of 2026-10-18;
-ADR-0202 Decision 3). Neither answer waits on the read; the first request does. Nothing a client
-sends takes part. The window sets the client's claim
+answers its opening, so its time is the accept time. Once per connection, right after that answer,
+the service reads the ancestors of its peer process from the operating system and keeps the app it
+saw start the connection: the first ancestor that lies in a catalog agent's installed app, else the
+first that is not a shell, interpreter or other wrapper, as an agent id and an executable file name
+(ADR-0161, amendment of 2026-10-18; ADR-0202 Decision 3). The opening's answer never waits on the
+read; the `initialize` answer does, because the read decides the session's instructions (ADR-0203,
+amendment of 2026-10-19). Nothing a client sends takes part. The window sets the client's claim
 beside that source. Receipts keep the source and, when the claim names a catalog agent, that
 agent's catalog id as a labelled claim, never the client's words. One function in
 `language::provenance` names the agent and composes the explanation, live and from history alike:

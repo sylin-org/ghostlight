@@ -355,7 +355,7 @@ mod ancestry {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use crate::os::ancestor_images;
+    use crate::os::ancestors;
     use crate::os::ancestry::{walk, ProcessFacts};
 
     /// A synthetic process table: each id with its parent, its start time and its image.
@@ -374,22 +374,43 @@ mod ancestry {
             .collect()
     }
 
-    fn walked(rows: &[(u32, Option<u32>, u64, Option<&str>)], limit: usize) -> Vec<String> {
+    /// The ancestors the walk finds above process 10, as (id, start time, image).
+    fn walked(
+        rows: &[(u32, Option<u32>, u64, Option<&str>)],
+        limit: usize,
+    ) -> Vec<(u32, u64, String)> {
         let table = table(rows);
         walk(10, limit, |id| table.get(&id).cloned())
             .into_iter()
-            .map(|image| image.to_string_lossy().into_owned())
+            .map(|ancestor| {
+                (
+                    ancestor.process_id,
+                    ancestor.started,
+                    ancestor.image.to_string_lossy().into_owned(),
+                )
+            })
+            .collect()
+    }
+
+    /// The images of [`walked`] alone.
+    fn images(rows: &[(u32, Option<u32>, u64, Option<&str>)], limit: usize) -> Vec<String> {
+        walked(rows, limit)
+            .into_iter()
+            .map(|(_, _, image)| image)
             .collect()
     }
 
     #[test]
-    fn the_walk_reads_each_parent_nearest_first_and_stops_at_the_top() {
+    fn the_walk_reads_each_parent_nearest_first_with_its_id_and_start_and_stops_at_the_top() {
         let rows = [
             (10, Some(20), 5, Some("edge")),
             (20, Some(30), 4, Some("shell")),
             (30, None, 1, Some("app")),
         ];
-        assert_eq!(walked(&rows, 16), ["shell", "app"]);
+        assert_eq!(
+            walked(&rows, 16),
+            [(20, 4, "shell".to_owned()), (30, 1, "app".to_owned())]
+        );
     }
 
     #[test]
@@ -400,7 +421,7 @@ mod ancestry {
             (30, Some(40), 3, Some("two")),
             (40, None, 2, Some("three")),
         ];
-        assert_eq!(walked(&rows, 2), ["one", "two"]);
+        assert_eq!(images(&rows, 2), ["one", "two"]);
     }
 
     #[test]
@@ -413,7 +434,7 @@ mod ancestry {
             (30, Some(40), 3, None),
             (40, None, 2, Some("app")),
         ];
-        assert_eq!(walked(&unreadable, 16), ["shell"]);
+        assert_eq!(images(&unreadable, 16), ["shell"]);
         assert!(walked(&[], 16).is_empty(), "the process itself is unknown");
     }
 
@@ -424,17 +445,22 @@ mod ancestry {
             (20, Some(30), 4, Some("shell")),
             (30, Some(10), 9, Some("later process")),
         ];
-        assert_eq!(walked(&rows, 16), ["shell"]);
+        assert_eq!(images(&rows, 16), ["shell"]);
     }
 
     #[test]
     fn this_test_process_has_real_ancestors_with_absolute_paths() {
-        let images = ancestor_images(std::process::id(), 16);
-        assert!(!images.is_empty(), "the test runner has a parent");
-        assert!(images.len() <= 16);
-        for image in images {
-            assert!(image.is_absolute(), "{}", image.display());
+        let found = ancestors(std::process::id(), 16);
+        assert!(!found.is_empty(), "the test runner has a parent");
+        assert!(found.len() <= 16);
+        for ancestor in &found {
+            assert!(ancestor.image.is_absolute(), "{}", ancestor.image.display());
         }
-        assert!(ancestor_images(std::process::id(), 0).is_empty());
+        assert_eq!(
+            ancestors(std::process::id(), 16)[0],
+            found[0],
+            "the same parent reads as the same process"
+        );
+        assert!(ancestors(std::process::id(), 0).is_empty());
     }
 }

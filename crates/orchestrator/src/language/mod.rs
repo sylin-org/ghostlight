@@ -73,6 +73,11 @@ Read a page with browser_read, and get handles for its controls from browser_fin
 Act with those handles, for example with browser_click or browser_fill_form; timeout_ms bounds the whole call. \
 Handles expire when the page navigates; a handle follows its control through a re-render the page can prove, and a stale handle's refusal says why. \
 Every result states its effect and whether repeating it is safe.";
+/// Model-facing instructions of a connection that offers no tools because another connection of
+/// the same agent already does, such as Claude Code with both the plugin and the installer's entry
+/// (ADR-0203, amendment of 2026-10-19). The tools come later only when that connection ends.
+pub const STANDBY_INSTRUCTIONS: &str = "Ghostlight is already connected to this agent through another server entry, so this one offers no tools. \
+Use the Ghostlight tools you already have; if that connection ends, this one offers them.";
 /// Closed role vocabulary a semantic selector may filter on, and the enum the catalog advertises.
 ///
 /// Every entry is a role the page asset's `roleFor` can produce for an observed control, and the

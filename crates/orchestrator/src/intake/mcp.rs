@@ -13,8 +13,14 @@
 //! also carries the same lean JSON after `Result: ` (ADR-0198 Decision 24). [`ResumeState`] is what lets a session continue across a service restart
 //! (Decision 12), and [`failure_templates`] holds the answers an edge gives when it cannot
 //! reach the service (Decision 2).
+//!
+//! A session can stand by: its instructions then say that Ghostlight is already connected to this
+//! agent, and the service answers its catalog with no tools until it is promoted. Whether it stands
+//! by is the service's [`Seating`] decision, asked once with the name the client claims (ADR-0203,
+//! amendment of 2026-10-19).
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::fmt;
 
 use crate::intake::session::{
     ServerProfile, ServiceContent, ServiceRequest, ServiceResponse, ToolDefinition,
@@ -29,6 +35,7 @@ use thiserror::Error;
 use super::server_profile;
 use crate::language::audit_health::Storage;
 use crate::language::intake::{EdgeFailure, ProtocolRefusal};
+use crate::language::STANDBY_INSTRUCTIONS;
 use crate::provenance::bounded_claim;
 use crate::work::result::{Effect, Readiness, Status};
 use crate::work::InvocationId;
@@ -176,6 +183,27 @@ impl Handled {
     }
 }
 
+/// The service's decision whether a session stands by, asked once with the bounded name its
+/// client claims, or none: true when another connection of the same agent already offers the
+/// tools.
+pub struct Seating(Box<StandsBy>);
+
+/// The decision a [`Seating`] makes.
+type StandsBy = dyn FnOnce(Option<&str>) -> bool + Send;
+
+impl Seating {
+    /// The decision `stands_by` makes.
+    pub fn new(stands_by: impl FnOnce(Option<&str>) -> bool + Send + 'static) -> Self {
+        Self(Box::new(stands_by))
+    }
+}
+
+impl fmt::Debug for Seating {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Seating")
+    }
+}
+
 /// One MCP client session, independent of the stream that carries it.
 #[derive(Debug)]
 pub struct McpSession {
@@ -184,6 +212,10 @@ pub struct McpSession {
     revision: Option<&'static str>,
     /// The name the client claimed for itself, bounded ([`bounded_claim`]); none when it sent none.
     claim: Option<String>,
+    /// Whether the session stands by: another connection of the same agent offers the tools.
+    standby: bool,
+    /// The decision a fresh session asks when it initializes, until then.
+    seating: Option<Seating>,
     /// Running tool calls: the invocation id to the client's id.
     calls: HashMap<InvocationId, Value>,
     /// Running tool calls: the client's id, as JSON text, to the invocation id.
@@ -208,6 +240,8 @@ impl McpSession {
             phase: Phase::Fresh,
             revision: None,
             claim: None,
+            standby: false,
+            seating: None,
             calls: HashMap::new(),
             call_ids: HashMap::new(),
             catalog_waiters: VecDeque::new(),
@@ -239,6 +273,45 @@ impl McpSession {
     #[must_use]
     pub fn claim(&self) -> Option<&str> {
         self.claim.as_deref()
+    }
+
+    /// Let `seating` decide whether this session stands by: now for a session that is already
+    /// initialized, which a resume token continued, and otherwise when its `initialize` arrives,
+    /// before it is answered.
+    pub fn seat(&mut self, seating: Seating) {
+        if self.is_initialized() {
+            self.standby = (seating.0)(self.claim());
+        } else {
+            self.seating = Some(seating);
+        }
+    }
+
+    /// Whether the session stands by, so its client is offered no tools.
+    #[must_use]
+    pub fn stands_by(&self) -> bool {
+        self.standby
+    }
+
+    /// Stop standing by, because the connection that offered this agent the tools ended. Returns
+    /// the line that tells the client its tool list changed, so it lists the tools again; none
+    /// when the session did not stand by or its client has not finished initializing, since it
+    /// then lists them anyway.
+    pub fn promote(&mut self) -> Vec<Value> {
+        let promoted = std::mem::take(&mut self.standby);
+        if promoted && self.phase == Phase::Ready {
+            vec![list_changed()]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The instructions this session's client is given.
+    fn instructions(&self) -> &str {
+        if self.standby {
+            STANDBY_INSTRUCTIONS
+        } else {
+            &self.server.instructions
+        }
     }
 
     /// Whether `initialize` has been answered, so requests are served.
@@ -296,7 +369,7 @@ impl McpSession {
         match response {
             ServiceResponse::Catalog { tools } => self.render_catalog(tools),
             ServiceResponse::CatalogChanged { .. } if self.phase == Phase::Ready => {
-                vec![json!({"jsonrpc": JSONRPC_VERSION, "method": method::TOOLS_LIST_CHANGED})]
+                vec![list_changed()]
             }
             ServiceResponse::Result {
                 id,
@@ -450,7 +523,7 @@ impl McpSession {
                 "supportedVersions": SUPPORTED_REVISIONS,
                 "capabilities": {"tools": {"listChanged": true}},
                 "_meta": meta,
-                "instructions": self.server.instructions,
+                "instructions": self.instructions(),
                 "ttlMs": 0,
                 "cacheScope": "private"
             }),
@@ -474,6 +547,9 @@ impl McpSession {
         {
             self.claim = bounded_claim(name);
         }
+        if let Some(seating) = self.seating.take() {
+            self.standby = (seating.0)(self.claim());
+        }
         self.revision = Some(revision);
         self.phase = Phase::Initialized;
         success(
@@ -482,7 +558,7 @@ impl McpSession {
                 "protocolVersion": revision,
                 "capabilities": {"tools": {"listChanged": true}},
                 "serverInfo": {"name": self.server.name, "version": self.server.version},
-                "instructions": self.server.instructions
+                "instructions": self.instructions()
             }),
         )
     }
@@ -674,6 +750,11 @@ impl ResumeState {
             .map_err(|_| ResumeError::Encoding)?;
         serde_json::from_slice(&json).map_err(|_| ResumeError::Content)
     }
+}
+
+/// The notification that tells a client its tool list changed.
+fn list_changed() -> Value {
+    json!({"jsonrpc": JSONRPC_VERSION, "method": method::TOOLS_LIST_CHANGED})
 }
 
 /// Echo a served MCP revision, or counteroffer the latest.

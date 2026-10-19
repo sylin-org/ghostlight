@@ -11,6 +11,10 @@
 //! is too, except that a policy's channel switch admits or refuses a request by it (ADR-0202
 //! Decision 22a).
 //!
+//! The same read names the source's running process, its id and start time ([`SourceProcess`]).
+//! It stays in memory and is never recorded: the service reads it only to offer one agent one set
+//! of tools (ADR-0203, amendment of 2026-10-19).
+//!
 //! When the name a connection's client claims is a catalog agent's, the attribution also keeps that
 //! agent's catalog id as [`Attribution::claimed_agent`], so history names the agent after a restart
 //! as the live row did (ADR-0202 Decision 14a). It is a claim, closed and bounded; the client's own
@@ -20,7 +24,7 @@
 //! the client's `initialize`, from a resume token, and into a connection's evidence. A client that
 //! names nothing claims nothing (ADR-0203 Decision 9).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,6 +32,7 @@ use crate::agent::Agent;
 use crate::install::apps::{is_wrapper, AppLocations, PATH_SEPARATORS};
 use crate::install::icons::IconPlaces;
 use crate::intake::session::IntakeChannel;
+use ghostlight_relay::os::Ancestor;
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
@@ -111,65 +116,105 @@ pub struct Source {
     pub image: String,
 }
 
-impl Source {
-    /// The source of a connection whose peer is the process `process_id`: its ancestors are read
+/// The running process of a connection's [`Source`]: its id and its start time, which together
+/// name one process, since an id the system hands out again belongs to a later process.
+///
+/// Observed with the source and never claimed. It stays in memory: no record, line or surface
+/// carries it.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SourceProcess {
+    /// The process id.
+    pub id: u32,
+    /// When the process started, in the system's own unit.
+    pub started: u64,
+}
+
+/// What one read of a connection's peer found: the [`Source`] the record keeps, and the
+/// [`SourceProcess`] it names, which stays in memory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Observation {
+    /// The app that started the connection.
+    pub source: Source,
+    /// The running process of that app.
+    pub process: SourceProcess,
+}
+
+impl Observation {
+    /// What started a connection whose peer is the process `process_id`: its ancestors are read
     /// (at most [`ANCESTOR_LIMIT`]), and the first that lies in a catalog agent's installed app
     /// wins, else the first that is not a wrapper. None when no process id is known or no ancestor
     /// but wrappers can be read; a failed read never fails the connection.
     #[must_use]
-    pub fn observe(process_id: Option<u32>) -> Option<Self> {
-        let ancestors = ghostlight_relay::os::ancestor_images(process_id?, ANCESTOR_LIMIT);
-        if ancestors.iter().all(|image| is_wrapper(image)) {
+    pub fn of_peer(process_id: Option<u32>) -> Option<Self> {
+        let ancestors = ghostlight_relay::os::ancestors(process_id?, ANCESTOR_LIMIT);
+        if ancestors.iter().all(|ancestor| is_wrapper(&ancestor.image)) {
             return None;
         }
         let apps = AppLocations::discover(&IconPlaces::system());
         Self::among(&ancestors, |image| apps.agent_of(image))
     }
 
-    /// The source among `ancestors`, nearest first, with `agent_of` saying whose installed app a
-    /// program is: the first ancestor that is an agent's app, else the first that is not a
+    /// The observation among `ancestors`, nearest first, with `agent_of` saying whose installed
+    /// app a program is: the first ancestor that is an agent's app, else the first that is not a
     /// wrapper.
     fn among(
-        ancestors: &[PathBuf],
+        ancestors: &[Ancestor],
         agent_of: impl Fn(&Path) -> Option<&'static str>,
     ) -> Option<Self> {
         let mut nearest = None;
-        for image in ancestors.iter().filter(|image| !is_wrapper(image)) {
-            if let Some(agent) = agent_of(image) {
-                return Self::of(image, Some(agent));
+        for ancestor in ancestors
+            .iter()
+            .filter(|ancestor| !is_wrapper(&ancestor.image))
+        {
+            if let Some(agent) = agent_of(&ancestor.image) {
+                return Self::of(ancestor, Some(agent));
             }
-            nearest.get_or_insert(image);
+            nearest.get_or_insert(ancestor);
         }
         Self::of(nearest?, None)
     }
 
-    /// The source whose executable is at `image`, the installed app of `agent` when one is named.
-    fn of(image: &Path, agent: Option<&str>) -> Option<Self> {
+    /// The observation of `ancestor`, the installed app of `agent` when one is named.
+    fn of(ancestor: &Ancestor, agent: Option<&str>) -> Option<Self> {
         Some(Self {
-            agent: agent.and_then(bounded_agent_id),
-            image: bounded_file_name(&image.to_string_lossy())?,
+            source: Source {
+                agent: agent.and_then(bounded_agent_id),
+                image: bounded_file_name(&ancestor.image.to_string_lossy())?,
+            },
+            process: SourceProcess {
+                id: ancestor.process_id,
+                started: ancestor.started,
+            },
         })
     }
 }
 
-/// How the service reads a connection's [`Source`] from its peer's process id: the operating
-/// system ([`Source::observe`]) in the service, and a stand-in in tests that hold or name the read.
+/// How the service reads what started a connection from its peer's process id: the operating
+/// system ([`Observation::of_peer`]) in the service, and a stand-in in tests that hold or name the
+/// read.
 #[derive(Clone)]
-pub struct SourceReader(Arc<dyn Fn(Option<u32>) -> Option<Source> + Send + Sync>);
+pub struct SourceReader(Arc<dyn Fn(Option<u32>) -> Option<Observation> + Send + Sync>);
 
 impl SourceReader {
     /// The reader that asks the operating system.
     #[must_use]
     pub fn system() -> Self {
-        Self(Arc::new(Source::observe))
+        Self(Arc::new(Observation::of_peer))
     }
 
     /// A reader that answers with `read`, for tests.
     #[cfg(test)]
     pub(crate) fn with(
-        read: impl Fn(Option<u32>) -> Option<Source> + Send + Sync + 'static,
+        read: impl Fn(Option<u32>) -> Option<Observation> + Send + Sync + 'static,
     ) -> Self {
         Self(Arc::new(read))
+    }
+
+    /// Read what started the connection whose peer is the process `peer`, once. A failed read is
+    /// none and never fails the connection.
+    #[must_use]
+    pub fn read(&self, peer: Option<u32>) -> Option<Observation> {
+        (self.0)(peer)
     }
 }
 
@@ -255,11 +300,11 @@ impl Attribution {
         }
     }
 
-    /// This attribution with the source `reader` finds above the connection's `peer` process,
-    /// read once. A failed read leaves the source unknown and never fails the connection.
+    /// This attribution with the source of `observation`, the one read of the connection's peer.
+    /// None leaves the source unknown.
     #[must_use]
-    pub fn observed(mut self, peer: Option<u32>, reader: &SourceReader) -> Self {
-        self.source = (reader.0)(peer);
+    pub fn observed(mut self, observation: Option<&Observation>) -> Self {
+        self.source = observation.map(|observation| observation.source.clone());
         self
     }
 
@@ -359,6 +404,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     /// The agent the window shows for a connection these details describe.
@@ -628,9 +675,25 @@ mod tests {
         assert!(rewritten.get("signature").is_none());
     }
 
-    /// A chain of ancestors, nearest first.
-    fn chain(images: &[&str]) -> Vec<PathBuf> {
-        images.iter().map(PathBuf::from).collect()
+    /// A chain of ancestors, nearest first: the nearest is process 1, and each is older than the
+    /// one below it.
+    fn chain(images: &[&str]) -> Vec<Ancestor> {
+        (1..)
+            .zip(images)
+            .map(|(id, image)| Ancestor {
+                process_id: id,
+                started: u64::from(100 - id),
+                image: PathBuf::from(image),
+            })
+            .collect()
+    }
+
+    /// The source [`Observation::among`] finds in `ancestors`.
+    fn source_among(
+        ancestors: &[Ancestor],
+        agent_of: impl Fn(&Path) -> Option<&'static str>,
+    ) -> Option<Source> {
+        Observation::among(ancestors, agent_of).map(|observation| observation.source)
     }
 
     /// Claude Desktop's program as the Store installs it.
@@ -646,7 +709,7 @@ mod tests {
 
     #[test]
     fn a_source_is_the_nearest_agent_app_past_wrappers_and_other_programs() {
-        let source = Source::among(
+        let observation = Observation::among(
             &chain(&[
                 "C:/Users/ann/.ghostlight/bin/ghostlight.exe",
                 "C:/Windows/System32/cmd.exe",
@@ -659,17 +722,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            source,
+            observation.source,
             Source {
                 agent: Some("claude-desktop".into()),
                 image: "claude.exe".into(),
             }
         );
+        assert_eq!(
+            observation.process,
+            SourceProcess { id: 5, started: 95 },
+            "the process is the source's own, never a wrapper below it"
+        );
     }
 
     #[test]
     fn with_no_agent_app_the_source_is_the_nearest_program_that_is_not_a_wrapper() {
-        let source = Source::among(
+        let source = source_among(
             &chain(&[
                 "/usr/bin/node",
                 "/usr/bin/bash",
@@ -687,7 +755,7 @@ mod tests {
             }
         );
         let same_name_elsewhere =
-            Source::among(&chain(&["C:/Users/ann/Downloads/claude.exe"]), store_claude).unwrap();
+            source_among(&chain(&["C:/Users/ann/Downloads/claude.exe"]), store_claude).unwrap();
         assert_eq!(
             same_name_elsewhere.agent, None,
             "an app is recognized by where it is installed, not by its file name"
@@ -697,15 +765,15 @@ mod tests {
 
     #[test]
     fn only_wrappers_or_nothing_leave_the_source_unknown() {
-        assert_eq!(Source::among(&[], store_claude), None);
+        assert_eq!(source_among(&[], store_claude), None);
         assert_eq!(
-            Source::among(
+            source_among(
                 &chain(&["C:/Windows/System32/cmd.exe", "/usr/bin/python3.12"]),
                 store_claude
             ),
             None
         );
-        assert_eq!(Source::observe(None), None);
+        assert_eq!(Observation::of_peer(None), None);
     }
 
     /// How long the source observation takes for a cargo test peer on this machine. It reads the
@@ -719,7 +787,7 @@ mod tests {
         let mut spans: Vec<std::time::Duration> = (0..RUNS)
             .map(|_| {
                 let start = std::time::Instant::now();
-                assert!(Source::observe(peer).is_some());
+                assert!(Observation::of_peer(peer).is_some());
                 start.elapsed()
             })
             .collect();

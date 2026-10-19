@@ -1677,3 +1677,60 @@ Localhost, loopback and link-local addresses follow policy under ADR-0155. A lay
 refused lists them as never-touch, and that refusal is the layer's decision under Decision 7.2's
 first sentence. The ADR-0122 line under What this supersedes and amends is corrected to match. The
 rest of Decision 7.2 stands.
+
+## Amendment (2026-10-19): one set of tools per agent
+
+This answers question 1. The owner, 2026-10-19: the Claude Code plugin must "work regardless".
+Plugin only, installer only, or both, the person ends up with one working Ghostlight and one set
+of tools.
+
+**What was measured.** linux-2 L2-04 (`docs/tasks/linux-2/LEDGER.md`), Claude Code 2.1.303 on a
+test machine:
+
+- With the plugin and the installer's entry, both servers start, and the model is offered 46
+  Ghostlight tools: 23 `mcp__ghostlight__*` and 23 `mcp__plugin_ghostlight_ghostlight__*`.
+- The installer's edge is a child of Claude Code. The plugin's edge is its great-grandchild:
+  Claude Code, `npm exec`, the node launcher, then `ghostlight mcp`.
+- Claude Code honors `notifications/tools/list_changed` for added tools on the next turn. It never
+  removes a tool it was offered.
+
+So the plugin keeps its server, and the service makes the second registration harmless. A server
+keeps its tools back only by answering its first `tools/list` with none.
+
+**Decision.**
+
+1. **One agent's connections.** Two MCP connections are one agent's when both observed sources
+   (ADR-0202 Decisions 3 and 4: the peer's ancestors, wrappers such as npm and node skipped) name
+   the same running process, by process id and start time, and that process is the installed app
+   of the agent each client claims to be. The process comes from the operating system, never from
+   the client. The claim only keeps connections apart: an editor whose terminal runs an agent, or
+   an extension host that runs two agents, is not the claimed agent's own app. Two separate
+   processes, a source that could not be read and the command line are never one agent's
+   connections. The process identity stays in memory; no record or surface carries it.
+2. **One offers, the rest stand by.** When a connection of that agent already offers the tools, a
+   new one stands by. Its `initialize` instructions say Ghostlight is already connected to this
+   agent (`language::STANDBY_INSTRUCTIONS`), and its `tools/list` answers no tools. Its calls are
+   still served.
+3. **Promotion.** When the connection that offers the tools ends, the first that stands by for the
+   same agent offers them and sends `notifications/tools/list_changed`, so its client lists them on
+   its next turn. A connection that ends while the service ends promotes nobody.
+4. **When the source is read.** This amends ADR-0202 Decision 3. The source is read once, right
+   after the opening's answer, for every MCP session, fresh or resumed. The opening's answer still
+   never waits on it, so the edge's opening deadline is untouched. A fresh session's `initialize`
+   answer does wait on it, because the read decides the instructions. The first request waited on
+   the same read before, so a session is not slower overall.
+5. **A resumed session** is seated by the same rule, in the order the edges reconnect. Its client
+   keeps whatever tools it was offered, and its calls are served either way. A known limit: after a
+   `replace`, the connection that comes back first offers the tools, even when it was the one
+   standing by. If the other one later ends, the agent has no Ghostlight tools until it restarts.
+6. **Where it lives.** `service/toolset.rs` holds the live connections and decides, under one lock,
+   which one offers the tools. The session engine (`intake/mcp.rs`) keeps whether its own session
+   stands by, for its instructions and its catalog. The relay's ancestor walk now returns each
+   ancestor's process id and start time beside its executable (`crates/relay/src/os/ancestry.rs`).
+   No frame or field changes. Relay revision 4 is not yet published, so the connectors guard asks
+   for no `RELAY` bump. Decision 13's "this ADR changes no relay or edge source" is amended for this
+   one change.
+
+Slice I11 takes option A: the plugin keeps its `npx -y ghostlight` server, and its "the plugin or
+`ghostlight install`, not both" line is not needed. The RC notes still tell plugin users to disable
+the plugin until the cutover, because npm still serves 1.3.14.

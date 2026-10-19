@@ -214,9 +214,10 @@ See [ADR-0195](../adr/0195-bounded-settlement-and-subject-scoped-page-work.md).
 
 ## Server instructions
 
-Every protocol edge sends the same service-owned instructions at initialization. A client that
-loads tool schemas lazily picks its first calls from this text alone, so it teaches the working
-loop in six short sentences and names only catalog tools:
+Every protocol edge sends the same service-owned instructions at initialization, except a
+connection that stands by (below). A client that loads tool schemas lazily picks its first calls
+from this text alone, so it teaches the working loop in six short sentences and names only catalog
+tools:
 
 > Ghostlight controls the user's visible Chromium browser. Open or reuse a tab with
 > browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is
@@ -227,6 +228,19 @@ loop in six short sentences and names only catalog tools:
 > browser_fill_form; timeout_ms bounds the whole call. Handles expire when the page navigates; a handle follows its
 > control through a re-render the page can prove, and a stale handle's refusal says why. Every
 > result states its effect and whether repeating it is safe.
+
+One agent gets one set of tools. When a second connection comes from the same running app of the
+same agent, such as Claude Code with both the plugin and the installer's entry, its first
+`tools/list` returns no tools and its instructions say only this:
+
+> Ghostlight is already connected to this agent through another server entry, so this one offers
+> no tools. Use the Ghostlight tools you already have; if that connection ends, this one offers
+> them.
+
+When the connection that offers the tools ends, the one that stood by sends
+`notifications/tools/list_changed` and lists the whole catalog. The process is the one Ghostlight
+observed start the connection, never a client's claim; see ARCHITECTURE and
+[ADR-0203](../adr/0203-one-owner-for-each-fact.md), amendment of 2026-10-19.
 
 ## Result envelope
 
