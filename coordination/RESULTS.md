@@ -1,23 +1,24 @@
 # Latest result
 
-[0057] linux-claude, 2026-10-19: L2-04, Claude Code with both the plugin and the installer's entry.
+[0058] linux-claude, 2026-10-19: L2-02, the installers install from a local bundle.
 
-- Scope: the owner narrowed linux-2 on this machine to CachyOS ([0056], ledger Notes). L2-01,
-  L2-03, L2-13 and L2-14 are blocked by that decision.
-- Method:
-  - Claude Code 2.1.303 on test-01, in an isolated `CLAUDE_CONFIG_DIR`.
-  - The plugin `ghostlight@sylin-org-plugins` 1.0.1, from this repository's marketplace.
-  - The installer's entry exactly as `ghostlight install` writes it.
-  - `npx` was a stand-in that runs this repository's 2.0 launcher, because npm serves 1.3.14.
-  - A local Messages API stand-in on 127.0.0.1 recorded the tools offered to the model. No login
-    was used.
-- Facts:
-  1. Both servers start, and the model is offered 46 Ghostlight tools: 23 per server.
-  2. The plugin's server is dropped only when a configured server has the same command and args.
-     The name and `env` do not count, `${HOME}` is expanded first, and the configured server wins.
-  3. Parents: the installer's edge is a child of Claude Code. The plugin's edge sits under
-     `npm exec ghostlight` and then the node launcher.
-  4. `tools/list_changed` is honored as a re-list. Added tools reach the model on the next turn;
-     removed tools do not. A duplicate keeps itself out only by an empty first `tools/list`.
-- Side finding (install/mod.rs): the installer ignores `CLAUDE_CONFIG_DIR`.
-- Details: docs/tasks/linux-2/LEDGER.md, L2-04.
+- 422e4696 `feat(install)`: `GHOSTLIGHT_FROM=<folder>` in `get.sh` and `get.ps1`.
+  - The folder is the release workflow's unpacked `release-candidate` artifact, or a folder of
+    release downloads.
+  - Each image is copied and the copy is checked against `SHA256SUMS` by the download rules.
+  - Anything unbound, missing or different is refused before anything runs.
+  - Nothing is fetched from GitHub. The GitHub CLI's provenance check still runs when present.
+  - It cannot be combined with `GHOSTLIGHT_VERSION`. `--restore` and `GHOSTLIGHT_NO_REGISTER`
+    work with it.
+- Docs: both script heads, the installation guide ("Test a build before its release"), and
+  RELEASE.md cutover steps 1 to 3, which now prove the install on the bundle, not on rc.1.
+- Tests:
+  - `tests/installer-shell.mjs` passes on test-01.
+  - `tests/installer-powershell.ps1` gains the local cases; CI's Windows job runs them.
+  - `get.ps1` was also run here in PowerShell 7.6.5 against stub images.
+- Still naming rc.1, for windows-claude: `docs/release/store-disclosure-2.0.md`,
+  `docs/release/notes-v2.0.0-rc.1.md` and STATUS's release order.
+- For Part 2: the bundle's extension ZIP has no development key, so testers load `extension/`
+  from the bundle's revision.
+- Seen once on ubuntu CI (run 39253295760): `a_quit_answers_new_invocations_with_shutting_down`
+  read a closed connection. It passed on the next run.
