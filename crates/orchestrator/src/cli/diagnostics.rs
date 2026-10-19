@@ -6,7 +6,7 @@
 
 use anyhow::bail;
 use ghostlight_bridge::diagnostics::{
-    marker_path, prune_directory, resolve, set_marker, Activation, Component, ENV_DIR,
+    marker_path, prune_directory, resolve, set_marker, Activation, Component, EDGE_LOGS, ENV_DIR,
 };
 use std::path::{Path, PathBuf};
 
@@ -296,28 +296,24 @@ fn run_show(
     }
     // A component the filter left out is absent by request, not because its diagnostics were off.
     let wanted = component;
-    for component in [
-        Component::Orchestrator,
-        Component::EdgeMcp,
-        Component::EdgeBrowser,
-    ]
-    .into_iter()
-    .filter(|known| wanted.is_none_or(|wanted| wanted == known.as_str()))
-    {
+    for component in writers().filter(|known| wanted.is_none_or(|wanted| wanted == *known)) {
         let present = records.iter().any(|record| {
-            record.get("component").and_then(serde_json::Value::as_str) == Some(component.as_str())
+            record.get("component").and_then(serde_json::Value::as_str) == Some(component)
         });
         if !present {
-            println!(
-                "No {} records in range; its diagnostics were probably off.",
-                component.as_str()
-            );
+            println!("No {component} records in range; its diagnostics were probably off.");
         }
     }
     Ok(())
 }
 
-/// Parse a window like `30s`, `10m`, `2h`, or `1d` into milliseconds.
+/// The name of every component that writes into the diagnostics directory: the service, then
+/// each edge log as `ghostlight_relay::log` spells it.
+fn writers() -> impl Iterator<Item = &'static str> {
+    std::iter::once(Component::Orchestrator.as_str())
+        .chain(EDGE_LOGS.into_iter().map(|log| log.as_str()))
+}
+
 /// The end of a shown line: the operation, then the detail, with a space between when there are
 /// both. An invocation id and a tool name must not read as one word.
 fn op_and_detail(op: &str, detail: &str) -> String {
@@ -328,6 +324,7 @@ fn op_and_detail(op: &str, detail: &str) -> String {
     }
 }
 
+/// Parse a window like `30s`, `10m`, `2h`, or `1d` into milliseconds.
 fn parse_window(text: &str) -> anyhow::Result<u128> {
     let digits: String = text
         .chars()
@@ -352,7 +349,15 @@ fn parse_window(text: &str) -> anyhow::Result<u128> {
 
 #[cfg(test)]
 mod tests {
-    use super::op_and_detail;
+    use super::{op_and_detail, writers};
+
+    #[test]
+    fn show_names_the_service_and_each_edge_log_once() {
+        assert_eq!(
+            writers().collect::<Vec<_>>(),
+            ["orchestrator", "edge-mcp", "edge-browser"]
+        );
+    }
 
     #[test]
     fn the_operation_and_its_detail_read_as_two_words() {

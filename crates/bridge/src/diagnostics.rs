@@ -44,28 +44,13 @@ pub mod event {
     pub const PROCESS_FAILED: &str = "process_failed";
     pub const PROCESS_EXITED: &str = "process_exited";
     pub const IDLE_EXIT: &str = "idle_exit";
-    pub const NATIVE_HELLO_RECEIVED: &str = "native_hello_received";
-    pub const NATIVE_INPUT_CLOSED: &str = "native_input_closed";
-    pub const NATIVE_INPUT_FAILED: &str = "native_input_failed";
-    pub const SERVICE_CONNECT_FAILED: &str = "service_connect_failed";
     pub const RUNTIME_PUBLISHED: &str = "runtime_published";
     pub const PROCESS_STARTED: &str = "process_started";
     pub const SINK_OPENED: &str = "sink_opened";
     pub const SINK_CLOSED: &str = "sink_closed";
-    pub const DEMAND_START_ATTEMPT: &str = "demand_start_attempt";
-    pub const DEMAND_START_SPAWNED: &str = "demand_start_spawned";
-    pub const DEMAND_START_ALREADY_RUNNING: &str = "demand_start_already_running";
-    pub const DEMAND_START_PENDING: &str = "demand_start_pending";
-    pub const DEMAND_START_RETRY_DEFERRED: &str = "demand_start_retry_deferred";
-    pub const DEMAND_START_ACTIVATED: &str = "demand_start_activated";
-    pub const DEMAND_START_DEPLOYMENT_IN_PROGRESS: &str = "demand_start_deployment_in_progress";
-    pub const DEMAND_START_FAILED: &str = "demand_start_failed";
-    pub const SERVICE_CONNECTED: &str = "service_connected";
-    pub const SERVICE_DISCONNECTED: &str = "service_disconnected";
     pub const HARNESS_ATTACHED: &str = "harness_attached";
     pub const HARNESS_DETACHED: &str = "harness_detached";
     pub const ADAPTER_ATTACHED: &str = "adapter_attached";
-    pub const ADAPTER_REPLACED: &str = "adapter_replaced";
     pub const ADAPTER_DISCONNECTED: &str = "adapter_disconnected";
     pub const HEARTBEAT_LOST: &str = "heartbeat_lost";
     pub const HEARTBEAT_RESUMED: &str = "heartbeat_resumed";
@@ -78,20 +63,19 @@ pub mod event {
     pub const AGENT_ICON_SKIPPED: &str = "agent_icon_skipped";
 }
 
-/// Which Ghostlight process is writing. Component names appear in file names and records.
+/// Which process writes through this sink. Its name appears in file names and records. The edge
+/// writes its own logs into the same directory, and `ghostlight_relay::log::Component` names them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Component {
+    /// The service, `ghostlight-service`.
     Orchestrator,
-    EdgeMcp,
-    EdgeBrowser,
 }
 
 impl Component {
+    /// The component's name in file names and records.
     pub fn as_str(self) -> &'static str {
         match self {
             Component::Orchestrator => "orchestrator",
-            Component::EdgeMcp => "edge-mcp",
-            Component::EdgeBrowser => "edge-browser",
         }
     }
 }
@@ -538,7 +522,7 @@ impl fmt::Debug for Sink {
 
 /// The edge's logs. The edge writes one file per role, `<component>.jsonl`, and stops writing it
 /// once it reaches [`EDGE_LOG_FULL_BYTES`] (`ghostlight_relay::log`).
-const EDGE_LOGS: [EdgeLog; 2] = [EdgeLog::EdgeMcp, EdgeLog::EdgeBrowser];
+pub const EDGE_LOGS: [EdgeLog; 2] = [EdgeLog::EdgeMcp, EdgeLog::EdgeBrowser];
 
 /// The name of the file the edge writes for `log`.
 fn edge_log_name(log: EdgeLog) -> String {
@@ -883,7 +867,7 @@ mod tests {
         let home = root.to_path_buf();
         set_marker(&home, true).expect("marker");
         let sink = Sink::birth_with(
-            Component::EdgeMcp,
+            Component::Orchestrator,
             "9.9.9-test",
             &home,
             None,
@@ -907,7 +891,7 @@ mod tests {
         let root = temp_root("toggle");
         let home = root.to_path_buf();
         let sink = Sink::birth_with(
-            Component::EdgeMcp,
+            Component::Orchestrator,
             "9.9.9-test",
             &home,
             None,
@@ -952,7 +936,7 @@ mod tests {
         let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_for_callback = Arc::clone(&seen);
         let sink = Sink::birth_with(
-            Component::EdgeBrowser,
+            Component::Orchestrator,
             "9.9.9-test",
             &home,
             None,

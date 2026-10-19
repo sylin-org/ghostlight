@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a, I9b, I4, I5, I2, I6, I8 and I10 have landed. I12 and I13 can start. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
+I1, I3, I7, I9a, I9b, I4, I5, I2, I6, I8, I10 and I12 have landed. I13 can start. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
 a test machine.
 
 ## Slices
@@ -27,7 +27,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I6 | fix(install): the roster cache follows the acts, and a command reads it once | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I8 | fix(packaging): the carriers agree with the service's rule and words | none | none | cross-lane the installer journeys; see Notes | landed (this commit) |
 | I10 | refactor(install): install words in language/deployment, and the browser list composed once | none | ux-2 closes (`install/mod.rs`) | cross-lane `language/outcome.rs`; see Notes | landed (this commit) |
-| I12 | refactor(diagnostics): one spelling of the edge's logs, and no name nobody writes | none | none | - | todo |
+| I12 | refactor(diagnostics): one spelling of the edge's logs, and no name nobody writes | none | none | see Notes | landed (this commit) |
 | I13 | refactor(win-peer): one token module for its two callers | none | none | - | todo |
 
 ## Notes
@@ -298,3 +298,16 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   refusal is back. Core's hunks stay in the working tree for core's own slice. The fixup also
   drops a doc line the move of `argument_count_phrase` left above `registration_state`. The gate
   ran on an export of the fixup's tree, not on the shared working tree.
+- I12, the loop: the bridge's `EDGE_LOGS` (the relay's `Component::EdgeMcp` and `EdgeBrowser`) is
+  now public, and `cli/diagnostics.rs`'s `writers()` names the service, then each edge log as
+  `relay::log` spells it. `diagnostics show` reads it for its "No ... records in range" lines.
+  Proved by `show_names_the_service_and_each_edge_log_once`, an extra test. Within the slice.
+- I12, the event names: the fifteen that went are the four `native_*` and `service_connect_failed`
+  names, the eight `demand_start_*` names, `service_connected`, `service_disconnected` and
+  `adapter_replaced`. The edge's `service_connected` and `service_disconnected` lines are spelled
+  by `relay::log::Event`, and the recording stop reason `service_disconnected` is its own
+  vocabulary; neither read the bridge's names.
+- I12, the sink tests that birthed a sink as an edge component now birth it as the service, the
+  only component that writes through it. `parse_window`'s doc line, which sat above
+  `op_and_detail`, moved to its function.
+- I12 changes no golden and needs no journey. `linux.txt` is unaffected.
