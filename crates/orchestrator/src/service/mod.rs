@@ -1930,7 +1930,7 @@ impl LiveSession {
 ///
 /// No browser is asked here: the session's first call confirms each tab against its browser's
 /// own list (ADR-0203 Decision 1). A tab written without a URL digest, by a build before digests,
-/// cannot be confirmed and is not brought back, so its handle reads as no longer open.
+/// cannot be confirmed and is not brought back, so its handle names no open tab.
 fn remember_resumed_tabs(workspaces: &WorkspaceStore, workspace: &WorkspaceId, owned: &[OwnedTab]) {
     for tab in owned {
         if let Some(url) = tab.url_digest.as_deref().and_then(UrlDigest::parse) {

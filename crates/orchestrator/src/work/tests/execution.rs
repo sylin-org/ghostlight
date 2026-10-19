@@ -3173,7 +3173,10 @@ fn cross_workspace_tab_discovery_names_owning_workspace_and_guidance() {
     assert_eq!(result.status, Status::Failed);
     assert_eq!(result.facts["reason"], "ownership_mismatch");
     assert_eq!(result.facts["owner_workspace"], "Workspace B");
-    assert_eq!(result.summary, "That tab handle belongs to Workspace B.");
+    assert_eq!(
+        result.summary,
+        "That handle belongs to another Ghostlight session (Workspace B)."
+    );
     assert_eq!(
         result.next_steps,
         vec!["Call browser_tabs with action list to see this session's tabs, then continue with those handles."]
@@ -3514,7 +3517,9 @@ fn cross_workspace_tab_discovery_stress_permutations() {
                 assert_eq!(result.facts["owner_workspace"], expected_owner);
                 assert_eq!(
                     result.summary,
-                    format!("That tab handle belongs to {expected_owner}.")
+                    format!(
+                        "That handle belongs to another Ghostlight session ({expected_owner})."
+                    )
                 );
                 assert_eq!(
                     result.next_steps,
@@ -4088,6 +4093,80 @@ fn a_moved_view_is_a_stale_view_with_a_screenshot_next_step() {
     assert_eq!(
         clicked.next_steps,
         vec!["Call browser_screenshot to obtain a current view handle."]
+    );
+}
+
+#[test]
+fn a_point_outside_the_image_gives_the_image_size() {
+    let (executor, browser, _, workspace, tab_handle, _) = workspace_with_a_target();
+    let viewport = ViewportGeometry {
+        scope: CaptureScope::Viewport,
+        page_x: 0.0,
+        page_y: 0.0,
+        css_width: 800.0,
+        css_height: 600.0,
+        visual_page_x: 0.0,
+        visual_page_y: 0.0,
+        visual_css_width: 800.0,
+        visual_css_height: 600.0,
+        device_scale: 1.0,
+        zoom: 1.0,
+        output_scale: 0.5,
+    };
+    browser.push(Ok(BrowserOutcome::Screenshot {
+        tab_id: 7,
+        mime_type: "image/jpeg".into(),
+        data: "image".into(),
+        width: 400,
+        height: 300,
+        viewport,
+    }));
+    let screenshot = executor.execute(
+        &workspace,
+        "browser_screenshot",
+        json!({"tab":tab_handle}),
+        &CancellationToken::default(),
+    );
+    let view = screenshot.facts["view"].as_str().unwrap().to_owned();
+    let dispatched = browser.calls().len();
+
+    for (tool, input) in [
+        (
+            "browser_click",
+            json!({"tab":tab_handle,"view":view,"x":400,"y":10}),
+        ),
+        (
+            "browser_screenshot",
+            json!({"tab":tab_handle,"view":view,"x":300,"y":0,"width":101,"height":10}),
+        ),
+    ] {
+        let refused = executor.execute(&workspace, tool, input, &CancellationToken::default());
+        assert_eq!(
+            refused.status,
+            Status::Failed,
+            "{tool}: {}",
+            refused.summary
+        );
+        assert_eq!(refused.effect, Effect::None, "{tool}");
+        assert_eq!(refused.facts["reason"], "outside_image", "{tool}");
+        assert_eq!(
+            refused.facts["image"],
+            json!({"width":400,"height":300}),
+            "{tool}"
+        );
+        assert_eq!(
+            refused.summary,
+            "Those coordinates are outside the view's image, which is 400 by 300 pixels."
+        );
+        assert_eq!(
+            refused.next_steps,
+            vec!["Repeat with coordinates inside the image, or call browser_screenshot for a new view."]
+        );
+    }
+    assert_eq!(
+        browser.calls().len(),
+        dispatched,
+        "nothing reaches the browser"
     );
 }
 

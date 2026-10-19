@@ -56,8 +56,8 @@ use crate::language::{
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
         CheckFailure, ExtensionAdvice, Observed, Outcome, Refusal, StaleHelp, TargetRole,
-        WorkspaceReason, CANDIDATE_TABS_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT,
-        STALE_FACT,
+        WorkspaceReason, BROWSER_PINNED_FACT, CANDIDATE_TABS_FACT, HANDLE_TAB_FACT,
+        IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
     },
     page_refusal::{PageGesture, PageRefusal},
     Operation, Record, TakeScreenshot,
@@ -2144,58 +2144,57 @@ impl ApplicationExecutor {
         let offer = context.findings.take_offer();
         // A held tab repeats the refusal of the page that held it, never a pause.
         let held = match &error {
-            WorkspaceError::Held(hold) => {
-                Some((self.held_decision(context, hold), observed_host(&hold.url)))
-            }
+            WorkspaceError::Held(hold) => Some(self.held_decision(context, hold)),
             _ => None,
         };
-        let mut reason = match error {
-            WorkspaceError::NotOwnedTab
-            | WorkspaceError::NotOwnedTarget
-            | WorkspaceError::NotOwnedView => WorkspaceReason::OwnershipMismatch {
-                owner: owner.clone(),
-            },
-            _ => WorkspaceReason::from(error),
-        };
-        if let WorkspaceReason::StaleTarget { reason, help } = &mut reason {
-            *help = stale_help(context, *reason, offer.as_ref(), acted_on);
+        let (mut refusal, fact) = language::outcome::workspace_refusal(error);
+        let mut facts = json!({"reason":fact});
+        if let Some(denial) = held {
+            facts = with_denial_facts(denial, facts);
         }
-        let refusal = match &held {
-            Some((_, host)) => Refusal::TabHeld { host: host.clone() },
-            None => Refusal::WorkspaceUnusable {
-                reason: reason.clone(),
-            },
-        };
+        if let Refusal::WorkspaceUnusable { reason } = &mut refusal {
+            match reason {
+                WorkspaceReason::OwnershipMismatch { owner: named } => {
+                    if let Some(owner) = &owner {
+                        facts[OWNER_FACT] = Value::String(owner.clone());
+                    }
+                    *named = owner;
+                }
+                WorkspaceReason::StaleTarget { reason, help } => {
+                    *help = stale_help(context, *reason, offer.as_ref(), acted_on);
+                    facts[STALE_FACT] = Value::String(reason.word().into());
+                }
+                WorkspaceReason::AmbiguousTab => {
+                    facts[CANDIDATE_TABS_FACT] = self.candidate_tabs(context);
+                }
+                WorkspaceReason::HandleOnOtherTab(Some(tab)) => {
+                    facts[HANDLE_TAB_FACT] = Value::String(tab.clone());
+                }
+                WorkspaceReason::OutsideImage(Some(size)) => {
+                    facts[IMAGE_SIZE_FACT] = json!({"width":size.width,"height":size.height});
+                }
+                _ => {}
+            }
+        }
+        if let Some(offer) = offer {
+            facts[RECOVERY_CANDIDATES_FACT] = Value::Array(offer.candidates);
+            if let Refusal::WorkspaceUnusable {
+                reason:
+                    WorkspaceReason::StaleTarget {
+                        help: StaleHelp::Replacement { target, .. },
+                        ..
+                    },
+            } = &refusal
+            {
+                facts[REPLACEMENT_FACT] = Value::String(target.clone());
+            }
+        }
         let summary = refusal.summary();
         let status = if held.is_some() {
             Status::Blocked
         } else {
             Status::Failed
         };
-        let held = held.map(|(denial, _)| denial);
-        let mut facts = json!({"reason":reason.as_fact()});
-        if let Some(denial) = held {
-            facts = with_denial_facts(denial, facts);
-        }
-        if let WorkspaceReason::StaleTarget { reason, .. } = &reason {
-            facts[STALE_FACT] = Value::String(reason.word().into());
-        }
-        if let Some(owner) = owner {
-            facts["owner_workspace"] = Value::String(owner);
-        }
-        if reason == WorkspaceReason::AmbiguousTab {
-            facts[CANDIDATE_TABS_FACT] = self.candidate_tabs(context);
-        }
-        if let Some(offer) = offer {
-            facts[RECOVERY_CANDIDATES_FACT] = Value::Array(offer.candidates);
-            if let WorkspaceReason::StaleTarget {
-                help: StaleHelp::Replacement { target, .. },
-                ..
-            } = &reason
-            {
-                facts[REPLACEMENT_FACT] = Value::String(target.clone());
-            }
-        }
         let effect = if acted_on.is_some() {
             Effect::Applied
         } else {
@@ -2575,9 +2574,10 @@ fn routing_refusal(
         BrowserError::UnknownBrowser(_) => {
             Some((Refusal::BrowserUnknown, json!({"reason":"browser_unknown"})))
         }
-        BrowserError::BrowserPinned => {
-            Some((Refusal::BrowserPinned, json!({"reason":"browser_pinned"})))
-        }
+        BrowserError::BrowserPinned => Some((
+            Refusal::BrowserPinned,
+            json!({"reason":BROWSER_PINNED_FACT}),
+        )),
         BrowserError::Primitive(detail) => Some((
             Refusal::BrowserPrimitive {
                 detail: detail.clone(),

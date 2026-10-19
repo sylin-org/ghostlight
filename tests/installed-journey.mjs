@@ -1077,7 +1077,7 @@ check("restart-continuity", "(26) a quit: the next call starts the service, the 
   await until(async () => !(await serviceStatus()), "the old service to stop", 30000, 250);
   const started = Date.now();
   // One call, which starts the service again. The quit released the session's tab and handed the
-  // session a token without it, so the earlier handle reads as no longer open (ADR-0203 Decision 3).
+  // session a token without it, so the earlier handle names no open tab (ADR-0203 Decision 3).
   const released = await t.call("browser_read", { tab, max_chars: 2000 }, { timeoutMs: RESTART_TIMEOUT_MS });
   assert.notEqual(released.status, "succeeded", `the quit kept the earlier tab: ${JSON.stringify(released)}`);
   // A fresh tab opens and reads once the extension reconnects. Only a browser that has not yet

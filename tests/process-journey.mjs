@@ -165,7 +165,7 @@ async function mainFlow() {
     await restartedBrowser.connect();
     const stale = await mcp.facts("browser_read", { tab: handle });
     assert.notEqual(stale.status, "succeeded");
-    assert.equal(stale.summary, "That tab is no longer open.");
+    assert.equal(stale.summary, "That tab handle names no open tab in this session.");
     assert.equal(restartedBrowser.requested("call").length, 0, "nothing reads the person's tab");
     const afterRestart = await mcp.facts("browser_tabs", { action: "list" });
     assert.deepEqual(afterRestart.facts.tabs, [], "the person's tab is not listed under the agent's handle");

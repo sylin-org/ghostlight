@@ -1042,3 +1042,193 @@ fn a_held_tab_refused_under_a_republished_policy_credits_the_policy_that_refused
         refused.facts
     );
 }
+
+/// Find the one Save field on the tab `tab_id` that the handle `tab_handle` names, and return
+/// its target handle.
+fn find_save(
+    executor: &ApplicationExecutor,
+    browser: &FakeBrowser,
+    workspace: &crate::workspace::WorkspaceId,
+    tab_id: u64,
+    tab_handle: &str,
+) -> String {
+    browser.push(Ok(BrowserOutcome::targets(
+        tab_id,
+        vec![ObservedTarget {
+            locator: format!("save-{tab_id}"),
+            role: "textbox".into(),
+            name: "Save".into(),
+            state: vec![],
+            credential_class: false,
+            ..Default::default()
+        }],
+    )));
+    let found = executor.execute(
+        workspace,
+        "browser_find",
+        json!({"tab":tab_handle,"text":"Save"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(found.status, Status::Succeeded, "{}", found.summary);
+    found.facts["matches"][0]["target"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn a_target_from_another_of_this_sessions_tabs_names_that_tab() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    let first = open_at(&executor, &browser, &workspace, 7, "https://example.com/a");
+    let second = open_at(&executor, &browser, &workspace, 8, "https://example.com/b");
+    let target = find_save(&executor, &browser, &workspace, 8, &second);
+    let dispatched = browser.calls().len();
+
+    let refused = executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"tab":first,"target":target}),
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(refused.status, Status::Failed, "{}", refused.summary);
+    assert_eq!(refused.effect, Effect::None);
+    assert!(refused.repeat_safe);
+    assert_eq!(refused.facts["reason"], "handle_on_other_tab");
+    assert_eq!(refused.facts["handle_tab"], second.as_str());
+    assert_eq!(
+        refused.summary,
+        format!("That handle belongs to {second}, another of this session's tabs.")
+    );
+    assert_eq!(
+        refused.next_steps,
+        vec![
+            "Repeat the call with handles from one tab, and with tab left out or set to that tab."
+        ]
+    );
+    assert_eq!(
+        browser.calls().len(),
+        dispatched,
+        "nothing reaches the browser"
+    );
+    // The durable record keeps the cause word, and neither tab.
+    let records = audit.0.lock().unwrap();
+    let record = records.last().unwrap();
+    assert_eq!(
+        serde_json::to_value(&record.refusal_facts).unwrap(),
+        json!({"reason":"workspace_unusable","cause":"handle_on_other_tab"})
+    );
+    let line = serde_json::to_string(record).unwrap();
+    assert!(!line.contains(&second), "{line}");
+    assert!(!line.contains(&first), "{line}");
+}
+
+#[test]
+fn a_fill_across_two_tabs_says_a_fill_works_in_one_tab() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    let first = open_at(&executor, &browser, &workspace, 7, "https://example.com/a");
+    let second = open_at(&executor, &browser, &workspace, 8, "https://example.com/b");
+    let on_first = find_save(&executor, &browser, &workspace, 7, &first);
+    let on_second = find_save(&executor, &browser, &workspace, 8, &second);
+    let dispatched = browser.calls().len();
+
+    for fill in [
+        json!({"fields":[{"target":on_first,"value":"a"},{"target":on_second,"value":"b"}]}),
+        json!({"fields":[{"target":on_first,"value":"a"}],"submit_target":on_second}),
+    ] {
+        let refused = executor.execute(
+            &workspace,
+            "browser_fill_form",
+            fill.clone(),
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            refused.status,
+            Status::Failed,
+            "{fill}: {}",
+            refused.summary
+        );
+        assert_eq!(refused.effect, Effect::None);
+        assert_eq!(refused.facts["reason"], "fields_on_several_tabs", "{fill}");
+        assert_eq!(
+            refused.summary,
+            "A fill works in one tab, and these targets are on more than one."
+        );
+        assert_eq!(
+            refused.next_steps,
+            vec!["Make one browser_fill_form call for each tab."]
+        );
+        assert_eq!(
+            serde_json::to_value(&audit.0.lock().unwrap().last().unwrap().refusal_facts).unwrap(),
+            json!({"reason":"workspace_unusable","cause":"fields_on_several_tabs"})
+        );
+    }
+
+    // A fill that names its tab and a field on another one is told which tab that field is in.
+    let named = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({"tab":first,"fields":[{"target":on_first,"value":"a"},{"target":on_second,"value":"b"}]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(named.facts["reason"], "handle_on_other_tab");
+    assert_eq!(named.facts["handle_tab"], second.as_str());
+    assert_eq!(
+        browser.calls().len(),
+        dispatched,
+        "nothing reaches the browser"
+    );
+}
+
+#[test]
+fn an_ownership_refusal_names_the_owner_as_the_window_does() {
+    let (executor, browser, workspaces, workspace, audit) = fixture();
+    let owner = workspaces.admit("claude-code".into(), IntakeChannel::Mcp);
+    let window_name =
+        crate::provenance::ConnectionEvidence::claimed("claude-code", IntakeChannel::Mcp)
+            .details()
+            .agent
+            .name;
+    assert_eq!(window_name, "Claude Code");
+    let owned = open_at(&executor, &browser, &owner, 9, "https://example.com/");
+
+    let refused = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":owned}),
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(refused.facts["reason"], "ownership_mismatch");
+    assert_eq!(refused.facts["owner_workspace"], window_name.as_str());
+    assert_eq!(
+        refused.summary,
+        "That handle belongs to another Ghostlight session (Claude Code)."
+    );
+    let line = serde_json::to_string(audit.0.lock().unwrap().last().unwrap()).unwrap();
+    assert!(!line.contains("Claude Code"), "{line}");
+    assert!(!line.contains("claude-code"), "{line}");
+
+    // An owner whose agent nothing names is the unknown agent, and the refusal names no one.
+    let unnamed = workspaces.admit(String::new(), IntakeChannel::Mcp);
+    let unnamed_tab = open_at(&executor, &browser, &unnamed, 10, "https://example.com/");
+    let refused = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":unnamed_tab}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(refused.facts["reason"], "ownership_mismatch");
+    assert!(refused.facts.get("owner_workspace").is_none());
+    assert_eq!(
+        refused.summary,
+        "That handle belongs to a different Ghostlight session."
+    );
+    assert!(
+        !refused
+            .summary
+            .contains(crate::language::provenance::UNKNOWN_AGENT),
+        "{}",
+        refused.summary
+    );
+}

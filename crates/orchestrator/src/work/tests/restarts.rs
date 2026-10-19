@@ -120,7 +120,10 @@ fn a_browser_restart_never_hands_an_agent_handle_the_persons_tab() {
             }
             _ => {
                 assert_ne!(result.status, Status::Succeeded, "{tool}");
-                assert_eq!(result.summary, "That tab is no longer open.", "{tool}");
+                assert_eq!(
+                    result.summary, "That tab handle names no open tab in this session.",
+                    "{tool}"
+                );
             }
         }
     }
@@ -229,7 +232,10 @@ fn a_token_from_before_a_browser_restart_restores_nothing() {
         json!({"tab":"tab_kept"}),
         &CancellationToken::default(),
     );
-    assert_eq!(read.summary, "That tab is no longer open.");
+    assert_eq!(
+        read.summary,
+        "That tab handle names no open tab in this session."
+    );
     assert!(!touched_old_id(&browser, 0), "{:?}", browser.calls());
     assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
     assert_eq!(workspaces.browser_of(workspace.as_str()), None);
@@ -245,7 +251,10 @@ fn a_call_on_a_tab_whose_browser_never_returns_forgets_it() {
         json!({"tab":"tab_kept","timeout_ms":1000}),
         &CancellationToken::default(),
     );
-    assert_eq!(read.summary, "That tab is no longer open.");
+    assert_eq!(
+        read.summary,
+        "That tab handle names no open tab in this session."
+    );
     assert!(browser.calls().is_empty(), "{:?}", browser.calls());
     assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
 }
@@ -445,7 +454,10 @@ fn a_gap_inside_a_call_never_sends_the_old_id_to_the_restarted_browser() {
         "{:?}",
         browser.calls()
     );
-    assert_eq!(read.summary, "That tab is no longer open.");
+    assert_eq!(
+        read.summary,
+        "That tab handle names no open tab in this session."
+    );
     assert!(
         !read.model_text().contains(PERSONS_URL),
         "{}",

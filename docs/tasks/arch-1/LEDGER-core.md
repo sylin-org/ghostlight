@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5 and C6 have landed. C7 is next. ux-2 has closed, so every slice whose
+C1, C2, C3a, C4, C5, C6 and C7 have landed. C13 is next. ux-2 has closed, so every slice whose
 "After" is met can start.
 
 ## Slices
@@ -21,7 +21,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits; see Notes | landed (e4f353ab, 1d10bf74, review fixup) |
 | C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | see Notes | landed (9beb7976) |
 | C6 | fix(language): a held tab is described truthfully | candidate | C2 | see Notes | landed (5122ae5a, review fixup) |
-| C7 | fix(language): a workspace refusal says what is true | candidate | C6 | - | todo |
+| C7 | fix(language): a workspace refusal says what is true | candidate | C6 | see Notes | landed (this commit) |
 | C13 | fix(provenance): the opener is named once | candidate | C7 | - | todo |
 | C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | - | todo |
 | C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | - | todo |
@@ -270,3 +270,44 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 - C6, a cross-lane accident: install's `e97d4618` committed `language/outcome.rs` whole, with
   core's unfinished held-tab hunks in it, so `e97d4618` alone does not build. Install's `77290406`
   took them back out, and C6's review fixup commits them with their dependents.
+- C7, the conversion: `impl From<WorkspaceError> for WorkspaceReason` goes, and
+  `language::outcome::workspace_refusal` gives each workspace error the refusal that is true of it
+  and its `reason` fact word. The ADR calls the `BrowserPinned` arm unreachable; since C3a,
+  `add_tab` and `restore_tab` raise `WorkspaceError::BrowserPinned` for a tab of another browser,
+  so the variant stays, and its arm answers with `Refusal::BrowserPinned` ("This session is
+  already working in a different browser.") instead of an ownership sentence. A held tab's host is
+  read by `TabHold::host`.
+- C7, the causes: `handle_on_other_tab` replaces `TargetTabMismatch` and `ViewTabMismatch`, and
+  `WorkspaceError::HandleOnOtherTab` carries the tab the handle belongs to, which the sentence
+  names and the `handle_tab` fact carries. `outside_image` replaces the two out-of-bounds errors,
+  with the view's size in the sentence and in an `image` fact; a view whose output scale is not
+  positive is now a stale view, because nothing about the point is wrong. `fields_on_several_tabs`
+  is raised by the fill itself: a field target or submit target is resolved in the tab the call
+  named, or in its own tab, so a fill that names no tab is told the fill works in one tab, and a
+  fill that names one is told which tab the handle belongs to. In the audit each is a bare cause
+  word, like `tab_held`: the carried tab and size are skipped when serialized, `retained()` drops
+  the tab from the durable sentence, and the size stays there as a measurement.
+- C7, the words: `TabUnavailable` reads "That tab handle names no open tab in this session.",
+  true for a closed, forgotten or never-issued handle. The ownership refusal reads "That handle
+  belongs to another Ghostlight session (Claude Code).", naming the owner's agent from its opener's
+  `ConnectionEvidence::details()`, as the window does, and no one for the unknown agent. The
+  `owner_workspace` fact carries the same name; C13 reads the name once at workspace open.
+- C7, the flow: a step whose arguments name a target or view handle (`target`, `root`, `view`,
+  `submit_target`, `source_target`, `destination_target`, a fill field's `target`) gets no flow
+  tab. The catalog's flow sentence ("a step's own tab wins") is unchanged, because the ADR counts
+  one changed catalog phrase.
+- C7, proofs: `a_target_from_another_of_this_sessions_tabs_names_that_tab`,
+  `a_fill_across_two_tabs_says_a_fill_works_in_one_tab` and
+  `an_ownership_refusal_names_the_owner_as_the_window_does` in `work/tests/tabs.rs`;
+  `a_point_outside_the_image_gives_the_image_size` in `work/tests/execution.rs`;
+  `a_flow_tab_is_not_injected_into_a_step_whose_handle_names_its_tab` in `language/mod.rs`;
+  `workspace_errors_map_to_the_refusal_that_says_what_is_true` and
+  `a_handle_on_another_tab_a_split_fill_and_a_point_off_the_image_each_say_so` in
+  `language/outcome.rs`. The catalog, result and audit goldens were regenerated and did not
+  change: none carries these refusals.
+- C7, journey for the coordinator: `tests/process-journey.mjs` now expects the new
+  `TabUnavailable` sentence after the browser restart. Run it from a fresh build named by
+  `GHOSTLIGHT_BIN_DIR`. D2: LANGUAGE's refusal table (`tab_unavailable`'s sentence, the ownership
+  sentence, the three new causes); the SIEM guide's three cause words; the ADR's Consequences and
+  the owner's try-list say "no longer open" informally, and the sentence now says the handle names
+  no open tab.

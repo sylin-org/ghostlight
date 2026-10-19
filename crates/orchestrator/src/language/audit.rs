@@ -234,16 +234,20 @@ impl Outcome {
 
 impl WorkspaceReason {
     /// This reason as durable history may keep it. The name another session's client claimed
-    /// is that client's word, not Ghostlight's, so an ownership refusal names no one.
+    /// is that client's word, not Ghostlight's, so an ownership refusal names no one. A handle on
+    /// another tab keeps its cause and not the tab, as a refusal on any tab names none.
     #[must_use]
     pub fn retained(&self) -> Self {
         match self {
             Self::OwnershipMismatch { .. } => Self::OwnershipMismatch { owner: None },
+            Self::HandleOnOtherTab(_) => Self::HandleOnOtherTab(None),
             Self::NoTab
             | Self::AmbiguousTab
             | Self::TabUnavailable
             | Self::StaleTarget { .. }
             | Self::StaleView
+            | Self::FieldsOnSeveralTabs
+            | Self::OutsideImage(_)
             | Self::TabHeld
             | Self::WorkspaceBusy
             | Self::WorkspaceClosed => self.clone(),

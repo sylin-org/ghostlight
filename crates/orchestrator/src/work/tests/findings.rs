@@ -398,7 +398,7 @@ fn a_flow_step_refused_for_another_sessions_tab_names_that_session() {
     assert_eq!(refused["facts"]["owner_workspace"], "Workspace B");
     assert_eq!(
         refused["summary"],
-        "That tab handle belongs to Workspace B."
+        "That handle belongs to another Ghostlight session (Workspace B)."
     );
     assert_eq!(browser.calls().len(), dispatched);
 }

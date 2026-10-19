@@ -1911,6 +1911,14 @@ pub const REPLACEMENT_FACT: &str = "replacement";
 /// The fact that lists this session's tabs, each with its handle, title and URL, in an
 /// `ambiguous_tab` refusal, so the caller can repeat the call naming its own tab.
 pub const CANDIDATE_TABS_FACT: &str = "tabs";
+/// The fact that names the tab a `handle_on_other_tab` refusal's handle belongs to.
+pub const HANDLE_TAB_FACT: &str = "handle_tab";
+/// The fact that gives the `width` and `height` of the image an `outside_image` refusal's view
+/// shows.
+pub const IMAGE_SIZE_FACT: &str = "image";
+/// The fact that names, as the window does, the agent of the session an `ownership_mismatch`
+/// refusal's handle belongs to, when an agent is named.
+pub const OWNER_FACT: &str = "owner_workspace";
 
 /// What a stale-target refusal offers beyond the word (ADR-0198 Decision 28).
 ///
@@ -1959,7 +1967,8 @@ pub enum WorkspaceReason {
     NoTab,
     /// The call named no tab and several of this session's tabs could be meant.
     AmbiguousTab,
-    /// The named tab handle is closed or no longer known.
+    /// The named tab handle names no open tab of this session: its tab closed, its binding was
+    /// forgotten, or the session never issued it.
     TabUnavailable,
     /// The target handle no longer names a control, for the reason given.
     StaleTarget {
@@ -1969,6 +1978,14 @@ pub enum WorkspaceReason {
     },
     /// The view no longer matches current rendered coordinates.
     StaleView,
+    /// A target or view handle belongs to another of this session's tabs than the one the call
+    /// named. The model hears that tab's handle; the audit keeps the cause word alone.
+    HandleOnOtherTab(#[serde(skip)] Option<String>),
+    /// One fill named fields, or a submit target, on more than one tab.
+    FieldsOnSeveralTabs,
+    /// Coordinates reach outside the image of the view they name, whose size the sentence gives.
+    /// The audit keeps the cause word alone.
+    OutsideImage(#[serde(skip)] Option<ImageSize>),
     /// The selected tab shows a page governance refused. [`Refusal::TabHeld`] names its host.
     TabHeld,
     /// Another invocation owns the workspace lease.
@@ -1988,7 +2005,7 @@ impl WorkspaceReason {
             Self::AmbiguousTab => {
                 "More than one tab is open in this session, so the call must name one.".into()
             }
-            Self::TabUnavailable => "That tab is no longer open.".into(),
+            Self::TabUnavailable => "That tab handle names no open tab in this session.".into(),
             Self::StaleTarget { reason, help } => match (reason, help) {
                 (StaleReason::Removed, StaleHelp::Replacement { .. }) => {
                     "That target is no longer on the page. One control on the page has the same role, name and row."
@@ -2000,12 +2017,25 @@ impl WorkspaceReason {
             }
             .into(),
             Self::StaleView => "The page has moved since that screenshot was taken.".into(),
+            Self::HandleOnOtherTab(Some(tab)) => {
+                format!("That handle belongs to {tab}, another of this session's tabs.")
+            }
+            Self::HandleOnOtherTab(None) => {
+                "That handle belongs to another of this session's tabs.".into()
+            }
+            Self::FieldsOnSeveralTabs => {
+                "A fill works in one tab, and these targets are on more than one.".into()
+            }
+            Self::OutsideImage(Some(ImageSize { width, height })) => format!(
+                "Those coordinates are outside the view's image, which is {width} by {height} pixels."
+            ),
+            Self::OutsideImage(None) => "Those coordinates are outside the view's image.".into(),
             Self::TabHeld => held_tab_summary(None),
             Self::WorkspaceBusy => {
                 "Another Ghostlight action is already using this session.".into()
             }
             Self::OwnershipMismatch { owner: Some(owner) } => {
-                format!("That tab handle belongs to {owner}.")
+                format!("That handle belongs to another Ghostlight session ({owner}).")
             }
             Self::OwnershipMismatch { owner: None } => {
                 "That handle belongs to a different Ghostlight session.".into()
@@ -2023,6 +2053,9 @@ impl WorkspaceReason {
             Self::TabUnavailable => "tab_unavailable",
             Self::StaleTarget { .. } => "stale_target",
             Self::StaleView => "stale_view",
+            Self::HandleOnOtherTab(_) => "handle_on_other_tab",
+            Self::FieldsOnSeveralTabs => "fields_on_several_tabs",
+            Self::OutsideImage(_) => "outside_image",
             Self::TabHeld => "tab_held",
             Self::WorkspaceBusy => "workspace_busy",
             Self::OwnershipMismatch { .. } => "ownership_mismatch",
@@ -2064,6 +2097,17 @@ impl WorkspaceReason {
             Self::StaleView => {
                 vec!["Call browser_screenshot to obtain a current view handle.".into()]
             }
+            Self::HandleOnOtherTab(_) => vec![
+                "Repeat the call with handles from one tab, and with tab left out or set to that tab."
+                    .into(),
+            ],
+            Self::FieldsOnSeveralTabs => {
+                vec!["Make one browser_fill_form call for each tab.".into()]
+            }
+            Self::OutsideImage(_) => vec![
+                "Repeat with coordinates inside the image, or call browser_screenshot for a new view."
+                    .into(),
+            ],
             Self::TabHeld => vec![LEAVE_HELD_TAB.into()],
             Self::WorkspaceBusy => {
                 vec!["Wait for the active Ghostlight invocation to finish.".into()]
@@ -2082,31 +2126,58 @@ impl WorkspaceReason {
     }
 }
 
-impl From<WorkspaceError> for WorkspaceReason {
-    fn from(error: WorkspaceError) -> Self {
-        match error {
-            WorkspaceError::NoTab => Self::NoTab,
-            WorkspaceError::AmbiguousTab => Self::AmbiguousTab,
-            WorkspaceError::StaleTab => Self::TabUnavailable,
-            WorkspaceError::StaleTarget { reason } => Self::StaleTarget {
-                reason,
-                help: StaleHelp::None,
-            },
-            WorkspaceError::StaleView
-            | WorkspaceError::ViewPointOutOfBounds
-            | WorkspaceError::ViewRegionOutOfBounds => Self::StaleView,
-            WorkspaceError::Held(_) => Self::TabHeld,
-            WorkspaceError::Busy => Self::WorkspaceBusy,
-            WorkspaceError::NotOwnedTab
-            | WorkspaceError::NotOwnedTarget
-            | WorkspaceError::NotOwnedView
-            | WorkspaceError::TargetTabMismatch
-            | WorkspaceError::ViewTabMismatch
-            | WorkspaceError::PhysicalTabOwned
-            | WorkspaceError::BrowserPinned => Self::OwnershipMismatch { owner: None },
-            WorkspaceError::UnknownWorkspace => Self::WorkspaceClosed,
+/// The size of a view's image, in pixels.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageSize {
+    /// The image's width.
+    pub width: u32,
+    /// The image's height.
+    pub height: u32,
+}
+
+/// The `reason` fact of a refusal because this session already works in another browser.
+pub const BROWSER_PINNED_FACT: &str = "browser_pinned";
+
+/// The refusal that says what is true of a workspace error, and the `reason` fact word that names
+/// it in the result.
+///
+/// A held tab names the host of the page that held it. A tab of another browser than the one the
+/// session works in is the session's browser binding, so it is refused as the browser choice is.
+/// Every other error is an unusable workspace resource, for its own reason.
+#[must_use]
+pub fn workspace_refusal(error: WorkspaceError) -> (Refusal, &'static str) {
+    let reason = match error {
+        WorkspaceError::Held(hold) => {
+            return (
+                Refusal::TabHeld { host: hold.host() },
+                WorkspaceReason::TabHeld.as_fact(),
+            )
         }
-    }
+        WorkspaceError::BrowserPinned => return (Refusal::BrowserPinned, BROWSER_PINNED_FACT),
+        WorkspaceError::NoTab => WorkspaceReason::NoTab,
+        WorkspaceError::AmbiguousTab => WorkspaceReason::AmbiguousTab,
+        WorkspaceError::StaleTab => WorkspaceReason::TabUnavailable,
+        WorkspaceError::StaleTarget { reason } => WorkspaceReason::StaleTarget {
+            reason,
+            help: StaleHelp::None,
+        },
+        WorkspaceError::StaleView => WorkspaceReason::StaleView,
+        WorkspaceError::HandleOnOtherTab { tab } => {
+            WorkspaceReason::HandleOnOtherTab(Some(tab.as_str().to_owned()))
+        }
+        WorkspaceError::FieldsOnSeveralTabs => WorkspaceReason::FieldsOnSeveralTabs,
+        WorkspaceError::OutsideImage { width, height } => {
+            WorkspaceReason::OutsideImage(Some(ImageSize { width, height }))
+        }
+        WorkspaceError::Busy => WorkspaceReason::WorkspaceBusy,
+        WorkspaceError::NotOwnedTab
+        | WorkspaceError::NotOwnedTarget
+        | WorkspaceError::NotOwnedView
+        | WorkspaceError::PhysicalTabOwned => WorkspaceReason::OwnershipMismatch { owner: None },
+        WorkspaceError::UnknownWorkspace => WorkspaceReason::WorkspaceClosed,
+    };
+    let fact = reason.as_fact();
+    (Refusal::WorkspaceUnusable { reason }, fact)
 }
 
 /// The label that introduces the safe next steps in a result's model-facing text.
@@ -2461,10 +2532,11 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
-        CaptureKind, CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Observed, Outcome,
-        PolicyAuthor, Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
-        HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
+        workspace_refusal, ActionSubject, BlockedReason, BrowserRecoveryReason,
+        BrowserUnavailableReason, CancelCause, CaptureKind, CheckFailure, DialogKind, EmptyObject,
+        ExtensionAdvice, ImageSize, Observed, Outcome, PolicyAuthor, Refusal, SavedTo, StaleHelp,
+        TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE,
+        TARGET_LABEL_MAX_CHARS,
     };
     use crate::intake::session::IntakeChannel;
     use crate::language::area::{LeftOut, LeftOutKey};
@@ -3510,7 +3582,7 @@ Changes are \"unsaved\".".into()),
                 Refusal::WorkspaceUnusable {
                     reason: WorkspaceReason::TabUnavailable,
                 },
-                "That tab is no longer open.",
+                "That tab handle names no open tab in this session.",
             ),
             (
                 Refusal::WorkspaceUnusable {
@@ -3929,7 +4001,7 @@ Changes are \"unsaved\".".into()),
                 owner: Some("Workspace B".into())
             }
             .summary(),
-            "That tab handle belongs to Workspace B."
+            "That handle belongs to another Ghostlight session (Workspace B)."
         );
         assert_eq!(
             WorkspaceReason::WorkspaceClosed.next_steps(),
@@ -4187,24 +4259,44 @@ Changes are \"unsaved\".".into()),
     }
 
     #[test]
-    fn workspace_errors_map_to_the_language_reason_oracle() {
+    fn workspace_errors_map_to_the_refusal_that_says_what_is_true() {
+        let unusable = |reason: WorkspaceReason| Refusal::WorkspaceUnusable { reason };
         let examples = [
-            (WorkspaceError::StaleTab, WorkspaceReason::TabUnavailable),
-            (WorkspaceError::NoTab, WorkspaceReason::NoTab),
-            (WorkspaceError::AmbiguousTab, WorkspaceReason::AmbiguousTab),
+            (
+                WorkspaceError::StaleTab,
+                unusable(WorkspaceReason::TabUnavailable),
+            ),
+            (WorkspaceError::NoTab, unusable(WorkspaceReason::NoTab)),
+            (
+                WorkspaceError::AmbiguousTab,
+                unusable(WorkspaceReason::AmbiguousTab),
+            ),
             (
                 WorkspaceError::StaleTarget {
                     reason: StaleReason::Removed,
                 },
-                WorkspaceReason::StaleTarget {
+                unusable(WorkspaceReason::StaleTarget {
                     reason: StaleReason::Removed,
                     help: StaleHelp::None,
-                },
+                }),
             ),
-            (WorkspaceError::StaleView, WorkspaceReason::StaleView),
             (
-                WorkspaceError::ViewPointOutOfBounds,
-                WorkspaceReason::StaleView,
+                WorkspaceError::StaleView,
+                unusable(WorkspaceReason::StaleView),
+            ),
+            (
+                WorkspaceError::OutsideImage {
+                    width: 400,
+                    height: 300,
+                },
+                unusable(WorkspaceReason::OutsideImage(Some(ImageSize {
+                    width: 400,
+                    height: 300,
+                }))),
+            ),
+            (
+                WorkspaceError::FieldsOnSeveralTabs,
+                unusable(WorkspaceReason::FieldsOnSeveralTabs),
             ),
             (
                 WorkspaceError::Held(crate::workspace::TabHold {
@@ -4213,54 +4305,106 @@ Changes are \"unsaved\".".into()),
                     ),
                     authority: "authority_test".into(),
                     requirements: crate::governance::CapabilitySet::READ,
-                    url: "https://elsewhere.test/".into(),
+                    url: "https://Elsewhere.test/path".into(),
                 }),
-                WorkspaceReason::TabHeld,
+                Refusal::TabHeld {
+                    host: Some("elsewhere.test".into()),
+                },
             ),
-            (WorkspaceError::Busy, WorkspaceReason::WorkspaceBusy),
+            (WorkspaceError::BrowserPinned, Refusal::BrowserPinned),
+            (
+                WorkspaceError::Busy,
+                unusable(WorkspaceReason::WorkspaceBusy),
+            ),
             (
                 WorkspaceError::NotOwnedTab,
-                WorkspaceReason::OwnershipMismatch { owner: None },
+                unusable(WorkspaceReason::OwnershipMismatch { owner: None }),
             ),
             (
                 WorkspaceError::NotOwnedTarget,
-                WorkspaceReason::OwnershipMismatch { owner: None },
+                unusable(WorkspaceReason::OwnershipMismatch { owner: None }),
             ),
             (
                 WorkspaceError::NotOwnedView,
-                WorkspaceReason::OwnershipMismatch { owner: None },
-            ),
-            (
-                WorkspaceError::TargetTabMismatch,
-                WorkspaceReason::OwnershipMismatch { owner: None },
-            ),
-            (
-                WorkspaceError::ViewTabMismatch,
-                WorkspaceReason::OwnershipMismatch { owner: None },
+                unusable(WorkspaceReason::OwnershipMismatch { owner: None }),
             ),
             (
                 WorkspaceError::PhysicalTabOwned,
-                WorkspaceReason::OwnershipMismatch { owner: None },
+                unusable(WorkspaceReason::OwnershipMismatch { owner: None }),
             ),
             (
                 WorkspaceError::UnknownWorkspace,
-                WorkspaceReason::WorkspaceClosed,
+                unusable(WorkspaceReason::WorkspaceClosed),
             ),
         ];
         for (error, expected) in examples {
-            assert_eq!(WorkspaceReason::from(error), expected);
+            let (refusal, fact) = workspace_refusal(error);
+            let expected_fact = match &expected {
+                Refusal::WorkspaceUnusable { reason } => reason.as_fact(),
+                Refusal::TabHeld { .. } => "tab_held",
+                _ => "browser_pinned",
+            };
+            assert_eq!(refusal, expected);
+            assert_eq!(fact, expected_fact);
         }
         assert_eq!(WorkspaceReason::TabUnavailable.as_fact(), "tab_unavailable");
         assert_eq!(WorkspaceReason::NoTab.as_fact(), "no_tab");
         assert_eq!(WorkspaceReason::AmbiguousTab.as_fact(), "ambiguous_tab");
-        // History stores the same names the facts use.
+        // History stores the same names the facts use, and none of the carried tab or size.
         for reason in [
             WorkspaceReason::NoTab,
             WorkspaceReason::AmbiguousTab,
             WorkspaceReason::TabUnavailable,
+            WorkspaceReason::HandleOnOtherTab(Some("tab_7k2nb5xe".into())),
+            WorkspaceReason::FieldsOnSeveralTabs,
+            WorkspaceReason::OutsideImage(Some(ImageSize {
+                width: 400,
+                height: 300,
+            })),
         ] {
             assert_eq!(serde_json::to_value(&reason).unwrap(), reason.as_fact());
         }
+    }
+
+    #[test]
+    fn a_handle_on_another_tab_a_split_fill_and_a_point_off_the_image_each_say_so() {
+        let other = WorkspaceReason::HandleOnOtherTab(Some("tab_7k2nb5xe".into()));
+        assert_eq!(
+            other.summary(),
+            "That handle belongs to tab_7k2nb5xe, another of this session's tabs."
+        );
+        assert_eq!(
+            other.next_steps(),
+            vec!["Repeat the call with handles from one tab, and with tab left out or set to that tab."]
+        );
+        assert_eq!(
+            WorkspaceReason::HandleOnOtherTab(None).summary(),
+            "That handle belongs to another of this session's tabs."
+        );
+        assert_eq!(
+            WorkspaceReason::FieldsOnSeveralTabs.summary(),
+            "A fill works in one tab, and these targets are on more than one."
+        );
+        assert_eq!(
+            WorkspaceReason::FieldsOnSeveralTabs.next_steps(),
+            vec!["Make one browser_fill_form call for each tab."]
+        );
+        let outside = WorkspaceReason::OutsideImage(Some(ImageSize {
+            width: 400,
+            height: 300,
+        }));
+        assert_eq!(
+            outside.summary(),
+            "Those coordinates are outside the view's image, which is 400 by 300 pixels."
+        );
+        assert_eq!(
+            outside.next_steps(),
+            vec!["Repeat with coordinates inside the image, or call browser_screenshot for a new view."]
+        );
+        assert_eq!(
+            WorkspaceReason::TabUnavailable.summary(),
+            "That tab handle names no open tab in this session."
+        );
     }
 
     const UPDATE_EXTENSION_STEP: &str = "Ask the user to update Ghostlight in Browser (to update now, open chrome://extensions, turn on Developer mode and click Update), then repeat the call.";

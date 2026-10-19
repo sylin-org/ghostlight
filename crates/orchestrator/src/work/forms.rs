@@ -69,13 +69,12 @@ impl ApplicationExecutor {
                     Err(terminal) => return *terminal,
                 }
             } else {
+                // A target is resolved in the tab the call named, or in its own tab, so a field on
+                // another tab than the fill's first is told apart from a handle on the wrong tab.
                 match self.resolve_target(
                     context,
                     lease,
-                    value
-                        .tab
-                        .as_deref()
-                        .or_else(|| selected.as_ref().map(|tab| tab.handle.as_str())),
+                    value.tab.as_deref(),
                     field
                         .target
                         .as_deref()
@@ -87,7 +86,7 @@ impl ApplicationExecutor {
             };
             if let Some(current) = &selected {
                 if current.handle != tab.handle {
-                    return self.workspace_failure(context, WorkspaceError::TargetTabMismatch);
+                    return self.workspace_failure(context, WorkspaceError::FieldsOnSeveralTabs);
                 }
             } else {
                 selected = Some(tab);
@@ -100,12 +99,14 @@ impl ApplicationExecutor {
             .collect();
         let selected = selected.expect("validated non-empty fields");
         let submit = match value.submit_target.as_deref() {
-            Some(handle) => {
-                match self.resolve_target(context, lease, Some(selected.handle.as_str()), handle) {
-                    Ok((_, target)) => Some(target),
-                    Err(error) => return self.workspace_failure(context, error),
+            Some(handle) => match self.resolve_target(context, lease, value.tab.as_deref(), handle)
+            {
+                Ok((tab, _)) if tab.handle != selected.handle => {
+                    return self.workspace_failure(context, WorkspaceError::FieldsOnSeveralTabs)
                 }
-            }
+                Ok((_, target)) => Some(target),
+                Err(error) => return self.workspace_failure(context, error),
+            },
             None => None,
         };
         let requirements = if submit.is_some() {

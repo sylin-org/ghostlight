@@ -9,6 +9,7 @@ use crate::browser::adapter::{
     ViewportGeometry,
 };
 
+use crate::agent::Agent;
 use crate::governance::{CapabilitySet, Decision};
 use crate::intake::session::SessionMarker;
 use crate::language::outcome::{DialogKind, TargetRole};
@@ -383,6 +384,17 @@ pub struct TabHold {
     pub url: String,
 }
 
+impl TabHold {
+    /// The host of the refused page, lowercase, when its address has one.
+    #[must_use]
+    pub fn host(&self) -> Option<String> {
+        Url::parse(&self.url)
+            .ok()?
+            .host_str()
+            .map(str::to_ascii_lowercase)
+    }
+}
+
 /// Immutable current target facts used at a browser-effect boundary.
 #[derive(Clone, Debug)]
 pub struct SelectedTarget {
@@ -664,6 +676,16 @@ struct ViewState {
     viewport: ViewportGeometry,
     width: u32,
     height: u32,
+}
+
+impl ViewState {
+    /// The refusal of coordinates that reach outside this view's image, which names its size.
+    const fn outside(&self) -> WorkspaceError {
+        WorkspaceError::OutsideImage {
+            width: self.width,
+            height: self.height,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1454,24 +1476,22 @@ impl WorkspaceStore {
             .ok_or(WorkspaceError::UnknownWorkspace)
     }
 
-    /// The client label of another admitted workspace that owns the requested tab handle.
-    ///
-    /// Returns None when no other workspace owns the handle, or when its owner has no client
-    /// label: a refusal never names another session by its workspace id.
+    /// The agent of another admitted workspace that owns the requested tab handle, as the
+    /// window names it. None when no other workspace owns it, or when its agent is the unknown
+    /// agent: a refusal never names another session by its workspace id.
     #[must_use]
     pub fn tab_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
         let handle = TabHandle(requested.into());
-        self.labeled_owner(current, |workspace| workspace.confirmed(&handle).is_ok())
+        self.owner_name(current, |workspace| workspace.confirmed(&handle).is_ok())
     }
 
-    /// The client label of another admitted workspace that owns the requested target handle.
-    ///
-    /// Returns None when no other workspace owns the handle, or when its owner has no client
-    /// label: a refusal never names another session by its workspace id.
+    /// The agent of another admitted workspace that owns the requested target handle, as the
+    /// window names it. None when no other workspace owns it, or when its agent is the unknown
+    /// agent: a refusal never names another session by its workspace id.
     #[must_use]
     pub fn target_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
         let handle = TargetHandle(requested.into());
-        self.labeled_owner(current, |workspace| workspace.targets.contains(&handle))
+        self.owner_name(current, |workspace| workspace.targets.contains(&handle))
     }
 
     /// Last-known context for a target handle that no longer resolves, so a refusal can offer
@@ -1547,13 +1567,14 @@ impl WorkspaceStore {
         mapped
     }
 
-    /// Name the other workspace that holds a handle, by its opener's claimed name only.
+    /// Name the other workspace that holds a handle by its opener's agent, the way the window
+    /// names it ([`crate::language::provenance::details`]).
     ///
     /// A workspace id is an internal key. No tool takes one, so naming it would only tell the
-    /// caller where another session lives (ADR-0196 Decision 8). An owner without a label is
-    /// therefore not attributed at all, and the refusal falls back to the generic sentence
-    /// (ADR-0172 Decision 4).
-    fn labeled_owner(
+    /// caller where another session lives (ADR-0196 Decision 8). An owner whose agent nothing
+    /// names, the unknown agent, is therefore not attributed at all, and the refusal falls back
+    /// to the generic sentence (ADR-0172 Decision 4). None when no other workspace holds it.
+    fn owner_name(
         &self,
         current: &WorkspaceId,
         holds: impl Fn(&WorkspaceState) -> bool,
@@ -1562,8 +1583,9 @@ impl WorkspaceStore {
             .workspaces
             .iter()
             .find(|(id, workspace)| *id != current && holds(workspace))
-            .map(|(_, workspace)| workspace.opener.reported_application().to_owned())
-            .filter(|label| !label.is_empty())
+            .map(|(_, workspace)| workspace.opener.details().agent)
+            .filter(|agent| *agent != Agent::unknown())
+            .map(|agent| agent.name)
     }
 
     /// Whether the workspace is still admitted: a released or reaped one is gone.
@@ -1656,7 +1678,7 @@ impl WorkspaceStore {
     /// A binding whose id the browser lists at the URL it is remembered by, and that no other
     /// workspace holds, is kept: it takes the live title and readiness and keeps its generation,
     /// handles and captures. The first one binds the workspace's browser. Every other pending
-    /// binding of `browser` is forgotten as closed, and its handle then reads as no longer open.
+    /// binding of `browser` is forgotten as closed, and its handle then names no open tab.
     pub fn confirm(
         &self,
         workspace: &WorkspaceId,
@@ -2321,7 +2343,9 @@ impl WorkspaceLease {
         }
         if let Some(selected) = selected_tab {
             if selected.handle != target.tab {
-                return Err(WorkspaceError::TargetTabMismatch);
+                return Err(WorkspaceError::HandleOnOtherTab {
+                    tab: target.tab.clone(),
+                });
             }
         }
         if let Some(hold) = &tab.hold {
@@ -2401,7 +2425,12 @@ impl WorkspaceLease {
             return Err(WorkspaceError::StaleView);
         }
         if selected_tab.is_some_and(|selected| selected.handle != view.tab) {
-            return Err(WorkspaceError::ViewTabMismatch);
+            return Err(WorkspaceError::HandleOnOtherTab {
+                tab: view.tab.clone(),
+            });
+        }
+        if view.viewport.output_scale <= 0.0 {
+            return Err(WorkspaceError::StaleView);
         }
         if !x.is_finite()
             || !y.is_finite()
@@ -2409,9 +2438,8 @@ impl WorkspaceLease {
             || y < 0.0
             || x >= f64::from(view.width)
             || y >= f64::from(view.height)
-            || view.viewport.output_scale <= 0.0
         {
-            return Err(WorkspaceError::ViewPointOutOfBounds);
+            return Err(view.outside());
         }
         let selected = SelectedView {
             handle,
@@ -2460,7 +2488,12 @@ impl WorkspaceLease {
             return Err(WorkspaceError::StaleView);
         }
         if selected_tab.is_some_and(|selected| selected.handle != view.tab) {
-            return Err(WorkspaceError::ViewTabMismatch);
+            return Err(WorkspaceError::HandleOnOtherTab {
+                tab: view.tab.clone(),
+            });
+        }
+        if view.viewport.output_scale <= 0.0 {
+            return Err(WorkspaceError::StaleView);
         }
         let right = x + width;
         let bottom = y + height;
@@ -2476,9 +2509,8 @@ impl WorkspaceLease {
             || !bottom.is_finite()
             || right > f64::from(view.width)
             || bottom > f64::from(view.height)
-            || view.viewport.output_scale <= 0.0
         {
-            return Err(WorkspaceError::ViewRegionOutOfBounds);
+            return Err(view.outside());
         }
         let selected = SelectedView {
             handle,
@@ -2598,18 +2630,24 @@ pub enum WorkspaceError {
     /// View handle belongs to another admitted workspace.
     #[error("view is owned by another workspace")]
     NotOwnedView,
-    /// Explicit tab does not own the target.
-    #[error("target does not belong to the selected tab")]
-    TargetTabMismatch,
-    /// Explicit tab does not own the view.
-    #[error("view does not belong to the selected tab")]
-    ViewTabMismatch,
-    /// Image coordinate is not finite or is outside the captured view.
+    /// The target or view handle belongs to another of this workspace's tabs than the one the
+    /// call named.
+    #[error("handle belongs to another tab of this workspace")]
+    HandleOnOtherTab {
+        /// The tab the handle belongs to.
+        tab: TabHandle,
+    },
+    /// The fields and submit target of one fill are on more than one tab.
+    #[error("fill targets are on several tabs")]
+    FieldsOnSeveralTabs,
+    /// An image coordinate or rectangle is not finite or reaches outside the captured image.
     #[error("view coordinate is outside the captured image")]
-    ViewPointOutOfBounds,
-    /// Image rectangle is invalid or extends outside the captured view.
-    #[error("view region is outside the captured image")]
-    ViewRegionOutOfBounds,
+    OutsideImage {
+        /// The image's width in pixels.
+        width: u32,
+        /// The image's height in pixels.
+        height: u32,
+    },
     /// The tab shows a page governance refused, for the reason the hold keeps.
     #[error("tab is held on a page governance refused")]
     Held(TabHold),
@@ -4276,7 +4314,10 @@ mod tests {
             lease
                 .resolve_view_point(view.as_str(), Some(&tab), 401.0, 1.0)
                 .unwrap_err(),
-            WorkspaceError::ViewPointOutOfBounds
+            WorkspaceError::OutsideImage {
+                width: 400,
+                height: 300
+            }
         );
         let (_, region) = lease
             .resolve_view_region(view.as_str(), Some(&tab), 100.0, 50.0, 200.0, 100.0)
@@ -4289,7 +4330,10 @@ mod tests {
             lease
                 .resolve_view_region(view.as_str(), Some(&tab), 300.0, 0.0, 101.0, 10.0)
                 .unwrap_err(),
-            WorkspaceError::ViewRegionOutOfBounds
+            WorkspaceError::OutsideImage {
+                width: 400,
+                height: 300
+            }
         );
         let magnified = lease
             .register_view(

@@ -1656,22 +1656,50 @@ fn decode_flow(mut input: Value) -> Result<Operation, LanguageError> {
     Ok(Operation::RunFlow(value))
 }
 
-/// Decode an ordinary flow child, inheriting the batch tab only for tab-scoped work.
+/// The arguments whose target or view handle belongs to one tab, which the handle names.
+const TAB_NAMING_HANDLES: &[&str] = &[
+    "target",
+    "root",
+    "view",
+    "submit_target",
+    "source_target",
+    "destination_target",
+];
+
+/// Whether a step's arguments name a handle that belongs to one tab: a target or view handle,
+/// or a fill field's target.
+fn names_its_tab(input: &Value) -> bool {
+    let named = |value: &Value, field: &str| {
+        value
+            .get(field)
+            .and_then(Value::as_str)
+            .is_some_and(|handle| !handle.is_empty())
+    };
+    TAB_NAMING_HANDLES.iter().any(|field| named(input, field))
+        || input
+            .get("fields")
+            .and_then(Value::as_array)
+            .is_some_and(|fields| fields.iter().any(|field| named(field, "target")))
+}
+
+/// Decode an ordinary flow child, inheriting the batch tab only for tab-scoped work whose
+/// handles name no tab of their own: a target or view handle already says which tab it is in.
 pub(crate) fn decode_flow_step(
     tool: &str,
     mut input: Value,
     tab: Option<&str>,
 ) -> Result<Operation, LanguageError> {
-    let uses_tab = match tool {
-        "policy_explain" => false,
-        "browser_tabs" => input
-            .get("action")
-            .and_then(Value::as_str)
-            .is_some_and(|action| matches!(action, "focus" | "close")),
-        "browser_record" => input.get("action").and_then(Value::as_str) == Some("start"),
-        "browser_navigate" => input.get("new_tab") != Some(&Value::Bool(true)),
-        _ => true,
-    };
+    let uses_tab = !names_its_tab(&input)
+        && match tool {
+            "policy_explain" => false,
+            "browser_tabs" => input
+                .get("action")
+                .and_then(Value::as_str)
+                .is_some_and(|action| matches!(action, "focus" | "close")),
+            "browser_record" => input.get("action").and_then(Value::as_str) == Some("start"),
+            "browser_navigate" => input.get("new_tab") != Some(&Value::Bool(true)),
+            _ => true,
+        };
     if uses_tab {
         if let (Some(tab), Some(object)) = (tab, input.as_object_mut()) {
             object
@@ -2762,6 +2790,67 @@ mod tests {
             panic!("focus")
         };
         assert_eq!(focus.tab, "tab_batch");
+    }
+
+    #[test]
+    fn a_flow_tab_is_not_injected_into_a_step_whose_handle_names_its_tab() {
+        let tab = Some("tab_batch");
+        let Operation::Click(click) =
+            decode_flow_step("browser_click", json!({"target":"target_other"}), tab).unwrap()
+        else {
+            panic!("click")
+        };
+        assert_eq!(click.tab, None, "a target says which tab it is in");
+        let Operation::Click(click) = decode_flow_step(
+            "browser_click",
+            json!({"view":"view_other","x":1,"y":1}),
+            tab,
+        )
+        .unwrap() else {
+            panic!("click")
+        };
+        assert_eq!(click.tab, None, "a view says which tab it is in");
+        let Operation::FillForm(fill) = decode_flow_step(
+            "browser_fill_form",
+            json!({"fields":[{"target":"target_other","value":"a"}]}),
+            tab,
+        )
+        .unwrap() else {
+            panic!("fill")
+        };
+        assert_eq!(fill.tab, None, "a field's target says which tab it is in");
+        let Operation::Drag(drag) = decode_flow_step(
+            "browser_drag",
+            json!({"source_target":"target_one","destination_target":"target_two"}),
+            tab,
+        )
+        .unwrap() else {
+            panic!("drag")
+        };
+        assert_eq!(drag.tab, None, "drag targets say which tab they are in");
+        // A step whose handles name no tab, a selector fill included, still works in the flow's tab.
+        let Operation::FillForm(fill) = decode_flow_step(
+            "browser_fill_form",
+            json!({"fields":[{"selector":{"name":"Email"},"value":"a"}]}),
+            tab,
+        )
+        .unwrap() else {
+            panic!("fill")
+        };
+        assert_eq!(fill.tab.as_deref(), Some("tab_batch"));
+        let Operation::TypeText(typed) = decode_flow_step(
+            "browser_type_text",
+            json!({"focused":true,"text":"target_lookalike"}),
+            tab,
+        )
+        .unwrap() else {
+            panic!("type")
+        };
+        assert_eq!(
+            typed.tab.as_deref(),
+            Some("tab_batch"),
+            "typed text is not a handle"
+        );
     }
 
     #[test]

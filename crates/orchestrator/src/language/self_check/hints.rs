@@ -36,8 +36,8 @@ use crate::language::field_echo::HeldField;
 use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
-    CaptureKind, CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Outcome, PolicyAuthor,
-    Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
+    CaptureKind, CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, ImageSize, Outcome,
+    PolicyAuthor, Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
 };
 use crate::language::page_refusal::{PageGesture, PageRefusal};
 use crate::workspace::StaleReason;
@@ -561,6 +561,14 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
         WorkspaceReason::AmbiguousTab,
         WorkspaceReason::TabUnavailable,
         WorkspaceReason::StaleView,
+        WorkspaceReason::HandleOnOtherTab(Some("tab_7k2nb5xe".into())),
+        WorkspaceReason::HandleOnOtherTab(None),
+        WorkspaceReason::FieldsOnSeveralTabs,
+        WorkspaceReason::OutsideImage(Some(ImageSize {
+            width: 1280,
+            height: 720,
+        })),
+        WorkspaceReason::OutsideImage(None),
         WorkspaceReason::TabHeld,
         WorkspaceReason::WorkspaceBusy,
         WorkspaceReason::OwnershipMismatch {
@@ -607,6 +615,9 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
             | WorkspaceReason::TabUnavailable
             | WorkspaceReason::StaleTarget { .. }
             | WorkspaceReason::StaleView
+            | WorkspaceReason::HandleOnOtherTab(_)
+            | WorkspaceReason::FieldsOnSeveralTabs
+            | WorkspaceReason::OutsideImage(_)
             | WorkspaceReason::TabHeld
             | WorkspaceReason::WorkspaceBusy
             | WorkspaceReason::OwnershipMismatch { .. }
