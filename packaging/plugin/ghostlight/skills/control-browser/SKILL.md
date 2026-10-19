@@ -5,90 +5,46 @@ description: "Drive the user's real, signed-in browser through Ghostlight's gove
 
 # Controlling the browser with Ghostlight
 
-These tools drive the user's visible Chromium browser through one governed path. Every call
-returns one envelope: `status`, `effect`, `readiness`, `repeat_safe`, a Ghostlight-authored
-`summary`, tool-specific `facts`, and up to two safe `next_steps`. Read the summary and
-`next_steps` before deciding what to do next; they are written to be followed.
+These tools drive the user's visible Chromium browser through one governed path. The tool
+descriptions and the server instructions say what each tool takes and what it returns. This
+skill adds the working habits they cannot carry.
 
 ## Observe, then act
 
-Perception handles are cheap and deliberate. Do not guess at page structure.
-
-- `browser_inspect` lists semantic controls (role, accessible name, state) and returns
-  `target_` handles. `scope: "document"` returns a bounded structure tree under a `snapshot_`
-  handle and diffs it against the prior snapshot, so one extra inspect proves whether your
-  edit landed.
-- `browser_find` ranks controls by visible or accessible text. Use it when you know the label:
-  the fastest route to a control is its name.
-- Acting on a stale `target_` handle is refused on purpose: a navigation made the page unseen,
-  so observe again. `tab_` handles are different -- they are durable slots, and navigating
-  through a closed one recreates the tab under the same handle and says so.
-- Typed selectors (`name`, optional `role`, optional `exact`) are accepted wherever target
-  handles are, including waits. Prefer a selector when stashing a handle adds nothing.
+- Do not guess at page structure or reuse selectors from memory. Get handles from browser_find
+  or browser_inspect, then act on those handles.
+- After an action that should change the page, observe again to confirm the change landed. Do
+  not assume it did.
+- A stale handle means the page changed since you looked. Observe again instead of retrying the
+  same handle.
 
 ## Coordinates come from a view
 
-Never invent pixel coordinates. `browser_screenshot` returns a `view_` handle that binds
-coordinates to one tab, document generation, viewport, scale, and zoom. Click, hover, drag,
-and wheel-scroll at `view_` pixels from the returned image; a bounded region capture returns a
-new, magnified view for precision. Coordinate input on a stale view is rejected -- take a
-fresh screenshot.
+Never invent pixel coordinates. Take them from the image browser_screenshot returned, and pass
+the view_ handle it returned. A view belongs to one tab as it looked at that
+moment, so after a navigation, a zoom or a resize, take a fresh screenshot. For precision,
+capture a magnified region and use the new view it returns.
 
-## Acting
+## Credentials
 
-- `browser_fill_form` fills 1 to 30 fields in one call and proves a contained submit before
-  clicking `submit_target`; it never submits without one. Use it over repeated typing.
-  It requires `read + write` even for unsent drafts; submit also requires `action`.
-- `browser_type_text` sends real per-character events, with `focused: true` to type into
-  whatever is focused and `clear_first` to replace. Use it when keystroke events matter.
-- `browser_click` takes a target or a view point; `click_count` covers double and triple.
-  `browser_press_key` takes one key or a stroke sequence with repeat and modifiers.
-- For credential-class fields (passwords, card numbers), fill and typing accept
-  `user_authorized_credentials: true` only when the user explicitly instructed credential entry.
-  An existing instruction is sufficient; do not ask again, and set it on the first call when
-  already authorized. It defaults to false and applies only to that request. Without it, the call
-  returns guidance before input and creates no session hold. This caller acknowledgement cannot
-  override configured policy or human Pause/Stop and is not independently verified proof.
-- `browser_upload` attaches local paths, inline base64 files (1 to 5, each and combined under
-  5,000,000 bytes), or a captured image, to a file input or dropped at a view point.
-- `browser_execute` runs page JavaScript and can mutate or navigate anything. Use a semantic
-  tool whenever one fits; reach for execute only for what no other tool expresses.
-
-## Composing steps
-
-- `browser_flow` runs 1 to 20 steps of any non-composite tool and lets later steps reference
-  earlier envelopes with `{"flow_ref": {"step": "id", "pointer": "/facts/..."}}`. Use
-  it for both fixed batches and journeys whose later inputs depend on earlier results. Set
-  `on_error` to `continue` only when later steps remain useful after a failed child; otherwise
-  the default is `stop`.
-- Every step is classified and audited independently under the invocation's authority;
-  composite wrappers add no power of their own.
-
-## Waiting and dialogs
-
-- Use `browser_wait` on `load_ready`, `url_contains`, `text_present` or `text_absent`,
-  `target_present` or `target_absent`, or `selector_present`. Bounded executor-side sleeps use
-  `duration` (0 to 10000 ms). A false condition is a decisive failed answer, not "unknown" --
-  do not retry blindly; observe instead.
-- Per-call `timeout_ms` runs 100 to 30000, defaulting to 8000.
-- A JavaScript dialog blocks its tab until handled. Check and resolve it with `browser_dialog`
-  (`status`, `accept`, `dismiss`, `respond`); deal with it before other work on that tab.
+Set `user_authorized_credentials` only when the user explicitly told you to enter credentials.
+An instruction the user already gave is enough, so do not ask again, and set it on the first
+call. It covers only the call that carries it. Without it, a credential field is refused before
+anything is typed, and nothing is held or paused because of it. The acknowledgement never overrides configured
+policy or the person's Pause or End session, and Ghostlight cannot verify it.
 
 ## Telling the truth about effects
 
-- `repeat_safe: false` means the same call is known unsafe or of unknown safety to repeat.
-  Do not replay it; observe and decide.
-- `effect` of `partial` or `unknown` means some work may have happened. Say so in anything you
-  report; never claim completion the envelope does not claim.
-- Refusals name the deciding reason and the remedy. When a refusal surprises you, ask
-  `policy_explain` first: it compiles the authority in force, one line per capability, and is
-  always available.
-- Repeated policy refusals do not pause the session. Later permitted requests remain available;
-  do not ask the user to review or resume a session because a request was refused.
+- Each result says what happened, whether repeating it is safe, and what to do next. Read that
+  before deciding.
+- When a result says repeating the call is not safe, or not known to be safe, do not replay it.
+  Observe and decide.
+- When a result says some work may have happened, or that its effect is unknown, say so in what
+  you report. Never claim more than the result claims.
 
-## Recording evidence
+## When a request is refused
 
-`browser_record` makes a short, memory-only GIF: `start`, ordinary work, then `save` (to a
-file input, a download, or back to you) or `discard`. Frames never leave the browser except
-by your explicit save. A replay is a human-scale artifact: report what it shows and how long
-it plays, and let the facts carry the byte counts.
+- A refusal names its reason and its remedy. When a refusal surprises you, call policy_explain
+  first, before you retry or ask the user.
+- A refused request does not pause the session. Do not ask the user to review or resume the
+  session because a request was refused.

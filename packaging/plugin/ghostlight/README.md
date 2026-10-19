@@ -50,5 +50,6 @@ programs from the GitHub release only when the installed set needs them. The npm
 
 The plugin is its own version space (ADR-0142 model). A plugin release edits four values that
 must agree: both manifest versions and both catalog entry versions. The
-repository-integrity gate fails otherwise. The skill ships with the plugin; its content is
-kept in lockstep with the model-facing language contract in `docs/1.0/LANGUAGE.md`.
+repository-integrity gate fails otherwise. The skill ships with the plugin. It carries only the
+working habits the tool catalog and the server instructions cannot, so it restates no bound,
+default, value list or result field of theirs.

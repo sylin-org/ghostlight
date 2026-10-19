@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7 and I9a have landed. ux-2 has closed, so I9b, I4, I5, I6, I8, I10, I12 and I13 can start,
+I1, I3, I7, I9a and I9b have landed. ux-2 has closed, so I4, I5, I6, I8, I10, I12 and I13 can start,
 and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
 registers) and the live check on a test machine.
 
@@ -20,7 +20,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I3 | fix(install): Ghostlight owns the command, and the client keeps its own keys | candidate | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I7 | fix(deployment): a same-version install restores a missing shell | candidate | none | see Notes | landed (this commit) |
 | I9a | docs(plugin): the plugin README withdraws the precedence claim | candidate | none | see Notes | landed (this commit) |
-| I9b | fix(plugin): the skill says only what the catalog cannot | candidate | none | - | todo |
+| I9b | fix(plugin): the skill says only what the catalog cannot | candidate | none | see Notes | landed (this commit) |
 | I11 | fix(plugin): the plugin registers what question 1 decides | candidate | owner question 1 (the plugin) and the live check | held for the owner | todo (held for the owner's question 1) |
 | I4 | fix(install): one rule says Ghostlight has an entry to remove | none | ux-2 closes (`install/mod.rs`) | - | todo |
 | I5 | fix(install): Ghostlight's npm launcher entry is Ghostlight's | none | none | - | todo |
@@ -75,3 +75,20 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   launcher row of `docs/trust/data-flows.md` for when the launcher downloads. Within the slice's
   Changes.
 - I9a changes no code, golden or journey. `linux.txt` is unaffected.
+- I9b, the false statements: the skill no longer says a document inspect returns a `snapshot_`
+  handle (it returns no handle) or that navigating through a closed tab handle recreates the tab,
+  and it drops the retired "session hold" and "Pause/Stop" (G4-02): a credential refusal now says
+  nothing is held or paused. Its result-field list is gone; it speaks of what a result says
+  instead.
+- I9b, the hold sentence: the skill says a refused request does not pause the session. It drops
+  "later permitted requests remain available", because a tab held after a refused landing refuses
+  them until the hold clears (C6). Not a changed decision: Decision 5.5 keeps "do not ask the user
+  to resume".
+- I9b, the plugin README: its last sentence said the skill is kept in lockstep with LANGUAGE.md. It
+  now says the skill restates nothing of the catalog. Within the slice.
+- I9b, for C20: the body reads clean through a scratch port of `hint_violations` against
+  `docs/1.0/catalog.json`. Tool names are written bare and handle prefixes unquoted, as the catalog
+  writes them; the one backticked word is `user_authorized_credentials`. The YAML front matter
+  (`name:`, `description:`) is not a hint, so C20 reads the body after it.
+- I9b changes no code, golden or journey, and no plugin version (D1's RELEASE.md step bumps it).
+  `linux.txt` is unaffected.
