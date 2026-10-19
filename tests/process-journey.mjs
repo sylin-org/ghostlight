@@ -29,6 +29,11 @@ const DENIED_HOST = "blocked.localhost";
 const PERSONS_URL = "https://example.com/the-persons-own";
 // The page of the tab a replace keeps bound and a quit releases.
 const KEPT_URL = "https://example.com/kept";
+// Where that page routes itself while the service is replaced, with no navigation the service sees.
+const ROUTED_URL = "https://example.com/kept/inbox";
+// The extension life of the browser run before its restart, and of the run after it.
+const FIRST_LIFE = "life_first";
+const RESTARTED_LIFE = "life_restarted";
 const BROWSER_ABSENT = (frame) => frame.kind === "backend_unavailable" && frame.service === "absent";
 const CONTENDERS = 10;
 // How long each binary may take to leave once it hears the end of the session, the budgets of
@@ -95,6 +100,7 @@ async function mainFlow() {
 
     // A synthetic browser through the browser edge.
     const browser = SyntheticBrowser.viaEdge(home, world);
+    browser.life = FIRST_LIFE;
     browsers.push(browser);
     const accepted = await browser.connect();
     assert.equal(accepted.control_state, "active");
@@ -145,6 +151,7 @@ async function mainFlow() {
     assert.equal(relisted.result.tools.length, catalog.length);
     await within(browser.ended, 20_000, "the browser edge exits when a service accepts again");
     const reborn = SyntheticBrowser.viaEdge(home, world);
+    reborn.life = FIRST_LIFE;
     browsers.push(reborn);
     const again = await reborn.connect();
     assert.notEqual(again.service_epoch, accepted.service_epoch, "the new service has a new epoch");
@@ -161,6 +168,7 @@ async function mainFlow() {
     await within(reborn.ended, 20_000, "the browser edge exits with its browser");
     world.navigate(world.tabs[0].tab_id, PERSONS_URL);
     const restartedBrowser = SyntheticBrowser.viaEdge(home, world);
+    restartedBrowser.life = RESTARTED_LIFE;
     browsers.push(restartedBrowser);
     await restartedBrowser.connect();
     const stale = await mcp.facts("browser_read", { tab: handle });
@@ -190,12 +198,16 @@ async function mainFlow() {
       return next !== null && next.instance !== replaced.instance;
     }, "the replacing service serves", 40_000);
     await within(restartedBrowser.ended, 20_000, "the browser edge exits when the replacing service accepts");
+    // The page routes itself meanwhile. The browser run goes on, so its life confirms the tab.
+    world.navigate(keptId, ROUTED_URL);
     const resumedBrowser = SyntheticBrowser.viaEdge(home, world);
+    resumedBrowser.life = RESTARTED_LIFE;
     browsers.push(resumedBrowser);
     await resumedBrowser.connect();
     const resumed = await mcp.facts("browser_read", { tab: kept });
-    assert.equal(resumed.status, "succeeded", "the replacing service resumes the session's tab");
-    console.log("PASS a replace closes nothing and the next service resumes the session's tab");
+    assert.equal(resumed.status, "succeeded", "the replacing service resumes the session's routed tab");
+    assert.equal(resumed.facts.url, ROUTED_URL, "the resumed tab reads at its live address");
+    console.log("PASS a replace closes nothing and the next service resumes the session's tab in the same life");
 
     // Quit releases the session's tab and holds.
     const quitting = await home.control({ op: controlOp.quit, reason: quitReason.quit });

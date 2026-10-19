@@ -2,6 +2,7 @@
   "kind": "hello",
   "protocol": 4,
   "browser_id": "browser_3f2a9c",
+  "life": "life_5c0d2e",
   "browser_name": "Chrome",
   "platform": "ghostlight/chromium",
   "engine_version": "131.0.6778.86",

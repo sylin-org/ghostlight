@@ -25,7 +25,7 @@ use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
     end_connection, is_current, lock, refuse_incompatible, valid_opaque_id, validated_browser_name,
     AdapterNotifications, AdapterRegistry, BrowserError, Connection, ConnectionTag, Liveness,
-    RelayBrowserPort, BROWSER_ID_PREFIX, CONTROL_DELIVERY_TIMEOUT,
+    RelayBrowserPort, BROWSER_ID_PREFIX, CONTROL_DELIVERY_TIMEOUT, LIFE_PREFIX,
 };
 
 /// Longest engine version a hello may report.
@@ -165,6 +165,7 @@ pub(crate) fn attach(
             adapter_version: hello.adapter_version,
             browser_id: tag.browser_id.clone(),
             browser_name,
+            life: hello.life,
             liveness: Arc::clone(&liveness),
         },
         hello.attended,
@@ -214,9 +215,13 @@ fn offered_protocol(hello: &Value) -> u16 {
 
 /// Decode and check a protocol-4 hello by the identity rules: an opaque browser identity, no
 /// platform or the Chromium [`wire::PLATFORM`], and a plain engine version.
+///
+/// A life that is not an opaque life id proves nothing about the browser run, so the hello is
+/// taken as one that names no life, and its tabs are confirmed by their URLs.
 fn validated_hello(hello: Value) -> Result<wire::Hello, BrowserError> {
-    let hello: wire::Hello =
+    let mut hello: wire::Hello =
         serde_json::from_value(hello).map_err(|_| BrowserError::Authentication)?;
+    hello.life = hello.life.filter(|life| valid_opaque_id(life, LIFE_PREFIX));
     if hello
         .platform
         .as_deref()

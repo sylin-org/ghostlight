@@ -518,12 +518,15 @@ fn failure_templates_have_the_relay_fixture_shape() {
 #[test]
 fn resume_state_round_trips_through_the_token() {
     let state = ready_session()
-        .resume_state(vec![OwnedTab {
-            browser_id: "browser_a".into(),
-            tab_id: 42,
-            handle: "tab_1".into(),
-            url_digest: Some("digest".into()),
-        }])
+        .resume_state(
+            vec![OwnedTab {
+                browser_id: "browser_a".into(),
+                tab_id: 42,
+                handle: "tab_1".into(),
+                url_digest: Some("digest".into()),
+            }],
+            BTreeMap::from([("browser_a".into(), "life_a".into())]),
+        )
         .unwrap();
     let token = state.encode();
     assert!(token.is_ascii());
@@ -534,14 +537,19 @@ fn resume_state_round_trips_through_the_token() {
     assert!(resumed.is_initialized());
     assert_eq!(resumed.claim(), Some("test client"));
     assert_eq!(
-        resumed.resume_state(Vec::new()).unwrap().revision,
+        resumed
+            .resume_state(Vec::new(), BTreeMap::new())
+            .unwrap()
+            .revision,
         LATEST_REVISION
     );
 }
 
 #[test]
 fn a_resumed_session_serves_requests_and_catalog_notices_at_once() {
-    let state = ready_session().resume_state(Vec::new()).unwrap();
+    let state = ready_session()
+        .resume_state(Vec::new(), BTreeMap::new())
+        .unwrap();
     let mut resumed = McpSession::resumed(state);
     let steps = resumed.accept(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
     assert_eq!(forwards(&steps), vec![ServiceRequest::Catalog]);
@@ -558,7 +566,9 @@ fn a_resumed_session_serves_requests_and_catalog_notices_at_once() {
 
 #[test]
 fn a_session_before_initialize_has_no_resume_state() {
-    assert!(McpSession::new().resume_state(Vec::new()).is_none());
+    assert!(McpSession::new()
+        .resume_state(Vec::new(), BTreeMap::new())
+        .is_none());
 }
 
 /// A resume token an earlier build handed out. A published token keeps reading.
@@ -590,7 +600,10 @@ fn an_empty_name_and_no_name_stay_the_same_unknown_agent_after_a_resume() {
     for line in [unnamed, empty] {
         let mut session = McpSession::new();
         replies(session.accept(&line.to_string()));
-        let token = session.resume_state(Vec::new()).unwrap().encode();
+        let token = session
+            .resume_state(Vec::new(), BTreeMap::new())
+            .unwrap()
+            .encode();
         let resumed = McpSession::resumed(ResumeState::decode(&token).unwrap());
         for claim in [session.claim(), resumed.claim()] {
             assert_eq!(claim, None, "{line}");
@@ -607,7 +620,10 @@ fn an_empty_name_and_no_name_stay_the_same_unknown_agent_after_a_resume() {
     );
     let resumed = McpSession::resumed(ResumeState::decode(&token).unwrap());
     assert_eq!(resumed.claim(), None, "a token's empty name is no name");
-    let rewritten = resumed.resume_state(Vec::new()).unwrap().encode();
+    let rewritten = resumed
+        .resume_state(Vec::new(), BTreeMap::new())
+        .unwrap()
+        .encode();
     let body = URL_SAFE_NO_PAD
         .decode(rewritten.strip_prefix(RESUME_TOKEN_PREFIX).unwrap())
         .unwrap();
@@ -649,7 +665,10 @@ fn a_resume_token_written_with_the_retired_fields_still_resumes() {
     let steps = resumed.accept(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
     assert_eq!(forwards(&steps), vec![ServiceRequest::Catalog]);
 
-    let rewritten = resumed.resume_state(Vec::new()).unwrap().encode();
+    let rewritten = resumed
+        .resume_state(Vec::new(), BTreeMap::new())
+        .unwrap()
+        .encode();
     let body = URL_SAFE_NO_PAD
         .decode(rewritten.strip_prefix(RESUME_TOKEN_PREFIX).unwrap())
         .unwrap();
@@ -680,6 +699,7 @@ fn an_unknown_revision_resumes_at_the_oldest_supported_revision() {
             handle: "tab_1".into(),
             url_digest: Some("digest".into()),
         }],
+        lives: BTreeMap::new(),
     };
     let decoded = ResumeState::decode(&unknown.encode()).expect("the token decodes");
     assert_eq!(decoded, unknown, "the claim and the tabs are kept");
@@ -687,7 +707,10 @@ fn an_unknown_revision_resumes_at_the_oldest_supported_revision() {
     assert!(resumed.is_initialized());
     assert_eq!(resumed.claim(), Some("returning client"));
     assert_eq!(
-        resumed.resume_state(Vec::new()).unwrap().revision,
+        resumed
+            .resume_state(Vec::new(), BTreeMap::new())
+            .unwrap()
+            .revision,
         OLDEST_REVISION
     );
     assert_eq!(OLDEST_REVISION, SUPPORTED_REVISIONS[0]);
@@ -698,7 +721,7 @@ fn an_unreadable_token_resumes_an_initialized_session_at_the_oldest_revision() {
     let mut resumed = McpSession::resumed(ResumeState::unreadable());
     assert!(resumed.is_initialized());
     assert_eq!(resumed.claim(), None);
-    let state = resumed.resume_state(Vec::new()).unwrap();
+    let state = resumed.resume_state(Vec::new(), BTreeMap::new()).unwrap();
     assert_eq!(state.revision, OLDEST_REVISION);
     assert!(state.owned_tabs.is_empty());
     let steps = resumed.accept(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
@@ -713,16 +736,24 @@ fn a_token_never_outgrows_the_opening_cap() {
         handle: format!("tab_{index}"),
         url_digest: Some("d".repeat(64)),
     };
+    let tab_browser = format!("browser_{}", "b".repeat(60));
+    let lives = BTreeMap::from([
+        (tab_browser.clone(), "life_b".to_owned()),
+        ("browser_without_tabs".to_owned(), "life_c".to_owned()),
+    ]);
     let few = ready_session()
-        .resume_state((0..3).map(tab).collect())
+        .resume_state((0..3).map(tab).collect(), lives.clone())
         .unwrap();
     assert_eq!(
         ResumeState::decode(&few.encode()).unwrap(),
-        few,
-        "a state that fits is written whole"
+        ResumeState {
+            lives: BTreeMap::from([(tab_browser.clone(), "life_b".to_owned())]),
+            ..few
+        },
+        "a state that fits is written whole, with the lives of its tabs' browsers only"
     );
     let many = ready_session()
-        .resume_state((0..5_000).map(tab).collect())
+        .resume_state((0..5_000).map(tab).collect(), lives)
         .unwrap();
     let token = many.encode();
     assert!(token.len() <= MAX_RESUME_TOKEN_BYTES, "{}", token.len());
@@ -731,6 +762,7 @@ fn a_token_never_outgrows_the_opening_cap() {
     assert!(kept > 0 && kept < many.owned_tabs.len(), "{kept}");
     assert_eq!(decoded.owned_tabs[..], many.owned_tabs[..kept]);
     assert_eq!(decoded.claim, many.claim);
+    assert_eq!(decoded.lives.keys().collect::<Vec<_>>(), [&tab_browser]);
     let one_more = ResumeState {
         owned_tabs: many.owned_tabs[..=kept].to_vec(),
         ..many.clone()

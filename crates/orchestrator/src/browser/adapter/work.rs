@@ -1304,7 +1304,11 @@ pub enum BrowserEvent {
     /// A tab closed outside an invocation.
     TabClosed { tab_id: u64 },
     /// The adapter connection ended.
-    Disconnected,
+    Disconnected {
+        /// The extension life the ended connection's hello reported, if it reported one. The tabs
+        /// the browser held in that life keep it while they wait for the browser to confirm them.
+        life: Option<String>,
+    },
 }
 
 #[cfg(test)]

@@ -6,8 +6,10 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a, C10b, C11, C12a and C19a have landed, and C22 landed
-with C13. C21 is next, with B1. ux-2 has closed, so every slice whose "After" is met can start.
+C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a, C10b, C11, C12a, C19a and C21 have landed, and C22
+landed with C13. Every candidate slice of core is in; B1 and C21 ride in the same candidate. Next
+are the slices gated none: C3b, C3c, C12b, C10c (after P1 and P5), C16, C17, C18, C19b, C19c and
+C20 (after I9b).
 
 ## Slices
 
@@ -28,8 +30,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | see Notes | landed (56d0f7c8) |
 | C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | see Notes | landed (8c216920) |
 | C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | see Notes | landed (a35d7b58) |
-| C19a | fix(audit): a step that never started carries the policy sequence | candidate | ux-2 closes | see Notes | landed (this commit) |
-| C21 | feat(adapter): the service reads the browser's life | candidate | C4, B1 | lands with B1; cross-lane `protocol4/wire.rs` | todo |
+| C19a | fix(audit): a step that never started carries the policy sequence | candidate | ux-2 closes | see Notes | landed (647b4d97) |
+| C21 | feat(adapter): the service reads the browser's life | candidate | C4, B1 | lands with B1; cross-lane `protocol4/wire.rs`; see Notes | landed (this commit) |
 | C3b | fix(browser): a pinned wait reads its own browser | none | C3a | - | todo |
 | C3c | refactor(browser): one browser start, recorded in the launch guard | none | C3b | - | todo |
 | C12b | refactor(language): each refusal is typed where it is learned, and its code is written once | none | ux-2 closes | two commits | todo |
@@ -513,3 +515,59 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   and also joins the unknown-fields read test. The other audit goldens and the catalog and result
   goldens did not change. No journey is needed. D2: the SIEM guide may name the not-started line
   and say it carries `policy_seq` under managed governance.
+- C21, where the life is kept: on each registered connection, from its hello, and
+  `BrowserPort::life_of` reads it (the default knows none, so a fake or a port without lives
+  confirms by URL). A connection that ends or is replaced reports its life in
+  `BrowserEvent::Disconnected { life }`, so the bindings that go pending take the life of the run
+  they were confirmed in from the event, not from a registry a new hello may already have
+  changed. The ADR says the registry keeps the last life for each browser id; nothing reads the
+  life of a browser that is not connected, so no map outlives its connection. A hello whose life
+  is not an opaque `life_` id is taken as naming none.
+- C21, what a binding records: a pending binding remembers its URL digest and its life
+  (`Remembered`). A confirmed binding is in the life its browser's connection reports now, so it
+  records none until it goes pending. Recording it at bind time would need the life at every
+  `add_tab` and `restore_tab` call, surface's tests included, for a value the port already holds.
+  The resume token reads a confirmed binding's life from the port, before it reads the bindings: a
+  gap marks a browser's bindings pending before a new connection replaces the old one, so a
+  binding still confirmed after that read was confirmed in the life it returned.
+- C21, the token: `ResumeState.lives` maps each browser of the kept tabs to its life, as the ADR
+  says ("a life per browser"). A browser whose tabs name two lives, or a confirmed tab with no
+  connection, carries none, so its tabs are confirmed by URL. A token cut to fit keeps only the
+  lives of its kept tabs' browsers. An earlier token has no `lives` and resumes by URL.
+- C21, the confirmation: the life is read once the listing answered, so it names the run the
+  listing came from or a later one, never an earlier one. In the binding's own life the tab with
+  its id confirms it and it takes the live URL, title and readiness. Its generation moves on when
+  the live URL is not the remembered digest, so a target or capture of the earlier page reads as
+  navigated; a changed title alone moves nothing. A hold stays as it was, because only a governed
+  landing clears it.
+- C21, the released pool keeps the URL rule. Its entries record no life, and a kept tab whose page
+  routed itself is then not reused and the open makes a fresh tab, which costs a tab and never
+  hands over the person's. The ADR's C21 Changes name only pending bindings.
+- C21, cross-lane: the adapter lane's `protocol4/wire.rs` (`Hello.life`), `protocol4/connection.rs`
+  and its tests, `browser/adapter/work.rs` (the event's field) and the fixtures
+  `tests/golden/protocol4/frames/hello.json` and `tolerance/hello.extra_fields.json`, which gained
+  `life`. The adapter lane is closed. `assets.sha256` and the package record did not change, and
+  the extension's tests pass unchanged, as B1's notes say.
+- C21, proofs: `a_worker_restart_in_the_same_life_keeps_a_tab_whose_page_routed_itself`,
+  `a_new_life_falls_back_to_the_url_check` and
+  `a_token_or_hello_without_a_life_falls_back_to_the_url_check` in `work/tests/restarts.rs`;
+  `a_service_replace_in_the_same_life_keeps_a_routed_tab_and_takes_its_live_url` and
+  `a_service_replace_into_a_new_life_forgets_a_routed_tab` in `service/mod.rs`, through a relay
+  port and a protocol-4 fake extension;
+  `in_its_own_life_a_pending_binding_is_confirmed_by_id_and_a_routed_page_moves_on`,
+  `in_its_own_life_an_unchanged_page_keeps_its_generation_and_targets`,
+  `another_life_or_no_life_confirms_only_by_url` and
+  `a_resumed_binding_remembers_the_life_its_token_names` in `workspace/mod.rs`;
+  `the_port_reads_the_life_each_hello_names_and_each_departure_carries_it` and
+  `a_hello_without_a_readable_life_is_accepted_and_names_none` in `protocol4/connection/tests.rs`;
+  `a_hello_without_a_life_decodes_and_serializes_without_one` in `wire.rs`; the token tests in
+  `intake/mcp/tests.rs` carry lives. No catalog, result or audit golden changed.
+- C21, journey for the coordinator: `tests/process-journey.mjs` gives its synthetic browsers a life
+  (`SyntheticBrowser.life` in `tests/lib/peers.mjs`): the first run's browsers share one, the
+  browser after the restart gets another, and during the replace the kept tab's page routes itself.
+  The replacing service resumes it in the same life and reads it at its routed address. Run it from
+  a fresh build named by `GHOSTLIGHT_BIN_DIR`; it was not run here. On a test machine with B1's
+  extension: a worker restart (`chrome://serviceworker-internals` stop) and a service replace keep
+  a single-page app's tab bound, and a browser restart leaves its handle naming no open tab.
+  `tests/golden/agents/native/linux.txt` is unchanged. D2: the adapter-protocol-4 design and
+  ARCHITECTURE's hello (`life`), and the confirmation rule with the life.

@@ -288,6 +288,9 @@ export class SyntheticBrowser {
     this.transport = transport;
     this.world = world;
     this.browserId = browserId;
+    // The extension life its hello names, as `chrome.storage.session` keeps it for one browser
+    // run; none until a journey sets one.
+    this.life = null;
     this.frames = [];
     this.requests = [];
     this.held = [];
@@ -321,6 +324,7 @@ export class SyntheticBrowser {
       kind: "hello",
       protocol: adapter.protocol,
       browser_id: this.browserId,
+      ...(this.life ? { life: this.life } : {}),
       browser_name: "Chrome",
       platform: adapter.platform,
       engine_version: "131.0.6778.86",

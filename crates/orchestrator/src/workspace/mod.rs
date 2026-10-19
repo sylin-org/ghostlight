@@ -104,9 +104,10 @@ impl UrlDigest {
     /// The live tab that confirms a tab remembered as `physical_id` at this digest: the one with
     /// that id, when it shows the remembered URL.
     ///
-    /// This is the one rule for every remembered tab, a pending binding and a released tab alike.
-    /// After a browser restart the id may name another tab, and a tab at another address is never
-    /// taken for the one the workspace knew.
+    /// This is the rule for every remembered tab, a pending binding and a released tab alike,
+    /// whenever no extension life proves that the browser is still in the run the tab was known
+    /// in ([`Remembered::confirmed_in`]). After a browser restart the id may name another tab,
+    /// and a tab at another address is never taken for the one the workspace knew.
     #[must_use]
     pub fn confirmed_in<'a>(
         &self,
@@ -115,6 +116,38 @@ impl UrlDigest {
     ) -> Option<&'a PhysicalTab> {
         live.iter()
             .find(|tab| tab.tab_id == physical_id && Self::of(&tab.url) == *self)
+    }
+}
+
+/// What a pending binding is remembered by until its browser confirms it (ADR-0203 Decision 1).
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Remembered {
+    /// The digest of the URL the workspace last knew for the tab.
+    url: UrlDigest,
+    /// The extension life the browser was in when the binding was last confirmed, when the
+    /// browser named one.
+    life: Option<String>,
+}
+
+impl Remembered {
+    /// The live tab that confirms a binding remembered as `physical_id`, when its browser lists
+    /// `live` in the extension life `life`.
+    ///
+    /// In the life the binding remembers, the browser is still in the run that gave the tab its
+    /// id, and a run never hands an id out twice, so the tab with that id is the binding's tab
+    /// whatever its page shows now: a single-page app changes its address without a navigation
+    /// the service sees. In any other life, or with no life on either side, only the URL rule
+    /// confirms it ([`UrlDigest::confirmed_in`]).
+    fn confirmed_in<'a>(
+        &self,
+        physical_id: u64,
+        life: Option<&str>,
+        live: &'a [PhysicalTab],
+    ) -> Option<&'a PhysicalTab> {
+        if self.life.is_some() && self.life.as_deref() == life {
+            return live.iter().find(|tab| tab.tab_id == physical_id);
+        }
+        self.url.confirmed_in(physical_id, live)
     }
 }
 
@@ -131,6 +164,11 @@ pub struct TabBinding {
     pub url: UrlDigest,
     /// Whether the binding waits for its browser to confirm it.
     pub pending: bool,
+    /// The extension life a pending binding remembers, if its browser named one.
+    ///
+    /// A confirmed binding carries none here: it is in the life its browser's connection reports
+    /// now, which the browser port knows ([`crate::browser::BrowserPort::life_of`]).
+    pub life: Option<String>,
 }
 
 /// How a workspace holds one physical tab of one browser, as a command addressed to that tab
@@ -474,8 +512,8 @@ pub struct ReleasedTab {
 }
 
 impl ReleasedTab {
-    /// The live tab that is still this released tab, by the rule every remembered tab follows
-    /// ([`UrlDigest::confirmed_in`]).
+    /// The live tab that is still this released tab, by the URL rule a remembered tab follows
+    /// when no extension life vouches for it ([`UrlDigest::confirmed_in`]).
     #[must_use]
     pub fn confirmed_in<'a>(&self, live: &'a [PhysicalTab]) -> Option<&'a PhysicalTab> {
         self.url.confirmed_in(self.physical_id, live)
@@ -725,13 +763,13 @@ struct TabState {
     readiness: BrowserReadiness,
     /// Why the tab is held, while it shows a page governance refused.
     hold: Option<TabHold>,
-    /// The URL the binding is remembered by while it waits for its browser to confirm it, or none
+    /// What the binding is remembered by while it waits for its browser to confirm it, or none
     /// once it is confirmed (ADR-0203 Decision 1).
     ///
     /// A pending binding is inert. It takes no commit, readiness or dialog event, nothing selects
     /// it, it counts as nobody's tab, and it is never closed through the browser. It stays in the
     /// one tabs map only so its handle is never minted again.
-    pending: Option<UrlDigest>,
+    pending: Option<Remembered>,
 }
 
 impl TabState {
@@ -764,9 +802,10 @@ impl TabState {
 
     /// The digest of the URL this binding is remembered by.
     fn remembered_url(&self) -> UrlDigest {
-        self.pending
-            .clone()
-            .unwrap_or_else(|| UrlDigest::of(&self.url))
+        self.pending.as_ref().map_or_else(
+            || UrlDigest::of(&self.url),
+            |remembered| remembered.url.clone(),
+        )
     }
 }
 
@@ -1050,23 +1089,27 @@ impl AggregateState {
     }
 
     /// Confirm or forget `current`'s pending bindings of `browser` against the tabs the browser
-    /// lists now (ADR-0203 Decision 1).
+    /// lists now, in the extension life `life` (ADR-0203 Decision 1).
     ///
-    /// A binding is kept when a live tab has its id and shows the URL it is remembered by, and no
-    /// other workspace holds a confirmed binding of that tab. It then takes the live title and
-    /// readiness, keeps its generation and handles, and the first one binds the workspace's
-    /// browser. Every other pending binding of `browser` is forgotten as closed.
+    /// A binding is kept when a live tab confirms it ([`Remembered::confirmed_in`]) and no other
+    /// workspace holds a confirmed binding of that tab. It then takes the live URL, title and
+    /// readiness and keeps its handles, and the first one binds the workspace's browser. Its
+    /// generation moves on when the live URL is not the one it was remembered by: the page may
+    /// have navigated while the service could not see it, so no target or capture of the earlier
+    /// page answers for the live one. Every other pending binding of `browser` is forgotten as
+    /// closed.
     fn confirm(
         &mut self,
         current: &WorkspaceId,
         browser: &str,
+        life: Option<&str>,
         live: &[PhysicalTab],
     ) -> Result<(), WorkspaceError> {
         let workspace = self
             .workspaces
             .get(current)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let pending: Vec<(TabHandle, u64, UrlDigest)> = workspace
+        let pending: Vec<(TabHandle, u64, Remembered)> = workspace
             .tabs
             .iter()
             .filter(|(_, tab)| tab.browser == browser)
@@ -1074,9 +1117,9 @@ impl AggregateState {
                 Some((handle.clone(), tab.physical_id, tab.pending.clone()?))
             })
             .collect();
-        for (handle, physical_id, url) in pending {
-            let shown = url
-                .confirmed_in(physical_id, live)
+        for (handle, physical_id, remembered) in pending {
+            let shown = remembered
+                .confirmed_in(physical_id, life, live)
                 .filter(|_| self.admit_tab(current, browser, physical_id).is_ok())
                 .cloned();
             if shown.is_some() {
@@ -1091,6 +1134,10 @@ impl AggregateState {
                 continue;
             };
             if let Some(tab) = workspace.tabs.get_mut(&handle) {
+                if UrlDigest::of(&shown.url) != remembered.url {
+                    tab.generation = tab.generation.saturating_add(1);
+                    workspace.targets.prune_tab(&handle, tab.generation);
+                }
                 tab.pending = None;
                 tab.url = shown.url;
                 tab.title = bounded(&shown.title, TAB_TITLE_CHARS);
@@ -1373,9 +1420,10 @@ impl WorkspaceStore {
     ///
     /// A browser that comes back may be a restarted one, and a restarted browser hands its tab ids
     /// out again, so a remembered id could name a tab the person just opened. Each binding is then
-    /// remembered by its id and the URL the workspace last knew, until the browser lists its tabs
-    /// again. The released pool keeps its tabs: a reuse confirms each one by the same rule.
-    pub fn apply_browser_disconnect(&self, browser: &str) {
+    /// remembered by its id, the URL the workspace last knew and `life`, the extension life the
+    /// ended connection reported, until the browser lists its tabs again. The released pool keeps
+    /// its tabs: a reuse confirms each one by the URL rule.
+    pub fn apply_browser_disconnect(&self, browser: &str, life: Option<&str>) {
         let mut state = self.lock();
         for tab in state
             .workspaces
@@ -1383,14 +1431,19 @@ impl WorkspaceStore {
             .flat_map(|workspace| workspace.tabs.values_mut())
             .filter(|tab| tab.is_confirmed() && tab.browser == browser)
         {
-            tab.pending = Some(UrlDigest::of(&tab.url));
+            tab.pending = Some(Remembered {
+                url: UrlDigest::of(&tab.url),
+                life: life.map(str::to_owned),
+            });
         }
     }
 
     /// Bring back one binding a resume token remembered, pending until `browser` confirms it.
+    /// `life` is the extension life the token says that browser was in, if it says one.
     ///
     /// A handle the workspace already holds is left as it is. The binding counts as nobody's tab
-    /// until its browser lists a tab with its id at the URL it is remembered by.
+    /// until its browser lists a tab that confirms it: in that life, the tab with its id; in any
+    /// other, the tab with its id at the URL it is remembered by.
     pub fn remember_tab(
         &self,
         workspace: &WorkspaceId,
@@ -1398,6 +1451,7 @@ impl WorkspaceStore {
         browser: &str,
         physical_id: u64,
         url: UrlDigest,
+        life: Option<&str>,
     ) {
         let mut state = self.lock();
         let Some(workspace) = state.workspaces.get_mut(workspace) else {
@@ -1410,7 +1464,10 @@ impl WorkspaceStore {
         workspace.tabs.insert(
             handle,
             TabState {
-                pending: Some(url),
+                pending: Some(Remembered {
+                    url,
+                    life: life.map(str::to_owned),
+                }),
                 ..TabState::bound(browser, physical_id)
             },
         );
@@ -1665,6 +1722,10 @@ impl WorkspaceStore {
                         physical_id: tab.physical_id,
                         url: tab.remembered_url(),
                         pending: !tab.is_confirmed(),
+                        life: tab
+                            .pending
+                            .as_ref()
+                            .and_then(|remembered| remembered.life.clone()),
                     })
                     .collect()
             })
@@ -1694,21 +1755,25 @@ impl WorkspaceStore {
     }
 
     /// Confirm or forget `workspace`'s pending bindings of `browser` against `live`, the tabs
-    /// that browser lists now (ADR-0203 Decision 1). Only the call that holds the workspace's
-    /// lease confirms, before it selects a tab and again before a crossing whose tab went pending
-    /// while it ran.
+    /// that browser lists now, in `life`, the extension life its connection reported once the
+    /// listing answered (ADR-0203 Decision 1). Only the call that holds the workspace's lease
+    /// confirms, before it selects a tab and again before a crossing whose tab went pending while
+    /// it ran.
     ///
-    /// A binding whose id the browser lists at the URL it is remembered by, and that no other
-    /// workspace holds, is kept: it takes the live title and readiness and keeps its generation,
-    /// handles and captures. The first one binds the workspace's browser. Every other pending
-    /// binding of `browser` is forgotten as closed, and its handle then names no open tab.
+    /// A binding the browser still shows, and that no other workspace holds, is kept: in the life
+    /// it remembers, the tab with its id; in any other, the tab with its id at the URL it is
+    /// remembered by. It takes the live URL, title and readiness and keeps its handles, and its
+    /// generation moves on when that URL is not the one it was remembered by. The first one binds
+    /// the workspace's browser. Every other pending binding of `browser` is forgotten as closed,
+    /// and its handle then names no open tab.
     pub fn confirm(
         &self,
         workspace: &WorkspaceId,
         browser: &str,
+        life: Option<&str>,
         live: &[PhysicalTab],
     ) -> Result<(), WorkspaceError> {
-        self.lock().confirm(workspace, browser, live)
+        self.lock().confirm(workspace, browser, life, live)
     }
 
     /// Invalidate agent references after an unrelated page change, without governing browsing.
@@ -3111,14 +3176,14 @@ mod tests {
     }
 
     /// A released tab outlives its browser's reconnect, and a reuse takes it only where the live
-    /// browser still shows it at its release address, the rule a pending binding follows.
+    /// browser still shows it at its release address, the URL rule a pending binding follows.
     #[test]
     fn a_released_tab_is_reused_after_a_reconnect_only_where_its_browser_still_shows_it() {
         let url = "https://example.com/kept";
         let store = WorkspaceStore::default();
         let released = workspace_with_tabs(&store, TEST_BROWSER, &[(8, url), (9, url)]);
         kept_open(&store, &store.release(&released));
-        store.apply_browser_disconnect(TEST_BROWSER);
+        store.apply_browser_disconnect(TEST_BROWSER, None);
 
         let restarted = [
             physical(8, "https://bank.example/the-persons-own"),
@@ -3149,7 +3214,7 @@ mod tests {
     fn pending_workspace(store: &WorkspaceStore) -> (WorkspaceId, String) {
         let workspace = workspace_with_tabs(store, TEST_BROWSER, &[(7, AGENT_URL)]);
         let handle = store.tab_bindings(workspace.as_str())[0].handle.clone();
-        store.apply_browser_disconnect(TEST_BROWSER);
+        store.apply_browser_disconnect(TEST_BROWSER, None);
         (workspace, handle)
     }
 
@@ -3216,7 +3281,7 @@ mod tests {
             .0
             .clone();
         drop(lease);
-        store.apply_browser_disconnect(TEST_BROWSER);
+        store.apply_browser_disconnect(TEST_BROWSER, None);
         let lease = store.acquire(&workspace).unwrap();
         let away = Some(TEST_BROWSER.to_owned());
 
@@ -3241,13 +3306,14 @@ mod tests {
             "browser_away",
             9,
             super::UrlDigest::of(AGENT_URL),
+            None,
         );
         assert_eq!(
             lease.pending_browser_of(&super::TabRequest::default()),
             None
         );
         store
-            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .confirm(&workspace, TEST_BROWSER, None, &[physical(7, AGENT_URL)])
             .unwrap();
         assert_eq!(
             lease.pending_browser_of(&super::TabRequest::default()),
@@ -3271,7 +3337,7 @@ mod tests {
         assert_eq!(state(7), BindingState::Pending);
         assert_eq!(state(8), BindingState::Unbound);
         store
-            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .confirm(&workspace, TEST_BROWSER, None, &[physical(7, AGENT_URL)])
             .unwrap();
         assert_eq!(state(7), BindingState::Confirmed);
         assert_eq!(
@@ -3289,12 +3355,17 @@ mod tests {
             &[(7, AGENT_URL), (8, "https://example.com/second")],
         );
         let before = store.tab_bindings(workspace.as_str());
-        store.apply_browser_disconnect(TEST_BROWSER);
+        store.apply_browser_disconnect(TEST_BROWSER, None);
         let lease = store.acquire(&workspace).unwrap();
         let mut live = physical(7, AGENT_URL);
         live.title = "Live title".into();
         store
-            .confirm(&workspace, TEST_BROWSER, &[live, physical(8, PERSONS_URL)])
+            .confirm(
+                &workspace,
+                TEST_BROWSER,
+                None,
+                &[live, physical(8, PERSONS_URL)],
+            )
             .unwrap();
 
         let tabs = lease.tabs().unwrap();
@@ -3309,6 +3380,156 @@ mod tests {
             WorkspaceError::StaleTab
         );
         assert!(lease.pending_browsers().is_empty());
+    }
+
+    /// The extension life a test browser's tabs were confirmed in, and the life after it.
+    const LIFE: &str = "life_first";
+    const NEXT_LIFE: &str = "life_next";
+
+    /// The address a single-page app routed the agent's tab to without a navigation the service
+    /// saw.
+    const ROUTED_URL: &str = "https://example.com/agent/routed";
+
+    #[test]
+    fn in_its_own_life_a_pending_binding_is_confirmed_by_id_and_a_routed_page_moves_on() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_test(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
+            .unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(7, AGENT_URL))
+            .unwrap();
+        let target = lease
+            .register_targets(&tab, &[control("#email", "Email")])
+            .unwrap()[0]
+            .0
+            .clone();
+        drop(lease);
+        store.apply_browser_disconnect(TEST_BROWSER, Some(LIFE));
+        let bindings = store.tab_bindings(workspace.as_str());
+        assert_eq!(bindings[0].life.as_deref(), Some(LIFE));
+
+        let lease = store.acquire(&workspace).unwrap();
+        let mut live = physical(7, ROUTED_URL);
+        live.title = "Routed".into();
+        store
+            .confirm(&workspace, TEST_BROWSER, Some(LIFE), &[live])
+            .unwrap();
+        let tabs = lease.tabs().unwrap();
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(tabs[0].handle, tab.handle);
+        assert_eq!(tabs[0].url, ROUTED_URL, "the binding takes the live URL");
+        assert_eq!(tabs[0].title, "Routed");
+        assert_eq!(tabs[0].generation, tab.generation + 1);
+        assert_eq!(
+            lease.resolve_target(target.as_str(), None).unwrap_err(),
+            WorkspaceError::StaleTarget {
+                reason: StaleReason::Navigated
+            },
+            "no target of the earlier page answers for the routed one"
+        );
+        let bindings = store.tab_bindings(workspace.as_str());
+        assert!(!bindings[0].pending);
+        assert_eq!(bindings[0].life, None);
+        assert_eq!(bindings[0].url, super::UrlDigest::of(ROUTED_URL));
+    }
+
+    #[test]
+    fn in_its_own_life_an_unchanged_page_keeps_its_generation_and_targets() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_test(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
+            .unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(7, AGENT_URL))
+            .unwrap();
+        let target = lease
+            .register_targets(&tab, &[control("#email", "Email")])
+            .unwrap()[0]
+            .0
+            .clone();
+        drop(lease);
+        store.apply_browser_disconnect(TEST_BROWSER, Some(LIFE));
+        let lease = store.acquire(&workspace).unwrap();
+        store
+            .confirm(
+                &workspace,
+                TEST_BROWSER,
+                Some(LIFE),
+                &[physical(7, AGENT_URL)],
+            )
+            .unwrap();
+        assert_eq!(lease.tabs().unwrap()[0].generation, tab.generation);
+        assert!(lease.resolve_target(target.as_str(), None).is_ok());
+    }
+
+    #[test]
+    fn another_life_or_no_life_confirms_only_by_url() {
+        // (the life the binding remembers, the life the browser reports now)
+        for (remembered, now) in [
+            (Some(LIFE), Some(NEXT_LIFE)),
+            (Some(LIFE), None),
+            (None, Some(LIFE)),
+            (None, None),
+        ] {
+            let store = WorkspaceStore::default();
+            let workspace = workspace_with_tabs(&store, TEST_BROWSER, &[(7, AGENT_URL)]);
+            store.apply_browser_disconnect(TEST_BROWSER, remembered);
+            store
+                .confirm(&workspace, TEST_BROWSER, now, &[physical(7, ROUTED_URL)])
+                .unwrap();
+            assert!(
+                store.tab_bindings(workspace.as_str()).is_empty(),
+                "{remembered:?} then {now:?}: a routed page is not the tab the binding knew"
+            );
+
+            let workspace = workspace_with_tabs(&store, TEST_BROWSER, &[(8, AGENT_URL)]);
+            store.apply_browser_disconnect(TEST_BROWSER, remembered);
+            store
+                .confirm(&workspace, TEST_BROWSER, now, &[physical(8, AGENT_URL)])
+                .unwrap();
+            let bindings = store.tab_bindings(workspace.as_str());
+            assert_eq!(bindings.len(), 1, "{remembered:?} then {now:?}");
+            assert!(!bindings[0].pending, "{remembered:?} then {now:?}");
+        }
+    }
+
+    #[test]
+    fn a_resumed_binding_remembers_the_life_its_token_names() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_test(&store);
+        store.remember_tab(
+            &workspace,
+            "tab_kept",
+            TEST_BROWSER,
+            7,
+            super::UrlDigest::of(AGENT_URL),
+            Some(LIFE),
+        );
+        assert_eq!(
+            store.tab_bindings(workspace.as_str())[0].life.as_deref(),
+            Some(LIFE)
+        );
+        store
+            .confirm(
+                &workspace,
+                TEST_BROWSER,
+                Some(LIFE),
+                &[physical(7, ROUTED_URL)],
+            )
+            .unwrap();
+        let bindings = store.tab_bindings(workspace.as_str());
+        assert_eq!(bindings.len(), 1);
+        assert!(!bindings[0].pending);
+        assert_eq!(bindings[0].url, super::UrlDigest::of(ROUTED_URL));
+        assert_eq!(
+            store.browser_of(workspace.as_str()),
+            Some(TEST_BROWSER.into())
+        );
     }
 
     #[test]
@@ -3326,7 +3547,7 @@ mod tests {
         assert!(store.tab_bindings(workspace.as_str()).is_empty());
         let lease = store.acquire(&workspace).unwrap();
         store
-            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .confirm(&workspace, TEST_BROWSER, None, &[physical(7, AGENT_URL)])
             .unwrap();
         assert!(lease.tabs().unwrap().is_empty());
     }
@@ -3345,7 +3566,7 @@ mod tests {
         assert_eq!(bindings[0].url, super::UrlDigest::of(AGENT_URL));
         let lease = store.acquire(&workspace).unwrap();
         store
-            .confirm(&workspace, TEST_BROWSER, &[physical(7, PERSONS_URL)])
+            .confirm(&workspace, TEST_BROWSER, None, &[physical(7, PERSONS_URL)])
             .unwrap();
         assert!(lease.tabs().unwrap().is_empty());
         assert!(store.tab_bindings(workspace.as_str()).is_empty());
@@ -3373,10 +3594,11 @@ mod tests {
             TEST_BROWSER,
             7,
             super::UrlDigest::of(AGENT_URL),
+            None,
         );
         let lease = store.acquire(&workspace).unwrap();
         store
-            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .confirm(&workspace, TEST_BROWSER, None, &[physical(7, AGENT_URL)])
             .unwrap();
         assert!(lease.tabs().unwrap().is_empty());
         assert!(store.tab_bindings(workspace.as_str()).is_empty());
@@ -3393,6 +3615,7 @@ mod tests {
             "browser_away",
             7,
             super::UrlDigest::of(AGENT_URL),
+            None,
         );
         let lease = store.acquire(&workspace).unwrap();
         lease
@@ -3424,12 +3647,13 @@ mod tests {
             TEST_BROWSER,
             7,
             super::UrlDigest::of(AGENT_URL),
+            None,
         );
         assert_eq!(store.browser_of(workspace.as_str()), None);
         let lease = store.acquire(&workspace).unwrap();
         assert_eq!(lease.forget_pending("browser_elsewhere"), Ok(()));
         store
-            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .confirm(&workspace, TEST_BROWSER, None, &[physical(7, AGENT_URL)])
             .unwrap();
         let tab = lease.select_tab(Some("tab_kept")).unwrap();
         assert_eq!(tab.physical_id, 7);

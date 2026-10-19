@@ -37,6 +37,8 @@ const UNBRANDED_BROWSER_NAME: &str = "Chromium";
 const MAX_BROWSER_CONNECTIONS: usize = 16;
 // Every browser identity an adapter mints starts with this prefix.
 const BROWSER_ID_PREFIX: &str = "browser_";
+// Every extension life an adapter mints starts with this prefix.
+const LIFE_PREFIX: &str = "life_";
 const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// How long a call waits for a browser that is on its way back before it says what is true.
@@ -225,6 +227,18 @@ pub trait BrowserPort: Send + Sync {
         0
     }
 
+    /// The extension life the registered connection of `browser` reported in its hello, or
+    /// `None` when no connection of that browser is registered or its hello named no life.
+    ///
+    /// One life names one browser run, in which tab ids are never reused, so a pending binding
+    /// remembered in this life is still the tab with its id (ADR-0203 Decision 1). A life read
+    /// after a listing answered names the run that listing came from or a later one, never an
+    /// earlier one, because a life never comes back once the browser has left it. The default
+    /// knows none, so every pending binding is confirmed by its URL.
+    fn life_of(&self, _browser: &str) -> Option<String> {
+        None
+    }
+
     /// Wait until one exact browser can take work, `until` passes, or the call is cancelled.
     ///
     /// The default reads `browsers()`, so a port that cannot tell a silent connection from an
@@ -392,6 +406,8 @@ struct Connection {
     adapter_version: String,
     browser_id: String,
     browser_name: Option<String>,
+    /// The extension life the connection's hello reported, if it reported one.
+    life: Option<String>,
     liveness: Arc<Liveness>,
 }
 
@@ -873,10 +889,11 @@ impl RelayBrowserPort {
     /// Register one accepted connection under its browser identity, retiring the connection it
     /// replaces, and tell the lifecycle observer.
     ///
-    /// Retiring a connection ends its stream, so the event sink hears that browser disconnect
-    /// before the new connection is registered. Its own end then goes unreported, because it is no
-    /// longer the current connection, and a browser whose old stream's end was never seen may have
-    /// restarted all the same (ADR-0203 Decision 1).
+    /// Retiring a connection ends its stream, so the event sink hears that browser disconnect,
+    /// with the life the retired connection reported, before the new connection is registered.
+    /// Its own end then goes unreported, because it is no longer the current connection, and a
+    /// browser whose old stream's end was never seen may have restarted all the same (ADR-0203
+    /// Decision 1).
     ///
     /// # Errors
     ///
@@ -887,10 +904,13 @@ impl RelayBrowserPort {
             .browser_name
             .as_deref()
             .and_then(browser_id_named);
-        let replacing = lock(&self.adapters).connections.contains_key(&browser_id);
-        if replacing {
+        let replaced = lock(&self.adapters)
+            .connections
+            .get(&browser_id)
+            .map(|previous| previous.life.clone());
+        if let Some(life) = replaced {
             if let Some(sink) = lock(&self.event_sink).clone() {
-                sink.on_event(&browser_id, BrowserEvent::Disconnected);
+                sink.on_event(&browser_id, BrowserEvent::Disconnected { life });
             }
         }
         let lifecycle = lock(&self.lifecycle).clone();
@@ -1101,6 +1121,13 @@ impl BrowserPort for RelayBrowserPort {
             .map(|installed| (*installed).to_owned())
     }
 
+    fn life_of(&self, browser: &str) -> Option<String> {
+        lock(&self.adapters)
+            .connections
+            .get(browser)
+            .and_then(|connection| connection.life.clone())
+    }
+
     fn arrivals_of(&self, installed: &str) -> u64 {
         lock(&self.adapters)
             .arrivals
@@ -1172,12 +1199,13 @@ fn end_connection(
     notifications: &AdapterNotifications,
 ) {
     let browser_id = &tag.browser_id;
-    let was_current = lock(adapters)
-        .remove_exact(browser_id, &tag.connection_id)
-        .is_some();
-    if was_current {
+    let removed = lock(adapters).remove_exact(browser_id, &tag.connection_id);
+    if let Some(removed) = removed {
         if let Some(sink) = &notifications.sink {
-            sink.on_event(browser_id, BrowserEvent::Disconnected);
+            sink.on_event(
+                browser_id,
+                BrowserEvent::Disconnected { life: removed.life },
+            );
         }
         if let Some(observer) = &notifications.lifecycle {
             observer.adapter_detached(browser_id);
@@ -1467,6 +1495,7 @@ pub(crate) mod testing {
         last_connected: Mutex<Option<String>>,
         installed: Mutex<std::collections::HashMap<String, String>>,
         arrivals: Mutex<std::collections::HashMap<String, u64>>,
+        lives: Mutex<std::collections::HashMap<String, String>>,
     }
 
     /// One answer the fake will give, and whether it wrote the command to the browser first.
@@ -1490,6 +1519,7 @@ pub(crate) mod testing {
                 last_connected: Mutex::new(None),
                 installed: Mutex::default(),
                 arrivals: Mutex::default(),
+                lives: Mutex::default(),
             }
         }
     }
@@ -1570,6 +1600,15 @@ pub(crate) mod testing {
         /// `installed`, a native-host id.
         pub fn remember_installed(&self, browser: &str, installed: &str) {
             lock(&self.installed).insert(browser.into(), installed.into());
+        }
+        /// Report `life` as the extension life the connection of `browser` named in its hello,
+        /// or no life for `None`.
+        pub fn set_life(&self, browser: &str, life: Option<&str>) {
+            let mut lives = lock(&self.lives);
+            match life {
+                Some(life) => lives.insert(browser.into(), life.into()),
+                None => lives.remove(browser),
+            };
         }
     }
 
@@ -1724,6 +1763,10 @@ pub(crate) mod testing {
 
         fn arrivals_of(&self, installed: &str) -> u64 {
             lock(&self.arrivals).get(installed).copied().unwrap_or(0)
+        }
+
+        fn life_of(&self, browser: &str) -> Option<String> {
+            lock(&self.lives).get(browser).cloned()
         }
 
         fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {

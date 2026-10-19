@@ -41,7 +41,7 @@ fn restart_listing(
     browser: &FakeBrowser,
     live: Vec<PhysicalTab>,
 ) {
-    workspaces.apply_browser_disconnect(FAKE_BROWSER);
+    workspaces.apply_browser_disconnect(FAKE_BROWSER, None);
     browser.push(Ok(BrowserOutcome::Tabs { tabs: live }));
 }
 
@@ -154,6 +154,164 @@ fn a_port_restart_keeps_a_tab_whose_page_is_unchanged() {
     assert!(!bindings[0].pending);
 }
 
+/// The extension life the agent's tab was opened in.
+const LIFE: &str = "life_first";
+
+/// The life of the browser after it restarted, or after the extension reloaded.
+const NEXT_LIFE: &str = "life_next";
+
+/// The address a single-page app routed the agent's tab to, with no navigation the service saw.
+const ROUTED_URL: &str = "https://example.com/agent/inbox";
+
+/// The browser's connection, which named `ended` in its hello, ends, and a connection that names
+/// `now` comes back listing `live`.
+fn reconnect_listing(
+    workspaces: &crate::workspace::WorkspaceStore,
+    browser: &FakeBrowser,
+    ended: Option<&str>,
+    now: Option<&str>,
+    live: Vec<PhysicalTab>,
+) {
+    workspaces.apply_browser_disconnect(FAKE_BROWSER, ended);
+    browser.set_life(FAKE_BROWSER, now);
+    browser.push(Ok(BrowserOutcome::Tabs { tabs: live }));
+}
+
+/// Read the agent's tab at `url` through `handle`.
+fn read_routed(
+    executor: &ApplicationExecutor,
+    browser: &FakeBrowser,
+    workspace: &crate::workspace::WorkspaceId,
+    handle: &str,
+    url: &str,
+) -> crate::work::result::InvocationResult {
+    browser.push(Ok(BrowserOutcome::Text {
+        tab_id: AGENT_TAB,
+        text: "Inbox".into(),
+        truncated: false,
+        title: "Inbox".into(),
+        url: url.into(),
+    }));
+    executor.execute(
+        workspace,
+        "browser_read",
+        json!({"tab":handle}),
+        &CancellationToken::default(),
+    )
+}
+
+#[test]
+fn a_worker_restart_in_the_same_life_keeps_a_tab_whose_page_routed_itself() {
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.set_life(FAKE_BROWSER, Some(LIFE));
+    let handle = open_agent_tab(&executor, &browser, &workspace);
+    reconnect_listing(
+        &workspaces,
+        &browser,
+        Some(LIFE),
+        Some(LIFE),
+        vec![tab(AGENT_TAB, ROUTED_URL)],
+    );
+    let read = read_routed(&executor, &browser, &workspace, &handle, ROUTED_URL);
+    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
+    assert_eq!(read.facts["tab"], json!(handle));
+    let bindings = workspaces.tab_bindings(workspace.as_str());
+    assert_eq!(bindings.len(), 1);
+    assert!(!bindings[0].pending);
+    assert_eq!(
+        bindings[0].url,
+        crate::workspace::UrlDigest::of(ROUTED_URL),
+        "the binding takes the live URL"
+    );
+}
+
+#[test]
+fn a_new_life_falls_back_to_the_url_check() {
+    // A browser restart or an extension reload: the routed tab is not the agent's any more.
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.set_life(FAKE_BROWSER, Some(LIFE));
+    let handle = open_agent_tab(&executor, &browser, &workspace);
+    reconnect_listing(
+        &workspaces,
+        &browser,
+        Some(LIFE),
+        Some(NEXT_LIFE),
+        vec![tab(AGENT_TAB, ROUTED_URL)],
+    );
+    let before = browser.calls().len();
+    let read = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(
+        read.summary,
+        "That tab handle names no open tab in this session."
+    );
+    assert!(!touched_old_id(&browser, before), "{:?}", browser.calls());
+    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
+
+    // The same id at the address the workspace knew still confirms in the new life.
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.set_life(FAKE_BROWSER, Some(LIFE));
+    let handle = open_agent_tab(&executor, &browser, &workspace);
+    reconnect_listing(
+        &workspaces,
+        &browser,
+        Some(LIFE),
+        Some(NEXT_LIFE),
+        vec![tab(AGENT_TAB, AGENT_URL)],
+    );
+    let read = read_routed(&executor, &browser, &workspace, &handle, AGENT_URL);
+    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
+}
+
+#[test]
+fn a_token_or_hello_without_a_life_falls_back_to_the_url_check() {
+    // (the life the ended hello named, the life the new hello names)
+    for (ended, now) in [(None, Some(LIFE)), (Some(LIFE), None), (None, None)] {
+        let (executor, browser, workspaces, workspace, _) = fixture();
+        browser.set_life(FAKE_BROWSER, ended);
+        let handle = open_agent_tab(&executor, &browser, &workspace);
+        reconnect_listing(
+            &workspaces,
+            &browser,
+            ended,
+            now,
+            vec![tab(AGENT_TAB, ROUTED_URL)],
+        );
+        let read = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({"tab":handle}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            read.summary, "That tab handle names no open tab in this session.",
+            "{ended:?} then {now:?}"
+        );
+    }
+
+    // A token that names no life for its browser resumes a binding the URL alone confirms.
+    let (executor, browser, workspaces, workspace) = resumed_session(AGENT_URL);
+    browser.set_life(FAKE_BROWSER, Some(LIFE));
+    browser.push(Ok(BrowserOutcome::Tabs {
+        tabs: vec![tab(AGENT_TAB, ROUTED_URL)],
+    }));
+    let read = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":"tab_kept"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(
+        read.summary,
+        "That tab handle names no open tab in this session."
+    );
+    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
+}
+
 /// Give the agent's tab its page's document, as a browser that opened it in this run knows it.
 fn agent_documents(browser: &FakeBrowser) {
     browser.set_documents(
@@ -186,6 +344,7 @@ fn resumed_session(
         FAKE_BROWSER,
         AGENT_TAB,
         crate::workspace::UrlDigest::of(url),
+        None,
     );
     (executor, browser, workspaces, workspace)
 }
@@ -285,6 +444,7 @@ fn opening_in_another_browser_forgets_the_resumed_tabs_and_says_so() {
         "browser_away",
         AGENT_TAB,
         crate::workspace::UrlDigest::of(AGENT_URL),
+        None,
     );
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(3, "https://example.com/"),
@@ -320,7 +480,7 @@ fn reconnect_soon(browser: &Arc<FakeBrowser>) {
 /// is queued by the test.
 fn drop_and_reconnect(workspaces: &WorkspaceStore, browser: &Arc<FakeBrowser>) {
     browser.connect(Vec::new());
-    workspaces.apply_browser_disconnect(FAKE_BROWSER);
+    workspaces.apply_browser_disconnect(FAKE_BROWSER, None);
     reconnect_soon(browser);
 }
 

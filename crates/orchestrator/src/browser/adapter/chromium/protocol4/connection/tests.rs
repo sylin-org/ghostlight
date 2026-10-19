@@ -218,6 +218,72 @@ fn a_hello_naming_another_platform_is_closed_without_an_answer() {
     assert!(port.browsers().is_empty());
 }
 
+/// The fake extension's hello for [`FOUR`], naming `life`.
+fn hello_in(life: &str) -> Value {
+    let mut hello = FakeExtension::hello(FOUR);
+    hello["life"] = json!(life);
+    hello
+}
+
+#[test]
+fn the_port_reads_the_life_each_hello_names_and_each_departure_carries_it() {
+    let port = port();
+    let events = Arc::new(Events::default());
+    port.set_event_sink(events.clone());
+    assert_eq!(port.life_of(FOUR), None);
+
+    let (_first, attached) = attach(&port, &hello_in("life_first"));
+    attached.unwrap();
+    assert_eq!(port.life_of(FOUR).as_deref(), Some("life_first"));
+
+    // A new connection of the same browser replaces it, and the departure names the replaced life.
+    let (second, attached) = attach(&port, &hello_in("life_second"));
+    attached.unwrap();
+    assert_eq!(port.life_of(FOUR).as_deref(), Some("life_second"));
+    assert_eq!(
+        *events.0.lock().unwrap(),
+        [(
+            FOUR.to_owned(),
+            BrowserEvent::Disconnected {
+                life: Some("life_first".into())
+            }
+        )]
+    );
+
+    // Its stream ends: the departure names its life, and the port knows none any more.
+    second.close();
+    eventually(|| events.0.lock().unwrap().len() == 2);
+    assert_eq!(
+        events.0.lock().unwrap()[1],
+        (
+            FOUR.to_owned(),
+            BrowserEvent::Disconnected {
+                life: Some("life_second".into())
+            }
+        )
+    );
+    assert_eq!(port.life_of(FOUR), None);
+}
+
+#[test]
+fn a_hello_without_a_readable_life_is_accepted_and_names_none() {
+    let mut cases = vec![FakeExtension::hello(FOUR)];
+    for life in [
+        "life_",
+        "life-first",
+        "browser_first",
+        &format!("life_{}", "a".repeat(80)),
+    ] {
+        cases.push(hello_in(life));
+    }
+    for hello in cases {
+        let port = port();
+        let (_fake, attached) = attach(&port, &hello);
+        assert_eq!(attached, Ok(()), "{hello}");
+        assert_eq!(port.life_of(FOUR), None, "{hello}");
+    }
+}
+
 #[test]
 fn events_reach_the_sink_and_unknown_frames_are_ignored() {
     let port = port();
@@ -401,7 +467,7 @@ fn a_closed_socket_fails_waiting_calls_and_detaches() {
     );
     assert_eq!(
         *events.0.lock().unwrap(),
-        [(FOUR.to_owned(), BrowserEvent::Disconnected)]
+        [(FOUR.to_owned(), BrowserEvent::Disconnected { life: None })]
     );
     assert_eq!(
         waiting.recv_timeout(Duration::from_millis(10)),

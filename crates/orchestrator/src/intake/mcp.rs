@@ -247,13 +247,19 @@ impl McpSession {
         self.phase != Phase::Fresh
     }
 
-    /// What a later connection needs to continue this session, once it is initialized.
+    /// What a later connection needs to continue this session, once it is initialized: the tabs
+    /// it owns and the extension life of each of their browsers that names one.
     #[must_use]
-    pub fn resume_state(&self, owned_tabs: Vec<OwnedTab>) -> Option<ResumeState> {
+    pub fn resume_state(
+        &self,
+        owned_tabs: Vec<OwnedTab>,
+        lives: BTreeMap<String, String>,
+    ) -> Option<ResumeState> {
         Some(ResumeState {
             revision: self.revision?.into(),
             claim: self.claim.clone(),
             owned_tabs,
+            lives,
         })
     }
 
@@ -570,6 +576,11 @@ pub struct ResumeState {
     /// The tabs the session owned.
     #[serde(default)]
     pub owned_tabs: Vec<OwnedTab>,
+    /// The extension life each browser of `owned_tabs` was in when the token was written, by
+    /// browser id (ADR-0203 Decision 1). A tab whose browser has no life here, as in a token an
+    /// earlier build wrote, is confirmed by its URL digest.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lives: BTreeMap<String, String>,
 }
 
 /// Why a resume token was not accepted.
@@ -599,19 +610,29 @@ impl ResumeState {
             revision: OLDEST_REVISION.into(),
             claim: None,
             owned_tabs: Vec::new(),
+            lives: BTreeMap::new(),
         }
     }
 
     /// Encode the state as an opaque token: a version prefix and base64url JSON, never longer
     /// than [`MAX_RESUME_TOKEN_BYTES`].
     ///
-    /// A state too large for that keeps its first tabs, as many as fit. A tab left out is not
-    /// restored after a restart, and its handle then reads as no longer open.
+    /// A state too large for that keeps its first tabs, as many as fit, and the lives of their
+    /// browsers only. A tab left out is not restored after a restart, and its handle then reads as
+    /// no longer open.
     #[must_use]
     pub fn encode(&self) -> String {
         let token = |tabs: usize| {
+            let owned_tabs = self.owned_tabs[..tabs].to_vec();
+            let lives = self
+                .lives
+                .iter()
+                .filter(|(browser, _)| owned_tabs.iter().any(|tab| &tab.browser_id == *browser))
+                .map(|(browser, life)| (browser.clone(), life.clone()))
+                .collect();
             let kept = Self {
-                owned_tabs: self.owned_tabs[..tabs].to_vec(),
+                owned_tabs,
+                lives,
                 ..self.clone()
             };
             let json = serde_json::to_vec(&kept).unwrap_or_default();
@@ -622,7 +643,7 @@ impl ResumeState {
             return whole;
         }
         // The most tabs that fit: `fits` always fits, since with no tab the state is a served
-        // revision and a bounded claim, and `over` never does.
+        // revision and a bounded claim with no life, and `over` never does.
         let (mut fits, mut over) = (0, self.owned_tabs.len());
         while over - fits > 1 {
             let middle = fits + (over - fits) / 2;

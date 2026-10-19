@@ -124,6 +124,12 @@ pub struct Hello {
     pub protocol: u16,
     /// Stable browser-instance identity chosen by the extension.
     pub browser_id: String,
+    /// The extension's life in this browser run, an opaque id the extension keeps in session
+    /// storage. The browser keeps it across a worker and a native-host restart and clears it on
+    /// a browser restart and on an extension reload, update or disable, so one life names one
+    /// browser run, in which tab ids are never reused (ADR-0203 Decision 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub life: Option<String>,
     /// Display name of the browser.
     #[serde(default)]
     pub browser_name: Option<String>,
@@ -2068,15 +2074,27 @@ mod tests {
     #[test]
     fn a_hello_decodes_and_serializes_back_to_itself() {
         let frame = json!({"kind": "hello", "protocol": 4, "browser_id": "browser_3f2a9c",
-            "browser_name": "Chrome", "platform": "ghostlight/chromium",
+            "life": "life_5c0d2e", "browser_name": "Chrome", "platform": "ghostlight/chromium",
             "engine_version": "131.0.6778.86", "adapter_version": "2.0.0", "attended": true});
         let Inbound::Hello(hello) = decode::<Inbound>(frame.clone()) else {
             panic!("a hello frame decodes as a hello");
         };
         assert_eq!(hello.protocol, PROTOCOL);
         assert_eq!(hello.browser_id, "browser_3f2a9c");
+        assert_eq!(hello.life.as_deref(), Some("life_5c0d2e"));
         assert!(hello.attended);
         assert_eq!(encode(&Inbound::Hello(hello)), frame);
+    }
+
+    #[test]
+    fn a_hello_without_a_life_decodes_and_serializes_without_one() {
+        let frame = json!({"kind": "hello", "protocol": 4, "browser_id": "browser_3f2a9c",
+            "adapter_version": "2.0.0", "attended": false});
+        let Inbound::Hello(hello) = decode::<Inbound>(frame) else {
+            panic!("a hello frame decodes as a hello");
+        };
+        assert_eq!(hello.life, None);
+        assert!(encode(&Inbound::Hello(hello)).get("life").is_none());
     }
 
     #[test]

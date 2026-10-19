@@ -34,7 +34,7 @@ pub mod shell;
 #[cfg(test)]
 pub(crate) mod test_home;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -942,7 +942,7 @@ impl Farewell {
             let keeps_tabs = wire
                 .workspace()
                 .is_some_and(|workspace| kept.contains(&workspace));
-            wire.hand_last_resume(&self.workspaces, keeps_tabs);
+            wire.hand_last_resume(&self.workspaces, self.port.as_ref(), keeps_tabs);
         }
         for wire in &streams {
             wire.goodbye(goodbye);
@@ -1453,8 +1453,11 @@ fn serve_mcp(
     let writer = Arc::new(SocketWriter::new(connection)?);
     let (session, resumed_tabs) = match resumed {
         Some(state) => {
-            let owned_tabs = state.owned_tabs.clone();
-            (McpSession::resumed(state), Some(owned_tabs))
+            let kept = KeptTabs {
+                owned: state.owned_tabs.clone(),
+                lives: state.lives.clone(),
+            };
+            (McpSession::resumed(state), Some(kept))
         }
         None => (McpSession::new(), None),
     };
@@ -1462,10 +1465,14 @@ fn serve_mcp(
     let _enrolled = intake.quit.enroll(Arc::clone(&wire));
 
     let mut live = match resumed_tabs {
-        Some(owned_tabs) => {
+        Some(kept) => {
             let live = LiveSession::open(intake, &wire, &accepted)?;
-            remember_resumed_tabs(&intake.workspaces, &live.workspace, &owned_tabs);
-            wire.publish_resume(&intake.workspaces, &live.workspace);
+            remember_resumed_tabs(&intake.workspaces, &live.workspace, &kept);
+            wire.publish_resume(
+                &intake.workspaces,
+                intake.browser_port.as_ref(),
+                &live.workspace,
+            );
             Some(live)
         }
         None => None,
@@ -1506,7 +1513,11 @@ fn serve_mcp(
             }
             open_when_initialized(&mut live)?;
             if let (true, Some(live)) = (opened, &live) {
-                wire.publish_resume(&intake.workspaces, &live.workspace);
+                wire.publish_resume(
+                    &intake.workspaces,
+                    intake.browser_port.as_ref(),
+                    &live.workspace,
+                );
             }
         }
         Ok(())
@@ -1606,11 +1617,17 @@ impl McpWire {
     ///
     /// Each tab is written with its own binding's browser, a pending one included, so a call that
     /// completes before that browser returns keeps the tab in the token. A tab carries the digest
-    /// of its URL, never the URL, so the edge holds no page address.
-    fn publish_resume(&self, workspaces: &WorkspaceStore, workspace: &WorkspaceId) {
+    /// of its URL, never the URL, so the edge holds no page address, and each browser carries the
+    /// extension life its tabs were confirmed in, read from `port`.
+    fn publish_resume(
+        &self,
+        workspaces: &WorkspaceStore,
+        port: &dyn BrowserPort,
+        workspace: &WorkspaceId,
+    ) {
         let mut resume = lock(&self.resume);
         if !resume.sealed {
-            self.write_resume(&mut resume, owned_tabs(workspaces, workspace));
+            self.write_resume(&mut resume, kept_tabs(workspaces, port, workspace));
         }
     }
 
@@ -1620,7 +1637,7 @@ impl McpWire {
     /// would hand it, and it is written even after an end handed the stream its last.
     fn announce_initialized(&self) {
         let mut resume = lock(&self.resume);
-        self.write_resume(&mut resume, Vec::new());
+        self.write_resume(&mut resume, KeptTabs::default());
     }
 
     /// Hand the edge the last resume token of this service, with the session's tabs only when
@@ -1628,23 +1645,28 @@ impl McpWire {
     ///
     /// A session that ends at a quit resumes later with no tab, so its handles read as no longer
     /// open instead of rebinding tabs the release left behind.
-    fn hand_last_resume(&self, workspaces: &WorkspaceStore, keeps_tabs: bool) {
+    fn hand_last_resume(
+        &self,
+        workspaces: &WorkspaceStore,
+        port: &dyn BrowserPort,
+        keeps_tabs: bool,
+    ) {
         let mut resume = lock(&self.resume);
         if resume.sealed {
             return;
         }
-        let tabs = match self.workspace() {
-            Some(workspace) if keeps_tabs => owned_tabs(workspaces, &workspace),
-            _ => Vec::new(),
+        let kept = match self.workspace() {
+            Some(workspace) if keeps_tabs => kept_tabs(workspaces, port, &workspace),
+            _ => KeptTabs::default(),
         };
-        self.write_resume(&mut resume, tabs);
+        self.write_resume(&mut resume, kept);
         resume.sealed = true;
     }
 
-    /// Write the token that restores `owned_tabs`, unless it is the one last written or the
-    /// session is not initialized yet.
-    fn write_resume(&self, resume: &mut Resume, owned_tabs: Vec<OwnedTab>) {
-        let Some(state) = lock(&self.session).resume_state(owned_tabs) else {
+    /// Write the token that restores `kept`, unless it is the one last written or the session is
+    /// not initialized yet.
+    fn write_resume(&self, resume: &mut Resume, kept: KeptTabs) {
+        let Some(state) = lock(&self.session).resume_state(kept.owned, kept.lives) else {
             return;
         };
         let token = state.encode();
@@ -1663,19 +1685,70 @@ impl McpWire {
     }
 }
 
+/// What a resume token restores: the tabs, and the extension life of each of their browsers.
+#[derive(Default)]
+struct KeptTabs {
+    owned: Vec<OwnedTab>,
+    lives: BTreeMap<String, String>,
+}
+
 /// The tabs a resume token restores for `workspace`: every binding, a pending one included, by
-/// its own browser and the digest of its URL.
-fn owned_tabs(workspaces: &WorkspaceStore, workspace: &WorkspaceId) -> Vec<OwnedTab> {
-    workspaces
+/// its own browser and the digest of its URL, and the extension life of each of their browsers.
+///
+/// A pending binding remembers the life it was confirmed in. A confirmed one is in the life its
+/// browser's connection reports, so those lives are read from `port` before the bindings are:
+/// a gap marks a browser's bindings pending before a new connection takes its place, so a binding
+/// still confirmed after that read was confirmed in the life it returned. A browser whose tabs
+/// name two lives, or none, carries no life, and its tabs are confirmed by their URL digests.
+fn kept_tabs(
+    workspaces: &WorkspaceStore,
+    port: &dyn BrowserPort,
+    workspace: &WorkspaceId,
+) -> KeptTabs {
+    let browsers: BTreeSet<String> = workspaces
         .tab_bindings(workspace.as_str())
         .into_iter()
-        .map(|binding| OwnedTab {
-            browser_id: binding.browser,
-            tab_id: binding.physical_id,
-            handle: binding.handle,
-            url_digest: Some(binding.url.as_str().to_owned()),
+        .map(|binding| binding.browser)
+        .collect();
+    let current: BTreeMap<String, Option<String>> = browsers
+        .into_iter()
+        .map(|browser| {
+            let life = port.life_of(&browser);
+            (browser, life)
         })
-        .collect()
+        .collect();
+    let bindings = workspaces.tab_bindings(workspace.as_str());
+    let mut lives: BTreeMap<String, Option<String>> = BTreeMap::new();
+    for binding in &bindings {
+        let life = if binding.pending {
+            binding.life.clone()
+        } else {
+            current.get(&binding.browser).cloned().flatten()
+        };
+        lives
+            .entry(binding.browser.clone())
+            .and_modify(|known| {
+                if *known != life {
+                    *known = None;
+                }
+            })
+            .or_insert(life);
+    }
+    KeptTabs {
+        owned: bindings
+            .into_iter()
+            .map(|binding| OwnedTab {
+                browser_id: binding.browser,
+                tab_id: binding.physical_id,
+                handle: binding.handle,
+                url_digest: Some(binding.url.as_str().to_owned()),
+            })
+            .collect(),
+        lives: lives
+            .into_iter()
+            .filter_map(|(browser, life)| Some((browser, life?)))
+            .collect(),
+    }
 }
 
 /// How often the refresher checks the policy files and the managed authority.
@@ -1849,7 +1922,11 @@ impl LiveSession {
                     for request in queue.admitted() {
                         executor.show_waiting(&request);
                     }
-                    wire.publish_resume(&intake.workspaces, &workspace);
+                    wire.publish_resume(
+                        &intake.workspaces,
+                        intake.browser_port.as_ref(),
+                        &workspace,
+                    );
                     if let Some(tools) = advertised.changed_by(&governance.snapshot()) {
                         generation = generation.wrapping_add(1);
                         wire.render(ServiceResponse::CatalogChanged { generation, tools });
@@ -1870,6 +1947,7 @@ impl LiveSession {
         let executor = Arc::clone(&intake.executor);
         let workspace = self.workspace.clone();
         let workspaces = intake.workspaces.clone();
+        let port = Arc::clone(&intake.browser_port);
         let wire = Arc::clone(wire);
         thread::Builder::new()
             .name("ghostlight-session-work".into())
@@ -1877,7 +1955,7 @@ impl LiveSession {
                 while let Some(request) = queue.next(independent) {
                     let result = executor.execute_prepared(&request, Admission::Queued);
                     deliver_result(&wire, result);
-                    wire.publish_resume(&workspaces, &workspace);
+                    wire.publish_resume(&workspaces, port.as_ref(), &workspace);
                     queue.complete(&request.id);
                 }
             })
@@ -1919,7 +1997,11 @@ impl LiveSession {
                 };
                 let result = intake.executor.execute_prepared(&request, admission);
                 deliver_result(wire, result);
-                wire.publish_resume(&intake.workspaces, &self.workspace);
+                wire.publish_resume(
+                    &intake.workspaces,
+                    intake.browser_port.as_ref(),
+                    &self.workspace,
+                );
             }
             ServiceRequest::Cancel { id } => self.queue.cancel(&id),
         }
@@ -1969,15 +2051,23 @@ impl LiveSession {
     }
 }
 
-/// Bring a resumed session's tabs back as pending bindings, each in its own browser.
+/// Bring a resumed session's tabs back as pending bindings, each in its own browser and with the
+/// extension life the token names for that browser.
 ///
 /// No browser is asked here: the session's first call confirms each tab against its browser's
 /// own list (ADR-0203 Decision 1). A tab written without a URL digest, by a build before digests,
 /// cannot be confirmed and is not brought back, so its handle names no open tab.
-fn remember_resumed_tabs(workspaces: &WorkspaceStore, workspace: &WorkspaceId, owned: &[OwnedTab]) {
-    for tab in owned {
+fn remember_resumed_tabs(workspaces: &WorkspaceStore, workspace: &WorkspaceId, kept: &KeptTabs) {
+    for tab in &kept.owned {
         if let Some(url) = tab.url_digest.as_deref().and_then(UrlDigest::parse) {
-            workspaces.remember_tab(workspace, &tab.handle, &tab.browser_id, tab.tab_id, url);
+            workspaces.remember_tab(
+                workspace,
+                &tab.handle,
+                &tab.browser_id,
+                tab.tab_id,
+                url,
+                kept.lives.get(&tab.browser_id).map(String::as_str),
+            );
         }
     }
 }
@@ -2272,8 +2362,9 @@ impl BrowserEventSink for ServiceBrowserEvents {
             }
             // A browser that comes back may have restarted and reused its tab ids, so every tab
             // binding it held waits for it to confirm it.
-            BrowserEvent::Disconnected => {
-                self.workspaces.apply_browser_disconnect(browser);
+            BrowserEvent::Disconnected { life } => {
+                self.workspaces
+                    .apply_browser_disconnect(browser, life.as_deref());
                 self.workbench.refresh_live_parts();
             }
             // Attention never reaches this sink: it is browser routing state, and the port that
@@ -2294,6 +2385,7 @@ impl BrowserEventSink for ServiceBrowserEvents {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
@@ -2684,7 +2776,7 @@ mod tests {
         lease.apply_landing(&added.handle, &tab).unwrap();
         drop(lease);
 
-        sink.on_event(FAKE_BROWSER, BrowserEvent::Disconnected);
+        sink.on_event(FAKE_BROWSER, BrowserEvent::Disconnected { life: None });
         let released = workspaces.release(&workspace);
         let browser = FakeBrowser::default();
         cleanup_released_tabs("released", &released, &browser, &workspaces, None);
@@ -3567,6 +3659,7 @@ mod tests {
             revision: "2025-06-18".into(),
             claim: Some("returning client".into()),
             owned_tabs: Vec::new(),
+            lives: BTreeMap::new(),
         }
         .encode()
     }
@@ -3915,6 +4008,7 @@ mod tests {
             revision: "2025-06-18".into(),
             claim: Some("returning client".into()),
             owned_tabs: vec![kept.clone(), gone.clone()],
+            lives: BTreeMap::new(),
         }
         .encode();
 
@@ -3983,9 +4077,14 @@ mod tests {
 
     /// What the returning browser's page answers to one world message.
     fn returning_world_value(message: &Value) -> Value {
+        world_value_at(message, RETURNING_URL)
+    }
+
+    /// What a page at `url` answers to one world message.
+    fn world_value_at(message: &Value, url: &str) -> Value {
         if message["kind"] == "read_text" {
             json!({"text": "Example Domain", "truncated": false, "title": "Example",
-                "url": RETURNING_URL})
+                "url": url})
         } else {
             Value::Null
         }
@@ -3993,9 +4092,18 @@ mod tests {
 
     /// A resume token for a session that owned `tab`.
     fn token_with(tab: crate::intake::mcp::OwnedTab) -> String {
+        token_in(tab, None)
+    }
+
+    /// A resume token for a session that owned `tab`, whose browser was in `life` when the token
+    /// was written, or named no life for `None`.
+    fn token_in(tab: crate::intake::mcp::OwnedTab, life: Option<&str>) -> String {
         ResumeState {
             revision: "2025-06-18".into(),
             claim: Some("returning client".into()),
+            lives: life
+                .map(|life| BTreeMap::from([(tab.browser_id.clone(), life.to_owned())]))
+                .unwrap_or_default(),
             owned_tabs: vec![tab],
         }
         .encode()
@@ -4019,26 +4127,40 @@ mod tests {
     fn attach_returning_browser(
         served: &Served,
     ) -> crate::browser::adapter::chromium::protocol4::fake::FakeExtension {
+        attach_returning_browser_in(served, None, RETURNING_URL)
+    }
+
+    /// Attach a protocol-4 extension for the returning browser whose hello names `life`, or no
+    /// life for `None`, and that lists its tab at `url`.
+    fn attach_returning_browser_in(
+        served: &Served,
+        life: Option<&str>,
+        url: &'static str,
+    ) -> crate::browser::adapter::chromium::protocol4::fake::FakeExtension {
         use crate::browser::adapter::chromium::protocol4::fake::{
             FakeExtension, Reply as FakeReply,
         };
         use crate::browser::adapter::chromium::protocol4::wire::Primitive;
 
+        let mut hello = FakeExtension::hello(RETURNING_BROWSER);
+        if let Some(life) = life {
+            hello["life"] = json!(life);
+        }
         let (service, extension) = pair().unwrap();
         let fake = FakeExtension::connect(
             extension,
-            &FakeExtension::hello(RETURNING_BROWSER),
-            Box::new(|correlation, primitive| {
+            &hello,
+            Box::new(move |correlation, primitive| {
                 let outcome = match primitive {
                     Primitive::ListTabs(_) => json!({"tabs": [{"tab_id": RETURNING_TAB,
-                        "title": "Example", "url": RETURNING_URL, "active": true,
+                        "title": "Example", "url": url, "active": true,
                         "readiness": "complete"}]}),
                     Primitive::Frames(_) => json!({"frames": [{"frame_id": "T",
-                        "loader_id": "t1", "parent_frame_id": null, "url": RETURNING_URL}],
+                        "loader_id": "t1", "parent_frame_id": null, "url": url}],
                         "complete": true, "unseen": []}),
                     Primitive::Call(call) => json!({"answers": call.calls.iter().map(|world| {
                         json!({"status": "returned", "envelope": {"ok": true,
-                            "value": returning_world_value(&world.message)}})
+                            "value": world_value_at(&world.message, url)}})
                     }).collect::<Vec<_>>()}),
                     _ => Value::Null,
                 };
@@ -4122,6 +4244,68 @@ mod tests {
             bound_tabs(&served),
             vec![("tab_kept".to_owned(), RETURNING_TAB)]
         );
+    }
+
+    /// The extension life the returning browser was in before the service was replaced.
+    const RETURNING_LIFE: &str = "life_returning";
+
+    /// The address the returning browser's single-page app routed its tab to meanwhile.
+    const ROUTED_URL: &str = "https://example.com/inbox";
+
+    #[test]
+    fn a_service_replace_in_the_same_life_keeps_a_routed_tab_and_takes_its_live_url() {
+        let home = TestHome::new("resume-same-life");
+        let served = serve_relayed(&home);
+        let mut socket = open_mcp(Some(token_in(returning_tab(), Some(RETURNING_LIFE))));
+        let resumed = next_resume(&mut socket);
+        assert_eq!(
+            resumed.lives.get(RETURNING_BROWSER).map(String::as_str),
+            Some(RETURNING_LIFE),
+            "a pending tab keeps the life its token named"
+        );
+
+        let _browser = attach_returning_browser_in(&served, Some(RETURNING_LIFE), ROUTED_URL);
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "browser_read", "arguments": {"tab": "tab_kept"}}}),
+        );
+        let (called, tokens) = response(&mut socket, 2);
+        let read = &called["result"]["structuredContent"];
+        assert_eq!(read["status"], "succeeded", "{read}");
+        assert_eq!(
+            bound_tabs(&served),
+            vec![("tab_kept".to_owned(), RETURNING_TAB)]
+        );
+        // The token the confirmation changed, published during the call or right after it.
+        let token = tokens.last().map_or_else(
+            || next_resume(&mut socket),
+            |token| ResumeState::decode(token).unwrap(),
+        );
+        assert_eq!(token.owned_tabs.len(), 1);
+        assert_eq!(
+            token.owned_tabs[0].url_digest,
+            digest_of(ROUTED_URL),
+            "the confirmed tab is remembered at its live address"
+        );
+        assert_eq!(
+            token.lives.get(RETURNING_BROWSER).map(String::as_str),
+            Some(RETURNING_LIFE),
+            "a confirmed tab is in the life its browser reports"
+        );
+    }
+
+    #[test]
+    fn a_service_replace_into_a_new_life_forgets_a_routed_tab() {
+        let home = TestHome::new("resume-new-life");
+        let served = serve_relayed(&home);
+        let mut socket = open_mcp(Some(token_in(returning_tab(), Some(RETURNING_LIFE))));
+        next_resume(&mut socket);
+
+        let _browser = attach_returning_browser_in(&served, Some("life_restarted"), ROUTED_URL);
+        let read = call_tool(&mut socket, 2, "browser_read", json!({"tab": "tab_kept"}));
+        assert_ne!(read["status"], "succeeded", "{read}");
+        assert!(bound_tabs(&served).is_empty());
     }
 
     #[test]

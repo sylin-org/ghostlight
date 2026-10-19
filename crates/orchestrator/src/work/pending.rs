@@ -2,11 +2,12 @@
 //!
 //! A physical tab id names one tab only within one browser run. A binding kept across a browser
 //! disconnect, a replaced connection or a service restart is pending until its browser lists a tab
-//! with its id at the URL the workspace last knew (ADR-0203 Decision 1). The first call of a
-//! workspace that holds pending bindings asks each connected browser for its tabs once, before it
-//! selects a tab or targets a browser. A gap can also open while a call runs, between two of its
-//! crossings, so every command addressed to one tab checks that tab's binding again before it
-//! crosses. No command reaches a tab the browser has not confirmed.
+//! with its id, in the extension life the binding remembers, or else at the URL the workspace last
+//! knew (ADR-0203 Decision 1). The first call of a workspace that holds pending bindings asks each
+//! connected browser for its tabs once, before it selects a tab or targets a browser. A gap can
+//! also open while a call runs, between two of its crossings, so every command addressed to one
+//! tab checks that tab's binding again before it crosses. No command reaches a tab the browser has
+//! not confirmed.
 
 use serde_json::json;
 
@@ -138,8 +139,13 @@ impl ApplicationExecutor {
             context.cancellation.flag(),
         ) {
             Ok(BrowserOutcome::Tabs { tabs }) => {
+                // The life is read once the listing answered, so it names the run the listing came
+                // from or a later one, and a later one confirms only by URL.
+                let life = self.browser.life_of(browser);
                 // A workspace that went away meanwhile has nothing left to confirm.
-                let _ = self.workspaces.confirm(context.workspace, browser, &tabs);
+                let _ = self
+                    .workspaces
+                    .confirm(context.workspace, browser, life.as_deref(), &tabs);
                 Ok(())
             }
             Ok(_) => Err(BrowserError::Protocol(

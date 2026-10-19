@@ -251,7 +251,7 @@ impl ApplicationExecutor {
     /// own sessions kept (ADR-0201 Decision 2), and a session whose `opener` has no key reuses
     /// nothing. The kept tab left its group when its session ended (ADR-0201), so `AdoptTab` puts
     /// it back in the group of this session's opener as it loads the page. A candidate is used
-    /// only while the live browser still shows it at its release address, the rule every
+    /// only while the live browser still shows it at its release address, the URL rule a
     /// remembered tab follows, so a restarted browser that handed its id to another tab never
     /// gives that tab away. One that closed or moved on is dropped and the next is tried. Returns
     /// None when nothing fits, and the open then creates a fresh tab.
