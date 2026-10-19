@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-P10 and P1 landed. Next: P2.
+P10, P1 and P2 landed. Next: P3.
 
 ## Slices
 
@@ -16,7 +16,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | --- | --- | --- | --- | --- | --- |
 | P10 | feat(governance): the runtime state names the acts it accepts | candidate | ux-2 closes | - | landed (570528ad, 4476fda8) |
 | P1 | fix(governance): one evaluator says whether a capability can be used anywhere | candidate | ux-2 closes | see Notes | landed (3373e274, this commit) |
-| P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | flatten already gone, see Notes | todo |
+| P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | flatten already gone, see Notes | landed (this commit) |
 | P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | - | todo |
 | P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | - | todo |
 | P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | - | todo |
@@ -55,3 +55,17 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   the snapshot over the rule's hosts, which also stops a wide rule under a narrow organization
   grant being marked inert. Dropping `browser_screenshot` when screenshots are off is C10c's. The
   catalog and result goldens are unchanged.
+- P2: a host a layer marks never-touch is refused as that layer's policy decision: reason
+  `protected_host`, rule `sacred_host`, the first matching layer's tier and no grant, and a denial
+  id taken from that layer's hash and the rule alone, so every host one layer lists shares one id
+  and the id names none. The audit line's `policy_tier`, `policy_rule` and `denial_id` and the
+  result's facts carry it, and the window's refusal line names the organization from
+  `policy_tier`. The layer-dropping flatten was already gone with P1, so nothing else is deleted;
+  `probe` now reads the never-touch author from the decision instead of parsing the URL again.
+  Two departures in reading, none in decision. The permission check's `layers` stay empty for a
+  never-touch refusal: no grant was evaluated, and `language::history::permission` (core's) would
+  otherwise read "no matching grant" or "no capability grant was required", both false. The credit
+  rides the decision's attribution. And Decision 7.2's "localhost, loopback and link-local stay
+  Ghostlight's own ceiling" is not restored: ADR-0155 removed those ceilings on the owner's
+  direction, so only non-HTTP(S) schemes (and the window's own origin, ADR-0199) stay unattributed.
+  The SIEM guide's `sacred_host` is D2's. The catalog and result goldens are unchanged.

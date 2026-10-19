@@ -234,7 +234,9 @@ pub enum ReasonCode {
     ChannelDenied,
     /// Host was not granted by every authority layer.
     HostDenied,
-    /// Host or scheme is independently protected.
+    /// The address is never automated: a scheme outside HTTP(S), which is Ghostlight's own
+    /// ceiling and credits no layer, or a host a layer marks never-touch, which credits that
+    /// layer.
     ProtectedHost,
     /// The address is Ghostlight's own workbench origin on this computer.
     OwnWorkbench,
@@ -291,6 +293,8 @@ pub enum PolicyRule {
     Screenshot,
     /// A channel switch refuses the request's channel.
     Channel,
+    /// A layer marks the host never-touch.
+    SacredHost,
 }
 
 impl PolicyRule {
@@ -304,6 +308,7 @@ impl PolicyRule {
             Self::TabClose => "tab_close",
             Self::Screenshot => "screenshot",
             Self::Channel => "channel",
+            Self::SacredHost => "sacred_host",
             Self::AuditAvailability => "audit_availability",
         }
     }
@@ -591,6 +596,25 @@ impl AuthoritySnapshot {
         })
     }
 
+    /// The refusal of a host the layer at `author` marks never-touch: that layer's policy
+    /// decision. Its denial id is derived from the layer and the rule alone, so it names no
+    /// listed host.
+    fn never_touch_refusal(&self, author: usize) -> Decision {
+        Decision::policy(
+            ReasonCode::ProtectedHost,
+            PolicyAttribution {
+                layer: u16::try_from(author).expect("policy layer count is bounded"),
+                grant: None,
+                rule: PolicyRule::SacredHost,
+                denial: denial_bytes(
+                    &self.layers[author].manifest.hash,
+                    "",
+                    PolicyRule::SacredHost,
+                ),
+            },
+        )
+    }
+
     /// Decide a capability at its final boundary.
     #[cfg(test)]
     #[must_use]
@@ -672,10 +696,11 @@ impl AuthoritySnapshot {
         let Ok(parsed) = Url::parse(url) else {
             return (Decision::deny(ReasonCode::HostDenied), vec![]);
         };
-        if !matches!(parsed.scheme(), "http" | "https")
-            || self.never_touch_author(&parsed).is_some()
-        {
+        if !matches!(parsed.scheme(), "http" | "https") {
             return (Decision::deny(ReasonCode::ProtectedHost), vec![]);
+        }
+        if let Some(author) = self.never_touch_author(&parsed) {
+            return (self.never_touch_refusal(author), vec![]);
         }
         if self.own_origin.covers(&parsed) {
             return (Decision::deny(ReasonCode::OwnWorkbench), vec![]);
@@ -869,12 +894,10 @@ impl AuthoritySnapshot {
         if decision.allowed {
             ProbeAnswer::Admitted
         } else if outcomes.is_empty() {
-            // A valid snapshot refuses an https probe before its layers only for a never-touch
-            // host or the window's own origin, and checks never-touch first.
-            let author = Url::parse(&url)
-                .ok()
-                .filter(|_| self.valid)
-                .and_then(|parsed| self.never_touch_author(&parsed));
+            let author = decision
+                .attribution
+                .filter(|attribution| attribution.rule == PolicyRule::SacredHost)
+                .map(|attribution| usize::from(attribution.layer));
             author.map_or(ProbeAnswer::Beyond, |author| {
                 ProbeAnswer::NeverTouch(Untouched {
                     alone: self

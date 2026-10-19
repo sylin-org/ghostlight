@@ -381,6 +381,107 @@ fn non_http_schemes_still_refuse_without_policy() {
     }
 }
 
+/// A snapshot of an organization layer and a user layer, each with its own never-touch list.
+fn never_touch_layers(
+    name: &str,
+    organization: &[&str],
+    user: &[&str],
+) -> super::AuthoritySnapshot {
+    let never_touch = |hosts: &[&str]| {
+        format!(
+            r#"[{{"key":"content.security.sacred_domains","value":{},"level":"mandatory"}}]"#,
+            serde_json::to_string(hosts).unwrap()
+        )
+    };
+    let local = temporary(&format!("{name}-local"));
+    let managed = temporary(&format!("{name}-managed"));
+    fs::write(&local, policy("mine", all_open_grant(), &never_touch(user))).unwrap();
+    fs::write(
+        &managed,
+        policy("org", all_open_grant(), &never_touch(organization)),
+    )
+    .unwrap();
+    GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()))
+        .snapshot()
+        .as_ref()
+        .clone()
+}
+
+#[test]
+fn an_organization_never_touch_refusal_carries_tier_rule_and_denial_id() {
+    let snapshot = never_touch_layers("never-touch-org", &["bank.example"], &["mail.example"]);
+    let refused = snapshot.authorize_landing(Capability::Read, "https://bank.example/accounts");
+    assert!(!refused.allowed);
+    assert_eq!(refused.reason, ReasonCode::ProtectedHost);
+    assert_eq!(refused.policy_rule(), Some("sacred_host"));
+    assert!(refused.denial_id().is_some());
+    assert_eq!(snapshot.attribution(refused), Some(("managed", None)));
+    let record = AuditRecord::now(
+        "invocation_never_touch",
+        "workspace_never_touch",
+        "browser_read",
+        Capability::Read,
+        snapshot.id(),
+        refused,
+        "blocked",
+        "none",
+        &crate::language::outcome::Refusal::AuthorityBlocked {
+            reason: crate::language::outcome::BlockedReason::ProtectedHost,
+            host: Some("bank.example".into()),
+            origin: None,
+        }
+        .audit(),
+        0,
+    )
+    .with_policy(&snapshot, refused);
+    assert_eq!(record.policy_tier.as_deref(), Some("managed"));
+    assert_eq!(record.grant_id, None);
+    assert_eq!(record.policy_rule.as_deref(), Some("sacred_host"));
+    assert_eq!(record.denial_id, refused.denial_id());
+
+    // The person's own list is the person's decision.
+    let own = snapshot.authorize_landing(Capability::Read, "https://mail.example/");
+    assert_eq!(own.reason, ReasonCode::ProtectedHost);
+    assert_eq!(snapshot.attribution(own), Some(("user", None)));
+    assert_ne!(own.denial_id(), refused.denial_id());
+
+    // A host both lists hold is credited to the first layer whose list matches.
+    let both = never_touch_layers(
+        "never-touch-both",
+        &["*.bank.example"],
+        &["www.bank.example"],
+    );
+    let refused = both.authorize_landing(Capability::Read, "https://www.bank.example/");
+    assert_eq!(both.attribution(refused), Some(("managed", None)));
+}
+
+#[test]
+fn a_non_http_scheme_stays_ghostlights_own_ceiling() {
+    let authored = never_touch_layers("never-touch-scheme", &["bank.example"], &["mail.example"]);
+    let open = GovernanceFacade::new(None, None).snapshot();
+    for snapshot in [&authored, open.as_ref()] {
+        for url in ["chrome://extensions/", "file:///tmp/bank.example.html"] {
+            let refused = snapshot.authorize_landing(Capability::Read, url);
+            assert!(!refused.allowed, "{url}");
+            assert_eq!(refused.reason, ReasonCode::ProtectedHost, "{url}");
+            assert_eq!(refused.policy_rule(), None, "{url}");
+            assert_eq!(refused.denial_id(), None, "{url}");
+            assert_eq!(snapshot.attribution(refused), None, "{url}");
+        }
+    }
+}
+
+#[test]
+fn the_denial_id_reveals_no_listed_host() {
+    let snapshot = never_touch_layers("never-touch-id", &["bank.example", "*.vault.example"], &[]);
+    let bank = snapshot.authorize_landing(Capability::Read, "https://bank.example/");
+    let vault = snapshot.authorize_landing(Capability::Read, "https://a.vault.example/");
+    // Every host one layer lists gets the same id, so the id cannot tell which entry matched.
+    assert_eq!(bank.denial_id(), vault.denial_id());
+    let id = bank.denial_id().expect("a policy decision has a denial id");
+    assert!(!id.contains("bank") && !id.contains("vault"), "{id}");
+}
+
 #[test]
 fn local_destinations_follow_authored_host_and_capability_rules() {
     let snapshot = snapshot_for(
