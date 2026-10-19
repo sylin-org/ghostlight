@@ -696,11 +696,29 @@ impl ApplicationExecutor {
 
     /// Hold a tab whose page governance just refused, and announce the hold.
     ///
-    /// Every path that finds its tab on a refused page comes here, a read as well as an action,
-    /// so the hold always shows. The tab then refuses reading and acting until a navigation
-    /// lands it on an allowed page or it is closed (ADR-0203 Decision 2.4). The hold keeps the
+    /// Every path that leaves its tab on a refused page comes here, a read, an action, and an
+    /// open whose refused landing could not be undone, so the hold always shows. The tab then
+    /// refuses reading and acting until a navigation lands it on an allowed page or it is closed
+    /// under the tab-close setting alone (ADR-0203 Decisions 2.4 and 7.6). The hold keeps the
     /// refusal, so every later refusal on the tab names the refused host and records its reason
-    /// (Decision 5.5). `effect` is what the call already did.
+    /// (Decision 5.5).
+    fn enter_hold(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        tab: &SelectedTab,
+        hold: TabHold,
+    ) {
+        let _ = lease.hold_tab(&tab.handle, hold);
+        self.emit(DomainEvent::HoldEntered {
+            invocation: context.invocation.into(),
+            workspace: context.workspace.as_str().into(),
+            physical_id: tab.physical_id,
+        });
+    }
+
+    /// Hold a tab whose page governance just refused, through [`Self::enter_hold`], and refuse
+    /// the call that found it there. `effect` is what the call already did.
     fn hold(
         &self,
         context: &InvocationContext<'_>,
@@ -711,12 +729,7 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let landing = hold.denial;
         let url = hold.url.clone();
-        let _ = lease.hold_tab(&tab.handle, hold);
-        self.emit(DomainEvent::HoldEntered {
-            invocation: context.invocation.into(),
-            workspace: context.workspace.as_str().into(),
-            physical_id: tab.physical_id,
-        });
+        self.enter_hold(context, lease, tab, hold);
         self.blocked_at(
             context,
             landing,

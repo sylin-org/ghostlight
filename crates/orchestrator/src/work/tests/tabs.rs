@@ -6,8 +6,9 @@
 //! not to choose. The agent is the one the opener's claim names (ADR-0203 Decision 9), and the tab
 //! group is titled for the agent the window names. A held tab refuses reading and acting, and only a navigation to an allowed page
 //! or a close may select it (ADR-0203 Decision 2.4). Closing a tab needs Action on its host, a
-//! held tab's close and the undoing of a refused landing need only the tab-close setting, and a
-//! listing names a tab on a refused host by its host alone (Decision 7.6).
+//! held tab's close and the undoing of a refused landing need only the tab-close setting, a refused
+//! landing that could not be undone holds its tab, and a listing names a tab on a refused host by
+//! its host alone (Decision 7.6).
 
 use super::*;
 use crate::provenance::{Attribution, ConnectionEvidence, Source};
@@ -1174,6 +1175,57 @@ fn a_denied_landing_is_closed_under_a_read_only_policy_when_the_setting_allows()
     assert_eq!(landed.effect, Effect::None);
     assert_eq!(landed.facts["compensated"], true);
     assert!(landed.repeat_safe);
+    assert!(matches!(
+        browser.calls().last(),
+        Some(BrowserCommand::CloseTab { tab_id: 7, .. })
+    ));
+    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
+}
+
+#[test]
+fn a_retained_denied_landing_is_closed_under_the_setting_alone() {
+    // No grant admits Action anywhere, and the refused landing's host is refused everything.
+    let policy = TestPolicy::new();
+    policy.publish(&example_com_with(&["read"], true));
+    let (executor, browser, workspaces, workspace, _) = fixture_with_governance(policy.facade());
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://elsewhere.test/"),
+        committed_urls: vec![
+            "https://example.com/".into(),
+            "https://elsewhere.test/".into(),
+        ],
+    }));
+    browser.push(Err(crate::browser::BrowserError::LocalInterlock(
+        "preserved".into(),
+    )));
+    let landed = navigate(&executor, &workspace, "https://example.com/");
+    assert_eq!(landed.status, Status::Blocked, "{}", landed.summary);
+    assert_eq!(landed.effect, Effect::Applied);
+    assert_eq!(landed.facts["retained"], true);
+    assert_eq!(landed.facts["held"], true);
+    let handle = landed.facts["tab"].as_str().unwrap().to_owned();
+    assert_eq!(workspaces.tab_bindings(workspace.as_str()).len(), 1);
+
+    // The retained tab is held, so reading it is refused as a held tab, naming the refused host.
+    let read = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(read.status, Status::Blocked, "{}", read.summary);
+    assert_eq!(read.facts["reason"], "tab_held", "{}", read.facts);
+    assert!(read.summary.contains("elsewhere.test"), "{}", read.summary);
+
+    browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 7 }));
+    let closed = executor.execute(
+        &workspace,
+        "browser_tabs",
+        json!({"action":"close","tab":handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(closed.status, Status::Succeeded, "{}", closed.summary);
+    assert_eq!(closed.facts["closed"], true);
     assert!(matches!(
         browser.calls().last(),
         Some(BrowserCommand::CloseTab { tab_id: 7, .. })

@@ -341,15 +341,21 @@ impl ApplicationExecutor {
                     json!({"reason":landing.reason.as_str(),"compensated":true}),
                     Some(&controlled.url),
                 ),
-                CloseCompensation::Retained => self.blocked_at(
-                    context,
-                    landing,
-                    Some(controlled.physical_id),
-                    Effect::Applied,
-                    false,
-                    json!({"reason":landing.reason.as_str(),"compensated":false,"retained":true}),
-                    Some(&controlled.url),
-                ),
+                // The refused page stays open, so the tab is held on it: its close then undoes
+                // this landing under the tab-close setting alone (ADR-0203 Decision 7.6).
+                CloseCompensation::Retained => {
+                    let hold = context.hold_of(landing, Capability::Read, &tab.url);
+                    self.enter_hold(context, lease, &controlled, hold);
+                    self.blocked_at(
+                        context,
+                        landing,
+                        Some(controlled.physical_id),
+                        Effect::Applied,
+                        false,
+                        json!({"tab":controlled.handle.as_str(),"reason":landing.reason.as_str(),"compensated":false,"retained":true,"held":true}),
+                        Some(&tab.url),
+                    )
+                }
                 CloseCompensation::Unknown => self.unknown(
                     context,
                     landing,
