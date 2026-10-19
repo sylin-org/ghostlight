@@ -1101,8 +1101,9 @@ the bounded problem/all projection, literal matching, opaque cursor, and URL-san
 mechanisms, and never writes them to extension storage. The orchestrator owns authorization and
 applies cross-origin authority plus final filtering before any model disclosure. A read sends the
 extension a document binding only when the authority watches documents, which it does when its
-policy does not admit every document. A bound tab's ring starts fresh at a top-frame navigation and
-at a changed binding; a navigation inside an embedded document never clears it. Reads are
+policy does not admit every document. Every tab's ring starts fresh at a top-frame navigation,
+bound or not, and a bound tab's also at a changed binding; a navigation inside an embedded document
+never clears it. Reads are
 non-destructive and visually quiet. Diagnostic payloads never enter audit or presentation.
 
 Process diagnostics are a separate, local surface (ADR-0145). When activated, all three

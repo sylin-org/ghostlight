@@ -58,11 +58,9 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   keeps, a quit releases, a call during a quit gets a tool result), and Extension product gates
   item 3 names the hello's `life`. Each restates a proof the core or package ledger already names.
   Not a changed decision.
-- D2, the diagnostics ring: ARCHITECTURE and ACCEPTANCE item 20 claim the top-frame reset only for
-  a bound tab, and that an embedded document's navigation never clears a ring. An unbound tab's
-  ring still survives a top-frame navigation (the open item in LEDGER-package.md and
-  LEDGER-adapter.md), so no document says it starts fresh there. When that fix lands, its D2
-  line says every tab's ring starts fresh at a top-frame navigation.
+- D2, the diagnostics ring: the package fix for unbound tabs (LEDGER-package.md) has landed, so
+  ARCHITECTURE and ACCEPTANCE item 20 now say every tab's ring starts fresh at a top-frame
+  navigation, bound or not, and an embedded document's navigation never clears it.
 - D2, Ghostlight's own ceiling: the docs name non-HTTP(S) schemes and the window's own address,
   not localhost, loopback and link-local as Decision 7.2's text does, because ADR-0155 removed
   those ceilings and P2 did not restore them (LEDGER-policy.md, P2). The trust and governance docs

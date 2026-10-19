@@ -343,8 +343,9 @@ workbench shows waiting becoming running once.
     match, cursor continuation, eviction, host filtering, expiry, browser loss, and tab closure.
 20. Prove diagnostics never return headers, bodies, cookies, authorization, post data, query
     strings, fragments, or another workspace's entries, and that a read cannot clear history. A
-    read sends a document binding only when the policy does not admit every document, and a
-    navigation inside an embedded document keeps the tab's entries.
+    read sends a document binding only when the policy does not admit every document. A
+    navigation inside an embedded document keeps the tab's entries, and a top-frame navigation
+    starts every tab's ring fresh, bound or not.
 21. With `Auto-open browser on request` off and no adapter connected, call a browser tool and
     verify no browser starts. The failed result tells the model to ask the user to open one of
     every eligible installed browser it names with the Ghostlight extension installed, carries
