@@ -256,6 +256,13 @@ policy sent `list_changed` within 8 s to a fresh session and to a resumed one th
 and sent nothing to a resumed one that had not, although its catalog is then 22 tools. So the
 policy step of F1 never reached Claude Code, and a tool that a policy change or a newer service
 adds does not reach a running agent until it restarts.
+Fixed by windows-claude in 0285ce2d and measured again on 2026-10-19 on test-01's real
+installation with 816154bf deployed (the owner directs tests on this machine, not in a scratch home):
+the plain MCP client, after a replace and no re-list, got `list_changed` 1.3 s after the replace
+returned; a policy that drops `execute` sent another and a re-list read 22 tools; the restore sent a
+third and a re-list read 23. In Claude Code, F1 with a replace now logs `list_changed` from the
+holder after the replace, on the policy change and on its restore, the standby stays silent until it
+is promoted, and the model is offered 23 Ghostlight tools at every step.
 
 **CachyOS check, 2026-10-19.** The development build at e9646471 was deployed on test-01 (it had
 run 7abbdc39); `ghostlight doctor` reads Ready, with Chromium registered and every agent
