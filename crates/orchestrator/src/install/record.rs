@@ -695,46 +695,43 @@ mod tests {
         );
     }
 
+    /// The version vectors both launchers test against too (`packaging/version-order.json`).
+    #[derive(Deserialize)]
+    struct VersionVectors {
+        ascending: Vec<String>,
+        equal: Vec<[String; 2]>,
+        malformed: Vec<String>,
+    }
+
+    fn version_vectors() -> VersionVectors {
+        serde_json::from_str(include_str!("../../../../packaging/version-order.json")).unwrap()
+    }
+
     #[test]
-    fn versions_order_by_semver_precedence() {
-        let ordered = [
-            "1.0.0-alpha",
-            "1.0.0-alpha.1",
-            "1.0.0-alpha.beta",
-            "1.0.0-beta",
-            "1.0.0-beta.2",
-            "1.0.0-beta.11",
-            "1.0.0-rc.1",
-            "1.0.0",
-            "1.0.1",
-            "1.2.0",
-            "1.10.0",
-            "2.0.0",
-        ];
-        let versions: Vec<Version> = ordered
+    fn versions_order_by_semver_precedence_on_the_vectors_the_launchers_share() {
+        let vectors = version_vectors();
+        let versions: Vec<Version> = vectors
+            .ascending
             .iter()
-            .map(|text| Version::parse(text).unwrap())
+            .map(|text| Version::parse(text).unwrap_or_else(|| panic!("{text:?}")))
             .collect();
         for pair in versions.windows(2) {
             assert!(pair[0] < pair[1], "{pair:?}");
         }
-        assert_eq!(Version::parse("1.0.0+a"), Version::parse("1.0.0+b"));
+        for [left, right] in &vectors.equal {
+            assert_eq!(
+                Version::parse(left),
+                Version::parse(right),
+                "{left} {right}"
+            );
+            assert!(Version::parse(left).is_some(), "{left}");
+        }
     }
 
     #[test]
-    fn malformed_versions_do_not_parse() {
-        for text in [
-            "",
-            "1",
-            "1.2",
-            "1.2.3.4",
-            "01.2.3",
-            "1.2.x",
-            "1.2.3-",
-            "1.2.3-a..b",
-            "v1.2.3",
-        ] {
-            assert_eq!(Version::parse(text), None, "{text:?}");
+    fn malformed_versions_do_not_parse_on_the_vectors_the_launchers_share() {
+        for text in version_vectors().malformed {
+            assert_eq!(Version::parse(&text), None, "{text:?}");
         }
     }
 

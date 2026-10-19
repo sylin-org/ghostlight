@@ -618,6 +618,37 @@ mod tests {
         assert!(!route.contains("ghostlight-service"));
     }
 
+    /// The two launchers, which word the way back themselves because they run before any service.
+    const LAUNCHERS: [(&str, &str); 2] = [
+        (
+            "packaging/npm/bin/ghostlight.js",
+            include_str!("../../../../packaging/npm/bin/ghostlight.js"),
+        ),
+        (
+            "packaging/mcpb/server/launch.js",
+            include_str!("../../../../packaging/mcpb/server/launch.js"),
+        ),
+    ];
+
+    #[test]
+    fn both_launchers_say_the_way_back_in_the_services_words() {
+        for (name, source) in LAUNCHERS {
+            let start = source
+                .find("const RESTORE_ROUTE = [")
+                .unwrap_or_else(|| panic!("{name} names no RESTORE_ROUTE"));
+            let list = &source[start..];
+            let list = &list[..list
+                .find(r#"].join("\n");"#)
+                .unwrap_or_else(|| panic!("{name} does not join RESTORE_ROUTE by lines"))];
+            assert!(!list.contains('\\'), "{name} escapes a RESTORE_ROUTE line");
+            let lines: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+            assert_eq!(lines.join("\n"), restore_route(), "{name}");
+            let missing = development_executable_missing("${executable}")
+                .replace(&restore_route(), "${RESTORE_ROUTE}");
+            assert!(source.contains(&format!("`{missing}")), "{name}: {missing}");
+        }
+    }
+
     #[test]
     fn a_missing_development_service_is_named_with_the_same_route() {
         let line = development_executable_missing("bin/ghostlight-service");

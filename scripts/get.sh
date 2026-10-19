@@ -106,7 +106,6 @@ sha256_file() {
   fi
 }
 
-install_directory="${HOME}/.ghostlight/bin"
 provenance_for_all=1
 for component in ghostlight ghostlight-service ghostlight-desktop; do
   asset="${component}-${target}"
@@ -140,21 +139,22 @@ else
   echo "Ghostlight ${version} downloaded. Checksums verified."
 fi
 
-# The verified service installs the whole set (the edge, the service and the shell) into
-# ~/.ghostlight/bin from its own directory. Its stdout is discarded; its errors still show. A
-# failed download cannot partially replace a working installation.
-if ! "$temporary/ghostlight-service" deployment install $restore >/dev/null; then
+# The verified service installs the whole set (the edge, the service and the shell) into the
+# Ghostlight home from its own directory. Its stdout is discarded; its errors still show. A failed
+# download cannot partially replace a working installation.
+service="$temporary/ghostlight-service"
+if ! "$service" deployment install $restore >/dev/null; then
   echo "ghostlight: installation failed" >&2
   exit 1
 fi
 
-ghostlight="$install_directory/ghostlight"
 if [ "${GHOSTLIGHT_NO_REGISTER:-0}" = "1" ]; then
-  echo "Ghostlight ${version} is installed in ${install_directory}. Run 'ghostlight install' to connect your browsers and agents."
+  echo "Ghostlight ${version} is installed. Run 'ghostlight install' to connect your browsers and agents."
 else
-  # The installed edge prints the install summary in this console.
-  if ! "$ghostlight" install; then
-    echo "ghostlight: installation did not complete. Run '${ghostlight} doctor' for details." >&2
+  # The same verified service hands `install` to the copy it just installed, which prints the
+  # install summary in this console.
+  if ! "$service" install; then
+    echo "ghostlight: installation did not complete. Run 'ghostlight doctor' in a new terminal for details." >&2
     exit 1
   fi
 fi

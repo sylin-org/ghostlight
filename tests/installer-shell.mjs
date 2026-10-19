@@ -1,7 +1,7 @@
 // Exercise the shipped shell installer with deterministic release/CDN replies and a fresh home.
 // The release carries three images: the edge `ghostlight`, the service `ghostlight-service` and the
 // shell `ghostlight-desktop`. The installer verifies all three, runs the downloaded service's
-// `deployment install`, then runs the installed edge's `install` in the person's own console.
+// `deployment install`, then the same downloaded service's `install` in the person's own console.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -17,19 +17,25 @@ mkdirSync(shims);
 const names = ["ghostlight", "ghostlight-service", "ghostlight-desktop"];
 const target = "x86_64-unknown-linux-gnu";
 const bodies = {
-  // The edge records that it ran and says so in the console it runs in.
+  // The installer never runs the edge.
   ghostlight: `#!/bin/sh
-echo "fixture edge: $*"
 echo "edge: $*" >> "$INSTALLER_COMMANDS"
+exit 1
 `,
-  // The service installs every image from the directory it runs in.
+  // The service installs every image from the directory it runs in. It records which copy ran each
+  // command, and its install says so in the console it runs in.
   "ghostlight-service": `#!/bin/sh
+copy=downloaded
+[ "$(dirname "$0")" = "$HOME/.ghostlight/bin" ] && copy=installed
 if [ "$1" = deployment ] && [ "$2" = install ]; then
-  echo "service: $*" >> "$INSTALLER_COMMANDS"
+  echo "$copy service: $*" >> "$INSTALLER_COMMANDS"
   mkdir -p "$HOME/.ghostlight/bin"
   for name in ghostlight ghostlight-service ghostlight-desktop; do
     cp "$(dirname "$0")/$name" "$HOME/.ghostlight/bin/$name"
   done
+elif [ "$1" = install ]; then
+  echo "fixture service: $*"
+  echo "$copy service: $*" >> "$INSTALLER_COMMANDS"
 else
   exit 1
 fi
@@ -115,11 +121,12 @@ for (const name of names) {
   assert.equal(readFileSync(join(installed, name), "utf8"), bodies[name]);
   assert.equal(statSync(join(installed, name)).mode & 0o777, 0o755);
 }
-assert.deepEqual(success.commands, ["service: deployment install", "edge: install"], "the service installs, then the installed edge runs install");
-assert.match(success.stdout, /fixture edge: install/, "the output of ghostlight install reaches the person's console");
+assert.deepEqual(success.commands, ["downloaded service: deployment install", "downloaded service: install"],
+  "the downloaded service installs, then runs install itself");
+assert.match(success.stdout, /fixture service: install/, "the output of ghostlight install reaches the person's console");
 const restored = run("restore", {}, undefined, ["--restore"]);
 assert.equal(restored.status, 0, restored.stderr);
-assert.deepEqual(restored.commands, ["service: deployment install --restore", "edge: install"]);
+assert.deepEqual(restored.commands, ["downloaded service: deployment install --restore", "downloaded service: install"]);
 for (const latest of ["https://example.com/releases/tag/v1.2.3", "https://github.com/sylin-org/ghostlight/releases/tag/v1.2.3-rc1"]) {
   const result = run(`invalid-release-${latest.includes("example") ? "host" : "tag"}`, { latest });
   assert.notEqual(result.status, 0);
@@ -134,7 +141,7 @@ for (const [label, version] of [["pinned-stable", "1.2.3"], ["pinned-prerelease"
   const pinned = run(label, {}, version);
   assert.equal(pinned.status, 0, pinned.stderr);
   assert.deepEqual(pinned.requests, [`https://api.github.com/repos/sylin-org/ghostlight/releases/tags/v${version}`, ...pinnedAssets(`v${version}`)]);
-  assert.deepEqual(pinned.commands, ["service: deployment install", "edge: install"]);
+  assert.deepEqual(pinned.commands, ["downloaded service: deployment install", "downloaded service: install"]);
   assert.ok(pinned.stdout.includes(`Ghostlight ${version} downloaded`), pinned.stdout);
 }
 const pinnedOlder = run("pinned-older-than-latest", { latest: "https://github.com/sylin-org/ghostlight/releases/tag/v3.0.0" }, "1.2.3");

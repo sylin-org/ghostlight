@@ -111,36 +111,82 @@ export function developmentExecutableMissing(executable) {
   return `The installed Ghostlight is a development build, but ${executable} is missing. ${RESTORE_ROUTE}`;
 }
 
+/** The largest value of a version field: the service reads each one as a 64-bit unsigned number. */
+const LARGEST_VERSION_FIELD = 2n ** 64n - 1n;
+
+/** A numeric version field or identifier: digits with no leading zero, within the service's range. */
+function versionNumber(text) {
+  if (!/^(0|[1-9][0-9]*)$/.test(text)) {
+    return null;
+  }
+  const value = BigInt(text);
+  return value <= LARGEST_VERSION_FIELD ? value : null;
+}
+
+/** One dot-separated pre-release identifier: a number, or letters, digits and hyphens. */
+function preReleaseIdentifier(text) {
+  if (/^[0-9]+$/.test(text)) {
+    return versionNumber(text);
+  }
+  return /^[0-9A-Za-z-]+$/.test(text) ? text : null;
+}
+
 /**
- * Orders two release versions. Returns a negative, zero or positive number, or null when either
- * is not `major.minor.patch` with an optional pre-release suffix. A pre-release sorts below its
- * release.
+ * Parses `major.minor.patch`, optionally followed by `-pre.release` and `+build`, by the rule
+ * the service reads `install.json` with (`install/record.rs`). Build metadata is ignored. Null
+ * when the value is not such a version.
+ */
+function parseVersion(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const build = value.indexOf("+");
+  const withoutBuild = build === -1 ? value : value.slice(0, build);
+  const dash = withoutBuild.indexOf("-");
+  const core = (dash === -1 ? withoutBuild : withoutBuild.slice(0, dash)).split(".").map(versionNumber);
+  const pre = dash === -1 ? [] : withoutBuild.slice(dash + 1).split(".").map(preReleaseIdentifier);
+  if (core.length !== 3 || core.includes(null) || pre.includes(null)) {
+    return null;
+  }
+  return { core, pre };
+}
+
+/** Orders two pre-release identifiers: numbers by value, below every word, and words by their characters. */
+function compareIdentifiers(left, right) {
+  const leftNumeric = typeof left === "bigint";
+  const rightNumeric = typeof right === "bigint";
+  if (leftNumeric !== rightNumeric) {
+    return leftNumeric ? -1 : 1;
+  }
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * Orders two release versions by semantic version precedence, as the service does. Returns -1, 0
+ * or 1, or null when either is not a version (see `parseVersion`). A pre-release sorts below its
+ * release, and its numeric identifiers compare by value, so `rc.10` follows `rc.2`.
  */
 export function compareVersions(left, right) {
-  const parse = (value) => {
-    const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(value));
-    return match ? { numbers: match.slice(1, 4).map(Number), pre: match[4] } : null;
-  };
-  const a = parse(left);
-  const b = parse(right);
+  const a = parseVersion(left);
+  const b = parseVersion(right);
   if (!a || !b) {
     return null;
   }
   for (let index = 0; index < 3; index++) {
-    if (a.numbers[index] !== b.numbers[index]) {
-      return a.numbers[index] - b.numbers[index];
+    if (a.core[index] !== b.core[index]) {
+      return a.core[index] < b.core[index] ? -1 : 1;
     }
   }
-  if (a.pre === b.pre) {
-    return 0;
+  if (a.pre.length === 0 || b.pre.length === 0) {
+    return Math.sign(b.pre.length) - Math.sign(a.pre.length);
   }
-  if (a.pre === undefined) {
-    return 1;
+  for (let index = 0; index < Math.min(a.pre.length, b.pre.length); index++) {
+    const order = compareIdentifiers(a.pre[index], b.pre[index]);
+    if (order !== 0) {
+      return order;
+    }
   }
-  if (b.pre === undefined) {
-    return -1;
-  }
-  return a.pre < b.pre ? -1 : 1;
+  return Math.sign(a.pre.length - b.pre.length);
 }
 
 /** Reads `install.json` from the install directory; absent or unreadable records are null. */

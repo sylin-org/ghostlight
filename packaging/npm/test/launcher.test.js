@@ -215,13 +215,24 @@ test("only doctor, status, help, version and the help of install, uninstall and 
   }
 });
 
-test("versions order numerically and a pre-release sorts below its release", () => {
-  assert.ok(compareVersions("2.0.0", "1.9.9") > 0);
-  assert.ok(compareVersions("1.3.9", "1.3.15") < 0);
-  assert.equal(compareVersions("2.0.0", "2.0.0"), 0);
-  assert.ok(compareVersions("2.0.0-rc.1", "2.0.0") < 0);
-  assert.equal(compareVersions("not-a-version", "2.0.0"), null);
+test("versions order by the service's rule, on the vectors install/record.rs reads", async () => {
+  const vectors = JSON.parse(await readFile(new URL("../../version-order.json", import.meta.url), "utf8"));
+  for (const [index, version] of vectors.ascending.entries()) {
+    assert.equal(compareVersions(version, version), 0, version);
+    for (const later of vectors.ascending.slice(index + 1)) {
+      assert.equal(compareVersions(version, later), -1, `${version} < ${later}`);
+      assert.equal(compareVersions(later, version), 1, `${later} > ${version}`);
+    }
+  }
+  for (const [left, right] of vectors.equal) {
+    assert.equal(compareVersions(left, right), 0, `${left} = ${right}`);
+  }
+  for (const malformed of vectors.malformed) {
+    assert.equal(compareVersions(malformed, "2.0.0"), null, JSON.stringify(malformed));
+    assert.equal(compareVersions("2.0.0", malformed), null, JSON.stringify(malformed));
+  }
   assert.equal(compareVersions(undefined, "2.0.0"), null);
+  assert.equal(compareVersions(200, "2.0.0"), null);
 });
 
 const PACKAGE_VERSION = "2.0.0";

@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a, I9b, I4, I5, I2 and I6 have landed. ux-2 has closed, so I8, I10, I12 and I13
+I1, I3, I7, I9a, I9b, I4, I5, I2, I6 and I8 have landed. ux-2 has closed, so I10, I12 and I13
 can start. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
 a test machine.
 
@@ -26,7 +26,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I5 | fix(install): Ghostlight's npm launcher entry is Ghostlight's | none | none | see Notes | landed (this commit) |
 | I2 | fix(install): one atomic replace and one same-location rule | none | I1 | see Notes | landed (this commit) |
 | I6 | fix(install): the roster cache follows the acts, and a command reads it once | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
-| I8 | fix(packaging): the carriers agree with the service's rule and words | none | none | cross-lane the installer journeys | todo |
+| I8 | fix(packaging): the carriers agree with the service's rule and words | none | none | cross-lane the installer journeys; see Notes | landed (this commit) |
 | I10 | refactor(install): install words in language/deployment, and the browser list composed once | none | ux-2 closes (`install/mod.rs`) | cross-lane `language/outcome.rs` | todo |
 | I12 | refactor(diagnostics): one spelling of the edge's logs, and no name nobody writes | none | none | - | todo |
 | I13 | refactor(win-peer): one token module for its two callers | none | none | - | todo |
@@ -211,3 +211,31 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `one_install_scans_once_plus_once_per_write` counts scans through a test-only counter: one when
   the registry is built, then one for each of three writes.
 - I6 changes no golden and needs no journey. `linux.txt` is unaffected.
+- I8, the order: both launchers parse a version by `install/record.rs`'s rule (digits with no
+  leading zero, fields within 64 bits, no empty pre-release identifier, build ignored) and order
+  it by semver precedence, so `2.0.0-rc.10` follows `2.0.0-rc.2` and a version the service cannot
+  read is unordered on both sides. The shared vectors are `packaging/version-order.json`, which
+  neither carrier ships; `record.rs`'s two version tests and both launcher tests read it, and their
+  inline vectors went.
+- I8, the restore words: the launchers keep their own `RESTORE_ROUTE`, because they run before any
+  service. `both_launchers_say_the_way_back_in_the_services_words` reads both files and compares
+  their route lines with `restore_route()`, and their missing-edge sentence with
+  `development_executable_missing`.
+- I8, the get scripts: after `deployment install`, the same downloaded service runs `install`.
+  The entry rule finds the installed service is the same image and forwards to it, so the summary
+  still prints in the person's console; over a development build it forwards as the edge did. The
+  `~/.ghostlight/bin` literal went, and with it `get.ps1`'s `USERPROFILE` check: the service decides
+  where the home is. So the `GHOSTLIGHT_NO_REGISTER` sentence names no directory, and the failure
+  line says "Run 'ghostlight doctor' in a new terminal", where the installed command is on `PATH`.
+  Within the slice's Deletes.
+- I8, the journeys (core's, named cross-lane): `tests/installer-shell.mjs`'s fixture service
+  records which copy ran each command, the journey expects the downloaded service's
+  `deployment install` and then its `install`, and the fixture edge now fails if it is run.
+  `tests/installer-powershell.ps1` checks the `GHOSTLIGHT_NO_REGISTER` sentence. Neither ran here:
+  the first is Linux-only and the second starts its own service. The coordinator runs
+  `node tests/installer-shell.mjs` on Linux and `pwsh -NoProfile -File tests/installer-powershell.ps1`
+  on Windows from a fresh build in `GHOSTLIGHT_BIN_DIR`, and `get.ps1` and `get.sh` once on a test
+  machine without `GHOSTLIGHT_NO_REGISTER`, to see `install`'s summary reach the console through the
+  downloaded service. Ran here: both launcher tests, `tests/installer-checksums.ps1` offline in
+  PowerShell 7 and 5.1, and `sh -n scripts/*.sh`.
+- I8 changes no golden. `linux.txt` is unaffected.

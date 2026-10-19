@@ -90,10 +90,6 @@
         throw "Release $tag has no SHA256SUMS asset."
     }
 
-    if ([string]::IsNullOrWhiteSpace($env:USERPROFILE) -or -not [System.IO.Path]::IsPathRooted($env:USERPROFILE)) {
-        throw "Ghostlight cannot locate this user's home directory."
-    }
-    $installDirectory = Join-Path $env:USERPROFILE ".ghostlight/bin"
     $downloadDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "ghostlight-download-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $downloadDirectory | Out-Null
     $provenanceForAll = $true
@@ -136,12 +132,23 @@
         }
 
         # The verified service installs the whole set (the edge, the service and the shell) into
-        # ~/.ghostlight/bin from its own directory. Its stdout is discarded; its errors still show.
-        $candidate = Join-Path $downloadDirectory "ghostlight-service.exe"
+        # the Ghostlight home from its own directory. Its stdout is discarded; its errors still show.
+        $service = Join-Path $downloadDirectory "ghostlight-service.exe"
         $deployment = @("deployment", "install")
         if ($Restore) { $deployment += "--restore" }
-        & $candidate @deployment | Out-Null
+        & $service @deployment | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Ghostlight installation failed with exit code $LASTEXITCODE." }
+
+        if ($env:GHOSTLIGHT_NO_REGISTER -eq "1") {
+            Write-Host "Ghostlight $version is installed. Run 'ghostlight install' to connect your browsers and agents."
+        } else {
+            # The same verified service hands `install` to the copy it just installed, which prints
+            # the install summary in this console.
+            & $service install
+            if ($LASTEXITCODE -ne 0) {
+                throw "Ghostlight installation did not complete. Run 'ghostlight doctor' in a new terminal for details."
+            }
+        }
     }
     finally {
         # The absolute temporary path was constructed directly under the OS temp directory.
@@ -149,16 +156,5 @@
             throw "Unexpected Ghostlight download directory: $downloadDirectory"
         }
         Remove-Item -LiteralPath $downloadDirectory -Recurse -Force
-    }
-
-    $ghostlight = Join-Path $installDirectory "ghostlight.exe"
-    if ($env:GHOSTLIGHT_NO_REGISTER -eq "1") {
-        Write-Host "Ghostlight $version is installed in $installDirectory. Run 'ghostlight install' to connect your browsers and agents."
-    } else {
-        # The installed edge prints the install summary in this console.
-        & $ghostlight install
-        if ($LASTEXITCODE -ne 0) {
-            throw "Ghostlight installation did not complete. Run '$ghostlight doctor' for details."
-        }
     }
 } @args

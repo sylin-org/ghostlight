@@ -1,9 +1,9 @@
 #Requires -Version 7
 # Offline exercise of the shipped downloader and the real package installation seam: the edge, the
 # service and the shell are verified and installed by the downloaded service, and a corrupt image
-# installs nothing. The fixture sets GHOSTLIGHT_NO_REGISTER so the final `ghostlight install` never
-# writes the machine's Start-menu shortcut or Uninstall key; the console output of that step is an
-# owed live check.
+# installs nothing. The fixture sets GHOSTLIGHT_NO_REGISTER so the downloaded service's final
+# `install` never writes the machine's Start-menu shortcut or Uninstall key; the console output of
+# that step is an owed live check.
 param([string]$BinaryDirectory = $env:GHOSTLIGHT_BIN_DIR)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -76,7 +76,12 @@ function Get-Command {
     Microsoft.PowerShell.Core\Get-Command -Name $Name
 }
 $installer = Join-Path $Repository 'scripts/get.ps1'
-& $installer
+# Write-Host speaks on the information stream. The script names no install path of its own: the
+# service decides where the home is.
+$said = @(& $installer 6>&1 | ForEach-Object { "$_" })
+if ($said -notcontains "Ghostlight 1.3.12 is installed. Run 'ghostlight install' to connect your browsers and agents.") {
+    throw "Unexpected installer output: $($said -join ' | ')"
+}
 $destination = Join-Path $UserDirectory '.ghostlight/bin'
 foreach ($name in $global:fixtureNames) {
     if ((Get-FileHash (Join-Path $destination "$name.exe")).Hash -ne (Get-FileHash (Join-Path $Binaries "$name.exe")).Hash) {
