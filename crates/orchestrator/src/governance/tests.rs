@@ -1074,6 +1074,26 @@ fn an_owned_schema_three_user_policy_moves_at_load_and_keeps_a_backup() {
 }
 
 #[test]
+fn a_schema_3_user_policy_moved_at_load_keeps_owner_only_access() {
+    let path = temporary("owned-schema-three-access");
+    fs::write(
+        &path,
+        r#"{"schema":3,"name":"mine","version":"1","mode":"enforce","grants":[]}"#,
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
+    assert!(facade.diagnostics().authority_valid);
+    assert!(manifest::parse(&fs::read_to_string(&path).unwrap(), "moved").is_ok());
+    crate::install::record::assert_owner_only(&path);
+    crate::install::record::assert_owner_only(&migrate::backup_path(&path));
+}
+
+#[test]
 fn an_owned_schema_three_user_policy_that_would_change_meaning_fails_closed_untouched() {
     let path = temporary("owned-observe");
     let original = r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[]}"#;

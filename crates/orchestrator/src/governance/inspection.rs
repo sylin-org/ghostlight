@@ -86,7 +86,7 @@ fn load(path: &Path) -> Result<manifest::Manifest> {
 }
 
 fn migrate(path: &Path, out: &mut impl Write) -> Result<()> {
-    match migrate::migrate_file(path) {
+    match migrate::migrate_file(path, migrate::Access::Kept) {
         Ok(None) => writeln!(out, "{}", migration::already_current(path))?,
         Ok(Some((backup, moved))) => {
             writeln!(

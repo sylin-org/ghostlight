@@ -35,6 +35,16 @@ pub struct Migration {
     pub removed: Vec<String>,
 }
 
+/// Who may read a policy file once it has moved.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Access {
+    /// Ghostlight owns the file, so the moved file is readable only by the user.
+    OwnerOnly,
+    /// Someone else named the file, and other accounts may read it, so the moved file keeps the
+    /// access the original had.
+    Kept,
+}
+
 /// What a migration found in a document.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Outcome {
@@ -99,10 +109,12 @@ pub fn migrate(text: &str, origin: &str) -> Result<Outcome, MigrateError> {
 ///
 /// The original is copied to `<file>.schema3.bak` first, and the new document replaces the file in
 /// one step, so a failure leaves the original where it was. The backup is private to the user; the
-/// migrated file keeps the access the original had, because the file may be one other accounts
-/// read. Returns the backup's path and what
-/// moved, or `None` when the file already speaks schema 4.
-pub fn migrate_file(path: &Path) -> Result<Option<(PathBuf, Migration)>, MigrateError> {
+/// migrated file gets `access`. Returns the backup's path and what moved, or `None` when the file
+/// already speaks schema 4.
+pub fn migrate_file(
+    path: &Path,
+    access: Access,
+) -> Result<Option<(PathBuf, Migration)>, MigrateError> {
     let original = fs::read(path).map_err(|error| {
         MigrateError::Unreadable(format!("read policy {}: {error}", path.display()))
     })?;
@@ -125,7 +137,12 @@ pub fn migrate_file(path: &Path) -> Result<Option<(PathBuf, Migration)>, Migrate
         }
         Err(error) => return Err(unwritable(error)),
     }
-    atomic_replace_keeping_access(path, migration.document.as_bytes()).map_err(unwritable)?;
+    let document = migration.document.as_bytes();
+    match access {
+        Access::OwnerOnly => atomic_replace(path, document),
+        Access::Kept => atomic_replace_keeping_access(path, document),
+    }
+    .map_err(unwritable)?;
     Ok(Some((backup, migration)))
 }
 
@@ -394,12 +411,14 @@ mod tests {
         let original =
             format!(r#"{{"schema":3,"name":"mine","version":"1","mode":"enforce",{GRANTS}}}"#);
         fs::write(&path, &original).unwrap();
-        let (backup, migration) = migrate_file(&path).unwrap().expect("the file moves");
+        let (backup, migration) = migrate_file(&path, Access::Kept)
+            .unwrap()
+            .expect("the file moves");
         assert_eq!(backup, backup_path(&path));
         assert_eq!(fs::read_to_string(&backup).unwrap(), original);
         assert_eq!(fs::read_to_string(&path).unwrap(), migration.document);
         assert!(manifest::parse(&migration.document, "moved").is_ok());
-        assert_eq!(migrate_file(&path).unwrap(), None);
+        assert_eq!(migrate_file(&path, Access::Kept).unwrap(), None);
         assert_eq!(fs::read_to_string(&backup).unwrap(), original);
     }
 
@@ -412,7 +431,9 @@ mod tests {
         let original = format!(r#"{{"schema":3,"name":"mine","version":"1",{GRANTS}}}"#);
         fs::write(&path, &original).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-        let (backup, _) = migrate_file(&path).unwrap().expect("the file moves");
+        let (backup, _) = migrate_file(&path, Access::Kept)
+            .unwrap()
+            .expect("the file moves");
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o644);
         assert_eq!(mode(&backup), 0o600);
@@ -424,7 +445,7 @@ mod tests {
         let original = r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[]}"#;
         fs::write(&path, original).unwrap();
         assert!(matches!(
-            migrate_file(&path).unwrap_err(),
+            migrate_file(&path, Access::Kept).unwrap_err(),
             MigrateError::Refused(_)
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), original);
@@ -439,7 +460,7 @@ mod tests {
         let backup = backup_path(&path);
         fs::write(&backup, "an earlier copy").unwrap();
         assert!(matches!(
-            migrate_file(&path).unwrap_err(),
+            migrate_file(&path, Access::Kept).unwrap_err(),
             MigrateError::Unwritable(_)
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), original);

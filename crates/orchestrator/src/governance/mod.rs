@@ -2221,15 +2221,18 @@ impl GovernanceFacade {
 }
 
 /// Read and validate one policy file, moving it to the current schema first when Ghostlight owns
-/// it and the move keeps its meaning. A file that cannot move keeps the error that names the
-/// migrate command, so the layer stays invalid and fails closed.
+/// it and the move keeps its meaning. The moved file is readable only by the user. A file that
+/// cannot move keeps the error that names the migrate command, so the layer stays invalid and
+/// fails closed.
 fn read_policy(path: &Path, owned: bool) -> Result<manifest::Manifest, GovernanceError> {
     let text = fs::read_to_string(path)
         .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))?;
     let origin = path.display().to_string();
     match manifest::parse(&text, &origin) {
         Err(manifest::ManifestError::RetiredSchema { .. }) if owned => {
-            if let Ok(Some((backup, moved))) = migrate::migrate_file(path) {
+            if let Ok(Some((backup, moved))) =
+                migrate::migrate_file(path, migrate::Access::OwnerOnly)
+            {
                 eprintln!(
                     "{}",
                     crate::language::migration::upgraded_user_policy(path, &backup)

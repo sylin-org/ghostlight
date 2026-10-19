@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-P10, P1, P2, P3 and P4 landed. Next: P9. S4a is unblocked.
+P10, P1, P2, P3, P4 and P9 landed. Next: P5. S4a is unblocked.
 
 ## Slices
 
@@ -18,8 +18,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | P1 | fix(governance): one evaluator says whether a capability can be used anywhere | candidate | ux-2 closes | see Notes | landed (3373e274, e45f09ed) |
 | P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | flatten already gone, see Notes | landed (bc00a84b) |
 | P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | see Notes | landed (9c705f86) |
-| P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | see Notes | landed (this commit) |
-| P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | - | todo |
+| P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | see Notes | landed (c2c958ff) |
+| P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | see Notes | landed (this commit) |
 | P5 | refactor(governance): one publication is read whole | none | ux-2 closes | - | todo |
 | P6 | refactor(governance): the unsigned managed file path goes | none | ux-2 closes | cross-lane core and surface call sites | todo |
 | P7 | refactor(governance): one settings vocabulary | none | ux-2 closes | - | todo |
@@ -91,3 +91,9 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   falls back from. Cross-lane: surface's `workbench/parts/tests.rs` fixture wraps its name in
   `Some`. The proofs live in `governance/managed/mod.rs`, beside the signed-bundle helpers. The
   catalog and result goldens are unchanged.
+- P9: `migrate::migrate_file` takes an `Access`: `OwnerOnly` writes the moved file through
+  `atomic_replace`, `Kept` through `atomic_replace_keeping_access`. `read_policy` moves an owned
+  file with `OwnerOnly`; `ghostlight policy migrate` keeps `Kept`, because it moves a file the
+  person names, which other accounts may read. No departure. The proof writes the schema-3 file
+  open first (0644 on Unix, the directory's inherited access on Windows) and checks the moved file
+  and its backup are owner-only. The catalog and result goldens are unchanged.
