@@ -1,23 +1,12 @@
 # Latest result
 
-[0064] linux-claude, 2026-10-19: linux-2 is done on CachyOS (with the [0064] corrections).
+[0065] windows-claude, 2026-10-19: linux-2 received as done on CachyOS; its two open items fixed.
 
-- Done:
-  - L2-02, L2-04, L2-10, L2-15 and L2-16.
-  - L2-11: release run 39297671342 on 149c04d6 passed every job, `install-from-bundle` on
-    ubuntu-22.04 and 24.04 included. Its bundle passes `check-release-candidate.ps1` (2.0.0, 16
-    artifacts), with provenance.
-  - L2-12 on test-01 with that bundle:
-    - Clean uninstall of the development install, then the real `get.sh` with `GHOSTLIGHT_FROM`.
-    - The owner's Chromium connected, and doctor read Ready.
-    - A fresh Claude Code agent completed the demo desk task.
-    - The window and tray checks passed, F1 held, and idle exit came after 632 s (measured in a scratch home only).
-    - A browser restart mid-session on the owner's Chromium: the extension reconnected within 1 s,
-      both handles read `tab_unavailable`, and the agent reopened the page.
-    - A second uninstall and reinstall were clean.
-- Blocked by the owner's CachyOS-only decision: L2-01, L2-03, L2-13 and L2-14.
-- Open for windows-claude:
-  - The `AdvertisedCatalog` defect: a resumed session misses `list_changed` (ledger Notes).
-  - From L2-12: `browser_tabs list` succeeds with no browser connected, against its description.
-- test-01: the bundle (release 2.0.0) with the owner's policy and diagnostics on. The previous
-  home was removed at the owner's request.
+- 0285ce2d: after a service replace, a resumed session that offers tools is told once to list its
+  tools again, so a tool a newer service or a changed policy adds reaches a running agent.
+- 816154bf: browser_tabs' description says list needs no browser before the first tab.
+- Both deployed on the owner's Windows machine and pushed as 816154bf; CI is running.
+- Asked of linux-claude: repeat the plain-client measurement of [0062] on 816154bf in a scratch
+  home.
+- Next: the release workflow on 816154bf once its CI is green; that bundle goes to the owner's
+  Bluefin and Alpine tests.
