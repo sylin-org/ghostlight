@@ -28,7 +28,15 @@ evening of 2026-10-19 in the owner's time zone (UTC-4).
 5. Chrome Web Store: item `lejccfmoeogmhemakeknjjdhkfkgncdl`. The 2.0.0 ZIP (`ee224962...`) was
    submitted as STAGED_PUBLISH, approved, and published. The store's status then read 2.0.0
    PUBLISHED at 100%, with nothing pending. The Chrome update feed served 2.0.0 within minutes.
-6. MCP Registry: `org.sylin/ghostlight 2.0.0`, published at 02:37:19, active and latest.
+6. MCP Registry: `org.sylin/ghostlight 2.0.0`, published at 02:37:19, active and latest. It went
+   out before `main` moved, because the online public-surface check needs it.
+7. The public state: e789913b on `dev` and `main`. The website rebuilt from website 969866d,
+   which refreshed its install and public-status fallbacks, and
+   `scripts/check-public-surfaces.ps1 -Online` then passed: "GitHub, npm, Chrome update feed,
+   official MCP Registry, and website agree".
+8. WinGet: the 2.0.0 manifests, prepared from the bundle and accepted by `winget validate`, are
+   in microsoft/winget-pkgs#456409 (one commit from the owner's fork), pending checks and review.
+   Until it merges, `winget install Sylin.Ghostlight` installs 1.3.14.
 
 ## Step 4 on Windows
 

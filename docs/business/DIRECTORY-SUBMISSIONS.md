@@ -17,13 +17,13 @@ These are distribution observations, not user reception. The dated evidence and 
 
 | Surface | Dated observation |
 | --- | --- |
-| Official MCP Registry | `org.sylin/ghostlight` 1.3.14 is active and latest as of 2026-10-02. |
+| Official MCP Registry | `org.sylin/ghostlight` 2.0.0 is active and latest as of 2026-10-19. |
 | Glama | Listed with A license, A quality, A maintenance, one favorite, and B for `computer`; explicit sync reached repository commit `9546875`. |
 | mcpservers.org | Development listing is live at `https://mcpservers.org/servers/sylin-org/ghostlight`; a 2026-08-07 refresh request was accepted. |
 | Cline marketplace | Submission issue [#1989](https://github.com/cline/mcp-marketplace/issues/1989) was refreshed in place for 0.8.0 and remains open. |
 | awesome-mcp-servers | PR [#11306](https://github.com/punkpeye/awesome-mcp-servers/pull/11306) is open, clean, and has its submission check green. |
 | GitHub MCP Registry | Public search returns one `Sylin Ghostlight` result by `sylin-org` with current copy. |
-| WinGet | Version 1.3.13 merged in PR #445923; 1.3.14 submitted in [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987), pending checks/review as of 2026-10-02. |
+| WinGet | Version 1.3.14 merged in [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987) on 2026-10-03; 2.0.0 submitted in [PR #456409](https://github.com/microsoft/winget-pkgs/pull/456409), pending checks and review as of 2026-10-19. |
 | PulseMCP | Its current form says official-registry entries are ingested daily and processed weekly. Recheck after one week before emailing. |
 | mcp.so | Its current submission path requires a $39 one-time fee. No spending was authorized. |
 

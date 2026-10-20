@@ -35,16 +35,16 @@ WinGet template place them together in one directory. MCP-client entries launch
 
 ## Founder: accounts and publishes (order matters)
 
-- [x] **npm.** `ghostlight@1.3.14` is live at `latest`. The release pipeline publishes it and smoke
-      tests the launcher against the integrity-pinned release binaries.
-- [x] **Chrome Web Store.** Adapter v1.3.12 is public and byte-validated against the submitted
-      package. Store id:
+- [x] **npm.** `ghostlight@2.0.0` is live at `latest`: the release bundle's exact tarball,
+      published with `scripts/publish-npm.ps1` at the owner's go.
+- [x] **Chrome Web Store.** Adapter v2.0.0 is public, published from the approved staged
+      submission of the release bundle's ZIP. Store id:
       `lejccfmoeogmhemakeknjjdhkfkgncdl`.
 - [ ] **Edge Add-ons store.** Native submission is intentionally deferred because individual
       enrollment makes the owner's home address customer-visible. Edge users can install the
       Chrome listing through Microsoft's supported other-store path.
-- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v1.3.14 is active and
-      latest. The release pipeline publishes each service version after npm.
+- [x] **MCP Registry (official).** Published as `org.sylin/ghostlight`; v2.0.0 is active and
+      latest. `scripts/publish-mcp-registry.ps1` publishes each release once npm serves it.
 - [x] **GitHub MCP Registry / VS Code `@mcp` discovery.** The founder sent the one-time
       onboarding request to `partnerships@github.com` on 2026-07-31. GitHub completed its review
       and approved `org.sylin/ghostlight` for inclusion on 2026-08-03. Public catalog search now
@@ -75,9 +75,9 @@ WinGet template place them together in one directory. MCP-client entries launch
       PR is clean with its submission check green. mcp.so now requires a $39 submission fee and
       needs separate spending approval. PulseMCP says official-registry records are ingested daily
       and processed weekly, so recheck after one week before emailing.
-- [x] **Winget.** v1.3.13 is publicly accepted after
-      [PR #445923](https://github.com/microsoft/winget-pkgs/pull/445923) merged on 2026-10-02.
-      Version 1.3.14 is submitted in [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987), pending checks/review.
+- [x] **Winget.** v1.3.14 is publicly accepted after
+      [PR #445987](https://github.com/microsoft/winget-pkgs/pull/445987) merged on 2026-10-03.
+      Version 2.0.0 is submitted in [PR #456409](https://github.com/microsoft/winget-pkgs/pull/456409), pending checks and review.
 - [x] **Canonical website.** `https://sylin.org/ghostlight/` is live. The old GitHub Pages paths
       are redirect fallbacks, and extension/install entry points use the canonical domain.
 - [x] **GitHub front doors.** The repository About description and Sylin organization profile

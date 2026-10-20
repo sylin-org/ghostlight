@@ -1,4 +1,4 @@
-# STATUS -- Ghostlight 1.3.14 published; 2.0 release candidate in preparation
+# STATUS -- Ghostlight 2.0.0 published
 
 This page is the current state and nothing else. Every earlier dated section, from the 1.0 rebuild
 through 2026-10-16, moved verbatim to [history/status-through-2026-10-16.md](history/status-through-2026-10-16.md).
@@ -6,29 +6,28 @@ Decisions live in [adr/](adr/README.md), standing preferences in [MEMORY.md](MEM
 
 ## Published
 
-- Release 1.3.14 is the latest public release, with the unchanged Chrome adapter 1.3.12 in the
-  Chrome Web Store (`docs/public-status.json`, `server.json`, `compatibility.json`).
-- 1.3.15 is not released. It was submitted for staged Chrome review (PENDING_REVIEW at the last
-  recorded read) with a non-public GitHub draft, and the release posture below says 1.x gets no
-  patch releases. The owner withdrew it on 2026-10-16: the draft is deleted and the `v1.3.15` tag
-  stays as history. The owner cancelled and pulled the Chrome Web Store item on 2026-10-17, so the
-  listing is clear for the 2.0 staged submission.
-- Nothing from the 2.0 break set is published. No `v2*` tag exists.
+- Release 2.0.0 is the latest public release, published on 2026-10-19: the GitHub release
+  `v2.0.0`, npm `ghostlight@2.0.0`, the Chrome Web Store extension 2.0.0 and the MCP Registry
+  record `org.sylin/ghostlight 2.0.0` (`docs/public-status.json`, `server.json`,
+  `compatibility.json`, and the custody record
+  [testing/release-2.0.0-2026-10-19.md](testing/release-2.0.0-2026-10-19.md)). WinGet serves
+  1.3.14 until microsoft/winget-pkgs#456409 merges.
+- 1.3.15 was never released. The owner withdrew it on 2026-10-16; the `v1.3.15` tag stays as
+  history.
 
 ## Branches
 
 Only `main` and `dev`, locally and on the remote (AGENTS.md, Branches). `main` holds the published
-1.3.14 product. `dev` holds all 2.0 work. `main` advances to the 2.0 tree in the cutover sitting
-(ADR-0200 Decision 16 and its amendments), because the short install commands fetch their scripts
-from `main`. Older branch heads are kept as `archive/` tags.
+2.0.0 product and its public state (e789913b). `dev` holds all work toward the next release.
+Older branch heads are kept as `archive/` tags.
 
-## 2.0 in flight
+## 2.0 work
 
-`dev` carries the 2.0 break set of
+`dev` carried the 2.0 break set of
 [ADR-0197](adr/0197-contained-seams-and-the-2-0-break.md), the one-service-and-thin-shells design of
 [ADR-0199](adr/0199-one-service-thin-shells.md) and the agent experience of
 [ADR-0198](adr/0198-agent-experience.md). The product version is 2.0.0 everywhere it is stamped.
-The three ledgers below are the record of what is done; read the RESUME HERE block in each.
+The ledgers below are the record of what was done; read the RESUME HERE block in each.
 
 - **Seams** ([seams.md](tasks/break-2.0/seams.md)): the removals, policy schema 4, audit v2, relay
   protocol 4, the edge, the carriers, the lean blueprint F1 to F13, and the handles slices.
@@ -99,9 +98,12 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
-The release candidate is next: the checklist below, then the owner's release order.
+2.0.0 was released from this work on 2026-10-19 (Release checklist below).
 
 ## Release bar
+
+2.0.0 shipped on 2026-10-19 by the owner's go. The owner skipped the 1.x upgrade check, and the
+Windows restart and sign-out check is still open (Release checklist). The bar as it stood:
 
 2.0 ships when it passes checks that prove its promises, never on a date or after a waiting
 period: clean installs on Windows and the Linux test machines, a 1.x upgrade on another machine,
@@ -121,14 +123,18 @@ that rebuilds the bundle and re-runs only the check it touches. The steps of the
 
 ## CI
 
-The last green run is 39278943156 on `dev` eb038961 (2026-10-19): every job, including the Rust,
-extension and page-asset gates, and every process and real-browser journey on Linux and Windows.
-It carries arch-1 (ADR-0203) integrated. Since the CI review of 2026-10-19 a newer push no longer
-cancels a run in progress, and cargo audit runs daily (audit.yml) and in the release workflow.
+The last green run is 39360079270 on `dev` e789913b (2026-10-19), the public state of 2.0.0:
+every job, including the Rust, extension and page-asset gates, and every process and
+real-browser journey on Linux and Windows. The run on `main` for the same commit (39360083656)
+failed once in the Windows process journey: a cut-off read's 8 s default timeout could expire
+before the test killed the service on a slow runner. f5d8507a gives that read the longest
+timeout. Since the CI review of 2026-10-19 a newer push no longer cancels a run in progress, and
+cargo audit runs daily (audit.yml) and in the release workflow.
 
 ## Release checklist
 
-Done on 2026-10-19:
+Done on 2026-10-19 (custody record:
+[testing/release-2.0.0-2026-10-19.md](testing/release-2.0.0-2026-10-19.md)):
 
 - The 2.0 bundle: release run 39347181245 on 6a41327f, verified with
   `scripts/check-release-candidate.ps1` (2.0.0, 16 artifacts). It differs from the bundle every
@@ -138,29 +144,27 @@ Done on 2026-10-19:
   `docs/testing/bluefin-2.0-bundle-2026-10-19.md`). Bluefin's finding, that status does not say
   what accept answers a prompt with, is kept for 2.0.1 (the owner and the coordinator).
 - sylin.org's privacy page carries the 2.0 policy (website 9117a8e).
-- The store approved the extension 2.0.0. It is staged (STAGED_PUBLISH), and the store serves
-  1.3.12 until the publish. The package keeps the host permissions (JQ3 kept for 2.0), and the
-  listing keeps its 1.x images until the owner replaces them. Only a release blocker reopens the
-  extension.
-- The cutover (`docs/RELEASE.md`), steps 1 to 3: `v2.0.0` on 6a41327f is GitHub's latest release
-  (18 files). `main` is at e3f00d75, a merge whose tree is v2.0.0's, so the sylin.org short
-  commands serve the 2.0 scripts. npm serves `ghostlight@2.0.0` as latest; its tarball is the
-  bundle's (`63bde2b5...`).
-- Step 4 on Windows, on the owner's machine and outside the app's sandbox. In Windows PowerShell
-  5.1 the plain one-liner verified the release (checksums and build provenance) and refused the
-  development build with the restore route. The restore one-liner then installed the release.
-  Doctor reads Ready, the four browsers are registered, and the installed programs are
-  byte-identical to the release. The demo desk's bell answered "hello from the desk" through the
-  release on the owner's Chrome, and `npx -y ghostlight@2` (the plugin's command) gives a client
-  23 tools. `npx ghostlight deployment install --restore`, and the plain one-liner in PowerShell
-  7, install 2.0.0.
-- The owner skipped the 1.x upgrade check. The short commands' redirects to `main` hold.
+- The cutover (`docs/RELEASE.md`), steps 1 to 5 and 7 to 9, run by the coordinator at the owner's
+  go. GitHub, npm, the Chrome Web Store (2.0.0 at 100%, from the approved staged submission) and
+  the MCP Registry serve 2.0.0. Step 4 proved the public install on the owner's Windows machine:
+  both one-liners, the restore route, the launcher, and a real task. The public state (e789913b)
+  is on `dev` and `main`, the website shows 2.0.0 (website 969866d), and
+  `scripts/check-public-surfaces.ps1 -Online` passes. The registry was published before `main`
+  moved, because the online check needs it; the website rebuild came last.
+- WinGet: the validated 2.0.0 manifests are in microsoft/winget-pkgs#456409, pending checks and
+  review. The store listing keeps its 1.x images until the owner replaces them.
 
 Now:
 
-- linux-claude on test-01 proves the public Linux one-liner on its real installation (asked in
-  `coordination/CHAT.md`, aab5ef1f; the owner relays it). Then the coordinator publishes the
-  staged store item (step 5) and the cutover continues with steps 6 to 10.
+- linux-claude on test-01, when the Linux machines are back: the public Linux one-liner on its
+  real installation (`coordination/CHAT.md`). The owner directed the cutover to go on without it.
+- Owner: step 6, the clean-profile run of the public path on Windows and Linux.
+- After microsoft/winget-pkgs#456409 merges: step 10, the README and installation guide lines that
+  say WinGet carries 2.0, and a `main` fast-forward.
+- `scripts/publish-website.ps1` clones the website into the system temp folder, outside the folder
+  whose Git configuration names the owner's GitHub account, so Git Credential Manager waited for an
+  account choice. The step's commit (969866d) was pushed from the owner's website checkout
+  instead. A clone under the repository would inherit that configuration.
 
 Still open from before the tag:
 
@@ -168,7 +172,7 @@ Still open from before the tag:
   shutdown block, and one service afterwards. One `.mcpb` install in Claude Desktop from the
   release, and the extension in Chrome and Edge.
 - The owner's look at the window on a light-mode Windows account at 100% and 150%.
-- The three 1.x users told directly, and the website's 2.0 pages (cutover step 7).
+- The three 1.x users told directly, and the owner's look at the website's 2.0 pages.
 
 After 2.0: Alpine in 2.0.1 with musl images (linux-claude; a musl build already runs on test-03),
 the prompt default carried through to status (Bluefin's finding), the `browser_tabs` action
