@@ -5,6 +5,10 @@
 # The Ghostlight 2.0 extension's setup page prints the one-line command that fetches this file;
 # keep its URL working for 2.x.
 #
+# The install needs no GitHub account and no GitHub tool. Every image is checked against the
+# release's SHA256SUMS before anything runs. docs/trust/supply-chain.md shows how to check build
+# provenance by hand.
+#
 # GHOSTLIGHT_VERSION installs exactly that release instead of the latest one, found by its tag
 # (v<version>) through the GitHub releases API. A prerelease is installable this way and no other:
 # the latest release never is:
@@ -14,9 +18,8 @@
 # build before it is released. It names a folder: the release workflow's `release-candidate`
 # artifact, unpacked (SHA256SUMS beside an assets folder), or a folder of release downloads
 # (SHA256SUMS beside the images). Every image is checked against SHA256SUMS exactly as a download
-# is, and anything it does not bind is refused. A bundle is only as trustworthy as its source; with
-# the GitHub CLI installed, the build provenance is checked as well. It cannot be combined with
-# GHOSTLIGHT_VERSION:
+# is, and anything it does not bind is refused. A bundle is only as trustworthy as its source. It
+# cannot be combined with GHOSTLIGHT_VERSION:
 #   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/<revision>/scripts/get.sh | GHOSTLIGHT_FROM=~/Downloads/release-candidate sh
 #
 # --restore installs this release over a development installation (a build the development loop
@@ -146,7 +149,6 @@ sha256_file() {
   fi
 }
 
-provenance_for_all=1
 for component in ghostlight ghostlight-service ghostlight-desktop; do
   asset="${component}-${target}"
   expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$sums")
@@ -176,9 +178,6 @@ for component in ghostlight ghostlight-service ghostlight-desktop; do
     echo "ghostlight: checksum verification failed for ${asset}" >&2
     exit 1
   fi
-  if ! { command -v gh >/dev/null 2>&1 && gh attestation verify "$downloaded" --repo "$repository" >/dev/null 2>&1; }; then
-    provenance_for_all=0
-  fi
   chmod 0755 "$downloaded"
 done
 
@@ -187,11 +186,7 @@ obtained="downloaded"
 if [ -n "$from" ]; then
   obtained="copied from ${from}"
 fi
-if [ "$provenance_for_all" -eq 1 ]; then
-  echo "${product} ${obtained}. Checksums and build provenance verified."
-else
-  echo "${product} ${obtained}. Checksums verified."
-fi
+echo "${product} ${obtained}. Checksums verified."
 
 # The verified service installs the whole set (the edge, the service and the shell) into the
 # Ghostlight home from its own directory. Its stdout is discarded; its errors still show. A failed
