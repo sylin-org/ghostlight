@@ -169,8 +169,10 @@ Now:
   prompt's default, which the extension carries through, with the wording alone for an extension
   older than 2.0.1 (an extension update and a store review); and the `browser_tabs` action
   wording. It ships when these land, at the owner's go.
-- linux-claude on test-01, when the Linux machines are back: the public Linux one-liner on its
-  real installation (`coordination/CHAT.md`). The owner directed the cutover to go on without it.
+- The public Linux one-liner on the real installations, which the cutover went on without: done
+  on CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
+  service is kept until `--restore`) and on Bluefin (test-02,
+  `docs/testing/bluefin-public-2.0.0-2026-10-20.md`; its images already equalled the release).
 - Owner: step 6, the clean-profile run of the public path on Windows and Linux.
 - Once WinGet's index lists 2.0.0: step 10, the README and installation guide lines that say WinGet
   carries 2.0, and a `main` fast-forward.
