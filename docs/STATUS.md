@@ -168,7 +168,10 @@ Now:
   from the release (linux-claude, linux-2 L2-01 and L2-14); `browser_dialog` status naming a
   prompt's default, which the extension carries through, with the wording alone for an extension
   older than 2.0.1 (an extension update and a store review); and the `browser_tabs` action
-  wording. It ships when these land, at the owner's go.
+  wording. Added by the owner later that day: `browser_navigate` accepting the advertised default
+  `reuse` beside `new_tab`, which a client that fills schema defaults sends (Claude Code began to),
+  and ureq 3 for the managed-policy fetch, which removes the `webpki-roots` audit exception. It ships
+  when these land, at the owner's go.
 - The public Linux one-liner on the real installations, which the cutover went on without: done
   on CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
   service is kept until `--restore`) and on Bluefin (test-02,
