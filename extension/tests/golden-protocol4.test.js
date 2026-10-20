@@ -88,17 +88,28 @@ test("protocol.isKnown answers membership and rejects an unknown list", () => {
   assert.throws(() => protocol.isKnown("not_a_list", "x"), TypeError);
 });
 
-test("vocabulary lists hold unique names and the numbers match the spec", () => {
+test("vocabulary lists hold unique names", () => {
   for (const [key, value] of Object.entries(vocabulary)) {
     if (!Array.isArray(value)) continue;
     assert.equal(new Set(value).size, value.length, `${key} repeats a name`);
     assert.ok(value.length > 0, `${key} is empty`);
   }
-  assert.equal(vocabulary.primitives.length, 17);
-  assert.equal(vocabulary.receipt_failures.length, 13);
-  assert.equal(vocabulary.call_failures.length, 10);
-  assert.equal(vocabulary.world_message_kinds.length, 32);
-  assert.equal(vocabulary.limits.direct_frame_bytes, 768 * 1024);
+});
+
+// Within protocol 4 nothing is removed or renamed (spec 1.7): a 2.0.0 extension or service still
+// speaks every name it shipped with, and reads every limit as it was. A new name is allowed, since
+// every reader is tolerant. vocabulary-2.0.0.json is the vocabulary as 2.0.0 shipped it and never
+// changes.
+test("the vocabulary keeps every name and limit 2.0.0 shipped with", () => {
+  const shipped = readJson("vocabulary-2.0.0.json");
+  for (const [key, value] of Object.entries(shipped)) {
+    assert.ok(key in vocabulary, `${key} was removed`);
+    if (Array.isArray(value)) {
+      for (const name of value) assert.ok(vocabulary[key].includes(name), `${key} lost ${name}`);
+    } else {
+      assert.deepStrictEqual(vocabulary[key], value, `${key} changed`);
+    }
+  }
 });
 
 test("pre-effect codes are every asset error code except the three that can follow an effect", () => {
@@ -120,8 +131,9 @@ test("every fixture parses, is ASCII, and ends with one newline", () => {
 });
 
 test("fixture directories hold only json files", () => {
-  // assets.sha256 pins the page bundle; the protocol-4 asset tests own it.
-  assert.deepStrictEqual(fs.readdirSync(GOLDEN).sort(), [...SECTIONS, "vocabulary.json", "assets.sha256"].sort());
+  // assets.sha256 pins the page bundle; the protocol-4 asset tests own it. vocabulary-2.0.0.json is
+  // the vocabulary as 2.0.0 shipped it.
+  assert.deepStrictEqual(fs.readdirSync(GOLDEN).sort(), [...SECTIONS, "vocabulary.json", "vocabulary-2.0.0.json", "assets.sha256"].sort());
   for (const name of SECTIONS) {
     for (const file of fs.readdirSync(path.join(GOLDEN, name))) assert.ok(file.endsWith(".json"), `${name}/${file}`);
   }

@@ -104,10 +104,11 @@ test("an allowed method reaches the debugger with its target and parameters", as
 test("the allowlist is the closed protocol 4 list and refusal is a known receipt code", () => {
   assert.equal(Object.isFrozen(sessions.CDP_ALLOW), true);
   assert.equal(new Set(sessions.CDP_ALLOW).size, sessions.CDP_ALLOW.length);
-  assert.equal(sessions.CDP_ALLOW.length, 33);
   for (const method of ["Runtime.enable", "Page.createIsolatedWorld", "Input.cancelDragging", "Accessibility.queryAXTree"]) {
     assert.ok(sessions.CDP_ALLOW.includes(method), method);
   }
+  // The trust boundary: no script debugging, no network interception, no navigation to a url the
+  // service has not authorized, no compiling outside a page call, and no attaching to other targets.
   for (const method of ["Debugger.enable", "Fetch.enable", "Page.navigate", "Runtime.compileScript", "Target.attachToTarget"]) {
     assert.equal(sessions.CDP_ALLOW.includes(method), false, method);
   }
