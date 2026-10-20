@@ -70,11 +70,6 @@ function Invoke-WebRequest {
         [IO.File]::WriteAllText($OutFile, 'invalid final download')
     } else { Copy-Item -LiteralPath (Join-Path $global:fixtureBinaries $name) -Destination $OutFile }
 }
-function Get-Command {
-    param([string]$Name, [string]$ErrorAction)
-    if ($Name -eq 'gh') { return $null }
-    Microsoft.PowerShell.Core\Get-Command -Name $Name
-}
 $installer = Join-Path $Repository 'scripts/get.ps1'
 # Write-Host speaks on the information stream. The script names no install path of its own: the
 # service decides where the home is.

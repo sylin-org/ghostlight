@@ -98,8 +98,6 @@ if (args.includes('-w')) {
 // A shim that does not parse would fail every request and hide what the cases mean to prove.
 const shimCheck = spawnSync(process.execPath, ["--check", join(shims, "curl")], { encoding: "utf8" });
 assert.equal(shimCheck.status, 0, `curl shim does not parse: ${shimCheck.stderr}`);
-// Provenance verification is optional. Keep this fixture offline even on machines with gh.
-writeFileSync(join(shims, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 // get.sh asks ldd, which belongs to the system's C library, which images to install, and whether
 // the window's libraries load. This one answers as glibc's does, or as musl's does when a case sets
 // INSTALLER_LIBC=musl, whatever system the test runs on; with INSTALLER_WINDOW_LIBRARIES=missing

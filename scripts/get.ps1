@@ -4,6 +4,10 @@
 # The Ghostlight 2.0 extension's setup page prints the one-line command that fetches this file;
 # keep its URL working for 2.x.
 #
+# The install needs no GitHub account and no GitHub tool. Every image is checked against the
+# release's SHA256SUMS before anything runs. docs/trust/supply-chain.md shows how to check build
+# provenance by hand.
+#
 # GHOSTLIGHT_VERSION installs exactly that release instead of the latest one, found by its tag
 # (v<version>) through the GitHub releases API. A prerelease is installable this way and no other:
 # the latest release never is:
@@ -13,9 +17,8 @@
 # build before it is released. It names a folder: the release workflow's `release-candidate`
 # artifact, unpacked (SHA256SUMS beside an assets folder), or a folder of release downloads
 # (SHA256SUMS beside the images). Every image is checked against SHA256SUMS exactly as a download
-# is, and anything it does not bind is refused. A bundle is only as trustworthy as its source; with
-# the GitHub CLI installed, the build provenance is checked as well. It cannot be combined with
-# GHOSTLIGHT_VERSION:
+# is, and anything it does not bind is refused. A bundle is only as trustworthy as its source. It
+# cannot be combined with GHOSTLIGHT_VERSION:
 #   $env:GHOSTLIGHT_FROM = "$HOME\Downloads\release-candidate"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/<revision>/scripts/get.ps1 | iex
 #
 # -Restore installs this release over a development installation (a build the development loop
@@ -128,7 +131,6 @@
 
     $downloadDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "ghostlight-download-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $downloadDirectory | Out-Null
-    $provenanceForAll = $true
     try {
         if ($local) {
             $sumsCopy = Join-Path $downloadDirectory "SHA256SUMS"
@@ -161,13 +163,6 @@
                 if ($observed -ne $expected) {
                     throw "Checksum verification failed for $assetName."
                 }
-                $github = Get-Command gh -ErrorAction SilentlyContinue
-                if ($github) {
-                    & gh attestation verify $temporary --repo $repository *> $null
-                    if ($LASTEXITCODE -ne 0) { $provenanceForAll = $false }
-                } else {
-                    $provenanceForAll = $false
-                }
                 Move-Item -LiteralPath $temporary -Destination $destination -Force
             }
             finally {
@@ -179,11 +174,7 @@
 
         $product = if ($version) { "Ghostlight $version" } else { "Ghostlight" }
         $obtained = if ($local) { "copied from $from" } else { "downloaded" }
-        if ($provenanceForAll) {
-            Write-Host "$product $obtained. Checksums and build provenance verified."
-        } else {
-            Write-Host "$product $obtained. Checksums verified."
-        }
+        Write-Host "$product $obtained. Checksums verified."
 
         # The verified service installs the whole set (the edge, the service and the shell) into
         # the Ghostlight home from its own directory. Its stdout is discarded; its errors still show.

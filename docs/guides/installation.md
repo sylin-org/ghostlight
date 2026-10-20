@@ -35,7 +35,10 @@ and what to do next.
    browsers for the current user, creates the Linux Applications entry, and connects detected MCP
    clients. When it finishes it prints the version, where Ghostlight lives, which agents have it
    and one Next line, and opens the Ghostlight window on its setup steps. It opens no window with
-   `--dry-run`, `--no-open`, in CI or inside an app container.
+   `--dry-run`, `--no-open`, in CI or inside an app container. It needs no GitHub account and no
+   GitHub tool: every executable is checked against the release's SHA-256 checksums before it runs.
+   [Verify a release](../trust/supply-chain.md#verify-a-release) shows how to check build
+   provenance by hand.
 
    WinGet (`winget install Sylin.Ghostlight`) or the Claude Desktop MCPB may deliver the same
    executables instead. With WinGet, run `ghostlight install` once through the WinGet alias: it
@@ -226,8 +229,7 @@ the real one-line installer against the workflow's bundle:
 
 The installer copies each executable from the folder and checks it against `SHA256SUMS` exactly as
 it checks a download. It refuses an image that `SHA256SUMS` does not bind, and it fetches nothing
-from GitHub. With the GitHub CLI installed it also checks the build provenance. A folder of
-downloaded release assets, with `SHA256SUMS` beside the images, works the same way.
+from GitHub. A folder of downloaded release assets, with `SHA256SUMS` beside the images, works the same way.
 `GHOSTLIGHT_FROM` cannot be combined with `GHOSTLIGHT_VERSION`.
 
 Until the 2.0 extension is in the Chrome Web Store, load the repository's `extension` folder at the

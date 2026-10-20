@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On Windows, Ghostlight no longer stops a shutdown, restart or sign-out. A hidden window that the
   window toolkit (Tao) creates answered Windows' question whether the session may end with no, so
   Windows listed `ghostlight-desktop.exe` as preventing shutdown. Tao 0.36.0 answers yes.
+- The one-line installers never run the GitHub CLI. In Windows PowerShell 5.1, a GitHub CLI that
+  was installed but not signed in stopped `get.ps1` before it installed anything. That provenance
+  check could never stop a bad install, only break a good one. `get.ps1` and `get.sh` now check each
+  image against the release's `SHA256SUMS` alone and need no GitHub account or tool;
+  docs/trust/supply-chain.md shows how to check build provenance by hand.
 
 ### Security
 
