@@ -17,8 +17,10 @@ on the go head") and the observations under L2-12.
 
 2.0.1, 2026-10-20: the owner's scope brings Alpine back (Notes, "Scope, 2026-10-20"), for
 linux-claude on test-03 alone. L2-01 is built: the release workflow makes the musl images and the
-installers pick them. L2-14 is next: the release workflow's bundle installed and used on test-03's
-real installation.
+installers pick them. L2-14 is done: release run 39508116197's bundle is installed on test-03's
+real installation and an agent used it in the owner's Chromium. Open for windows-claude: the
+extension stalls every command after a reconnect while a controlled tab has a prompt open
+(L2-14, "Found on the way").
 
 ## Files this batch owns
 
@@ -135,7 +137,7 @@ never sees the entry.
 | L2-11 | The release workflow's bundle, built and verified | done |
 | L2-12 | A clean install from the bundle, and real use | done |
 | L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
-| L2-14 | Alpine from the bundle | todo (test-03) |
+| L2-14 | Alpine from the bundle | done |
 | L2-15 | The owner's steps for Bluefin and Alpine | done |
 | L2-16 | CI installs the candidate from its bundle and uses it, as a person on Linux does | done |
 
@@ -214,6 +216,60 @@ Observations, for windows-claude:
 2. `browser_tabs` with `list` succeeds with "Listed 0 tabs in this session." when no browser is
    connected and the session has no tab, while its catalog description says list "refuses when
    none is connected".
+
+**L2-14.** Result, 2026-10-20, done, on test-03 (Alpine 3.24.1, KDE Plasma on Wayland, the
+owner's Chromium 152 with the store extension 2.0.0):
+
+- The bundle: run 39508116197 of `release.yml` on 627940a8 (CI 39506804440 green on it) passed all
+  ten jobs, `release-binaries-musl` and `install-from-bundle-alpine` included. The
+  `release-candidate` artifact, in `~/Downloads/release-candidate-39508116197`, passes
+  `scripts/check-release-candidate.ps1`: "Release candidate verified: version 2.0.0, source
+  627940a89594020943186294b75ef42857ba8589, 19 artifacts."
+- The install: the real `get.sh` from the bundle's revision on GitHub with `GHOSTLIGHT_FROM`
+  printed "Checksums and build provenance verified." and chose the musl images. The first run
+  went over the earlier 2.0.0 musl build from L2-01's rehearsal and left its service in place
+  (see "Found on the way"), so that home was uninstalled with `ghostlight uninstall`, kept as
+  `~/.ghostlight.pre-l214`, and the bundle installed fresh. All three images in `bin` then hash
+  as the bundle's `x86_64-unknown-linux-musl` images; `install.json` reads the release channel.
+  The owner's running Chromium connected by itself and `ghostlight doctor` read Ready.
+- Real use: a fresh Claude Code process (`claude -p --model haiku`, 8 turns, 13 s, $0.0055)
+  through the installer's entry opened the demo desk in a new tab, clicked "Ring the bell", read
+  the prompt with `browser_dialog` status and accepted it. The page read `the bell says: "hello
+  from the desk"`, the prompt's default, as finding 1's fix says. The service's diagnostics show
+  navigate, find, click, status, accept and read in that order.
+- `tests/linux/installed-journey.mjs` on the bundle install, without the launcher's
+  `LD_LIBRARY_PATH`: all four phases passed. The report records why the browser's version could
+  not be read, which is finding 2 of
+  [the Alpine record](../../testing/alpine-2.0-bundle-2026-10-19.md), fixed in 627940a8.
+
+Found on the way, for windows-claude (the extension is theirs):
+
+1. **A prompt left open in a controlled tab stops all browser work after a reconnect.** After the
+   install, every command timed out with "The job ran out of time before the browser confirmed
+   what the sent command did." Chromium opened no tab. The diagnostics of the earlier home show
+   the same thing since 16:50: an agent left the bell's prompt open at 16:49:54, and every service
+   start after that failed the same way. Reproduced on the real browser with the store
+   extension 2.0.0:
+   - prompt open in a controlled tab, no reconnect: a second agent's navigate works;
+   - relay reconnect (the browser relay process ended), no prompt open: navigate works;
+   - prompt open, then a relay reconnect: navigate times out, and keeps timing out until
+     Chromium restarts.
+
+   In `extension/worker.js` (unchanged since v2.0.0) every request first awaits the shared
+   `negotiation` promise (`runRequest`). `negotiate` calls `setFocusEmulationEnabled`, and so does
+   `onPortClosed` through `settleServiceBoundaryState`. In `lib/sessions.js`,
+   `setFocusEmulationEnabled` waits for every tracked tab's queue to send
+   `Emulation.setFocusEmulationEnabled` with no deadline and no dialog check, and a tab held by a
+   JavaScript dialog never answers it. So one tab's open prompt holds all work in every tab, and
+   each later reconnect queues behind it. People will meet this in 2.0.1: their extension is the
+   store's 2.0.0, and a service update is a reconnect. CI's install jobs load the extension from
+   the bundle's revision, so they never pair a new service with the store extension.
+2. **A same-version install keeps a different build.** `get.sh` over an installed 2.0.0 printed
+   "Ghostlight 2.0.0 is installed." but left the earlier build's service in place
+   (`record::decide` reads Same when the version matches and the installed image matches its own
+   record). Released versions never share a number, so only testers of a candidate at the
+   installed version meet it. They should uninstall first, or the candidate should carry its own
+   version.
 
 **L2-15.** A short page under `docs/testing/` with the owner's exact steps for Bluefin and Alpine:
 where to get the bundle, the install command, what to try, and what each result means.

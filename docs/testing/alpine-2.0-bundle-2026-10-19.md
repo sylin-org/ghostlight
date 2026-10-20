@@ -144,6 +144,9 @@ real installation and browser, not what a person gets from the release.
    - The service that the journey's MCP edge started inherited the variable. No Ghostlight image
      loads a library from that folder (`ldd`), and a redeploy restarted the service clean.
    - Reading the variables from the running browser root's environment would avoid both problems.
+   - **Fixed in 627940a8**: the version is for the report only, so a probe that cannot run now
+     records why and the journey goes on. On 2026-10-20 all four phases passed on test-03 with
+     no `LD_LIBRARY_PATH` (linux-2 ledger, L2-14).
 3. **`installed/desktop-check.py` reads KWin's output from the systemd user journal.** Alpine runs
    OpenRC, so the check cannot run here. The window was checked through KWin's window runner
    instead.
