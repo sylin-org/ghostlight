@@ -63,3 +63,21 @@ Tao 0.36 or newer. The lockfile must continue to identify the exact source revis
 - [Tao Wayland decoration fix](https://github.com/tauri-apps/tao/pull/1218)
 - [Tauri native titlebar control failure](https://github.com/tauri-apps/tauri/issues/13440)
 - [Wayland xdg-shell toplevel protocol](https://wayland.app/protocols/xdg-shell)
+
+## Amendment (2026-10-20): Tao 0.36.0 from crates.io
+
+The pin is removed. 2.0 has no Tauri runtime: the shell depends on Tao directly, so the condition
+above no longer waits on Tauri. Tao 0.36.0 carries the Wayland decoration fix (the pinned commit is
+its ancestor), and the workspace takes it from crates.io, with no patch and no Git source in the
+`cargo-deny` allowlist.
+
+The pinned revision also carried a Windows regression that stopped every shutdown, restart and
+sign-out. Tao #1231 made its thread event target callback the window class procedure but kept
+`DefSubclassProc` for the messages it does not handle, and on a window with no subclass chain that
+returns 0. The hidden "Tao Thread Event Target" window therefore answered `WM_QUERYENDSESSION`
+with FALSE, and Windows recorded `ghostlight-desktop.exe` as vetoing the shutdown (Winsrv event
+10001). Tao #1274, in 0.36.0, sends those messages to `DefWindowProcW`. Between the pin and 0.36.0
+Tao changed nothing for Linux.
+
+The Windows desktop journey now sends the end-session messages to every top-level window of each
+process, as Windows does, not only to Ghostlight's session listener window.

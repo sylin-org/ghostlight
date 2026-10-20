@@ -90,27 +90,35 @@ public static class GhostlightNativeJourney {
             if (!PostMessage(window, 0x0010, UIntPtr.Zero, IntPtr.Zero)) throw new InvalidOperationException("WM_CLOSE failed.");
         } else if (!ShowWindowAsync(window, 6)) throw new InvalidOperationException("Minimize failed.");
     }
-    // Every Ghostlight process owns one session listener window (class GhostlightSessionListener_*).
-    // This sends it the end-session messages Windows sends at sign-out and shutdown.
+    private static string ClassOf(IntPtr window) {
+        var name = new StringBuilder(256);
+        GetClassName(window, name, name.Capacity);
+        return name.ToString();
+    }
+    // Sends the end-session messages as Windows does at sign-out and shutdown: it asks every
+    // top-level window of the process, not only Ghostlight's session listener, and one refusal
+    // from any window stops the end of the session. Every window must allow the end at once; only
+    // then is each told that the session is ending. A process without its session listener window
+    // (class GhostlightSessionListener_*) has not started listening yet.
     public static void EndSession(int owner) {
-        IntPtr listener = IntPtr.Zero;
+        var windows = new List<IntPtr>();
         EnumWindows((window, data) => {
             uint process;
             GetWindowThreadProcessId(window, out process);
-            if (process != owner) return true;
-            var name = new StringBuilder(256);
-            GetClassName(window, name, name.Capacity);
-            if (name.ToString().StartsWith("GhostlightSessionListener_")) listener = window;
+            if (process == owner) windows.Add(window);
             return true;
         }, IntPtr.Zero);
-        if (listener == IntPtr.Zero) throw new InvalidOperationException("Session listener window is unavailable.");
+        if (!windows.Exists(window => ClassOf(window).StartsWith("GhostlightSessionListener_")))
+            throw new InvalidOperationException("Session listener window is unavailable.");
 
         UIntPtr result;
-        if (SendMessageTimeout(listener, 0x0011, UIntPtr.Zero, IntPtr.Zero, 2, 1000, out result) == IntPtr.Zero || result.ToUInt64() != 1)
-            throw new InvalidOperationException("WM_QUERYENDSESSION was not accepted promptly.");
-        // The process may exit before this send returns, so only the earlier query has a reply
+        foreach (var window in windows) {
+            if (SendMessageTimeout(window, 0x0011, UIntPtr.Zero, IntPtr.Zero, 2, 1000, out result) == IntPtr.Zero || result.ToUInt64() == 0)
+                throw new InvalidOperationException("The window of class '" + ClassOf(window) + "' refused WM_QUERYENDSESSION or did not answer promptly.");
+        }
+        // The process may exit before these sends return, so only the queries have a reply
         // assertion.
-        SendMessageTimeout(listener, 0x0016, new UIntPtr(1), IntPtr.Zero, 2, 250, out result);
+        foreach (var window in windows) SendMessageTimeout(window, 0x0016, new UIntPtr(1), IntPtr.Zero, 2, 250, out result);
     }
 }
 '@

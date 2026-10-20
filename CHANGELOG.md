@@ -5,6 +5,14 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- On Windows, Ghostlight no longer stops a shutdown, restart or sign-out. A hidden window that the
+  window toolkit (Tao) creates answered Windows' question whether the session may end with no, so
+  Windows listed `ghostlight-desktop.exe` as preventing shutdown. Tao 0.36.0 answers yes.
+
 ## [2.0.0] - 2026-10-19
 
 Ghostlight 2.0.0 is a breaking release. Update the service and the Ghostlight in Browser extension

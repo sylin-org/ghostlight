@@ -16,7 +16,7 @@ thiserror.workspace = true
 png = "0.18.1"
 notify-rust = { version = "=4.18.0", default-features = false, features = ["d"] }
 open = { version = "=5.4.1", features = ["shellexecute-on-windows"] }
-tao = "=0.35.3"
+tao = "=0.36.0"
 tray-icon = { version = "=0.24.2", default-features = false, features = ["gtk"] }
 wry = "=0.55.1"
 

@@ -40,9 +40,3 @@ unsafe_code = "forbid"
 all = "warn"
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
-
-[patch.crates-io]
-# The shell's window library, Tao 0.35.3, has a custom Wayland titlebar that swallows its own
-# control-button events. Pin Tao's merged upstream fix until a release carries it (Tao 0.36 or
-# newer). See ADR-0120.
-tao = { git = "https://github.com/tauri-apps/tao", rev = "07f3742b1833b64be27b1ef991e38d557d4276c9" }
