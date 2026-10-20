@@ -78,6 +78,27 @@ hook was added. The [installed record](../testing/controlled-tab-focus-installed
 contains source hashes and bounded observations. Cleanup boundaries have lifecycle/worker
 regression coverage; the final verified draft was left unsaved under active control.
 
+## Amendment 2026-10-20: a page that shows a dialog
+
+Found on test-03 with the store extension 2.0.0 ([the linux-2 ledger](../tasks/linux-2/LEDGER.md),
+L2-14, "Found on the way"). A page that shows a JavaScript dialog answers no command until the
+dialog closes. At a service boundary the lifecycle sent the focus change to such a tab and waited
+for it. That tab's queue stalled, the boundary waited on every tab, and every request waits on the
+boundary, so all browser work ran out of time until the person closed the dialog. A pause, a
+resume or a release of that tab stalled the same way.
+
+- **Nothing waits on a page that shows a dialog.** A focus change for such a tab is held, and the
+  tab takes what control asks for when its dialog closes. The page runs no script meanwhile, so
+  nothing on it can tell the difference. When a dialog opens while a focus command is on its way,
+  the lifecycle stops waiting for the answer and sends the change again at close, because the late
+  answer may still take effect.
+- **The rest of the lifecycle does the same.** Releasing page code, disabling a domain and the
+  terminal release send their commands without waiting on such a page; the detach that follows
+  ends what they would have changed. Registering new page code passes over such a tab, whose
+  documents install the code on their next call.
+- **Decision 5 stands.** A failed focus command still releases its session. An unanswered one is
+  not a failure.
+
 ## Prior art
 
 - [Playwright Chromium initialization](https://github.com/microsoft/playwright/blob/main/packages/playwright-core/src/server/chromium/crPage.ts)

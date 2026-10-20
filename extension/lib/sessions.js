@@ -65,7 +65,7 @@
    *
    * `installer(session)` is required: it registers page code in a root or child session and is
    * awaited before a child resumes. `onRelease(tabId)` is awaited, best effort, before every
-   * voluntary detach. `onSessionGone(tabId, sessionId)` fires when a child session ends.
+   * voluntary detach, unless the tab's page shows a JavaScript dialog and could not answer. `onSessionGone(tabId, sessionId)` fires when a child session ends.
    * A session is `{ target, targetId, identifiers }`: `target` is the CDP target for cdp(),
    * `targetId` is null for a root session, and `identifiers` is the live list of script
    * registration identifiers that belong to it.
@@ -109,6 +109,7 @@
           focusEmulated: false,
           focusAttempted: false,
           dialog: null,
+          dialogWaiters: new Set(),
           domains: new Set(),
           root: { target: Object.freeze({ tabId }), targetId: null, identifiers: [] },
           children: new Map(),
@@ -136,6 +137,19 @@
       });
       state.pending = result.catch(() => {});
       return result;
+    }
+
+    // Whether `sent`, a command the tab's page must answer, was answered before a JavaScript dialog
+    // showed there. A page that shows a dialog answers nothing until the dialog closes, so lifecycle
+    // work never waits on it: this resolves false at once when a dialog is open, or as soon as one
+    // opens, and leaves the command to take effect when the dialog closes. A failed command rejects.
+    function answeredBeforeDialog(state, sent) {
+      let wake;
+      const shown = state.dialog
+        ? Promise.resolve()
+        : new Promise((resolve) => { wake = resolve; state.dialogWaiters.add(wake); });
+      return Promise.race([sent.then(() => true), shown.then(() => false)])
+        .finally(() => state.dialogWaiters.delete(wake));
     }
 
     // Forgets everything that belonged to one debugger attachment. Registrations and child
@@ -201,16 +215,19 @@
       }
     });
 
+    // A page that shows a dialog is not waited on here: the detach that follows ends what its page
+    // code and its focus override would have been told.
     async function detachSession(tabId, state) {
       if (!state.attached) return;
       try {
-        await onRelease?.(tabId);
+        await answeredBeforeDialog(state, Promise.resolve(onRelease?.(tabId)));
       } catch (_error) { /* releasing page code is best effort; detachment ends the session anyway */ }
       if (state.focusEmulated || state.focusAttempted) {
         try {
-          await cdp({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: false });
-          state.focusEmulated = false;
-          state.focusAttempted = false;
+          if (await answeredBeforeDialog(state, cdp({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: false }))) {
+            state.focusEmulated = false;
+            state.focusAttempted = false;
+          }
         } catch (_error) { /* detachment also removes the override */ }
       }
       try {
@@ -223,21 +240,26 @@
       clearAttachment(state);
     }
 
+    // Brings the tab's focus override to what control asks for. A tab that shows a dialog is left as
+    // it is until closeDialog runs this again: its page runs nothing meanwhile, so nothing on it can
+    // tell. A command a dialog left unanswered may still take effect, so it never counts as done.
     async function syncFocus(tabId, state) {
       while (state.attached) {
         const enabled = focusEmulationEnabled && state.retained && !state.closing;
-        if (state.focusEmulated === enabled) return;
+        if (state.focusEmulated === enabled && !state.focusAttempted) return;
+        if (state.dialog) return;
         const generation = state.generation;
         state.focusAttempted = true;
+        let answered;
         try {
-          await cdp({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled });
+          answered = await answeredBeforeDialog(state, cdp({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled }));
         } catch (error) {
           // A failed command may have taken effect. Release the session rather than
           // leave an override whose state we cannot confirm.
           await detachSession(tabId, state);
           throw error;
         }
-        if (state.generation !== generation) return;
+        if (!answered || state.generation !== generation) return;
         state.focusEmulated = enabled;
         state.focusAttempted = false;
       }
@@ -317,8 +339,10 @@
 
     /**
      * Sets whether controlled (retained) tabs emulate focus, and applies it to every attached tab now.
-     * Rejects with an AggregateError of every tab that could not be updated; such a tab has released
-     * its session rather than keep an override whose state is unknown.
+     * A tab that shows a JavaScript dialog takes the change when the dialog closes, so nothing waits
+     * on its page (ADR-0168 amendment of 2026-10-20). Rejects with an AggregateError of every tab
+     * that could not be updated; such a tab has released its session rather than keep an override
+     * whose state is unknown.
      */
     async function setFocusEmulationEnabled(enabled) {
       focusEmulationEnabled = Boolean(enabled);
@@ -344,21 +368,28 @@
      * `{ type, message, defaultPrompt, url, sessionId }`. `defaultPrompt` is the text a prompt's
      * field starts with, empty for every other dialog. `url` is the url of the frame that raised
      * it, or empty when the browser did not say. An open dialog keeps the session attached until
-     * closeDialog, so the dialog can still be answered.
+     * closeDialog, so the dialog can still be answered. Lifecycle work waiting on the tab's page
+     * stops waiting.
      */
     function openDialog(tabId, { type, message = "", defaultPrompt = "", url = "", sessionId = null } = {}) {
-      tabState(tabId).dialog = { type: type || DIALOG_UNKNOWN, message, defaultPrompt, url, sessionId };
+      const state = tabState(tabId);
+      state.dialog = { type: type || DIALOG_UNKNOWN, message, defaultPrompt, url, sessionId };
+      for (const wake of state.dialogWaiters) wake();
     }
 
     /**
-     * Clears the open dialog of a tab and detaches the session if nothing else needs it.
-     * Does nothing for a tab that is not tracked.
+     * Clears the open dialog of a tab, brings its focus override to what control asks for now, and
+     * detaches the session if nothing else needs it. Does nothing for a tab that is not tracked.
      */
     async function closeDialog(tabId) {
       const state = tabs.get(tabId);
       if (!state) return;
       state.dialog = null;
-      await enqueue(tabId, state, () => settle(tabId, state));
+      await enqueue(tabId, state, async () => {
+        // A focus command that fails has already released the session; the dialog was handled.
+        await syncFocus(tabId, state).catch(() => {});
+        await settle(tabId, state);
+      });
     }
 
     /**
@@ -389,7 +420,8 @@
     /**
      * Disables a domain enabled by enableDomain and forgets it, even when the command fails. The Page
      * domain stays enabled for the life of the attachment. Does nothing when the tab is not attached
-     * or the domain is not enabled.
+     * or the domain is not enabled. A page that shows a dialog takes the command when it closes,
+     * and nothing waits for that.
      */
     async function disableDomain(tabId, domain) {
       const state = tabs.get(tabId);
@@ -397,7 +429,7 @@
       await enqueue(tabId, state, async () => {
         if (!state.attached || !state.domains.has(domain)) return;
         try {
-          await cdp(state.root.target, `${domain}.disable`);
+          await answeredBeforeDialog(state, cdp(state.root.target, `${domain}.disable`));
         } finally {
           state.domains.delete(domain);
         }
@@ -433,18 +465,19 @@
     /**
      * Releases every debugger session, awaiting onRelease for each and turning focus emulation off.
      * This is terminal: it clears leases, retention and open dialogs, and refuses queued attaches.
-     * Rejects with an AggregateError when any session could not be detached; those tabs stay tracked
-     * for a retry.
+     * A tab that shows a dialog is detached without waiting on its page. Rejects with an
+     * AggregateError when any session could not be detached; those tabs stay tracked for a retry.
      */
     async function detachAll() {
       const results = await Promise.allSettled(Array.from(tabs, async ([tabId, state]) => {
         state.retained = false;
         state.closing = true;
-        state.dialog = null;
         state.leases = 0;
         try {
           await enqueue(tabId, state, () => detachSession(tabId, state));
         } finally {
+          // Cleared only now, so the detach knows not to wait on a page that shows a dialog.
+          state.dialog = null;
           if (!state.attached && tabs.get(tabId) === state) tabs.delete(tabId);
         }
       }));
@@ -477,17 +510,20 @@
 
     /**
      * Visits the root and child sessions of every attached tab, a tab at a time and behind that
-     * tab's pending lifecycle work. The visitor may use cdp() but must not call back into the
-     * lifecycle. Every session is visited even when one visit fails; failures are then rejected
-     * together as one AggregateError.
+     * tab's pending lifecycle work. A tab that shows a JavaScript dialog, or comes to show one
+     * during its visit, is passed over from then on, since its page would answer nothing until the
+     * dialog closes. The visitor may use cdp() but must not call back into the lifecycle. Every
+     * other session is visited even when one visit fails; failures are then rejected together as
+     * one AggregateError.
      */
     async function forEachSession(visit) {
       const results = await Promise.allSettled(Array.from(tabs, ([tabId, state]) =>
         state.attached ? enqueue(tabId, state, async () => {
           const errors = [];
           for (const session of [state.root, ...state.children.values()]) {
+            if (state.dialog) break;
             try {
-              await visit(session);
+              await answeredBeforeDialog(state, Promise.resolve().then(() => visit(session)));
             } catch (error) {
               errors.push(error);
             }

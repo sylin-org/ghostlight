@@ -779,3 +779,124 @@ test("a late focus acknowledgement cannot resurrect an externally detached sessi
   assert.equal(chromeDebugger.focus.size, 0);
   await lifecycle.detachAll();
 });
+
+// Waiting on a page that shows a dialog never ends, so a test that would wait fails at this limit.
+const WAITS_ON_A_DIALOG = { timeout: 5_000 };
+
+// A debugger whose page answers no command while it shows a JavaScript dialog, as Chromium's renderer
+// does: a command to a tab after `show(tabId)` waits until `answer(tabId)`. Page.handleJavaScriptDialog
+// is the browser's own and always answers. `sent` records every command as it is sent.
+function pageWithDialogs() {
+  const chromeDebugger = fakeDebugger();
+  const sendCommand = chromeDebugger.sendCommand;
+  const showing = new Map();
+  chromeDebugger.sent = [];
+  chromeDebugger.sendCommand = async (target, method, params) => {
+    chromeDebugger.sent.push([target.tabId, method]);
+    const held = showing.get(target.tabId);
+    if (held && method !== "Page.handleJavaScriptDialog") await held.promise;
+    return sendCommand(target, method, params);
+  };
+  chromeDebugger.show = (tabId) => {
+    let open;
+    showing.set(tabId, { promise: new Promise((resolve) => { open = resolve; }), open: () => open() });
+  };
+  chromeDebugger.answer = (tabId) => {
+    showing.get(tabId)?.open();
+    showing.delete(tabId);
+  };
+  return chromeDebugger;
+}
+
+test("a tab that shows a dialog holds up no focus change and catches up when the dialog closes", WAITS_ON_A_DIALOG, async () => {
+  const chromeDebugger = pageWithDialogs();
+  const lifecycle = sessions.create(chromeDebugger, { installer });
+  await lifecycle.setFocusEmulationEnabled(true);
+  await Promise.all([lifecycle.retain(41), lifecycle.retain(42)]);
+  chromeDebugger.show(41);
+  lifecycle.openDialog(41, { type: "prompt", message: "Name?" });
+  chromeDebugger.sent.length = 0;
+
+  // A pause, a resume and a pause again finish at once, and none of them reaches the page that
+  // shows the dialog.
+  await lifecycle.setFocusEmulationEnabled(false);
+  await lifecycle.setFocusEmulationEnabled(true);
+  await lifecycle.setFocusEmulationEnabled(false);
+  assert.deepEqual(chromeDebugger.sent.filter(([tabId]) => tabId === 41), []);
+  assert.equal(chromeDebugger.focus.get(42), false);
+
+  chromeDebugger.answer(41);
+  await lifecycle.closeDialog(41);
+  assert.equal(chromeDebugger.focus.get(41), false, "the tab takes what control asks for now");
+  assert.equal(lifecycle.attachedCount(), 2);
+  await lifecycle.detachAll();
+});
+
+test("a dialog that opens while a focus change is in flight frees the wait, and the tab catches up when it closes", WAITS_ON_A_DIALOG, async () => {
+  const chromeDebugger = pageWithDialogs();
+  const lifecycle = sessions.create(chromeDebugger, { installer });
+  await lifecycle.setFocusEmulationEnabled(true);
+  await lifecycle.retain(43);
+  // The pause reaches the page just as it shows a dialog, so the page answers it only afterwards.
+  chromeDebugger.show(43);
+  const pausing = lifecycle.setFocusEmulationEnabled(false);
+  await new Promise((resolve) => setImmediate(resolve));
+  lifecycle.openDialog(43, { type: "alert", message: "Hi" });
+  await pausing;
+  // A resume while the dialog is open: the unanswered pause still counts as unconfirmed.
+  await lifecycle.setFocusEmulationEnabled(true);
+
+  chromeDebugger.answer(43);
+  await lifecycle.closeDialog(43);
+  assert.equal(chromeDebugger.focus.get(43), true, "the late pause does not outlast the resume");
+  await lifecycle.detachAll();
+});
+
+test("a release, a domain's disable and a terminal shutdown never wait on a page that shows a dialog", WAITS_ON_A_DIALOG, async () => {
+  const chromeDebugger = pageWithDialogs();
+  const released = [];
+  const lifecycle = sessions.create(chromeDebugger, {
+    installer,
+    // Releasing page code needs the page.
+    onRelease: async (tabId) => {
+      released.push(tabId);
+      await lifecycle.cdp({ tabId }, "Runtime.releaseObjectGroup", { objectGroup: "ghostlight" });
+    }
+  });
+  await lifecycle.setFocusEmulationEnabled(true);
+  await lifecycle.retain(44);
+  await lifecycle.enableDomain(44, "Network");
+  chromeDebugger.show(44);
+  lifecycle.openDialog(44, { type: "confirm", message: "Sure?" });
+
+  await lifecycle.unretain(44);
+  assert.equal(lifecycle.attachedCount(), 1, "the dialog keeps the session, so it can still be answered");
+  await lifecycle.disableDomain(44, "Network");
+  await lifecycle.detachAll();
+  assert.equal(lifecycle.attachedCount(), 0);
+  assert.deepEqual(released, [44]);
+  assert.equal(lifecycle.currentDialog(44), null);
+  assert.deepEqual(chromeDebugger.calls.filter(([kind]) => kind === "detach"), [["detach", 44]]);
+});
+
+test("forEachSession passes over a tab that shows a dialog, before or during its visit", WAITS_ON_A_DIALOG, async () => {
+  const chromeDebugger = pageWithDialogs();
+  const lifecycle = sessions.create(chromeDebugger, { installer });
+  await Promise.all([lifecycle.acquire(45), lifecycle.acquire(46), lifecycle.acquire(47)]);
+  chromeDebugger.show(45);
+  lifecycle.openDialog(45, { type: "alert" });
+  const visited = [];
+
+  await lifecycle.forEachSession(async (session) => {
+    const tabId = session.target.tabId;
+    visited.push(tabId);
+    if (tabId === 47) {
+      // This page shows a dialog while it is being visited.
+      chromeDebugger.show(47);
+      lifecycle.openDialog(47, { type: "alert" });
+    }
+    await lifecycle.cdp(session.target, "Page.addScriptToEvaluateOnNewDocument", { source: "" });
+  });
+  assert.deepEqual(visited.sort(), [46, 47]);
+  await lifecycle.detachAll();
+});

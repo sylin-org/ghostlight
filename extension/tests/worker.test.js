@@ -719,6 +719,57 @@ test("a dialog is recorded with its message, the frame that raised it and its se
   } finally { worker.dispose(); }
 });
 
+// Makes tab `tabId` show a prompt and answer nothing until it is handled, as Chromium's page does:
+// every command to it waits, except Page.handleJavaScriptDialog, which the browser answers and which
+// closes the dialog.
+async function showBlockingPrompt(worker, tabId) {
+  const api = worker.chrome.debugger;
+  const send = api.sendCommand.bind(api);
+  const shown = gate();
+  let open = true;
+  api.sendCommand = async (target, method, params) => {
+    if (target.tabId === tabId && open) {
+      if (method !== "Page.handleJavaScriptDialog") {
+        await shown.promise;
+      } else {
+        open = false;
+        shown.open();
+        const answer = await send(target, method, params);
+        api.emit({ tabId }, "Page.javascriptDialogClosed", { result: params.accept, userInput: "" });
+        return answer;
+      }
+    }
+    return send(target, method, params);
+  };
+  api.emit({ tabId }, "Page.javascriptDialogOpening", { type: "prompt", message: "Name?", defaultPrompt: "", url: ACCOUNT.url });
+  await flush();
+}
+
+test("a dialog left open across a reconnect leaves the next service working", { timeout: 20_000 }, async () => {
+  // The browser relay ends and the same service comes back, or a new service with new page code.
+  const next = assets("\"use strict\";\nglobalThis.__ghostlightRuntime = { id: __ghostlightAssetId, next: true };");
+  for (const service of [{}, { service_epoch: "service_other", assets: next }]) {
+    const worker = await connected();
+    try {
+      await showBlockingPrompt(worker, TAB);
+      await worker.close("Native host has exited.");
+      worker.timers.fire(3_000);
+      await flush();
+      await worker.accept(service);
+      const answered = (correlation) => worker.receipts().find((entry) => entry.correlation === correlation);
+
+      await worker.request("p4_other", "frames", { tab_id: OTHER_TAB });
+      assert.ok(answered("p4_other")?.ok, "another tab works at once");
+      await worker.request("p4_status", "dialog", { tab_id: TAB, op: { op: "status" } });
+      assert.equal(answered("p4_status")?.ok?.present, true, "the dialog can still be read");
+      await worker.request("p4_cancel", "dialog", { tab_id: TAB, op: { op: "handle", accept: false, text: null } });
+      assert.equal(answered("p4_cancel")?.ok?.handled, true, "and answered");
+      await worker.request("p4_after", "frames", goldenArgs("frames"));
+      assert.ok(answered("p4_after")?.ok, "the tab works again once its dialog is closed");
+    } finally { worker.dispose(); }
+  }
+});
+
 test("a released tab reports one commit and then stops", async () => {
   const worker = await connected();
   try {

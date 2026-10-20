@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into the Codex app's private copy of VS Code's settings, which VS Code never reads when it is
   started on its own, and called VS Code connected. Only the agent's own Store package can hold
   its settings now. Uninstall still removes an entry an earlier install left in another copy.
+- A JavaScript dialog left open in a tab Ghostlight controls no longer stops all browser work when
+  the service reconnects or updates, or when control pauses or releases that tab. The extension
+  waited on that tab's page, which answers nothing while it shows a dialog, so every call ran out
+  of time until someone closed the dialog. It no longer waits on such a page: the tab catches up
+  when its dialog closes, and the dialog can still be read and answered meanwhile. With the 2.0.0
+  extension, answering or cancelling the open dialog ends the stall.
 
 ### Security
 
