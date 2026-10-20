@@ -68,6 +68,14 @@ layout once, when you run the install again. The full release notes are in
   holds, and fields the page changed back fail as reverted (ADR-0198 Decisions 7 to 11).
 - An action that completes with a dialog open says so, carries a `dialog_opened` fact and points to
   `browser_dialog` (ADR-0197 Decision 21).
+- The install scripts install from a local copy of a release. With `GHOSTLIGHT_FROM` set to an
+  unpacked release folder, `get.sh` and `get.ps1` check every file against its `SHA256SUMS` and
+  fetch nothing from GitHub.
+- Search in the window (Ctrl+K) finds activity by its words, its host and its agent, and reaches
+  history beyond the 199 rows the list shows.
+- The page shows fills, uploads and scrolls on their element: a splash on each field a fill set
+  and on an upload's input once the files are attached, and a scroll to a target draws its cue on
+  the element once the page has scrolled to it.
 
 ### Changed
 
@@ -170,6 +178,52 @@ layout once, when you run the install again. The full release notes are in
   while that start is still opening, get one browser window, not one each.
 - The Chromium page-asset tests run with `node --test` and need no `npm install`. CI runs them
   beside the extension tests.
+- The window rests in ink. Teal marks only work that is running, the focus and the one main action
+  of a view: the Ready light is grey at rest, held and waiting work no longer look live, a row says
+  Waiting or Held, and the band counts only running work.
+- A switched-off channel shows everywhere: the band says Turned off, the tray, Status and Policy
+  name the switch, and the refusal says it in your words ("Your policy turns off work from MCP
+  agents.").
+- The window keeps its meaning at every width. The band drops whole facts instead of cutting
+  words, rows keep the agent's name at half-screen widths, and the Full control chip is gone; it
+  reads Shared while watching is on.
+- One word per act: "Start a new session" in the band, the tray and the popup. Detail cards say
+  what happened in plain words, and rows recorded before agents were named say "Earlier session".
+- Integrations shows each agent with its app icon and its words, without a connection drawing.
+- On a light Windows taskbar the tray shows the mascot with a soft outline, keeping its face at 16
+  pixels.
+- On the Policy page every switch has an accessible name, "Require audit" is now "Stop browser
+  work", a watching page cannot edit, and page effects and captions show as set in the browser.
+- The popup rests in grey and shows the waiting lantern while no agent is working. The setup
+  page's install command fits at every width, and the options page's switches look like the
+  window's.
+- After a browser restart or an extension reload, a tab a session remembers is confirmed by the
+  browser before it is used. A tab that now shows another page reads as no longer open, and the
+  agent opens it again. An agent's tab survives a Ghostlight update (ADR-0203 Decision 1).
+- When Ghostlight quits, it releases every session's tabs, command-line sessions included, so none
+  keeps the debugging bar, and the extension releases the tabs a crashed service held when the
+  next one connects. An extension too old for the service says to update Ghostlight in Browser
+  (ADR-0203 Decision 3).
+- Closing a tab needs Action on its host. `browser_tabs list` lists a tab on a host the policy
+  refuses to read without its title or address and names that host, and in a session with no tab
+  it answers at once and starts no browser (ADR-0203 Decisions 2 and 7).
+- Refusals say what is true: a handle that names another of the session's tabs, a fill across two
+  tabs, a point outside a screenshot, a held tab (which names the refused host and how to leave
+  it), and a duration wait cut short, which sent nothing (ADR-0203 Decision 5).
+- The Policy page, the catalog and enforcement give one answer about where a capability can be
+  used, the preview honors the channel switches, and a never-touch refusal names the layer that
+  set it (ADR-0203 Decision 7).
+- History says "needs you" for a credential refusal, and the tray offers Resume only while paused.
+- Updating Ghostlight keeps an agent's own settings in its configuration file: disabled,
+  approvals, tool filters and environment (ADR-0203 Decision 10).
+- When an action opens a dialog, the agent is told to read it with `browser_dialog` status before
+  it answers; status gives the dialog's kind and message.
+- After a Ghostlight update, a running agent is told to list its tools again, so a tool a newer
+  service or a changed policy adds reaches it.
+- The Claude Code plugin and Ghostlight's own entry together give an agent one set of tools: a
+  second connection from the same agent waits with none and takes over if the first ends. The 2.0
+  plugin asks npm for Ghostlight 2.
+- The install finds Claude Code's settings where `CLAUDE_CONFIG_DIR` points.
 
 ### Removed
 
@@ -260,6 +314,11 @@ layout once, when you run the install again. The full release notes are in
   browser adapter" is gone, and a bridge contract failure no longer says "disconnected".
 - Process diagnostics log when a connected browser stops answering and when it answers again
   (`heartbeat_lost`, `heartbeat_resumed`).
+- A call made while Ghostlight quits gets an answer instead of a closed connection.
+- A disabled copy of the extension no longer counts as installed, so the advice names the step
+  that helps.
+- A process diagnostics record is never cut off when the service exits.
+- An install of the same version puts back a missing or changed window program.
 
 ### Security
 
@@ -269,6 +328,11 @@ layout once, when you run the install again. The full release notes are in
   (ADR-0199 amendment of 2026-10-15).
 - On Linux, the audit log, the policy files and the other state files are created readable by
   their owner only (mode 0600, folders 0700).
+- The audit keeps only what may be retained. A fill whose submit raises a dialog, or whose
+  expectation falls short, writes no field value, and a refusal never writes another client's name
+  (ADR-0203 Decision 4).
+- On Windows, the managed-policy signing seeds, a new audit log, the agent locations file and an
+  owned user policy are created readable by their owner and SYSTEM only (ADR-0203 Decision 11).
 
 ## [1.3.15] - Withdrawn
 

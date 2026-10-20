@@ -85,6 +85,13 @@ and 1.x installs move once.
 - **Uninstall says what it did.** `ghostlight uninstall` stops Ghostlight, removes what it
   registered, and says what it removed and what it kept. `~/.ghostlight` stays; delete it to remove
   the programs, the audit history and the settings. `--dry-run` lists what it would remove.
+- **Quiet when nothing runs.** The window and the popup rest in grey; teal means an agent is
+  working. A switched-off channel, a held tab and a refusal each say what happened in plain words.
+- **Your tabs stay yours across restarts.** After a browser restart, an extension reload or a
+  Ghostlight update, a tab a session remembers is confirmed by the browser before it is used, so
+  an agent never lands on a tab you opened, and its own tab survives the update.
+- **One set of tools per agent.** With both the Claude Code plugin and Ghostlight's own entry, the
+  agent gets one set of Ghostlight tools, and after an update it is told to list them again.
 
 ### Governance
 
@@ -167,6 +174,9 @@ Supported browsers are Chrome, Edge, Brave and Chromium, and Chromium 125 or new
 Edge installs the extension from the same Chrome Web Store listing. The extension is version 2.0.0
 and speaks adapter protocol 4. The service and the window are version 2.0.0; the edge and the relay
 are version 4.0.0, the relay revision, and keep their numbers across service releases.
+
+The Linux programs are built for x86_64 with glibc. Alpine and other musl systems are not supported
+in 2.0; they come in 2.0.1.
 
 ### Verify
 
