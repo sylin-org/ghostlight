@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   window toolkit (Tao) creates answered Windows' question whether the session may end with no, so
   Windows listed `ghostlight-desktop.exe` as preventing shutdown. Tao 0.36.0 answers yes.
 
+### Security
+
+- TLS certificate checks take rustls-webpki 0.103.16 and webpki-roots 1.0.10, for RUSTSEC-2026-0382
+  and RUSTSEC-2026-0381 (a distrusted root). The organization-policy fetch moves to ureq 3, which
+  uses those roots directly, so no advisory is ignored.
+
 ## [2.0.0] - 2026-10-19
 
 Ghostlight 2.0.0 is a breaking release. Update the service and the Ghostlight in Browser extension

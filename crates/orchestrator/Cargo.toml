@@ -28,7 +28,7 @@ sha2.workspace = true
 thiserror.workspace = true
 time = { version = "0.3", default-features = false, features = ["local-offset", "std"] }
 toml_edit = "=0.22.27"
-ureq = { version = "2", default-features = false, features = ["tls"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 url.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
