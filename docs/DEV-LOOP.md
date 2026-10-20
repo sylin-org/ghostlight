@@ -118,6 +118,11 @@ publishes, so a service that does not start is installed again on the next launc
 | Chromium extension mechanism or presentation | none for JavaScript | Reload the unpacked extension explicitly in `chrome://extensions` |
 | Shared bridge contract | `cargo build --workspace` | Restart only consumers affected by that versioned boundary |
 
+A browser restart is not a reload. Chromium keeps an unpacked extension's service worker script
+in the profile's cache across restarts and even a manifest version bump (Chromium 155 on Bluefin,
+`docs/testing/bluefin-dev-2.0.1-2026-10-20.md`), so only the reload button in `chrome://extensions`
+picks up new extension code. A store update installs a new version and is not affected.
+
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
 contract, not an optimization.
 
