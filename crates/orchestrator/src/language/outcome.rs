@@ -1619,6 +1619,9 @@ pub enum Refusal {
     NoDialogVisible,
     /// A JavaScript dialog blocks the page, so the browser could not take the work.
     DialogOpen,
+    /// Back (or forward) found no earlier (or later) page in the tab's history, so nothing was
+    /// sent.
+    NoHistoryEntry { forward: bool },
     /// This session has no recording to act on.
     RecordingUnavailable,
     /// This session already holds a recording, so another cannot start.
@@ -1780,6 +1783,12 @@ impl Refusal {
             }
             Self::NoDialogVisible => "No JavaScript dialog is currently visible.",
             Self::DialogOpen => "A JavaScript dialog is open on this page, so nothing was sent.",
+            Self::NoHistoryEntry { forward: false } => {
+                "This tab has no earlier page in its history, so nothing was sent."
+            }
+            Self::NoHistoryEntry { forward: true } => {
+                "This tab has no later page in its history, so nothing was sent."
+            }
             Self::RecordingUnavailable => "This session has no recording.",
             Self::RecordingHeld => "This session already has a recording.",
             Self::RecordingExportFailed => "The recording could not be turned into a replay.",
@@ -1929,6 +1938,7 @@ impl Refusal {
                 "Capture the viewport or a smaller region instead of the full page.".into(),
             ],
             Self::DialogOpen => vec![READ_DIALOG_FIRST.into()],
+            Self::NoHistoryEntry { .. } => vec![OPEN_FIRST_TAB.into()],
             Self::RecordingUnavailable => vec![
                 "Call browser_record with action start to begin a recording.".into(),
             ],
@@ -3739,6 +3749,14 @@ Changes are \"unsaved\".".into()),
             (
                 Refusal::DialogOpen,
                 "A JavaScript dialog is open on this page, so nothing was sent.",
+            ),
+            (
+                Refusal::NoHistoryEntry { forward: false },
+                "This tab has no earlier page in its history, so nothing was sent.",
+            ),
+            (
+                Refusal::NoHistoryEntry { forward: true },
+                "This tab has no later page in its history, so nothing was sent.",
             ),
             (
                 Refusal::RecordingUnavailable,

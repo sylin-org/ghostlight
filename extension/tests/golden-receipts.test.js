@@ -347,6 +347,13 @@ const CASES = {
     }
   },
   "navigate.debugger_unavailable": { attach: refuseAttach(ATTACH_TAKEN), message: ATTACH_TAKEN },
+  // A new tab has one history entry, so back from it has nowhere to go.
+  "navigate.no_history_entry": {
+    tabs: [{ ...ACCOUNT_TAB, url: "https://example.com/", title: "Example Domain" }],
+    arrange: (parts) => {
+      parts.chrome.handlers["Page.getNavigationHistory"] = () => ({ currentIndex: 0, entries: [{ id: 1, url: "https://example.com/" }] });
+    }
+  },
   "open_tab.tab_missing": {},
 
   // ---- view, capture, dialog and accessibility snapshot

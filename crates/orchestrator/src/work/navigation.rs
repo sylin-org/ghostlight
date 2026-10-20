@@ -8,12 +8,12 @@ use crate::events::DomainEvent;
 use crate::governance::{Capability, Decision};
 use crate::language::outcome::{Outcome, Refusal};
 use crate::language::provenance::group_title;
-use crate::language::ReusePolicy;
+use crate::language::{ReusePolicy, HISTORY_FORWARD};
 use crate::workspace::{Opener, SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
-    observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect, InvocationContext,
-    InvocationResult, Readiness, Status, Terminal,
+    browser_reason, observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect,
+    InvocationContext, InvocationResult, Readiness, Status, Terminal,
 };
 
 /// How the governed tab came to exist, which the receipt reports truthfully (ADR-0137).
@@ -552,6 +552,18 @@ impl ApplicationExecutor {
                     direction: direction.into(),
                 },
             );
+            // The browser looked and sent nothing, so the refusal can say which way was empty.
+            if let Err(error @ BrowserError::NoHistoryEntry) = &outcome {
+                return self.failed(
+                    context,
+                    decision,
+                    Some(selected.physical_id),
+                    Refusal::NoHistoryEntry {
+                        forward: direction == HISTORY_FORWARD,
+                    },
+                    json!({"reason": browser_reason(error)}),
+                );
+            }
             self.complete_navigation(
                 context,
                 lease,

@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0005",
+  "failure": "no_history_entry",
+  "message": "The tab has no earlier page in its history.",
+  "dispatched": false,
+  "committed_urls": []
+}

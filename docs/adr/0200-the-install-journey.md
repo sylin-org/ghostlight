@@ -422,3 +422,19 @@ The change:
 The changed packaged file is `lib/primitives.js`, and the freeze golden is regenerated from the new
 zip. The version becomes 2.0.1 when 2.0.1 is prepared, and that build goes to the store for review.
 Decision 16's rule is unchanged.
+
+## Amendment (2026-10-20): the extension's back and forward go to the exact entry
+
+The owner put a history fix into 2.0.1 on 2026-10-20 ("Fix it in 2.0.1"). `browser_history` back
+or forward failed after an agent moved between pages with `browser_navigate` alone, and the service
+said the effect was unknown: `chrome.tabs.goBack` follows the browser's back button, which skips an
+entry whose page the person never interacted with (Chrome's history manipulation intervention),
+while the page's own `history.back()` does not. Checked on the owner's Chrome: with `history.length`
+2, back failed; after one real click on the first page, the same back worked.
+
+The extension now reads the tab's history with `Page.getNavigationHistory` and goes to the previous
+or next entry with `Page.navigateToHistoryEntry`, two methods added to the CDP allowlist. With no
+entry that way it sends nothing and answers the new receipt failure `no_history_entry`, which a
+2.0.0 service reads as `other`. The changed packaged files are `lib/tabs.js`, `lib/sessions.js` and
+`lib/protocol.js`, and the freeze golden is regenerated. This build goes to the store with the
+2.0.1 prompt field. Decision 16's rule is unchanged.

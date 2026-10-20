@@ -22,6 +22,13 @@
 > field is empty. It is an optional field the old side ignores (section 1.7); a 2.0.0 extension
 > does not send it, and the service then words the prompt without it.
 
+> **2.0.1 (2026-10-20).** `navigate` back and forward go to the exact previous or next entry of the
+> tab's history with `Page.getNavigationHistory` and `Page.navigateToHistoryEntry`, which join the
+> CDP allowlist, instead of `chrome.tabs.goBack` and `goForward`: those follow the back button,
+> which skips an entry whose page the person never interacted with. With no entry that way the
+> receipt is the new failure `no_history_entry`, always `dispatched:false`. A 2.0.0 service reads
+> an unknown code as `other` (section 1.7).
+
 
 Status: implementation spec for the owner. Written read-only against dev at `95a7e646`.
 
@@ -612,6 +619,7 @@ Receipt `failure` (closed; Rust `Failure`, unknown values decode as `Other`):
 | `capture_too_large` | No quality in the budget fits `max_base64_chars` |
 | `browser_refused` | Chrome rejected the call, or the CDP allowlist refused a method |
 | `session_lost` | The debugger session detached mid-primitive |
+| `no_history_entry` | Back or forward found no entry that way in the tab's history. Always `dispatched:false` (2.0.1) |
 | `other` | Anything else, with `message` |
 
 `CallAnswer::Failed.code` (closed; Rust `CallFailure`): `document_changed`, `frame_missing`, `owner_missing`,
@@ -1203,8 +1211,9 @@ async function navigate(args, fx) {
   try {
     fx.dispatched = true;
     if (args.to.to === "url") await chrome.tabs.update(args.tab_id, { url: args.to.url, active: true });
-    if (args.to.to === "back") { await chrome.tabs.goBack(args.tab_id); await sleep(75); }
-    if (args.to.to === "forward") { await chrome.tabs.goForward(args.tab_id); await sleep(75); }
+    // 2.0.1: the exact previous or next entry (Page.getNavigationHistory, Page.navigateToHistoryEntry);
+    // with none that way, no_history_entry before anything is sent.
+    if (args.to.to === "back" || args.to.to === "forward") { await traverseHistory(args.tab_id, args.to.to, fx); await sleep(75); }
     if (args.to.to === "reload") { await chrome.tabs.reload(args.tab_id, { bypassCache: Boolean(args.to.bypass_cache) }); await sleep(75); }
     return { tab: tabFact(await waitForReady(args.tab_id, args.ready_timeout_ms, fx)) };
   } finally { if (args.discard_beforeunload) { beforeUnload.delete(args.tab_id); await releaseDebugger(args.tab_id); } }

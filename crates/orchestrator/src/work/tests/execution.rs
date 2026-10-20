@@ -4512,6 +4512,41 @@ fn a_prompts_status_names_its_field_and_what_accept_answers() {
     assert_eq!(status.facts["dialog_type"], "prompt");
 }
 
+/// Back or forward with no page that way in the tab's history is refused and sends nothing: the
+/// browser looked, found no entry, and went nowhere. The sentence says which way was empty.
+#[test]
+fn history_with_no_page_that_way_is_refused_and_says_which_way() {
+    let (executor, browser, _workspaces, workspace, tab_handle, _target) =
+        workspace_with_a_target();
+    for (action, summary) in [
+        (
+            "back",
+            "This tab has no earlier page in its history, so nothing was sent.",
+        ),
+        (
+            "forward",
+            "This tab has no later page in its history, so nothing was sent.",
+        ),
+    ] {
+        browser.push(Err(BrowserError::NoHistoryEntry));
+        let refused = executor.execute(
+            &workspace,
+            "browser_history",
+            json!({"action":action,"tab":tab_handle}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(refused.status, Status::Failed, "{action}");
+        assert_eq!(refused.effect, Effect::None, "{action}");
+        assert!(refused.repeat_safe, "{action}");
+        assert_eq!(refused.summary, summary);
+        assert_eq!(refused.facts["reason"], "no_history_entry");
+        assert_eq!(
+            refused.next_steps,
+            vec!["Call browser_navigate with url to open a page."]
+        );
+    }
+}
+
 /// The step of a removed handle's refusal that has no candidates to pick from.
 pub(super) const REMOVED_STEP: &str =
     "Call browser_find or browser_inspect to obtain current target handles.";

@@ -20,7 +20,7 @@
     "Page.enable", "Page.getFrameTree", "Page.addScriptToEvaluateOnNewDocument",
     "Page.removeScriptToEvaluateOnNewDocument", "Page.createIsolatedWorld", "Page.getLayoutMetrics",
     "Page.captureScreenshot", "Page.handleJavaScriptDialog", "Page.startScreencast", "Page.stopScreencast",
-    "Page.screencastFrameAck",
+    "Page.screencastFrameAck", "Page.getNavigationHistory", "Page.navigateToHistoryEntry",
     "Runtime.evaluate", "Runtime.callFunctionOn", "Runtime.releaseObject", "Runtime.releaseObjectGroup",
     "Runtime.runIfWaitingForDebugger", "Runtime.terminateExecution", "Runtime.enable", "Runtime.disable",
     "Network.enable", "Network.disable", "Target.setAutoAttach", "DOM.getFrameOwner", "DOM.resolveNode",

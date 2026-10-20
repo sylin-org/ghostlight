@@ -2909,7 +2909,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
             (governed_check(*reason), Decision::refused(*reason))
         }
         BrowserError::DocumentUnavailable => (CheckFailure::DocumentUnavailable, admitted),
-        BrowserError::DialogOpen | BrowserError::TabNotShowing => {
+        BrowserError::DialogOpen | BrowserError::TabNotShowing | BrowserError::NoHistoryEntry => {
             (CheckFailure::BrowserRefused, admitted)
         }
         BrowserError::CancelledBeforeDispatch | BrowserError::CancelledAfterDispatch => {
@@ -3245,6 +3245,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::PageRefused(refusal) => refusal.as_str(),
         BrowserError::FieldsRejected { .. } => "field_value_rejected",
         BrowserError::DialogOpen => "dialog_open",
+        BrowserError::NoHistoryEntry => "no_history_entry",
         BrowserError::TabNotShowing => "tab_not_showing",
         BrowserError::StaleView => "stale_view",
         BrowserError::StaleTab => WorkspaceReason::TabUnavailable.as_fact(),

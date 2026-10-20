@@ -751,6 +751,7 @@ impl<'a> Link<'a> {
             wire::Failure::Timeout => BrowserError::DeadlineBeforeDispatch,
             wire::Failure::TabMissing => BrowserError::Primitive(TAB_MISSING.into()),
             wire::Failure::DialogOpen => BrowserError::DialogOpen,
+            wire::Failure::NoHistoryEntry => BrowserError::NoHistoryEntry,
             wire::Failure::Unsupported => BrowserError::Unsupported {
                 primitive: P::NAME.into(),
             },

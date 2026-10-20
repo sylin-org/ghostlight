@@ -361,15 +361,39 @@ test("navigate to a url matches the golden receipt", async () => {
   assert.deepEqual(chrome.named("tabs.update").map((call) => call.args), [[12, { url: "https://example.com/", active: true }]]);
 });
 
-test("navigate back, forward and reload call the matching tab method", async () => {
-  const { tabs, chrome } = setup({ browser: { tabs: [tab({ id: 12 })] } });
+test("navigate back and forward go to the exact history entry, and reload calls the tab method", async () => {
+  const { tabs, chrome, lifecycle, debuggerChrome } = setup({ browser: { tabs: [tab({ id: 12 })] } });
+  debuggerChrome.handlers["Page.getNavigationHistory"] = () => ({ currentIndex: 1, entries: [{ id: 10 }, { id: 11 }, { id: 12 }] });
   for (const name of ["navigate.back", "navigate.forward", "navigate.reload"]) {
     const result = await execute(tabs.navigate, goldenArgs(name));
     assert.equal(result.ok.tab.tab_id, 12, name);
+    assert.equal(result.dispatched, true, name);
   }
-  assert.equal(chrome.named("tabs.goBack").length, 1);
-  assert.equal(chrome.named("tabs.goForward").length, 1);
+  const sent = debuggerChrome.calls.filter((call) => call.method === "Page.navigateToHistoryEntry");
+  assert.deepEqual(sent.map((call) => [call.target, call.params]), [[{ tabId: 12 }, { entryId: 10 }], [{ tabId: 12 }, { entryId: 12 }]]);
+  // The browser's back button skips a page the person never touched; the exact entry does not.
+  assert.equal(chrome.named("tabs.goBack").length, 0);
+  assert.equal(chrome.named("tabs.goForward").length, 0);
   assert.deepEqual(chrome.named("tabs.reload").map((call) => call.args), [[12, { bypassCache: true }]]);
+  assert.equal(lifecycle.attachedCount(), 0, "the debugger lease is given back");
+});
+
+test("back from the first entry and forward from the last send nothing and say no_history_entry", async () => {
+  const { tabs, lifecycle, debuggerChrome } = setup({ browser: { tabs: [tab({ id: 12 })] } });
+  const cases = [
+    [{ currentIndex: 0, entries: [{ id: 5 }, { id: 6 }] }, "navigate.back", "The tab has no earlier page in its history."],
+    [{ currentIndex: 1, entries: [{ id: 5 }, { id: 6 }] }, "navigate.forward", "The tab has no later page in its history."],
+    [{}, "navigate.back", "The tab has no earlier page in its history."]
+  ];
+  for (const [history, name, message] of cases) {
+    debuggerChrome.handlers["Page.getNavigationHistory"] = () => history;
+    const result = await execute(tabs.navigate, goldenArgs(name));
+    assert.equal(result.failure, "no_history_entry", name);
+    assert.equal(result.message, message, name);
+    assert.equal(result.dispatched, false, name);
+  }
+  assert.equal(debuggerChrome.calls.filter((call) => call.method === "Page.navigateToHistoryEntry").length, 0);
+  assert.equal(lifecycle.attachedCount(), 0, "the debugger lease is given back");
 });
 
 test("navigate on a missing tab is tab_missing before any effect", async () => {

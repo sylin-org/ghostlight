@@ -485,7 +485,7 @@ fn closed_names_equal_the_vocabulary() {
         set(
             names!(Failure: Unsupported, InvalidRequest, TabMissing, DebuggerUnavailable,
             DocumentChanged, DialogOpen, Timeout, Cancelled, LocalInterlock, CaptureTooLarge,
-            BrowserRefused, SessionLost, Other),
+            BrowserRefused, SessionLost, NoHistoryEntry, Other),
         ),
     );
     check(

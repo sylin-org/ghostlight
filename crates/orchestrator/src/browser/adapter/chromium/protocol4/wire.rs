@@ -1399,6 +1399,9 @@ pub enum Failure {
     BrowserRefused,
     /// The debugger session detached mid-primitive.
     SessionLost,
+    /// Back or forward found no entry that way in the tab's history. Always `dispatched:false`.
+    /// A service older than 2.0.1 reads it as `Other`.
+    NoHistoryEntry,
     /// Anything else, described by the receipt's message.
     #[serde(other)]
     Other,
@@ -2270,6 +2273,7 @@ mod tests {
             ("capture_too_large", Failure::CaptureTooLarge),
             ("browser_refused", Failure::BrowserRefused),
             ("session_lost", Failure::SessionLost),
+            ("no_history_entry", Failure::NoHistoryEntry),
             ("other", Failure::Other),
         ];
         for (name, code) in codes {

@@ -40,6 +40,7 @@
     "capture_too_large",
     "browser_refused",
     "session_lost",
+    "no_history_entry",
     "other"
   ],
   "call_failures": [

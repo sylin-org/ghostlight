@@ -29,7 +29,7 @@
     primitives: ["list_tabs", "open_tab", "navigate", "focus_tab", "close_tab", "set_zoom", "resize_window", "frames", "call",
       "evaluate_main", "view", "input", "capture", "dialog", "diagnostics", "recording", "accessibility_snapshot"],
     receipt_failures: ["unsupported", "invalid_request", "tab_missing", "debugger_unavailable", "document_changed", "dialog_open",
-      "timeout", "cancelled", "local_interlock", "capture_too_large", "browser_refused", "session_lost", "other"],
+      "timeout", "cancelled", "local_interlock", "capture_too_large", "browser_refused", "session_lost", "no_history_entry", "other"],
     call_failures: ["document_changed", "frame_missing", "owner_missing", "dialog_open", "timeout", "cancelled", "session_lost",
       "page_exception", "unserializable", "other"],
     call_answers: ["returned", "failed", "skipped"],

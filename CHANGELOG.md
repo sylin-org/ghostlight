@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `browser_history` back and forward go to the previous or next page of the tab's history, even
+  when the agent moved between pages with `browser_navigate` alone. They followed the browser's back
+  button, which skips a page the person never interacted with, so the call went nowhere and read as
+  an unknown effect. With no page that way, the call now says so and sends nothing.
 - A client that fills in a tool's advertised defaults before it sends a call, as Claude Code began
   to, is no longer refused for opening a new tab, going back or forward, or scrolling to a target. A
   field sent with its default means the same as leaving it out, and a self-check proves every

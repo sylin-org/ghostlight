@@ -1376,6 +1376,9 @@ pub enum BrowserError {
     /// A JavaScript dialog blocks the page, so the renderer cannot take the work.
     #[error("a JavaScript dialog blocks the page")]
     DialogOpen,
+    /// Back or forward found no entry that way in the tab's history, so nothing was sent.
+    #[error("the tab has no history entry that way")]
+    NoHistoryEntry,
     /// The tab is not the one its window shows. Chromium draws only that one, so a capture of
     /// this tab would wait for a frame that never comes. Nothing was captured.
     #[error("the tab is not showing in its window")]

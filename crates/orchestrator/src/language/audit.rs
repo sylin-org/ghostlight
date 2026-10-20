@@ -131,6 +131,7 @@ pub enum AuditRefusal {
     TabNotShowing,
     NoDialogVisible,
     DialogOpen,
+    NoHistoryEntry,
     RecordingUnavailable,
     RecordingHeld,
     RecordingExportFailed,
@@ -318,6 +319,7 @@ impl Refusal {
             | Self::TabNotShowing
             | Self::NoDialogVisible
             | Self::DialogOpen
+            | Self::NoHistoryEntry { .. }
             | Self::RecordingUnavailable
             | Self::RecordingHeld
             | Self::RecordingExportFailed
@@ -426,6 +428,7 @@ impl Refusal {
             Self::TabNotShowing => AuditRefusal::TabNotShowing,
             Self::NoDialogVisible => AuditRefusal::NoDialogVisible,
             Self::DialogOpen => AuditRefusal::DialogOpen,
+            Self::NoHistoryEntry { .. } => AuditRefusal::NoHistoryEntry,
             Self::RecordingUnavailable => AuditRefusal::RecordingUnavailable,
             Self::RecordingHeld => AuditRefusal::RecordingHeld,
             Self::RecordingExportFailed => AuditRefusal::RecordingExportFailed,

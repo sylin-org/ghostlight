@@ -447,6 +447,11 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
                 primitive: "navigate".into(),
             },
         ),
+        (
+            wire::Failure::NoHistoryEntry,
+            Some("The tab has no earlier page in its history."),
+            BrowserError::NoHistoryEntry,
+        ),
     ] {
         *next.lock().unwrap() = wire::Receipt {
             message: message.map(str::to_owned),

@@ -30,7 +30,11 @@
   const STATUS_LOADING = "loading";
   const STATUS_COMPLETE = "complete";
   const BEFORE_UNLOAD = "beforeunload";
-  const METHOD = Object.freeze({ HANDLE_DIALOG: "Page.handleJavaScriptDialog" });
+  const METHOD = Object.freeze({
+    HANDLE_DIALOG: "Page.handleJavaScriptDialog",
+    NAVIGATION_HISTORY: "Page.getNavigationHistory",
+    NAVIGATE_TO_ENTRY: "Page.navigateToHistoryEntry"
+  });
   const TARGET = Object.freeze({ URL: "url", BACK: "back", FORWARD: "forward", RELOAD: "reload" });
   const FAILURE = Object.freeze({
     INVALID_REQUEST: "invalid_request",
@@ -39,7 +43,14 @@
     CANCELLED: "cancelled",
     LOCAL_INTERLOCK: "local_interlock",
     BROWSER_REFUSED: "browser_refused",
+    NO_HISTORY_ENTRY: "no_history_entry",
     OTHER: "other"
+  });
+  // What back and forward say when the tab's history has no entry that way. Advisory, as every
+  // receipt message is: the service words the refusal itself.
+  const NO_ENTRY_MESSAGE = Object.freeze({
+    back: "The tab has no earlier page in its history.",
+    forward: "The tab has no later page in its history."
   });
   const INTERLOCK_MESSAGE = "Ghostlight is preserving controlled tabs by local browser choice.";
   const WIDTH_LIMITS = protocol.vocabulary.limits.resize_width;
@@ -360,6 +371,29 @@
       }
     });
 
+    /**
+     * Goes to the tab's previous or next history entry exactly, as the page's own history.back()
+     * and history.forward() do. The browser's back button, and tabs.goBack with it, skip an entry
+     * whose page the person never interacted with (Chrome's history manipulation intervention),
+     * which stranded an agent that moved between pages with navigate alone. With no entry that way
+     * nothing is sent, and the receipt says no_history_entry.
+     */
+    async function traverseHistory(tabId, direction, fx) {
+      await lifecycle.acquire(tabId);
+      try {
+        const history = await lifecycle.cdp({ tabId }, METHOD.NAVIGATION_HISTORY);
+        const step = direction === TARGET.BACK ? -1 : 1;
+        const entry = Array.isArray(history?.entries) && Number.isSafeInteger(history.currentIndex)
+          ? history.entries[history.currentIndex + step]
+          : undefined;
+        if (!Number.isSafeInteger(entry?.id)) throw sessions.failure(FAILURE.NO_HISTORY_ENTRY, NO_ENTRY_MESSAGE[direction]);
+        fx.dispatched = true;
+        await lifecycle.cdp({ tabId }, METHOD.NAVIGATE_TO_ENTRY, { entryId: entry.id });
+      } finally {
+        await lifecycle.release(tabId);
+      }
+    }
+
     const navigate = handler({
       addresses: true,
       validate(args) {
@@ -385,16 +419,14 @@
           beforeUnloadTabs.set(args.tab_id, (beforeUnloadTabs.get(args.tab_id) ?? 0) + 1);
         }
         try {
-          fx.dispatched = true;
           if (args.to.to === TARGET.URL) {
+            fx.dispatched = true;
             await chromeApi.tabs.update(args.tab_id, { url: args.to.url, active: true });
-          } else if (args.to.to === TARGET.BACK) {
-            await chromeApi.tabs.goBack(args.tab_id);
-            await sleep(HISTORY_SETTLE_MS);
-          } else if (args.to.to === TARGET.FORWARD) {
-            await chromeApi.tabs.goForward(args.tab_id);
+          } else if (args.to.to === TARGET.BACK || args.to.to === TARGET.FORWARD) {
+            await traverseHistory(args.tab_id, args.to.to, fx);
             await sleep(HISTORY_SETTLE_MS);
           } else {
+            fx.dispatched = true;
             await chromeApi.tabs.reload(args.tab_id, { bypassCache: Boolean(args.to.bypass_cache) });
             await sleep(HISTORY_SETTLE_MS);
           }

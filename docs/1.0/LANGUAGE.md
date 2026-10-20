@@ -466,6 +466,14 @@ Move through history or reload. Shortest call: `{"action":"back"}`.
 Rules: `bypass_cache:true` is valid only for `reload`; `false`, its default, goes with any action.
 Capability: `action`.
 
+`back` and `forward` go to the tab's previous or next history entry exactly, as the page's own
+`history.back()` does. The browser's back button skips a page the person never interacted with, so an
+agent that moved between pages with `browser_navigate` alone would otherwise land nowhere. With no
+page that way the call is refused before anything is sent: `This tab has no earlier page in its
+history, so nothing was sent.` (or `no later page` for `forward`), with the `reason` fact
+`no_history_entry` and the next step `Call browser_navigate with url to open a page.` An extension
+older than 2.0.1 uses the back button's rule.
+
 Facts: `tab`, `action`, governed `url`, bounded `title`, and `document_generation`.
 
 ### `browser_window`

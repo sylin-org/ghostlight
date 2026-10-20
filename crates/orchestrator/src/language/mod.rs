@@ -1363,12 +1363,19 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
     })
 }
 
+/// The history action that goes forward, as the catalog and the decoder name it.
+pub(crate) const HISTORY_FORWARD: &str = "forward";
+
 fn decode_history(input: Value) -> Result<Operation, LanguageError> {
     let value: HistoryRequest = parse(
         input,
         &["action", "tab", "bypass_cache", "timeout_ms"],
         |value: &HistoryRequest| {
-            validate_choice(&value.action, &["back", "forward", "reload"], "action")?;
+            validate_choice(
+                &value.action,
+                &["back", HISTORY_FORWARD, "reload"],
+                "action",
+            )?;
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
             // false is the advertised default, which a client may send with any action.
             if value.action != "reload" && value.bypass_cache {
