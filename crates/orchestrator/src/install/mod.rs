@@ -5960,6 +5960,61 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_absent_from_its_plain_path_is_not_found_in_another_apps_copy() {
+        // As on leo-desktop-02 on 2026-10-20: Visual Studio Code had never been started, so its
+        // plain settings folder did not exist, and an install had written Ghostlight's entry into
+        // the Codex app's private copy of that folder, which Visual Studio Code never reads.
+        let directory = temporary("store-other-only");
+        let context = windows_context(&directory);
+        let plain = context.roaming.join("Code/User/mcp.json");
+        // Spelled as the look spells it: the settings folder as the row names it, then the file.
+        let leftover = packaged::private_root(
+            context.local_app_data.as_deref().unwrap(),
+            "OpenAI.Codex_2p2nqsd0c76g0",
+            packaged::DataRoot::Roaming,
+        )
+        .join("Code/User")
+        .join("mcp.json");
+        fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+        fs::write(
+            &leftover,
+            format!(
+                "{{\"servers\":{{\"ghostlight\":{{\"type\":\"stdio\",\"command\":{},\"args\":[\"mcp\"]}}}}}}",
+                serde_json::to_string(&context.edge.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+        let registry = HarnessRegistry::with_context(context.clone());
+        let editor = || {
+            registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "vscode")
+                .unwrap()
+        };
+
+        let summary = editor();
+        assert_eq!(PathBuf::from(&summary.config_path), plain);
+        assert_eq!(
+            summary.state,
+            HarnessState::NotDetected,
+            "another app's copy is no evidence of the agent: {}",
+            summary.detail
+        );
+        assert_eq!(summary.owned_copies, [leftover.to_string_lossy()]);
+
+        let removed = registry.apply("vscode", HarnessAction::Uninstall).unwrap();
+        assert!(removed.changed, "{}", removed.message);
+        let left = fs::read_to_string(&leftover).unwrap();
+        assert!(!left.contains(SERVER_NAME), "{left}");
+        assert!(
+            !plain.exists(),
+            "nothing is written where the agent is absent"
+        );
+        assert!(editor().owned_copies.is_empty());
+    }
+
+    #[test]
     fn a_store_folder_without_its_file_shows_the_plain_file_and_that_file_is_set_up() {
         let directory = temporary("store-merged");
         let context = windows_context(&directory);

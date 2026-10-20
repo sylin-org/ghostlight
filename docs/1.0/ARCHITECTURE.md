@@ -782,12 +782,13 @@ installed Store package's private copy of that root, `%LOCALAPPDATA%\Packages\<f
 or `...\Local` (`install/packaged.rs`): `Packages` is listed once and only the client's own settings
 folder is tested in each package, so a Store edition is found even before it writes its file. A
 copy in the agent's own package (named by its packaged app or Store icon) beats the plain path,
-except that while that copy has no file the plain file it shows wins; another package's copy beats
-the plain path only when the plain file and its folder are both absent; within a rank the copy
-written last wins. Inspection names the chosen file, says when it is the agent's own Store copy
-and names another copy that exists; Install and Fix write only the chosen file, and Uninstall,
-available while any copy holds Ghostlight's own entry, removes it from every copy that holds one
-(ADR-0197 amendment of 2026-10-17). Check is read-only.
+except that while that copy has no file the plain file it shows wins; another package's copy never
+beats the plain path, even when the plain file and its folder are both absent, and never counts as
+evidence that the agent is installed; within a rank the copy written last wins. Inspection names
+the chosen file, says when it is the agent's own Store copy and names another copy that exists;
+Install and Fix write only the chosen file, and Uninstall, available while any copy holds
+Ghostlight's own entry, removes it from every copy that holds one (ADR-0197 amendments of
+2026-10-17 and 2026-10-20). Check is read-only.
 Install and uninstall are serialized, merge only the `ghostlight` entry, keep unrelated siblings,
 preserve JSONC and TOML comments, create a backup, and refuse malformed, unreadable, or
 foreign-owned configuration rather than guessing. A separate confirmed Fix action may replace one

@@ -350,6 +350,27 @@ Ghostlight, outside, finds a packaged client's settings. The owner asked for a p
 - **No change elsewhere.** A client found only at its plain path behaves as before, and Linux has no
   packages to look at.
 
+## Another app's container is not the agent's (2026-10-20)
+
+This amends "Choosing a copy" in the amendment above. Live finding on leo-desktop-02
+([the record](../testing/windows-public-2.0.0-2026-10-20.md)): Visual Studio Code, an ordinary
+Windows program, had never been started, so `%APPDATA%\Code\User` did not exist. The Codex app's
+container held a `Code\User` folder that something run inside it once wrote. Another package's
+copy beat the plain path whenever the plain settings were absent, so the install wrote
+Ghostlight's entry into Codex's container and reported Visual Studio Code as connected without
+naming the file. Started on its own, Visual Studio Code reads only the plain path and never sees
+that entry, and the install had written inside another app's container.
+
+- **Only the agent's own package can hold its settings.** Another package's copy is never the
+  chosen copy and never evidence that the agent is installed, whatever exists at the plain path. It
+  comes after the plain path in the reading order, so the plain path is the one read and written
+  even when neither its file nor its folder exists yet.
+- **Other copies stay visible.** Inspection still names another package's copy that holds
+  Ghostlight's own entry, and Uninstall still removes that entry from every copy that holds one, so
+  what an earlier install left there is cleaned up.
+- **What this gives up.** A Store edition the catalog does not name is no longer found through its
+  container alone. When one appears, the catalog names its package, as it names Claude Desktop's.
+
 ## Amendment 2026-10-14: connector source lock
 
 Connector and relay source is locked to the last published tag at the same relay revision. The

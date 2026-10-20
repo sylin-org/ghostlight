@@ -13,9 +13,11 @@
 //! then tests the one settings folder each client names in each of them. Nothing is searched
 //! recursively and the registry is not read. The order of the copies is the order the agent reads
 //! them in ([`Packages::copies`]): a copy in a package of the agent's own Store app, named as the
-//! catalog and the Store lookup of [`super::icons`] name it, beats the plain path, and any other
-//! package's copy beats the plain path only when the plain settings are not there at all (ADR-0197
-//! amendment "Packaged clients seen from outside", 2026-10-17).
+//! catalog and the Store lookup of [`super::icons`] name it, beats the plain path. Another
+//! package's copy never does, because only a process inside that other app's container reads it:
+//! it is listed after the plain path, to be named and cleaned up, and never chosen (ADR-0197
+//! amendments "Packaged clients seen from outside", 2026-10-17, and "Another app's container is
+//! not the agent's", 2026-10-20).
 
 use std::cmp::Reverse;
 use std::fs;
@@ -168,10 +170,9 @@ pub(super) struct SettingsCopy {
 
 /// How early the agent reads a copy, lowest first. The agent's own app reads its private file
 /// first; while it has none, the app's merged view shows the plain file, so a plain file comes
-/// next. Then the own app's settings folder without a file, where its first write lands, then a
-/// plain settings folder without a file. Another package's copy comes after the plain path unless
-/// neither the plain file nor its folder exists, so a Store edition the catalog does not name is
-/// still found.
+/// next. Then the own app's settings folder without a file, where its first write lands, then the
+/// plain path, with or without its folder. Another package's copy comes last, whatever exists:
+/// the agent started on its own never reads it, so it is never the one chosen.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Reading {
     /// The own app's private settings file.
@@ -182,10 +183,10 @@ enum Reading {
     OwnFolder,
     /// The plain settings folder, without the file.
     PlainFolder,
-    /// Another package's private settings folder, with or without the file.
-    OtherPackage,
     /// The plain path, where neither the file nor its folder exists.
     PlainAbsent,
+    /// Another package's private settings folder, with or without the file.
+    OtherPackage,
 }
 
 impl Packages {
@@ -361,8 +362,8 @@ mod tests {
         assert_eq!(
             files(&packages.copies(&plain, &[], as_is)),
             [
-                (roaming.join("claude_desktop_config.json"), OTHER),
-                (plain.clone(), PLAIN)
+                (plain.clone(), PLAIN),
+                (roaming.join("claude_desktop_config.json"), OTHER)
             ]
         );
         assert_eq!(
@@ -376,7 +377,7 @@ mod tests {
         let plain = roots.local.join("Tool/settings/mcp.json");
         assert_eq!(
             files(&packages.copies(&plain, &[], as_is)),
-            [(local.join("mcp.json"), OTHER), (plain.clone(), PLAIN)]
+            [(plain.clone(), PLAIN), (local.join("mcp.json"), OTHER)]
         );
         assert_eq!(
             local,
@@ -422,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn the_agents_own_package_wins_and_otherwise_the_copy_written_last() {
+    fn the_agents_own_package_wins_and_no_other_package_does() {
         let scratch = Scratch::new();
         let roots = roots(&scratch);
         let own = package(&roots, CLAUDE_FAMILY, DataRoot::Roaming, "Claude");
@@ -435,48 +436,48 @@ mod tests {
         let packages = Packages::listed(roots.clone());
         let plain = roots.roaming.join(CLAUDE_SETTINGS);
 
-        let chosen = packages.copies(&plain, &["Claude"], as_is);
         assert_eq!(
-            (chosen[0].file.clone(), chosen[0].place),
-            (own.join(name), OWN),
-            "the agent's own Store app wins"
-        );
-        assert_eq!(chosen.last().unwrap().file, plain, "the plain path is last");
-
-        let chosen = packages.copies(&plain, &[], as_is);
-        assert_eq!(
-            files(&chosen),
+            files(&packages.copies(&plain, &["Claude"], as_is)),
             [
+                (own.join(name), OWN),
+                (plain.clone(), PLAIN),
+                (newer.join(name), OTHER),
+                (older.join(name), OTHER)
+            ],
+            "the agent's own Store app wins, then the plain path, then the others, written last first"
+        );
+        assert_eq!(
+            files(&packages.copies(&plain, &[], as_is)),
+            [
+                (plain.clone(), PLAIN),
                 (newer.join(name), OTHER),
                 (older.join(name), OTHER),
-                (own.join(name), OTHER),
-                (plain.clone(), PLAIN)
+                (own.join(name), OTHER)
             ],
-            "without its own app the copy written last wins"
+            "without its own app the plain path leads, however new another package's copy is"
         );
     }
 
     #[test]
-    fn another_packages_copy_beats_the_plain_path_only_where_the_plain_settings_are_absent() {
+    fn another_packages_copy_never_comes_before_the_plain_path() {
+        // As on leo-desktop-02 on 2026-10-20: Visual Studio Code had never been started, so its
+        // plain settings folder did not exist, and the Codex app's container held a `Code\User`
+        // folder that something run inside it once wrote. Visual Studio Code started on its own
+        // never reads that copy.
         let scratch = Scratch::new();
         let roots = roots(&scratch);
-        let leftover = package(&roots, CODEX_FAMILY, DataRoot::Roaming, "Claude");
-        let name = "claude_desktop_config.json";
-        written_ago(&leftover.join(name), 0);
-        let plain = roots.roaming.join(CLAUDE_SETTINGS);
-        let copies = |roots: &DataRoots| {
-            files(&Packages::listed(roots.clone()).copies(&plain, &["Claude"], as_is))
-        };
-        // No plain settings at all: the other package's copy is the only trace of the agent.
-        assert_eq!(
-            copies(&roots),
-            [(leftover.join(name), OTHER), (plain.clone(), PLAIN)]
-        );
-        // The plain settings folder, without its file, already keeps the plain path first.
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        let plain_first = vec![(plain.clone(), PLAIN), (leftover.join(name), OTHER)];
+        let leftover = package(&roots, CODEX_FAMILY, DataRoot::Roaming, "Code/User");
+        written_ago(&leftover.join("mcp.json"), 0);
+        let plain = roots.roaming.join("Code/User/mcp.json");
+        let copies =
+            |roots: &DataRoots| files(&Packages::listed(roots.clone()).copies(&plain, &[], as_is));
+        let plain_first = vec![(plain.clone(), PLAIN), (leftover.join("mcp.json"), OTHER)];
+        // No plain settings at all.
         assert_eq!(copies(&roots), plain_first);
-        // And so does the plain file, however old it is.
+        // The plain settings folder, without its file.
+        fs::create_dir_all(plain.parent().unwrap()).unwrap();
+        assert_eq!(copies(&roots), plain_first);
+        // The plain file, however old it is.
         written_ago(&plain, 600);
         assert_eq!(copies(&roots), plain_first);
     }

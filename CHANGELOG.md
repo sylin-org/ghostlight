@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check could never stop a bad install, only break a good one. `get.ps1` and `get.sh` now check each
   image against the release's `SHA256SUMS` alone and need no GitHub account or tool;
   docs/trust/supply-chain.md shows how to check build provenance by hand.
+- On Windows, the install no longer registers an agent inside another app's Microsoft Store
+  container. With Visual Studio Code installed but never started, it wrote Ghostlight's entry
+  into the Codex app's private copy of VS Code's settings, which VS Code never reads when it is
+  started on its own, and called VS Code connected. Only the agent's own Store package can hold
+  its settings now. Uninstall still removes an entry an earlier install left in another copy.
 
 ### Security
 
