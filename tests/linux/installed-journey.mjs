@@ -43,11 +43,23 @@ const output = join(process.env.GHOSTLIGHT_LINUX_INSTALLED_AREA || join(root, ".
 mkdirSync(output, { recursive: true });
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const delay = ms => new Promise(done => setTimeout(done, ms));
+/**
+ * The browser's version, for the report only. A browser may start only through its launcher (one
+ * that sets a library path, say), so the bare executable can fail to run while the browser runs
+ * fine; then the report says why, and the journey goes on, because no check reads the version.
+ */
+function browserVersion() {
+  try {
+    return execFileSync(browserImage, ["--version"], { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"] }).trim();
+  } catch (error) {
+    return `unknown: ${String(error.stderr || error.message).trim().split("\n")[0]}`;
+  }
+}
 const report = { started_at: new Date().toISOString(), passed: false,
   scope: "Linux development installation; actual native messaging; the running system browser",
   revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
   test_sha256: hash(readFileSync(new URL(import.meta.url))),
-  browser_version: execFileSync(browserImage, ["--version"], { encoding: "utf8", timeout: 10000 }).trim(),
+  browser_version: browserVersion(),
   config_root: configRoot, binaries: {}, identities: {}, phases: [], invocations: [] };
 const save = () => writeFileSync(join(output, "results.json"), JSON.stringify(report, null, 2) + "\n");
 save();
