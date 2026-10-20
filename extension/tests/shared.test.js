@@ -81,7 +81,7 @@ test("the manifest declares the complete local product surface", () => {
   assert.equal(manifest.name, "Ghostlight in Browser");
   assert.equal(manifest.description, "Governed browser automation over your own authenticated session, for AI agents.");
   assert.equal(manifest.minimum_chrome_version, "125");
-  assert.equal(manifest.version, "2.0.0");
+  assert.equal(manifest.version, "2.0.1");
   assert.equal(manifest.background.service_worker, "worker.js");
   assert.equal(manifest.action.default_title, "Ghostlight in Browser");
   assert.equal(manifest.action.default_popup, "popup.html");

@@ -438,3 +438,14 @@ entry that way it sends nothing and answers the new receipt failure `no_history_
 2.0.0 service reads as `other`. The changed packaged files are `lib/tabs.js`, `lib/sessions.js` and
 `lib/protocol.js`, and the freeze golden is regenerated. This build goes to the store with the
 2.0.1 prompt field. Decision 16's rule is unchanged.
+
+## Amendment (2026-10-20): the extension never waits on a page that shows a dialog
+
+test-03 found, with the store extension 2.0.0, that a prompt left open in a controlled tab stopped
+every command after a reconnect until someone closed it (ADR-0168 amendment of 2026-10-20). The fix
+is in the one module that owns debugger sessions: lifecycle work never waits on a page that shows a
+dialog, and the tab takes its focus state when the dialog closes. The changed packaged file is
+`lib/sessions.js`, and the freeze golden is regenerated. With this the extension's version becomes
+2.0.1, as the prompt field's amendment says, and `compatibility.json` names adapter 2.0.1 for the 2.0
+services. This build goes to the store with the prompt field and the history fix. Decision 16's rule
+is unchanged.
