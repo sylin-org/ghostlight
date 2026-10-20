@@ -172,10 +172,31 @@ Now:
   `reuse` beside `new_tab`, which a client that fills schema defaults sends (Claude Code began to),
   and ureq 3 for the managed-policy fetch, which removes the `webpki-roots` audit exception. It ships
   when these land, at the owner's go.
-- The public Linux one-liner on the real installations, which the cutover went on without: done
-  on CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
-  service is kept until `--restore`) and on Bluefin (test-02,
-  `docs/testing/bluefin-public-2.0.0-2026-10-20.md`; its images already equalled the release).
+- 2.0.1, landed on `dev` on 2026-10-20 beside that scope, each from a live finding:
+  - The one-line installers never run the GitHub CLI (53ce4654). In Windows PowerShell 5.1 a `gh`
+    that was installed but not signed in stopped `get.ps1` before it installed anything, and the
+    check could never stop a bad install. The owner wants the installers to need nothing from
+    GitHub but the files (MEMORY.md). `main`, which the short links serve, keeps the old scripts
+    until it advances, unless the owner moves those two files sooner.
+  - The install never chooses another app's container for an agent (4fac15a7, ADR-0197 amendment
+    of 2026-10-20): VS Code, never started on leo-desktop-02, was registered inside the Codex app's
+    container and called connected.
+  - The extension never waits on a page that shows a dialog (2f9c11f9, ADR-0168 amendment of
+    2026-10-20). A prompt left open in a controlled tab stalled every command after a reconnect, a
+    pause or a release until someone closed it (test-03, store extension 2.0.0). Deployed on the
+    owner's machine and checked live with the owner's reload: a prompt stayed open across a browser
+    relay reconnect, and status, a new tab and the answer all worked at once. With the store's 2.0.0
+    extension, answering or cancelling the dialog ends the stall; the release notes say so.
+  - Alpine is proven: release run 39508116197 on 627940a8 passed all ten jobs, and test-03 installed
+    that bundle with `get.sh` and rang the desk bell in its Chromium (linux-2 L2-14).
+- The public one-liner on the real installations, which the cutover went on without: done on
+  CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
+  service is kept until `--restore`, so a second candidate of one version is installed after an
+  uninstall or with `--restore`), on Bluefin (test-02,
+  `docs/testing/bluefin-public-2.0.0-2026-10-20.md`; its images already equalled the release) and
+  on a second Windows machine (leo-desktop-02, `docs/testing/windows-public-2.0.0-2026-10-20.md`;
+  over 1.3.5 leftovers and again after an uninstall, both Ready, the first agent task skipped by the
+  owner).
 - Owner: step 6, the clean-profile run of the public path on Windows and Linux.
 - Once WinGet's index lists 2.0.0: step 10, the README and installation guide lines that say WinGet
   carries 2.0, and a `main` fast-forward.
