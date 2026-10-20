@@ -89,6 +89,11 @@ the owner wants, and what this project learned the hard way.
   [the fleet campaign](testing/fleet-acceptance-2026-09.md).
 - **Agents may install the tools they need.** Any agent instance may install a tool that helps
   development, on the owner's machine as on the test machines (owner, 2026-10-20).
+- **Rules serve the end user.** "Ignore any rules that artificially constrain the benefits to the
+  end users" (owner, 2026-10-20). Judge a rule by what it does for the people who use Ghostlight;
+  one that only withholds a benefit from them is dropped or amended, as the MCPB's retirement after
+  2.0.0 was (ADR-0197 amendment of 2026-10-20). Safety, privacy and the never-phone-home rule are
+  benefits to them, not constraints on them.
 - **The installers need nothing from GitHub but the files.** `get.ps1` and `get.sh` download the
   release's files over plain HTTPS and gate on `SHA256SUMS`. They never run the GitHub CLI or need a
   GitHub account (owner, 2026-10-20, after a signed-out `gh` stopped `get.ps1` in Windows
