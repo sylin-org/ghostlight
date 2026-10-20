@@ -307,14 +307,14 @@ fn tabs_schema() -> Value {
             ),
             object(
                 vec![
-                    ("action", constant("focus", "")),
+                    ("action", constant("focus", "Bring the tab to the front.")),
                     ("tab", handle("tab_", "From browser_tabs list.")),
                 ],
                 vec!["action", "tab"],
             ),
             object(
                 vec![
-                    ("action", constant("close", "")),
+                    ("action", constant("close", "Close the tab.")),
                     ("tab", handle("tab_", "From browser_tabs list.")),
                 ],
                 vec!["action", "tab"],
@@ -421,7 +421,10 @@ fn window_schema() -> Value {
             ),
             object(
                 vec![
-                    ("action", constant("resize", "")),
+                    (
+                        "action",
+                        constant("resize", "Set the window size in pixels."),
+                    ),
                     ("width", integer(320, 7_680, None, "")),
                     ("height", integer(240, 4_320, None, "")),
                     ("tab", tab()),
@@ -1411,6 +1414,9 @@ fn agreed_default(variants: &[Map<String, Value>]) -> Option<Value> {
 /// A string field whose variants are all single constants is a discriminator such as `action`
 /// or `condition`, so each value keeps its own meaning: `list: ... focus: ...`. Values that share
 /// a description share one entry. Any other field joins its distinct descriptions in order.
+///
+/// Every value of a discriminator must say what it does: a value without a description would
+/// read `focus: ` with nothing after it, and building the catalog in a test fails on one.
 fn merged_description(kind: &str, variants: &[Map<String, Value>]) -> String {
     fn description(variant: &Map<String, Value>) -> Option<&str> {
         variant.get("description").and_then(Value::as_str)
@@ -1423,6 +1429,7 @@ fn merged_description(kind: &str, variants: &[Map<String, Value>]) -> String {
     for variant in variants {
         let value = variant["const"].as_str().expect("string constants");
         let meaning = description(variant).unwrap_or_default();
+        debug_assert!(!meaning.is_empty(), "the {value} value says what it does");
         match entries
             .iter_mut()
             .find(|(_, existing)| *existing == meaning)
@@ -1538,7 +1545,7 @@ fn modifier_keys() -> Value {
 }
 
 fn tab() -> Value {
-    handle("tab_", "Omit when one tab is unambiguous.")
+    handle("tab_", "Omit when unambiguous.")
 }
 
 fn url() -> Value {

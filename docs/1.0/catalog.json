@@ -15,7 +15,7 @@
       ],
       "properties": {
         "action": {
-          "description": "list: List this session's tabs. focus, close: ",
+          "description": "list: List this session's tabs. focus: Bring the tab to the front. close: Close the tab.",
           "enum": [
             "list",
             "focus",
@@ -92,7 +92,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -152,7 +152,7 @@
           "type": "boolean"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -195,7 +195,7 @@
       ],
       "properties": {
         "action": {
-          "description": "zoom: Set tab zoom. resize: ",
+          "description": "zoom: Set tab zoom. resize: Set the window size in pixels.",
           "enum": [
             "zoom",
             "resize"
@@ -213,7 +213,7 @@
           "type": "integer"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -271,7 +271,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -345,7 +345,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -398,7 +398,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -463,7 +463,7 @@
           "type": "number"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -623,7 +623,7 @@
           "type": "object"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -712,7 +712,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -776,7 +776,7 @@
       ],
       "properties": {
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -952,7 +952,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1075,7 +1075,7 @@
           "type": "object"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1251,7 +1251,7 @@
           "type": "array"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1325,7 +1325,7 @@
           "type": "number"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1426,7 +1426,7 @@
           "type": "object"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1493,7 +1493,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1628,7 +1628,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1699,7 +1699,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1791,7 +1791,7 @@
           "type": "array"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1847,7 +1847,7 @@
           "type": "boolean"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
@@ -1929,7 +1929,7 @@
           "type": "string"
         },
         "tab": {
-          "description": "Omit when one tab is unambiguous.",
+          "description": "Omit when unambiguous.",
           "maxLength": 160,
           "pattern": "^tab_.+$",
           "type": "string"
