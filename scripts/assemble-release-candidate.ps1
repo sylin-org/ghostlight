@@ -128,7 +128,8 @@ $specifications = @(
 
 $rawTargets = @(
     [ordered]@{ target = "x86_64-pc-windows-msvc"; extension = ".exe" },
-    [ordered]@{ target = "x86_64-unknown-linux-gnu"; extension = "" }
+    [ordered]@{ target = "x86_64-unknown-linux-gnu"; extension = "" },
+    [ordered]@{ target = "x86_64-unknown-linux-musl"; extension = "" }
 )
 foreach ($rawTarget in $rawTargets) {
     foreach ($component in @(

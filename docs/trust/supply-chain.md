@@ -27,7 +27,8 @@ prepared only against observable matching assets. See
 A 2.0 release publishes these files:
 
 - `ghostlight-<target>`, `ghostlight-service-<target>` and `ghostlight-desktop-<target>` for
-  `x86_64-pc-windows-msvc` (with `.exe`) and `x86_64-unknown-linux-gnu`;
+  `x86_64-pc-windows-msvc` (with `.exe`), `x86_64-unknown-linux-gnu` and, from 2.0.1,
+  `x86_64-unknown-linux-musl` (Alpine and other musl systems; the edge and the service are static);
 - `ghostlight-v<version>-x86_64-pc-windows-msvc.zip`, the WinGet archive;
 - `ghostlight-extension-v<adapter version>.zip`, the extension package;
 - `ghostlight-<version>.tgz`, the npm launcher;

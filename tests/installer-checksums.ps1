@@ -56,7 +56,9 @@ $windowsAssets = @('ghostlight', 'ghostlight-service', 'ghostlight-desktop') | F
 # A real release lists every asset it carries, not only the three this script installs.
 $otherAssets = @(
     'ghostlight-x86_64-unknown-linux-gnu', 'ghostlight-service-x86_64-unknown-linux-gnu',
-    'ghostlight-desktop-x86_64-unknown-linux-gnu', 'ghostlight-v2.0.0.mcpb', 'ghostlight-2.0.0.tgz',
+    'ghostlight-desktop-x86_64-unknown-linux-gnu', 'ghostlight-x86_64-unknown-linux-musl',
+    'ghostlight-service-x86_64-unknown-linux-musl', 'ghostlight-desktop-x86_64-unknown-linux-musl',
+    'ghostlight-v2.0.0.mcpb', 'ghostlight-2.0.0.tgz',
     'ghostlight-extension-v2.0.0.zip', 'release-candidate.json'
 )
 $expected = @{}

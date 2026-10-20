@@ -35,10 +35,13 @@ $fixedCoordinates = @(
     "client-launcher|npm",
     "raw-binary|ghostlight@x86_64-pc-windows-msvc",
     "raw-binary|ghostlight@x86_64-unknown-linux-gnu",
+    "raw-binary|ghostlight@x86_64-unknown-linux-musl",
     "raw-binary|ghostlight-desktop@x86_64-pc-windows-msvc",
     "raw-binary|ghostlight-desktop@x86_64-unknown-linux-gnu",
+    "raw-binary|ghostlight-desktop@x86_64-unknown-linux-musl",
     "raw-binary|ghostlight-service@x86_64-pc-windows-msvc",
     "raw-binary|ghostlight-service@x86_64-unknown-linux-gnu",
+    "raw-binary|ghostlight-service@x86_64-unknown-linux-musl",
     "winget-archive|x86_64-pc-windows-msvc"
 )
 

@@ -16,6 +16,7 @@ const shims = join(area, "shims");
 mkdirSync(shims);
 const names = ["ghostlight", "ghostlight-service", "ghostlight-desktop"];
 const target = "x86_64-unknown-linux-gnu";
+const muslTarget = "x86_64-unknown-linux-musl";
 const bodies = {
   // The installer never runs the edge.
   ghostlight: `#!/bin/sh
@@ -56,6 +57,7 @@ exit 1
 // curl -o and reads the saved file, so the content type never matters.
 const sums = names.flatMap(name => [
   `${createHash("sha256").update(bodies[name]).digest("hex")}  ${name}-${target}`,
+  `${createHash("sha256").update(bodies[name]).digest("hex")}  ${name}-${muslTarget}`,
   `${"0".repeat(64)}  ${name}-x86_64-pc-windows-msvc.exe`
 ]).join("\n") + "\n";
 writeFileSync(join(shims, "curl"), `#!/usr/bin/env node
@@ -82,7 +84,7 @@ if (url.endsWith('/releases/latest')) {
   body = fixture.sums;
   effective = 'https://release-assets.githubusercontent.com/fixture/SHA256SUMS';
 } else {
-  const name = url.split('/').at(-1).replace('-${target}', '');
+  const name = url.split('/').at(-1).replace(/-x86_64-unknown-linux-(gnu|musl)$/, '');
   if (!(name in fixture.bodies)) process.exit(22);
   body = fixture.bodies[name];
   effective = 'https://release-assets.githubusercontent.com/fixture/' + name;
@@ -98,6 +100,31 @@ const shimCheck = spawnSync(process.execPath, ["--check", join(shims, "curl")], 
 assert.equal(shimCheck.status, 0, `curl shim does not parse: ${shimCheck.stderr}`);
 // Provenance verification is optional. Keep this fixture offline even on machines with gh.
 writeFileSync(join(shims, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+// get.sh asks ldd, which belongs to the system's C library, which images to install, and whether
+// the window's libraries load. This one answers as glibc's does, or as musl's does when a case sets
+// INSTALLER_LIBC=musl, whatever system the test runs on; with INSTALLER_WINDOW_LIBRARIES=missing
+// it reports WebKitGTK missing the way each C library's ldd does.
+writeFileSync(join(shims, "ldd"), `#!/bin/sh
+libc=\${INSTALLER_LIBC:-glibc}
+if [ "$1" = --version ]; then
+  if [ "$libc" = musl ]; then
+    echo "musl libc (x86_64)" >&2
+    echo "Version 1.2.6" >&2
+    exit 1
+  fi
+  echo "ldd (GNU libc) 2.39"
+  exit 0
+fi
+if [ "\${INSTALLER_WINDOW_LIBRARIES:-}" = missing ]; then
+  if [ "$libc" = musl ]; then
+    echo "Error loading shared library libwebkit2gtk-4.1.so.0: No such file or directory (needed by $1)" >&2
+  else
+    echo "\tlibwebkit2gtk-4.1.so.0 => not found"
+  fi
+  exit 1
+fi
+echo "\tlibwebkit2gtk-4.1.so.0 => /usr/lib/libwebkit2gtk-4.1.so.0"
+`, { mode: 0o755 });
 function run(label, changes = {}, version, arguments_ = [], settings = {}) {
   const directory = join(area, label), userDirectory = join(directory, "user");
   mkdirSync(userDirectory, { recursive: true });
@@ -106,6 +133,8 @@ function run(label, changes = {}, version, arguments_ = [], settings = {}) {
   const environment = { ...process.env, HOME: userDirectory, PATH: `${shims}:${process.env.PATH}`,
     INSTALLER_FIXTURE: fixture, INSTALLER_REQUESTS: requests, INSTALLER_COMMANDS: commands };
   delete environment.INSTALLER_INSTALL_FAILS;
+  delete environment.INSTALLER_LIBC;
+  delete environment.INSTALLER_WINDOW_LIBRARIES;
   delete environment.GHOSTLIGHT_VERSION;
   delete environment.GHOSTLIGHT_NO_REGISTER;
   delete environment.GHOSTLIGHT_FROM;
@@ -133,6 +162,27 @@ for (const name of names) {
 assert.deepEqual(success.commands, ["downloaded service: deployment install", "downloaded service: install"],
   "the downloaded service installs, then runs install itself");
 assert.match(success.stdout, /fixture service: install/, "the output of ghostlight install reaches the person's console");
+// A system whose C library is musl (Alpine and its kind) downloads the musl images instead.
+const musl = run("musl-downloads", {}, undefined, [], { INSTALLER_LIBC: "musl" });
+assert.equal(musl.status, 0, musl.stderr);
+assert.deepEqual(musl.requests, [
+  "https://github.com/sylin-org/ghostlight/releases/latest",
+  ...["SHA256SUMS", ...names.map(name => `${name}-${muslTarget}`)]
+    .map(name => `https://github.com/sylin-org/ghostlight/releases/download/v1.2.3/${name}`)
+]);
+assert.deepEqual(musl.commands, ["downloaded service: deployment install", "downloaded service: install"]);
+// With the window's libraries loadable nothing more is said. Without them the install still
+// succeeds, and the person is told what the window needs, with Alpine's command on musl.
+assert.equal(success.stdout.includes("WebKitGTK"), false, success.stdout);
+for (const [label, libc, hint] of [
+  ["window-libraries-glibc", "glibc", "ghostlight: Install your system's WebKitGTK 4.1 package to have the window."],
+  ["window-libraries-musl", "musl", "ghostlight: On Alpine, add it with: doas apk add webkit2gtk-4.1 libayatana-appindicator"]
+]) {
+  const windowless = run(label, {}, undefined, [], { INSTALLER_LIBC: libc, INSTALLER_WINDOW_LIBRARIES: "missing" });
+  assert.equal(windowless.status, 0, windowless.stderr);
+  assert.ok(windowless.stdout.includes("ghostlight: the Ghostlight window needs WebKitGTK 4.1, which is not installed. Browsers and agents work without it."), windowless.stdout);
+  assert.ok(windowless.stdout.includes(hint), windowless.stdout);
+}
 // A failed install leaves no ghostlight command to name, so the downloaded service's doctor reports
 // what it found and the script says only that installation did not complete.
 const unfinished = run("install-fails", {}, undefined, [], { INSTALLER_INSTALL_FAILS: "1" });
@@ -199,12 +249,12 @@ for (const damaged of names) {
 // A release bundle on this machine installs without asking the network for anything. Its folder is
 // the release workflow's artifact (SHA256SUMS beside assets/, with a manifest naming the version) or
 // a folder of release downloads (SHA256SUMS beside the images). The folder's name has a space.
-function bundle(label, { layout = "candidate", images = bodies, checksums = sums } = {}) {
+function bundle(label, { layout = "candidate", images = bodies, checksums = sums, system = target } = {}) {
   const folder = join(area, label, "release candidate");
   const assets = layout === "candidate" ? join(folder, "assets") : folder;
   mkdirSync(assets, { recursive: true });
   if (checksums !== null) writeFileSync(join(folder, "SHA256SUMS"), checksums);
-  for (const [name, body] of Object.entries(images)) writeFileSync(join(assets, `${name}-${target}`), body);
+  for (const [name, body] of Object.entries(images)) writeFileSync(join(assets, `${name}-${system}`), body);
   writeFileSync(join(assets, "ghostlight-x86_64-pc-windows-msvc.exe"), "the other system's image");
   if (layout === "candidate") {
     writeFileSync(join(folder, "release-candidate.json"),
@@ -227,6 +277,17 @@ assert.equal(fromDownloads.status, 0, fromDownloads.stderr);
 assert.deepEqual(fromDownloads.requests, []);
 assert.deepEqual(fromDownloads.commands, ["downloaded service: deployment install --restore", "downloaded service: install"]);
 assert.ok(fromDownloads.stdout.includes(`Ghostlight copied from ${downloads}. Checksums verified.`), fromDownloads.stdout);
+// A musl system takes the musl images from a bundle. A bundle holding only those cannot serve a
+// glibc system, which says which image is missing.
+const muslBundle = run("local-bundle-musl", {}, undefined, [],
+  { GHOSTLIGHT_FROM: bundle("local-bundle-musl", { system: muslTarget }), INSTALLER_LIBC: "musl" });
+assert.equal(muslBundle.status, 0, muslBundle.stderr);
+assert.deepEqual(muslBundle.commands, ["downloaded service: deployment install", "downloaded service: install"]);
+const muslOnly = run("local-bundle-musl-on-glibc", {}, undefined, [],
+  { GHOSTLIGHT_FROM: bundle("local-bundle-musl-on-glibc", { system: muslTarget }) });
+assert.notEqual(muslOnly.status, 0);
+assert.ok(muslOnly.stderr.trim().endsWith(` has no ghostlight-${target}`), muslOnly.stderr);
+assert.deepEqual(muslOnly.commands, []);
 const unregistered = run("local-no-register", {}, undefined, [], { GHOSTLIGHT_FROM: bundle("local-no-register"), GHOSTLIGHT_NO_REGISTER: "1" });
 assert.equal(unregistered.status, 0, unregistered.stderr);
 assert.deepEqual(unregistered.commands, ["downloaded service: deployment install"]);
@@ -255,4 +316,4 @@ const absentFolder = run("local-absent", {}, undefined, [], { GHOSTLIGHT_FROM: n
 assert.notEqual(absentFolder.status, 0);
 assert.equal(absentFolder.stderr.trim(), `ghostlight: GHOSTLIGHT_FROM is not a folder: ${nowhere}`);
 assert.deepEqual(absentFolder.requests, []);
-console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, install in the console, a failed install reported by the downloaded doctor, restore, invalid release, absent, unreachable or malformed requested version, checksum refusal, a local bundle in both layouts with nothing asked of the network, and its refusals\nEvidence: ${area}`);
+console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, the musl images on a musl system, the window's missing libraries named, install in the console, a failed install reported by the downloaded doctor, restore, invalid release, absent, unreachable or malformed requested version, checksum refusal, a local bundle in both layouts with nothing asked of the network, and its refusals\nEvidence: ${area}`);

@@ -1,0 +1,16 @@
+anyhow
+ghostlight
+ghostlight-relay
+itoa
+memchr
+proc-macro2
+quote
+serde
+serde_core
+serde_derive
+serde_json
+syn
+thiserror
+thiserror-impl
+unicode-ident
+zmij

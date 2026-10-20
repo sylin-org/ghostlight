@@ -30,7 +30,7 @@ const TREE_DIR = join(ROOT, "tests", "golden", "cargo-tree");
 const UPDATE = process.env.GHOSTLIGHT_GUARD_UPDATE === "1";
 
 const EDGES = ["ghostlight"];
-const TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
+const TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"];
 
 /**
  * Paths locked to the published relay revision: everything in the two crates except test files,

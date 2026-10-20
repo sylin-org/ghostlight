@@ -53,11 +53,27 @@ const HELP_FLAGS = new Set(["--help", "-h"]);
 /** The command a script runs, whose usage the service prints when a help flag is among its arguments. */
 const CALL_COMMAND = "call";
 
-export function releaseTarget(platform = process.platform, architecture = process.arch) {
-  const key = `${platform}/${architecture}`;
+/** The C libraries the Linux images are built for: most systems use glibc, Alpine and its kind musl. */
+export const GLIBC = "glibc";
+export const MUSL = "musl";
+
+/**
+ * The C library this Node process runs on, which is the one the system gives programs: glibc when
+ * Node's own report names a glibc runtime, musl otherwise. Only Linux has a choice; elsewhere null.
+ */
+export function runtimeLibc(platform = process.platform, report = () => process.report?.getReport?.()) {
+  if (platform !== "linux") {
+    return null;
+  }
+  return report()?.header?.glibcVersionRuntime ? GLIBC : MUSL;
+}
+
+export function releaseTarget(platform = process.platform, architecture = process.arch, libc = runtimeLibc(platform)) {
+  const key = libc === MUSL ? `${platform}/${architecture}/${MUSL}` : `${platform}/${architecture}`;
   const targets = {
     "win32/x64": "x86_64-pc-windows-msvc",
     "linux/x64": "x86_64-unknown-linux-gnu",
+    "linux/x64/musl": "x86_64-unknown-linux-musl",
   };
   const target = targets[key];
   if (!target) {
@@ -66,22 +82,24 @@ export function releaseTarget(platform = process.platform, architecture = proces
   return target;
 }
 
-export function assetNames(platform = process.platform, architecture = process.arch) {
-  const target = releaseTarget(platform, architecture);
+export function assetNames(platform = process.platform, architecture = process.arch, libc = runtimeLibc(platform)) {
+  const target = releaseTarget(platform, architecture, libc);
   const extension = platform === "win32" ? ".exe" : "";
   return EXECUTABLES.map((name) => `${name}-${target}${extension}`);
 }
 
+/** The images' names once installed, the same for either C library. */
 export function executableNames(platform = process.platform, architecture = process.arch) {
-  releaseTarget(platform, architecture);
+  releaseTarget(platform, architecture, null);
   const extension = platform === "win32" ? ".exe" : "";
   return EXECUTABLES.map((name) => `${name}${extension}`);
 }
 
 export function publishedAssetNames() {
   return [
-    ...assetNames("win32", "x64"),
-    ...assetNames("linux", "x64"),
+    ...assetNames("win32", "x64", null),
+    ...assetNames("linux", "x64", GLIBC),
+    ...assetNames("linux", "x64", MUSL),
   ];
 }
 
@@ -303,9 +321,10 @@ export async function ensureBinary({
 }
 
 /** Downloads and verifies the given executables into a fresh stage directory under `cacheRoot`. */
-async function stageDownloads({ indexes, packageJson, manifest, platform, architecture, cacheRoot, fetchImpl, reporter }) {
-  const assets = assetNames(platform, architecture);
+async function stageDownloads({ indexes, packageJson, manifest, platform, architecture, libc, cacheRoot, fetchImpl, reporter }) {
+  const assets = assetNames(platform, architecture, libc);
   const executables = executableNames(platform, architecture);
+  const system = libc === MUSL ? `${platform}/${architecture} (${MUSL})` : `${platform}/${architecture}`;
   await mkdir(cacheRoot, { recursive: true });
   const stage = await mkdtemp(join(cacheRoot, ".download-"));
   try {
@@ -316,7 +335,7 @@ async function stageDownloads({ indexes, packageJson, manifest, platform, archit
         expectedHash: manifest.binaries[assets[index]],
         fetchImpl,
         onDownload: () => reporter(
-          `Downloading Ghostlight ${packageJson.version} for ${platform}/${architecture} (${position + 1}/${indexes.length})...`,
+          `Downloading Ghostlight ${packageJson.version} for ${system} (${position + 1}/${indexes.length})...`,
         ),
       });
       if (changed) {
@@ -347,6 +366,7 @@ export async function prepareLaunch({
   arguments_ = process.argv.slice(2),
   platform = process.platform,
   architecture = process.arch,
+  libc = runtimeLibc(platform),
   cacheRoot = process.env[TEST_HOME_VARIABLE] ?? join(homedir(), ".ghostlight"),
   fetchImpl = globalThis.fetch,
   reporter = () => {},
@@ -366,7 +386,7 @@ export async function prepareLaunch({
     validateChecksums(manifest, packageJson.version, publishedAssetNames());
     return { packageJson, manifest };
   };
-  const stageOptions = { platform, architecture, cacheRoot: home, fetchImpl, reporter };
+  const stageOptions = { platform, architecture, libc, cacheRoot: home, fetchImpl, reporter };
   const wholeSet = executables.map((_, index) => index);
 
   if (arguments_[0] === DEPLOYMENT_COMMAND) {

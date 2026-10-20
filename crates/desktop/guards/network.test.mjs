@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 const CRATE = "ghostlight-desktop";
-const TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
+const TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"];
 
 /** Crates the window must never link: any network stack would break the never-phone-home promise (ADR-0028). */
 const NETWORK_CRATES = /^(hyper|reqwest|ureq|h2|http|rustls|native-tls|openssl|curl|isahc|tokio|socket2|mio|zbus|ashpd|async-std)$/;

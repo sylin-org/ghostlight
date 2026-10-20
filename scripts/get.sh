@@ -5,6 +5,8 @@
 # The Ghostlight 2.0 extension's setup page prints the one-line command that fetches this file;
 # keep its URL working for 2.x.
 #
+# It installs the images for the system's C library: glibc, or musl on Alpine and its kind.
+#
 # GHOSTLIGHT_VERSION installs exactly that release instead of the latest one, found by its tag
 # (v<version>) through the GitHub releases API. A prerelease is installable this way and no other:
 # the latest release never is:
@@ -35,8 +37,26 @@ for argument in "$@"; do
 done
 
 repository="sylin-org/ghostlight"
+
+# The Linux images exist for both C libraries: glibc for most systems, musl for Alpine and its
+# kind. ldd belongs to the system's own C library and names it; a system without a readable ldd is
+# musl when it has musl's loader and no glibc loader.
+linux_target() {
+  case "$(ldd --version 2>&1 || true)" in
+    *musl*) echo "x86_64-unknown-linux-musl" ;;
+    *GNU*|*GLIBC*|*glibc*) echo "x86_64-unknown-linux-gnu" ;;
+    *)
+      if [ -e /lib/ld-musl-x86_64.so.1 ] && [ ! -e /lib64/ld-linux-x86-64.so.2 ]; then
+        echo "x86_64-unknown-linux-musl"
+      else
+        echo "x86_64-unknown-linux-gnu"
+      fi
+      ;;
+  esac
+}
+
 case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
+  Linux-x86_64) target=$(linux_target) ;;
   *)
     echo "ghostlight: no published binary for $(uname -s)/$(uname -m)" >&2
     exit 1
@@ -214,4 +234,16 @@ else
     echo "ghostlight: installation did not complete" >&2
     exit 1
   fi
+fi
+
+# The window links the system's WebKitGTK 4.1. Where its libraries are missing (a fresh Alpine
+# desktop often lacks them) the window cannot start, while the service, the browser connection and
+# the agents work. ldd names what is missing, so say what to install.
+if command -v ldd >/dev/null 2>&1 &&
+  ldd "$temporary/ghostlight-desktop" 2>&1 | grep -q -E 'not found|Error loading shared library'; then
+  echo "ghostlight: the Ghostlight window needs WebKitGTK 4.1, which is not installed. Browsers and agents work without it."
+  case "$target" in
+    *-musl) echo "ghostlight: On Alpine, add it with: doas apk add webkit2gtk-4.1 libayatana-appindicator" ;;
+    *) echo "ghostlight: Install your system's WebKitGTK 4.1 package to have the window." ;;
+  esac
 fi

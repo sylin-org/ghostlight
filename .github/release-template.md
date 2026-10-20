@@ -77,6 +77,9 @@ build-provenance attestations are the artifact-integrity controls.
 | Raw image: `ghostlight-service` | Linux x86_64 | `ghostlight-service-x86_64-unknown-linux-gnu` |
 | Raw image: `ghostlight-desktop` | Windows x86_64 | `ghostlight-desktop-x86_64-pc-windows-msvc.exe` |
 | Raw image: `ghostlight-desktop` | Linux x86_64 | `ghostlight-desktop-x86_64-unknown-linux-gnu` |
+| Raw image: edge `ghostlight` | Linux x86_64, musl (Alpine) | `ghostlight-x86_64-unknown-linux-musl` |
+| Raw image: `ghostlight-service` | Linux x86_64, musl (Alpine) | `ghostlight-service-x86_64-unknown-linux-musl` |
+| Raw image: `ghostlight-desktop` | Linux x86_64, musl (Alpine) | `ghostlight-desktop-x86_64-unknown-linux-musl` |
 | WinGet archive | Windows x86_64 | `ghostlight-v${VERSION}-x86_64-pc-windows-msvc.zip` |
 | Chromium extension (store ZIP) | Any supported desktop | `ghostlight-extension-v${ADAPTER_VERSION}.zip` |
 | npm launcher tarball | Supported desktops | `ghostlight-${VERSION}.tgz` |

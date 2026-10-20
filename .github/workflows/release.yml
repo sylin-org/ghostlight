@@ -90,6 +90,32 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Alpine and other musl systems (linux-2 L2-01): the edge and the service static, the shell
+  # against Alpine's WebKitGTK, built in Alpine by the same script an Alpine machine runs.
+  release-binaries-musl:
+    needs: quality-gate
+    runs-on: ubuntu-24.04
+    env:
+      ALPINE_IMAGE: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build all three executable shores in Alpine
+        run: |
+          docker run --rm -e OWNER="$(id -u):$(id -g)" -v "$PWD:/work" -w /work "$ALPINE_IMAGE" sh -euc '
+            apk add --no-cache build-base pkgconf rustup webkit2gtk-4.1-dev dbus-dev libayatana-appindicator-dev
+            rustup-init -y --profile minimal --default-toolchain none
+            export PATH="$HOME/.cargo/bin:$PATH"
+            rustup toolchain install
+            rustc --version
+            sh scripts/build-musl-images.sh dist/raw-x86_64-unknown-linux-musl
+            chown -R "$OWNER" dist target'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-x86_64-unknown-linux-musl
+          path: dist/raw-x86_64-unknown-linux-musl/
+          if-no-files-found: error
+          retention-days: 7
+
   extension-artifact:
     needs: quality-gate
     runs-on: ubuntu-24.04
@@ -106,7 +132,7 @@ jobs:
           retention-days: 7
 
   candidate-bundle:
-    needs: [supply-chain, quality-gate, release-binaries, extension-artifact]
+    needs: [supply-chain, quality-gate, release-binaries, release-binaries-musl, extension-artifact]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -235,3 +261,23 @@ jobs:
           echo "GHOSTLIGHT_TEST_BROWSER=$RUNNER_TEMP/ghostlight-chrome/chrome-linux64/chrome" >> "$GITHUB_ENV"
       - name: Install from the bundle, use it from an agent, uninstall
         run: dbus-run-session -- xvfb-run -a node tests/linux/release-install.mjs --bundle release-candidate --browser "$GHOSTLIGHT_TEST_BROWSER"
+
+  # The same on Alpine, the system the musl images are for (linux-2 L2-14): the real get.sh picks
+  # them, and Alpine's own Chromium runs in an Alpine container as an ordinary user.
+  install-from-bundle-alpine:
+    needs: candidate-bundle
+    runs-on: ubuntu-24.04
+    env:
+      ALPINE_IMAGE: alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-candidate
+          path: release-candidate
+      - name: Install from the bundle on Alpine, use it from an agent, uninstall
+        run: |
+          docker run --rm --shm-size=1g -e PERSON_UID="$(id -u)" -v "$PWD:/work" "$ALPINE_IMAGE" sh -euc '
+            apk add --no-cache nodejs chromium font-dejavu xvfb xvfb-run dbus webkit2gtk-4.1 libayatana-appindicator
+            adduser -D -u "$PERSON_UID" person
+            su person -s /bin/sh -c "cd /work && CI=1 GHOSTLIGHT_TEST_NO_SANDBOX=1 dbus-run-session -- xvfb-run -a node tests/linux/release-install.mjs --bundle release-candidate --browser /usr/bin/chromium"'

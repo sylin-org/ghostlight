@@ -72,9 +72,14 @@ Applications or `ghostlight open` shows the window.
 Ghostlight supports the stable channel of each browser it lists. Beta, Dev and Canary channels
 install separately with their own profiles, and Ghostlight does not support them.
 
-Linux binaries support x86_64 glibc-based desktops and a native Chrome, Edge, Brave, or Chromium
-package. Snap and Flatpak browsers cannot start Ghostlight's browser relay through native
-messaging. Install and doctor identify those package forms and name the native-package remedy. Use
+Linux binaries support x86_64 desktops with either C library: glibc, which most distributions use,
+and, from 2.0.1, musl, which Alpine uses. The installer and the npm launcher pick the images for
+the system's C library. The musl edge and service are static and run on any musl system. The musl
+window is built on Alpine and needs its WebKitGTK 4.1, and the tray needs AppIndicator: on Alpine,
+`doas apk add webkit2gtk-4.1 libayatana-appindicator`. Without them the service, the browser
+connection and the agents still work, and `get.sh` says what the window needs. Every Linux
+system needs a native Chrome, Edge, Brave, or Chromium package; on Alpine, `chromium`. Snap and
+Flatpak browsers cannot start Ghostlight's browser relay through native messaging. Install and doctor identify those package forms and name the native-package remedy. Use
 `--all-browsers` only when deliberately preparing registrations before browser installation.
 
 `ghostlight install --client <id>` sets up only the agents you name: an agent's id selects each

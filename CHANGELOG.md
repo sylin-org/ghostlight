@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Alpine and other musl systems install Ghostlight from the release. It carries
+  `x86_64-unknown-linux-musl` images: the edge and the service static, the window built on Alpine
+  against WebKitGTK 4.1. `get.sh` and the npm launcher pick them on a musl system, and `get.sh`
+  says what the window needs when its libraries are missing. The release workflow builds them in
+  Alpine and installs the candidate on Alpine with Alpine's Chromium.
+
 ### Fixed
 
 - On Windows, Ghostlight no longer stops a shutdown, restart or sign-out. A hidden window that the

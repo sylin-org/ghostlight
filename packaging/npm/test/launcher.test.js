@@ -14,9 +14,12 @@ import {
   edgeArguments,
   ensureBinary,
   executableNames,
+  GLIBC,
+  MUSL,
   neverInstalls,
   publishedAssetNames,
   releaseTarget,
+  runtimeLibc,
   validateChecksums,
 } from "../bin/ghostlight.js";
 
@@ -65,18 +68,33 @@ test("a real offline npm install invokes the launcher through the platform bin e
 });
 
 test("the published platforms resolve to exact release targets", () => {
-  assert.equal(releaseTarget("win32", "x64"), "x86_64-pc-windows-msvc");
-  assert.equal(releaseTarget("linux", "x64"), "x86_64-unknown-linux-gnu");
-  assert.throws(() => releaseTarget("linux", "arm64"), /does not publish/);
+  assert.equal(releaseTarget("win32", "x64", null), "x86_64-pc-windows-msvc");
+  assert.equal(releaseTarget("linux", "x64", GLIBC), "x86_64-unknown-linux-gnu");
+  assert.equal(releaseTarget("linux", "x64", MUSL), "x86_64-unknown-linux-musl");
+  assert.throws(() => releaseTarget("linux", "arm64", GLIBC), /does not publish/);
+  assert.throws(() => releaseTarget("linux", "arm64", MUSL), /does not publish binaries for linux\/arm64\/musl/);
+});
+
+test("a Linux process names its C library from Node's own report", () => {
+  assert.equal(runtimeLibc("linux", () => ({ header: { glibcVersionRuntime: "2.39" } })), GLIBC);
+  assert.equal(runtimeLibc("linux", () => ({ header: {} })), MUSL, "Alpine's Node reports no glibc runtime");
+  assert.equal(runtimeLibc("win32", () => { throw new Error("no report is read off Linux"); }), null);
+  assert.notEqual(runtimeLibc(), undefined);
 });
 
 test("every platform downloads the complete unit of edge, service and shell", () => {
-  assert.deepEqual(assetNames("linux", "x64"), [
+  assert.deepEqual(assetNames("linux", "x64", GLIBC), [
     "ghostlight-x86_64-unknown-linux-gnu",
     "ghostlight-service-x86_64-unknown-linux-gnu",
     "ghostlight-desktop-x86_64-unknown-linux-gnu",
   ]);
-  assert.ok(assetNames("win32", "x64").every((name) => name.endsWith(".exe")));
+  assert.deepEqual(assetNames("linux", "x64", MUSL), [
+    "ghostlight-x86_64-unknown-linux-musl",
+    "ghostlight-service-x86_64-unknown-linux-musl",
+    "ghostlight-desktop-x86_64-unknown-linux-musl",
+  ]);
+  assert.ok(assetNames("win32", "x64", null).every((name) => name.endsWith(".exe")));
+  assert.equal(publishedAssetNames().length, 9, "three images for each of Windows, glibc and musl");
 });
 
 test("verified assets are cached under exact trusted sibling names", () => {
@@ -253,7 +271,7 @@ async function launcherFixture() {
   const names = executableNames("linux", "x64");
   const activity = { downloads: [], installs: [] };
   const options = {
-    platform: "linux", architecture: "x64", cacheRoot: home,
+    platform: "linux", architecture: "x64", libc: GLIBC, cacheRoot: home,
     fetchImpl: async url => {
       activity.downloads.push(url.split("/").at(-1));
       return new Response(bytes[url.split("/").at(-1)]);
@@ -297,6 +315,18 @@ test("a launch with nothing installed downloads, verifies, installs from the sta
     assert.equal(open.executable, join(f.bin, "ghostlight"));
     assert.deepEqual(open.arguments_, ["open"]);
     assert.equal(f.activity.installs.length, 1, "the second launch finds the install current");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("on a musl system a launch downloads and verifies the musl images", async () => {
+  const f = await launcherFixture();
+  try {
+    const launch = await f.prepareLaunch({ ...f.options, libc: MUSL, arguments_: [] });
+    assert.equal(launch.executable, join(f.bin, "ghostlight"));
+    assert.deepEqual([...f.activity.downloads].sort(), [...assetNames("linux", "x64", MUSL)].sort());
+    assert.equal(f.activity.installs.length, 1);
   } finally {
     await f.cleanup();
   }

@@ -15,6 +15,11 @@ the owner's policy and diagnostics on; the home from before L2-12 was removed at
 the owner's request on 2026-10-19. Open for windows-claude: the `AdvertisedCatalog` defect (Notes, "F1
 on the go head") and the observations under L2-12.
 
+2.0.1, 2026-10-20: the owner's scope brings Alpine back (Notes, "Scope, 2026-10-20"), for
+linux-claude on test-03 alone. L2-01 is built: the release workflow makes the musl images and the
+installers pick them. L2-14 is next: the release workflow's bundle installed and used on test-03's
+real installation.
+
 ## Files this batch owns
 
 `.github/workflows/release.yml`, `scripts/get.sh`, `scripts/get.ps1`,
@@ -26,7 +31,7 @@ on the go head") and the observations under L2-12.
 
 | Task | What | Status |
 | --- | --- | --- |
-| L2-01 | Alpine (musl) gets a working Ghostlight from the release | blocked: owner, CachyOS only |
+| L2-01 | Alpine (musl) gets a working Ghostlight from the release | done (built; proven under L2-14) |
 | L2-02 | The install scripts install from a local release bundle | done |
 | L2-03 | Bluefin readiness: Flatpak browsers, SELinux, read-only /usr | blocked: owner, CachyOS only |
 | L2-04 | What Claude Code does with the plugin and the installer's entry together | done |
@@ -130,7 +135,7 @@ never sees the entry.
 | L2-11 | The release workflow's bundle, built and verified | done |
 | L2-12 | A clean install from the bundle, and real use | done |
 | L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
-| L2-14 | Alpine from the bundle | blocked: owner, CachyOS only |
+| L2-14 | Alpine from the bundle | todo (test-03) |
 | L2-15 | The owner's steps for Bluefin and Alpine | done |
 | L2-16 | CI installs the candidate from its bundle and uses it, as a person on Linux does | done |
 
@@ -241,6 +246,23 @@ compare as resolved paths, and the browser keeps its passwords in its profile
 while it waits. The first release run on the go head is L2-11's.
 
 ## Notes
+
+**Scope, 2026-10-20.** The owner set 2.0.1's scope: among other items, Alpine and other musl
+systems from the release (windows-claude's line in the chat, and `docs/STATUS.md`). That supersedes
+the "CachyOS only" choice below for L2-01 and L2-14, which test-03 carries out on its own real
+installation, Alpine 3.24 with the owner's Chromium. L2-03 and L2-13 stay out.
+
+**L2-01 as built, 2026-10-20.** `scripts/build-musl-images.sh` builds the three images on Alpine
+and checks the copies that ship: the edge and the service static (no loader, no library), the
+window through musl's loader against Alpine's WebKitGTK 4.1. The release workflow runs it in an
+`alpine:3.24.2` container pinned by digest (`release-binaries-musl`), so the candidate carries 19
+artifacts. `get.sh` asks `ldd` which C library the system has, falling back to musl's loader;
+the npm launcher asks Node's own report. After installing, `get.sh` checks the window's libraries
+with `ldd` and says what to install when they are missing, because a window that cannot load only
+reads as "ended again and again" in `status`. `install-from-bundle-alpine` runs
+`tests/linux/release-install.mjs` in Alpine with Alpine's Chromium. A local rehearsal of the
+bundle job on test-03 (the v2.0.0 Windows and glibc images, the musl images built here) assembled
+and verified 19 artifacts, and the npm package binds all nine images.
 
 **F1 on the go head, 2026-10-19 (for L2-12).** On the go head deployed in place, in the isolated
 Claude Code home of L2-04 with the plugin (now `npx -y ghostlight@2`, run by the stand-in that
