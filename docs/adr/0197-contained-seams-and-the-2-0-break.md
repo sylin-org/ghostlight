@@ -371,6 +371,20 @@ that entry, and the install had written inside another app's container.
 - **What this gives up.** A Store edition the catalog does not name is no longer found through its
   container alone. When one appears, the catalog names its package, as it names Claude Desktop's.
 
+## The MCPB keeps shipping (2026-10-20)
+
+This amends Decision 16 and its 2026-10-14 amendment ("MCPB retires after its final 2.0 release").
+On 2026-10-20 the owner set a standing rule: ignore any rule that artificially constrains the
+benefits to the end users. Ending the bundle at 2.0.0 was such a rule. A person on Windows who
+installs Ghostlight through the Claude Desktop bundle would stay on 2.0.0, without every fix after
+it, the shutdown veto of 2.0.0 among them. The release workflow builds and tests the bundle anyway.
+
+- **The bundle ships with every release again**, at the product version.
+- **It stays a carrier** (ADR-0199 Decision 19): it installs the set when the installed one is
+  absent or older, then runs the installed edge. Inside Claude Desktop's container it installs the
+  home and prints the one command that finishes the registrations from a regular terminal.
+- **Nothing else changes.** The other retired channels stay retired.
+
 ## Amendment 2026-10-14: connector source lock
 
 Connector and relay source is locked to the last published tag at the same relay revision. The

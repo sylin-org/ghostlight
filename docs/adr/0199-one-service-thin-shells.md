@@ -747,3 +747,9 @@ agent counts once. The line reads "Ghostlight is running; 2 agents and 1 browser
 "Ghostlight is not running.". It still counts connections and never services, and `status --json`
 and `doctor` keep the MCP client and command-line counts beside the agents. Pause reads "Pause
 agents" and "Resume agents" on the band, in the tray and in Settings, the browser toolbar's words.
+
+## Amendment (2026-10-20): the MCPB keeps shipping
+
+Decision 19's "MCPB's final release carries 2.0.0" no longer holds: the Claude Desktop bundle ships
+with every release, as a carrier, unchanged otherwise. The reason is in the ADR-0197 amendment of
+the same day, "The MCPB keeps shipping".

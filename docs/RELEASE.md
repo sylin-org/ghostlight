@@ -52,8 +52,9 @@ One Ghostlight version comprises three executable images and what delivers them:
 - one Windows WinGet archive, the one-line installers (`get.ps1` and `get.sh`, served from
   `main`), and candidate-derived WinGet manifests (WinGet is a carrier for `ghostlight install`,
   which installs into `~/.ghostlight/bin` and never replaces a newer copy with an older one);
-- the self-contained Windows Claude Desktop MCPB, of which 2.0.0 is the final release, because
-  MCPB runs its bundled installer on every Claude Desktop start (ADR-0197 Decision 16);
+- the self-contained Windows Claude Desktop MCPB, a carrier that runs its bundled installer on
+  every Claude Desktop start and installs only over an absent or older set. It ships with every
+  release (ADR-0197 amendment of 2026-10-20, which ended its retirement after 2.0.0);
 - the Ghostlight plugin (`packaging/plugin/ghostlight/`) for Claude-schema and ZCode
   marketplaces, at its own version (ADR-0144). The marketplaces read it from `main`, so it reaches
   its users when `main` advances, and its version moves only in the plugin step (Candidate gates);
