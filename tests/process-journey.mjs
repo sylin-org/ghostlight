@@ -131,12 +131,13 @@ async function mainFlow() {
     assert.equal(browser.requested("capture").length, 1);
     console.log("PASS a synthetic browser serves list_tabs, navigate, a call and a capture");
 
-    // The service is killed under a call in flight.
+    // The service is killed under a call in flight. The read carries the longest timeout_ms a call
+    // allows, so the kill lands before the read's own deadline however slow the runner is.
     const probe = await RelayMcp.open(home);
     const cutOff = probe.reply.templates[templateKind.cut_off]["tools/call"].result.content;
     probe.close();
     browser.holdNext("call");
-    const inFlight = mcp.begin("tools/call", { name: "browser_read", arguments: { tab: handle } });
+    const inFlight = mcp.begin("tools/call", { name: "browser_read", arguments: { tab: handle, timeout_ms: 30_000 } });
     await until(() => browser.held.length === 1, "the read reaches the browser");
     const before = await home.status();
     await home.killService();
