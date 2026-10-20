@@ -5,8 +5,8 @@ Ghostlight installs as one local product: three executables in `~/.ghostlight/bi
 `ghostlight-desktop`, the window and the tray) and a compatible Chromium extension. No account, no
 resident launcher service, no admin rights.
 
-This guide describes the 2.0 install and the source-development path. Until 2.0 is published, the
-latest published release is the one the [README](../../README.md) names under "Where it stands
+This guide describes the 2.0 install and the source-development path. The latest
+published release is the one the [README](../../README.md) names under "Where it stands
 today". Every route installs into `~/.ghostlight/bin`. The extension connects by the fixed
 native-host name, and the service gives it the page code it runs when it connects, so a service
 update needs no extension update. A 1.x extension speaks protocol 3 and must be updated once to the

@@ -5,7 +5,7 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - Unreleased
+## [2.0.0] - 2026-10-19
 
 Ghostlight 2.0.0 is a breaking release. Update the service and the Ghostlight in Browser extension
 together, because neither works with the other's 1.x version. A 1.x install moves to the 2.0

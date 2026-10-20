@@ -34,12 +34,12 @@ browser work and its controls on your machine.
 
 ## Where it stands today
 
-The published release is 1.3.14. It is available as the GitHub release
-[`v1.3.14`](https://github.com/sylin-org/ghostlight/releases/tag/v1.3.14), the npm package
-`ghostlight@1.3.14`, the Chrome Web Store adapter v1.3.12, and the MCP Registry record
-`org.sylin/ghostlight 1.3.14`, all observed on 2026-10-02 and recorded in
+The published release is 2.0.0. It is available as the GitHub release
+[`v2.0.0`](https://github.com/sylin-org/ghostlight/releases/tag/v2.0.0), the npm package
+`ghostlight@2.0.0`, the Chrome Web Store adapter v2.0.0, and the MCP Registry record
+`org.sylin/ghostlight 2.0.0`, all observed on 2026-10-19 and recorded in
 [`docs/public-status.json`](docs/public-status.json) and the
-[release custody record](docs/testing/screenshot-release-1.3.14-2026-10-02.md).
+[release custody record](docs/testing/release-2.0.0-2026-10-19.md).
 
 ## What you get
 
@@ -249,13 +249,14 @@ use the one-line installer.
 <details>
 <summary><strong>Current release and compatibility</strong></summary>
 
-**Platform state.** Windows and Linux are the supported 1.0 platforms, verified against live
-browsers on development hosts; the clean installed-product evidence lanes continue after
-publication. macOS has no 1.0 artifact yet.
+**Platform state.** Windows (x64) and Linux (x86_64 with glibc) are the supported 2.0 platforms.
+2.0.0 was tested before publication on Windows, CachyOS and Bluefin, and its public install was
+proven on Windows on 2026-10-19. Alpine and other musl systems come in 2.0.1. macOS has no artifact
+yet.
 
-**Extension state.** The Chrome Web Store listing serves adapter v1.3.12, compatible with
-service 1.3.14 under adapter protocol 3. Service updates use fixed installation paths and
-the existing injector; no extension update or reload is required.
+**Extension state.** The Chrome Web Store listing serves adapter v2.0.0, compatible with
+service 2.0.x under adapter protocol 4. The service gives the extension the page code it runs, so
+a 2.0 service update needs no extension update or reload. A 1.x extension updates once to 2.0.
 
 The service and Chrome adapter are delivered separately with compatible mechanisms. The
 [compatibility map](compatibility.json) is authoritative, and the

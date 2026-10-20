@@ -1,18 +1,12 @@
 # Roadmap
 
-Ghostlight 2.0 is the current development target. The public 1.3.14 release remains the installed
-baseline until 2.0 passes its release checks and is published.
+Ghostlight 2.0 is released: 2.0.0 was published on 2026-10-19.
 
-## 2.0 release
+## 2.0.1
 
-- Build the release candidate, prove the install from its bundle on Windows and Linux, and run a
-  1.x upgrade on another machine while the store still serves 1.x. Nothing is tagged before
-  `v2.0.0`.
-- Submit the 2.0 extension for staged store review with the 2.0 privacy text already public.
-- Cut over in one sitting: the release, the npm launcher, the short install commands, the
-  extension, the public state, the MCP Registry and WinGet.
+- Alpine and other musl systems, with musl images in the release.
 
-The steps are in [`docs/RELEASE.md`](docs/RELEASE.md), the checks in
+The release steps are in [`docs/RELEASE.md`](docs/RELEASE.md), the checks in
 [`docs/STATUS.md`](docs/STATUS.md), and the acceptance contract in
 [`docs/1.0/ACCEPTANCE.md`](docs/1.0/ACCEPTANCE.md).
 

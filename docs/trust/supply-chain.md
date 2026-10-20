@@ -14,8 +14,8 @@ release asset from 2026-07 onward; earlier releases attest the packaged archives
 also carry a canonical `SHA256SUMS` manifest. A read-only assembly job creates the complete
 release bundle, including the SBOM; the privileged publisher can only download that bundle,
 verify its exact file list and hashes, attest it, and create the release.
-The public service channels currently serve 1.3.14. The Chrome Web Store adapter serves 1.3.12 and
-is compatible with that service release under adapter protocol 3.
+The public service channels currently serve 2.0.0. The Chrome Web Store adapter serves 2.0.0 and
+is compatible with that service release under adapter protocol 4.
 The workflow builds and attests a complete candidate without publishing it; channel publication
 remains an explicit owner-approved operation after verification. WinGet metadata is
 prepared only against observable matching assets. See
