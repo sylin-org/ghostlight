@@ -128,22 +128,25 @@ cancels a run in progress, and cargo audit runs daily (audit.yml) and in the rel
 
 ## Release checklist
 
+Done on 2026-10-19:
+
+- The 2.0 bundle: release run 39347181245 on 6a41327f, verified with
+  `scripts/check-release-candidate.ps1` (2.0.0, 16 artifacts). It differs from the bundle every
+  machine tested (39323041650 on eba78013) only in docs, and its extension ZIP is the same
+  (`ee224962...`). `v2.0.0` is tagged on 6a41327f.
+- Tested on that code: the owner's Windows machine, CachyOS (linux-2) and Bluefin (test-02,
+  `docs/testing/bluefin-2.0-bundle-2026-10-19.md`). Bluefin's finding, that status does not say
+  what accept answers a prompt with, is kept for 2.0.1 (the owner and the coordinator).
+- sylin.org's privacy page carries the 2.0 policy (website 9117a8e).
+- The extension is submitted to the Chrome Web Store as 2.0.0, STAGED_PUBLISH, pending review; the
+  store still serves 1.3.12. The package keeps the host permissions (JQ3 kept for 2.0), and the
+  listing keeps its 1.x images until the owner replaces them. Only a release blocker reopens the
+  extension.
+
 Now:
 
-- Coordinator: the browser_dialog wording (an agent reads a dialog's status before it answers),
-  then the bundle from `dev`, verified with `scripts/check-release-candidate.ps1`.
-- Bluefin passed on the bundle of eba78013 on test-02, with the owner's Chromium
-  (`docs/testing/bluefin-2.0-bundle-2026-10-19.md`), except the first task as the owner's page
-  words it: browser_dialog status does not say what accept answers a prompt with, so the agent
-  asked the person what the bell should say. Owner and coordinator: choose one of the record's two
-  fixes, or keep it. CachyOS passed on the bundle of 68419db8 (linux-2); linux-claude re-checks
-  only what changed since.
-- Owner: the extension's store submission from that bundle: the 2.0 privacy page first, the
-  remote-code answer No, the recaptured assets, and what a reviewer is offered while the public
-  command still installs 1.x (`docs/release/store-disclosure-2.0.md`). After it, only a release
-  blocker reopens the extension.
-- Owner: JQ3 (keep or drop the extension's host permissions) and the installer's wait times, each
-  decided or kept.
+- Owner: wait for the store's approval, then the cutover below. The installer's wait times are
+  kept unless the owner decides otherwise.
 
 Before the tag, checks that prove a promise:
 
