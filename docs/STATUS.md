@@ -138,30 +138,39 @@ Done on 2026-10-19:
   `docs/testing/bluefin-2.0-bundle-2026-10-19.md`). Bluefin's finding, that status does not say
   what accept answers a prompt with, is kept for 2.0.1 (the owner and the coordinator).
 - sylin.org's privacy page carries the 2.0 policy (website 9117a8e).
-- The extension is submitted to the Chrome Web Store as 2.0.0, STAGED_PUBLISH, pending review; the
-  store still serves 1.3.12. The package keeps the host permissions (JQ3 kept for 2.0), and the
+- The store approved the extension 2.0.0. It is staged (STAGED_PUBLISH), and the store serves
+  1.3.12 until the publish. The package keeps the host permissions (JQ3 kept for 2.0), and the
   listing keeps its 1.x images until the owner replaces them. Only a release blocker reopens the
   extension.
+- The cutover (`docs/RELEASE.md`), steps 1 to 3: `v2.0.0` on 6a41327f is GitHub's latest release
+  (18 files). `main` is at e3f00d75, a merge whose tree is v2.0.0's, so the sylin.org short
+  commands serve the 2.0 scripts. npm serves `ghostlight@2.0.0` as latest; its tarball is the
+  bundle's (`63bde2b5...`).
+- Step 4 on Windows, on the owner's machine and outside the app's sandbox. In Windows PowerShell
+  5.1 the plain one-liner verified the release (checksums and build provenance) and refused the
+  development build with the restore route. The restore one-liner then installed the release.
+  Doctor reads Ready, the four browsers are registered, and the installed programs are
+  byte-identical to the release. The demo desk's bell answered "hello from the desk" through the
+  release on the owner's Chrome, and `npx -y ghostlight@2` (the plugin's command) gives a client
+  23 tools. `npx ghostlight deployment install --restore`, and the plain one-liner in PowerShell
+  7, install 2.0.0.
+- The owner skipped the 1.x upgrade check. The short commands' redirects to `main` hold.
 
 Now:
 
-- Owner: wait for the store's approval, then the cutover below. The installer's wait times are
-  kept unless the owner decides otherwise.
+- linux-claude on test-01 proves the public Linux one-liner on its real installation (asked in
+  `coordination/CHAT.md`, aab5ef1f; the owner relays it). Then the coordinator publishes the
+  staged store item (step 5) and the cutover continues with steps 6 to 10.
 
-Before the tag, checks that prove a promise:
+Still open from before the tag:
 
-- A 1.x upgrade on another machine while the store still serves 1.x.
 - On Windows: a restart and a sign-out with an agent session, the browser and the window open: no
   shutdown block, and one service afterwards. One `.mcpb` install in Claude Desktop from the
-  bundle, and the extension in Chrome and Edge.
+  release, and the extension in Chrome and Edge.
 - The owner's look at the window on a light-mode Windows account at 100% and 150%.
-- The three 1.x users told directly, the sylin.org redirects to the scripts on `main`, and the
-  website's 2.0 pages.
-
-The cutover, in one sitting after the store approves (`docs/RELEASE.md`): `v2.0.0` as latest on
-the tested commit, `main` fast-forwarded, the npm launcher, the store publish, a clean run of the
-public path on Windows and Linux, the public-state commit and the website, the MCP Registry record
-and the WinGet manifests.
+- The three 1.x users told directly, and the website's 2.0 pages (cutover step 7).
 
 After 2.0: Alpine in 2.0.1 with musl images (linux-claude; a musl build already runs on test-03),
-ADR-0203's sixteen deferred slices, and the CI review's deferred items.
+the prompt default carried through to status (Bluefin's finding), the `browser_tabs` action
+description, which ends in "focus, close: " with no meaning (the catalog joins empty value
+descriptions), ADR-0203's sixteen deferred slices, and the CI review's deferred items.
