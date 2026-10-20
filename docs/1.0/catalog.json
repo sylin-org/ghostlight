@@ -84,7 +84,7 @@
         },
         "reuse": {
           "default": "domain",
-          "description": "domain reuses a tab an earlier session of this client released for this host, never one the person opened. never always creates. domain cannot combine with new_tab.",
+          "description": "domain reuses a tab an earlier session of this client released for this host, never one the person opened. never always creates. new_tab ignores it.",
           "enum": [
             "domain",
             "never"

@@ -10,7 +10,7 @@ use crate::governance::AuthoritySnapshot;
 use super::{
     DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
     MAX_INSPECT_ITEMS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
-    SCRIPT_MAX_CHARS, SEMANTIC_ROLES,
+    SCRIPT_MAX_CHARS, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT, SEMANTIC_ROLES,
 };
 
 /// Canonical tool names in the complete catalog.
@@ -348,7 +348,7 @@ fn navigate_schema() -> Value {
                         enumeration(
                             &["domain", "never"],
                             Some("domain"),
-                            "domain reuses a tab an earlier session of this client released for this host, never one the person opened. never always creates. domain cannot combine with new_tab.",
+                            "domain reuses a tab an earlier session of this client released for this host, never one the person opened. never always creates. new_tab ignores it.",
                         ),
                     ),
                 ],
@@ -634,13 +634,17 @@ fn scroll_schema() -> Value {
                         "direction",
                         enumeration(
                             &["up", "down", "left", "right"],
-                            Some("down"),
+                            Some(SCROLL_DIRECTION_DEFAULT),
                             SCROLL_DIRECTION,
                         ),
                     ),
                     (
                         "amount",
-                        enumeration(&["small", "medium", "large", "page"], Some("medium"), ""),
+                        enumeration(
+                            &["small", "medium", "large", "page"],
+                            Some(SCROLL_AMOUNT_DEFAULT),
+                            "",
+                        ),
                     ),
                 ],
                 vec![],
@@ -650,7 +654,11 @@ fn scroll_schema() -> Value {
                     ("tab", tab()),
                     (
                         "direction",
-                        enumeration(&["up", "down"], Some("down"), SCROLL_DIRECTION),
+                        enumeration(
+                            &["up", "down"],
+                            Some(SCROLL_DIRECTION_DEFAULT),
+                            SCROLL_DIRECTION,
+                        ),
                     ),
                     ("view", handle("view_", VIEW_POINT)),
                     ("x", coordinate()),

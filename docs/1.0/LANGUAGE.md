@@ -29,7 +29,9 @@ even for unsent drafts", and "screenshot image". The serialized `tools` array th
 returns has a size budget (31,800 characters, with caps on the five largest tools) that only
 ratchets down: a later change raises it by the measured size of a clause its new behavior needs.
 The implementation owns bounds and defaults as named constants shared by schema rendering and
-decoding. See [ADR-0198](../adr/0198-agent-experience.md).
+decoding. A field sent with its advertised default means the same as leaving it out, because some
+clients fill in every default before they send a call; a self-check sends every example and
+known-good call with its defaults filled in. See [ADR-0198](../adr/0198-agent-experience.md).
 
 `browser_flow` is the single composition tool for one to twenty ordinary tool calls. Step IDs
 are optional for short batches and available for explicit result references. Each child uses the
@@ -434,7 +436,7 @@ facts include `tab`, `active`, and `window_focused`. Close facts include `tab` a
 Navigate to a governed URL. Shortest call: `{"url":"https://example.com"}`.
 
 Rules: `tab` and `new_tab:true` cannot be combined. `new_tab:true` always creates a tab, so
-`reuse:"domain"` beside it is refused and `reuse:"never"` beside it changes nothing.
+`reuse` beside it changes nothing, its advertised default `domain` included.
 `beforeunload:"discard"` accepts just that navigation's own unsaved-change prompt; without it, a
 blocking prompt stops the navigation and is reported, never accepted.
 
@@ -461,7 +463,8 @@ Facts: `tab`, governed `url`, bounded `title`, `created`, `reused`, and `documen
 
 Move through history or reload. Shortest call: `{"action":"back"}`.
 
-Rules: `bypass_cache` is valid only for `reload`. Capability: `action`.
+Rules: `bypass_cache:true` is valid only for `reload`; `false`, its default, goes with any action.
+Capability: `action`.
 
 Facts: `tab`, `action`, governed `url`, bounded `title`, and `document_generation`.
 
@@ -630,6 +633,7 @@ medium amount.
 
 Rules: one of three branches: `target` to reveal; or a page scroll by `direction` and `amount`; or
 coordinate wheel input with `view`, `x`, `y`, and `ticks`, whose `direction` is `up` or `down`.
+Beside `target`, a `direction` or `amount` other than its default (`down`, `medium`) is refused.
 Capability: `read`.
 
 Facts: `tab`, optional `target`, `scrolled`, and observed horizontal and vertical offsets.

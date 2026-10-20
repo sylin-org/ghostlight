@@ -6,7 +6,7 @@ use serde_json::json;
 use crate::governance::Capability;
 use crate::language::{
     outcome::{Outcome, TargetRole},
-    Click, Drag, Hover, ScrollPage,
+    Click, Drag, Hover, ScrollPage, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT,
 };
 use crate::workspace::WorkspaceLease;
 
@@ -183,11 +183,21 @@ impl ApplicationExecutor {
                         direction: value
                             .target
                             .is_none()
-                            .then(|| value.direction.clone().unwrap_or_else(|| "down".into())),
+                            .then(|| {
+                                value
+                                    .direction
+                                    .clone()
+                                    .unwrap_or_else(|| SCROLL_DIRECTION_DEFAULT.into())
+                            }),
                         amount: value
                             .target
                             .is_none()
-                            .then(|| value.amount.clone().unwrap_or_else(|| "medium".into())),
+                            .then(|| {
+                                value
+                                    .amount
+                                    .clone()
+                                    .unwrap_or_else(|| SCROLL_AMOUNT_DEFAULT.into())
+                            }),
                     },
                 ) {
                     Ok(BrowserOutcome::Scrolled {

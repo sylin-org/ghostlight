@@ -1340,22 +1340,14 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
         },
     )?;
     Ok(if value.new_tab {
-        let reuse = match value.reuse.as_deref() {
-            // A fresh tab is the entire point of new_tab; reuse never applies there. An
-            // explicit "domain" beside new_tab is contradictory, so it is refused rather than
-            // silently ignored.
-            Some("domain") => {
-                return Err(LanguageError::Invalid(
-                    "reuse cannot be combined with new_tab".into(),
-                ))
-            }
-            _ => ReusePolicy::Never,
-        };
+        // A fresh tab is the entire point of new_tab, so reuse never applies there. A client
+        // that fills in the advertised default sends reuse "domain" beside it, which is
+        // therefore ignored rather than refused.
         Operation::OpenPage(OpenPage {
             url: value.url,
             browser: value.browser,
             timeout_ms: value.timeout_ms,
-            reuse,
+            reuse: ReusePolicy::Never,
         })
     } else {
         Operation::NavigatePage(NavigatePage {
@@ -1372,14 +1364,14 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
 }
 
 fn decode_history(input: Value) -> Result<Operation, LanguageError> {
-    let bypass_present = has_field(&input, "bypass_cache");
     let value: HistoryRequest = parse(
         input,
         &["action", "tab", "bypass_cache", "timeout_ms"],
         |value: &HistoryRequest| {
             validate_choice(&value.action, &["back", "forward", "reload"], "action")?;
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
-            if value.action != "reload" && bypass_present {
+            // false is the advertised default, which a client may send with any action.
+            if value.action != "reload" && value.bypass_cache {
                 return Err(LanguageError::Invalid(
                     "bypass_cache is only valid when action is reload".into(),
                 ));
@@ -1952,6 +1944,14 @@ fn validate_location(
     }
 }
 
+/// The direction a page scroll takes when the call gives none: the catalog advertises it and the
+/// executor applies it.
+pub(crate) const SCROLL_DIRECTION_DEFAULT: &str = "down";
+
+/// The amount a page scroll takes when the call gives none: the catalog advertises it and the
+/// executor applies it.
+pub(crate) const SCROLL_AMOUNT_DEFAULT: &str = "medium";
+
 fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     let wheel =
@@ -1963,7 +1963,17 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
             ));
         }
         validate_handle(target, "target_")?;
-        if value.direction.is_some() || value.amount.is_some() {
+        // A client that fills in the advertised defaults sends them beside a target; only another
+        // direction or amount asks for the page scroll a target excludes.
+        let page_scroll = value
+            .direction
+            .as_deref()
+            .is_some_and(|direction| direction != SCROLL_DIRECTION_DEFAULT)
+            || value
+                .amount
+                .as_deref()
+                .is_some_and(|amount| amount != SCROLL_AMOUNT_DEFAULT);
+        if page_scroll {
             return Err(LanguageError::Invalid(
                 "target cannot be combined with direction or amount".into(),
             ));
@@ -2942,13 +2952,11 @@ mod tests {
             ),
             Err(LanguageError::Invalid(_))
         ));
-        assert!(matches!(
-            decode(
-                "browser_navigate",
-                json!({"url":"https://example.com","new_tab":true,"reuse":"domain"})
-            ),
-            Err(LanguageError::Invalid(_))
-        ));
+        // A client that fills in the advertised default sends reuse "domain" beside new_tab.
+        assert_eq!(
+            reuse_of(json!({"url":"https://example.com","new_tab":true,"reuse":"domain"})),
+            ReusePolicy::Never
+        );
     }
 
     #[test]
@@ -3079,11 +3087,19 @@ mod tests {
         };
         assert!(scroll.direction.is_none());
         assert!(scroll.amount.is_none());
+        // The advertised defaults beside a target are what a defaults-filling client sends.
         assert!(decode(
             "browser_scroll",
-            json!({"target":"target_x","direction":"down"})
+            json!({"target":"target_x","direction":"down","amount":"medium"})
         )
-        .is_err());
+        .is_ok());
+        for page in [json!({"direction":"up"}), json!({"amount":"page"})] {
+            let mut call = json!({"target":"target_x"});
+            call.as_object_mut()
+                .unwrap()
+                .extend(page.as_object().unwrap().clone());
+            assert!(decode("browser_scroll", call).is_err());
+        }
         assert!(decode(
             "browser_upload",
             json!({"target":"target_x","paths":["relative.txt"]})
@@ -3099,6 +3115,11 @@ mod tests {
             json!({"action":"back","bypass_cache":true})
         )
         .is_err());
+        assert!(decode(
+            "browser_history",
+            json!({"action":"back","bypass_cache":false})
+        )
+        .is_ok());
         assert!(decode(
             "browser_window",
             json!({"action":"zoom","width":800,"height":600})

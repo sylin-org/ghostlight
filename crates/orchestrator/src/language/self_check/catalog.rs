@@ -354,6 +354,57 @@ fn known_good_calls_satisfy_the_schema_and_decode() {
     }
 }
 
+/// `call` with every advertised default filled in for the fields it leaves out, as a client that
+/// applies schema defaults sends it.
+fn with_defaults(schema: &Value, call: &Value) -> Value {
+    let mut filled = call.clone();
+    if let (Some(properties), Some(object)) =
+        (schema["properties"].as_object(), filled.as_object_mut())
+    {
+        for (name, property) in properties {
+            if let Some(default) = property.get("default") {
+                object
+                    .entry(name.clone())
+                    .or_insert_with(|| default.clone());
+            }
+        }
+    }
+    filled
+}
+
+/// Some clients fill in every advertised default before they send a call (Claude Code began to in
+/// October 2026). A default means the same as leaving its field out, so every example and every
+/// known-good call is still accepted with its defaults filled in.
+#[test]
+fn every_call_is_accepted_with_the_advertised_defaults_filled_in() {
+    let mut calls: Vec<(String, Value)> = known_good_calls()
+        .into_iter()
+        .map(|(tool, call)| (tool.to_owned(), call))
+        .collect();
+    for tool in catalog() {
+        for example in tool.input_schema["examples"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            calls.push((tool.name.clone(), example.clone()));
+        }
+    }
+    let mut refused = Vec::new();
+    for (tool, call) in &calls {
+        let filled = with_defaults(&advertised(tool), call);
+        if !violations(&advertised(tool), &filled).is_empty()
+            || decode(tool, filled.clone()).is_err()
+        {
+            refused.push(format!("{tool} {filled}"));
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "refused with defaults filled in: {refused:#?}"
+    );
+}
+
 /// Walk a value alongside its schema and count, for every `oneOf` the value reaches, how many
 /// branches it matches.
 fn one_of_matches(schema: &Value, value: &Value, at: &str, seen: &mut Vec<(String, usize)>) {

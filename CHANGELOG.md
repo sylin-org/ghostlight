@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A client that fills in a tool's advertised defaults before it sends a call, as Claude Code began
+  to, is no longer refused for opening a new tab, going back or forward, or scrolling to a target. A
+  field sent with its default means the same as leaving it out, and a self-check proves every
+  example and known-good call is accepted with its defaults filled in.
 - On Windows, Ghostlight no longer stops a shutdown, restart or sign-out. A hidden window that the
   window toolkit (Tao) creates answered Windows' question whether the session may end with no, so
   Windows listed `ghostlight-desktop.exe` as preventing shutdown. Tao 0.36.0 answers yes.
