@@ -264,6 +264,15 @@ Found on the way, for windows-claude (the extension is theirs):
    each later reconnect queues behind it. People will meet this in 2.0.1: their extension is the
    store's 2.0.0, and a service update is a reconnect. CI's install jobs load the extension from
    the bundle's revision, so they never pair a new service with the store extension.
+
+   Closing the prompt by hand ends the stall, with no browser restart (checked at windows-claude's
+   request). With the stall reproduced again (two navigates timed out), Escape on the prompt, which
+   is its Cancel, let the next navigate succeed 2 s later. The two timed-out navigates never ran:
+   Chromium's session records no tab for them. On Wayland the prompt is its own window, titled
+   "sylin.org says". So a person on the store extension whose agents stop after an update can
+   answer or cancel the open page dialog, and work resumes. The key went through KWin's input
+   emulation (`org.kde.KWin.EIS.RemoteDesktop.connectToEIS` over D-Bus, which KWin grants a session
+   client with no portal prompt) and Alpine's libei 1.5.0, unpacked under the home without root.
 2. **A same-version install keeps a different build.** `get.sh` over an installed 2.0.0 printed
    "Ghostlight 2.0.0 is installed." but left the earlier build's service in place
    (`record::decide` reads Same when the version matches and the installed image matches its own
