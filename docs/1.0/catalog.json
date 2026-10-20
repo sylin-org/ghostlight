@@ -1483,7 +1483,7 @@
       ],
       "properties": {
         "action": {
-          "description": "status: Its kind and message, if open. accept: As OK does. dismiss: Dismiss it. respond: Answer a prompt.",
+          "description": "status: Its kind and message, and a prompt's field text, if open. accept: As OK does; a prompt answers with its field text. dismiss: Dismiss it. respond: Answer a prompt.",
           "enum": [
             "status",
             "accept",

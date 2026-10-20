@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says what the window needs when its libraries are missing. The release workflow builds them in
   Alpine and installs the candidate on Alpine with Alpine's Chromium.
 
+### Changed
+
+- `browser_dialog` status says what a prompt's field holds, and that accept answers with it, as OK
+  does, so an agent can accept a prompt without asking. The text is never audited. An extension
+  older than 2.0.1 does not report it; the next step still says what accept answers with.
+- Every `browser_tabs` and `browser_window` action says what it does: focus, close and resize
+  had no description.
+
 ### Fixed
 
 - On Windows, Ghostlight no longer stops a shutdown, restart or sign-out. A hidden window that the

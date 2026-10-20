@@ -323,6 +323,8 @@
         present: Boolean(dialog),
         dialog_type: dialog?.type ?? DIALOG_UNKNOWN,
         message: dialog ? shared.bounded(dialog.message, MESSAGE_CHARS) : undefined,
+        // A prompt also says what its field holds: the text accept answers with.
+        default_prompt: dialog?.type === DIALOG_PROMPT ? shared.bounded(dialog.defaultPrompt, MESSAGE_CHARS) : undefined,
         ...dialogUrl(dialog)
       };
     }
@@ -362,8 +364,9 @@
       addresses: true,
       validate: validateDialog,
       /**
-       * Resolves `DialogFacts`. `status` reports the open dialog with its bounded message. `handle`
-       * accepts or dismisses it, with the prompt text when given.
+       * Resolves `DialogFacts`. `status` reports the open dialog with its bounded message and, for a
+       * prompt, the bounded text its field holds. `handle` accepts or dismisses it, with the prompt
+       * text when given.
        */
       run(request, fx) {
         return request.op.op === DIALOG_OP.STATUS ? dialogStatus(request) : dialogHandle(request, fx);

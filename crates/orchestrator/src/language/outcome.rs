@@ -365,6 +365,19 @@ impl DialogKind {
 const HANDLE_DIALOG_FIRST: &str =
     "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.";
 
+/// The step that answers a prompt once its status has been read. Every 2.0 extension answers an
+/// accept with the text in the prompt's field, as OK does, whether or not it reports that text.
+const ANSWER_PROMPT: &str = "Call browser_dialog with action accept to answer with the text in its field, as OK does, respond with your own text, or dismiss, before continuing.";
+
+/// What the status of a prompt says about the text in its field.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PromptField {
+    /// The text the field holds, empty when the field is empty, as the extension reported it.
+    Holds(String),
+    /// The extension did not say what the field holds: one older than 2.0.1 does not report it.
+    Unreported,
+}
+
 /// The step for a dialog the agent has not read yet: its status first, because accept answers a
 /// prompt with its default text, as OK does, and only the message says whether that is wanted.
 const READ_DIALOG_FIRST: &str = "Call browser_dialog with action status to read it, then accept, dismiss, or respond with text for a prompt.";
@@ -542,6 +555,8 @@ pub enum Outcome {
     DialogObserved {
         present: bool,
         message: Option<String>,
+        /// `Some` for a prompt, with what its field holds when the extension reported it.
+        prompt: Option<PromptField>,
     },
     /// Bounded console and network diagnostics were read.
     DiagnosticsRead {
@@ -881,15 +896,8 @@ impl Outcome {
             Self::DialogObserved {
                 present: true,
                 message,
-            } => match message
-                .as_deref()
-                .and_then(|message| one_line_bounded(message, DIALOG_MESSAGE_MAX_CHARS))
-            {
-                Some(message) => {
-                    format!("A JavaScript dialog is currently visible: \"{message}\".")
-                }
-                None => "A JavaScript dialog is currently visible.".into(),
-            },
+                prompt,
+            } => dialog_observed(message.as_deref(), prompt.as_ref()),
             Self::DialogObserved { present: false, .. } => {
                 "No JavaScript dialog is currently visible.".into()
             }
@@ -1021,6 +1029,11 @@ impl Outcome {
                 "Read or inspect the page to see its current state before choosing another action."
                     .into(),
             ],
+            Self::DialogObserved {
+                present: true,
+                prompt: Some(_),
+                ..
+            } => vec![ANSWER_PROMPT.into()],
             Self::DialogObserved { present: true, .. } => vec![HANDLE_DIALOG_FIRST.into()],
             Self::ScriptEvaluated {
                 empty_object: EmptyObject::Awaited,
@@ -2433,6 +2446,30 @@ fn whole_seconds(duration_ms: u64) -> usize {
     usize::try_from(duration_ms.saturating_add(500) / 1_000).unwrap_or(usize::MAX)
 }
 
+/// The sentence for a dialog that is showing: its message when the browser reported one and, for
+/// a prompt, what its field holds when the extension reported it.
+fn dialog_observed(message: Option<&str>, prompt: Option<&PromptField>) -> String {
+    let shown = if prompt.is_some() {
+        "A prompt dialog is currently visible"
+    } else {
+        "A JavaScript dialog is currently visible"
+    };
+    let opening =
+        match message.and_then(|message| one_line_bounded(message, DIALOG_MESSAGE_MAX_CHARS)) {
+            Some(message) => format!("{shown}: \"{message}\"."),
+            None => format!("{shown}."),
+        };
+    let field = match prompt {
+        Some(PromptField::Holds(text)) => match one_line_bounded(text, DIALOG_MESSAGE_MAX_CHARS) {
+            Some(text) => format!(" Its field holds \"{text}\"."),
+            None if text.is_empty() => " Its field is empty.".to_owned(),
+            None => " Its field holds only spaces.".to_owned(),
+        },
+        Some(PromptField::Unreported) | None => String::new(),
+    };
+    format!("{opening}{field}")
+}
+
 /// Page-authored text as one bounded line: controls and direction overrides become spaces,
 /// double quotes become single ones, and anything over `max_chars` ends in an ellipsis.
 pub(super) fn one_line_bounded(value: &str, max_chars: usize) -> Option<String> {
@@ -2586,9 +2623,9 @@ mod tests {
     use super::{
         workspace_refusal, ActionSubject, BlockedReason, BrowserRecoveryReason,
         BrowserUnavailableReason, CancelCause, CaptureKind, CheckFailure, DialogKind, EmptyObject,
-        ExtensionAdvice, ImageSize, Observed, Outcome, PolicyAuthor, QuitCause, Refusal, SavedTo,
-        StaleHelp, TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE,
-        HUMAN_STOP_DIRECTIVE, REPEAT_IN_A_MOMENT, TARGET_LABEL_MAX_CHARS,
+        ExtensionAdvice, ImageSize, Observed, Outcome, PolicyAuthor, PromptField, QuitCause,
+        Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
+        HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, REPEAT_IN_A_MOMENT, TARGET_LABEL_MAX_CHARS,
     };
     use crate::intake::session::IntakeChannel;
     use crate::language::area::{LeftOut, LeftOutKey};
@@ -2957,6 +2994,7 @@ mod tests {
                 Outcome::DialogObserved {
                     present: true,
                     message: None,
+                    prompt: None,
                 },
                 "A JavaScript dialog is currently visible.",
             ),
@@ -2965,13 +3003,47 @@ mod tests {
                     present: true,
                     message: Some("Leave this page?
 Changes are \"unsaved\".".into()),
+                    prompt: None,
                 },
                 "A JavaScript dialog is currently visible: \"Leave this page? Changes are 'unsaved'.\".",
             ),
             (
                 Outcome::DialogObserved {
+                    present: true,
+                    message: Some("What should it say?".into()),
+                    prompt: Some(PromptField::Holds("hello from the desk".into())),
+                },
+                "A prompt dialog is currently visible: \"What should it say?\". Its field holds \"hello from the desk\".",
+            ),
+            (
+                Outcome::DialogObserved {
+                    present: true,
+                    message: Some("Name?".into()),
+                    prompt: Some(PromptField::Holds(String::new())),
+                },
+                "A prompt dialog is currently visible: \"Name?\". Its field is empty.",
+            ),
+            (
+                Outcome::DialogObserved {
+                    present: true,
+                    message: None,
+                    prompt: Some(PromptField::Holds("  \t ".into())),
+                },
+                "A prompt dialog is currently visible. Its field holds only spaces.",
+            ),
+            (
+                Outcome::DialogObserved {
+                    present: true,
+                    message: Some("Name?".into()),
+                    prompt: Some(PromptField::Unreported),
+                },
+                "A prompt dialog is currently visible: \"Name?\".",
+            ),
+            (
+                Outcome::DialogObserved {
                     present: false,
                     message: None,
+                    prompt: None,
                 },
                 "No JavaScript dialog is currently visible.",
             ),
@@ -4164,12 +4236,25 @@ Changes are \"unsaved\".".into()),
             Outcome::DialogObserved {
             present: true,
             message: None,
+            prompt: None,
         }.next_steps(),
             vec!["Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing."]
         );
+        for field in [PromptField::Holds("hello".into()), PromptField::Unreported] {
+            assert_eq!(
+                Outcome::DialogObserved {
+                    present: true,
+                    message: None,
+                    prompt: Some(field),
+                }
+                .next_steps(),
+                vec!["Call browser_dialog with action accept to answer with the text in its field, as OK does, respond with your own text, or dismiss, before continuing."]
+            );
+        }
         assert!(Outcome::DialogObserved {
             present: false,
             message: None,
+            prompt: None,
         }
         .next_steps()
         .is_empty());

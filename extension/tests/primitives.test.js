@@ -446,6 +446,17 @@ test("dialog status reports the open dialog with its bounded message and the url
   assert.equal(parts.frames[0].ok.message.length, 500);
 });
 
+test("dialog status of a prompt also reports the bounded text its field holds, matching the golden receipt", async () => {
+  const parts = rig();
+  parts.lifecycle.openDialog(TAB, { type: "prompt", message: "What should it say?", defaultPrompt: "hello from the desk", url: URL });
+  await parts.primitives.run("p4_001d", request("dialog", { tab_id: TAB, op: { op: "status" } }));
+  assert.deepEqual(wireFrame(parts.frames), [golden("receipts/dialog.ok_prompt")]);
+  parts.frames.length = 0;
+  parts.lifecycle.openDialog(TAB, { type: "prompt", message: "?", defaultPrompt: "d".repeat(900) });
+  await parts.primitives.run("long", request("dialog", { tab_id: TAB, op: { op: "status" } }));
+  assert.equal(parts.frames[0].ok.default_prompt.length, 500);
+});
+
 test("dialog status with no dialog attaches, waits for an announcement, and answers absent", async () => {
   const parts = rig();
   await parts.primitives.run("p4_001d", request("dialog", { tab_id: TAB, op: { op: "status" } }));
@@ -457,7 +468,7 @@ test("dialog status with no dialog attaches, waits for an announcement, and answ
 test("dialog status finds a dialog that was already open when the debugger attached", async () => {
   const parts = rig({ onSleep: () => parts.lifecycle.openDialog(TAB, { type: "prompt", message: "Name?" }) });
   await parts.primitives.run("late", request("dialog", { tab_id: TAB, op: { op: "status" } }));
-  assert.deepEqual(parts.frames[0].ok, { present: true, dialog_type: "prompt", message: "Name?" });
+  assert.deepEqual(parts.frames[0].ok, { present: true, dialog_type: "prompt", message: "Name?", default_prompt: "" });
 });
 
 test("a dialog the browser gave no url for reports none, and a long url is bounded", async () => {

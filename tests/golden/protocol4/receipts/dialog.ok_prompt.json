@@ -1,0 +1,7 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_001d",
+  "ok": {"present":true,"dialog_type":"prompt","message":"What should it say?","default_prompt":"hello from the desk","url":"https://example.com/account"},
+  "dispatched": false,
+  "committed_urls": []
+}

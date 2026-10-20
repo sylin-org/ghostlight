@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::composition::CompositionProgress;
 use super::outcome::{
     counted, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CheckFailure, Outcome,
-    Refusal, WorkspaceReason,
+    PromptField, Refusal, WorkspaceReason,
 };
 use super::page_refusal::{PageGesture, PageRefusal};
 use crate::intake::session::IntakeChannel;
@@ -141,7 +141,8 @@ pub enum AuditRefusal {
 impl Outcome {
     /// This outcome as durable history may keep it (ADR-0198 rule 3, ADR-0203 Decision 4.1).
     ///
-    /// What a fill read back and a dialog's message are page-authored text, so they go. A dialog
+    /// What a fill read back, a dialog's message and a prompt's field are page-authored text, so they
+    /// go; a prompt stays a prompt. A dialog
     /// the action left open retains the action it wraps, so a wrapper never carries past this
     /// rule what the bare outcome could not. Every other outcome's sentence is Ghostlight's own,
     /// with a page name only where the governed snapshot kept it.
@@ -161,9 +162,12 @@ impl Outcome {
                 held: Vec::new(),
                 rebound: *rebound,
             },
-            Self::DialogObserved { present, .. } => Self::DialogObserved {
+            Self::DialogObserved {
+                present, prompt, ..
+            } => Self::DialogObserved {
                 present: *present,
                 message: None,
+                prompt: prompt.as_ref().map(|_| PromptField::Unreported),
             },
             Self::DialogOpened { action, dialog } => Self::DialogOpened {
                 action: Box::new(action.retained()),
@@ -487,6 +491,7 @@ mod tests {
         let outcome = Outcome::DialogObserved {
             present: true,
             message: Some("Delete account PRIVATE_DIALOG_TEXT?".into()),
+            prompt: None,
         };
         assert!(outcome.summary().contains("PRIVATE_DIALOG_TEXT"));
         let audit = outcome.audit();
@@ -494,6 +499,20 @@ mod tests {
         assert!(audit
             .summary()
             .contains("JavaScript dialog is currently visible"));
+    }
+
+    #[test]
+    fn retained_prompt_observation_keeps_the_kind_and_drops_the_field() {
+        let outcome = Outcome::DialogObserved {
+            present: true,
+            message: Some("Your PRIVATE_DIALOG_TEXT?".into()),
+            prompt: Some(PromptField::Holds("PRIVATE_FIELD_TEXT".into())),
+        };
+        assert!(outcome.summary().contains("PRIVATE_FIELD_TEXT"));
+        let audit = outcome.audit();
+        assert!(!audit.summary().contains("PRIVATE_FIELD_TEXT"));
+        assert!(!audit.summary().contains("PRIVATE_DIALOG_TEXT"));
+        assert_eq!(audit.summary(), "A prompt dialog is currently visible.");
     }
 
     /// A fill whose page read back a choice and a reformatted text, with names preserved, so the
@@ -547,6 +566,7 @@ mod tests {
                 Outcome::DialogObserved {
                     present: true,
                     message: Some("Delete PRIVATE_DIALOG?".into()),
+                    prompt: None,
                 },
                 vec!["PRIVATE_DIALOG"],
             ),

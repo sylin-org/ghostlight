@@ -1240,6 +1240,11 @@ pub struct DialogFacts {
     /// The dialog's message, bounded to 500 characters; status only.
     #[serde(default)]
     pub message: Option<String>,
+    /// For a prompt, the text its field holds, which accept answers with, bounded to 500
+    /// characters and empty when the field is empty; status only. An extension older than 2.0.1
+    /// does not send it.
+    #[serde(default)]
+    pub default_prompt: Option<String>,
     /// The url of the frame that raised the dialog, bounded to the url limit; absent when the
     /// browser did not say.
     #[serde(default)]

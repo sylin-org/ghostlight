@@ -710,8 +710,9 @@ test("a dialog is recorded with its message, the frame that raised it and its se
     await flush();
     await worker.request("p4_dialog", "dialog", { tab_id: TAB, op: { op: "status" } });
     const receipt = worker.receipts().find((entry) => entry.correlation === "p4_dialog");
-    assert.deepEqual(receipt.ok, { present: true, dialog_type: "prompt", message: "Name?", url: "https://example.com/frame" });
-    // Accepted without text, the prompt is answered with the default its event carried.
+    // Status names the text the prompt's field holds, the default its event carried.
+    assert.deepEqual(receipt.ok, { present: true, dialog_type: "prompt", message: "Name?", default_prompt: "Ada", url: "https://example.com/frame" });
+    // Accepted without text, the prompt is answered with that default.
     await worker.request("p4_accept", "dialog", { tab_id: TAB, op: { op: "handle", accept: true, text: null } });
     const answered = worker.chrome.debugger.calls.find((call) => call.method === "Page.handleJavaScriptDialog");
     assert.deepEqual({ ...answered.params }, { accept: true, promptText: "Ada" });

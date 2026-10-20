@@ -294,6 +294,23 @@ fn rows() -> Vec<Row> {
                 present: true,
                 dialog_type: "confirm".into(),
                 message: Some("Leave?".into()),
+                default_prompt: None,
+                url: Some("https://example.com/form".into()),
+            },
+        },
+        Row {
+            command: BrowserCommand::InspectDialog { tab_id: 12 },
+            primitive: json!({"name": "dialog", "args": {"tab_id": 12, "op": {"op": "status"}}}),
+            receipt: answer(
+                json!({"present": true, "dialog_type": "prompt", "message": "Name?",
+                    "default_prompt": "Ada", "url": "https://example.com/form"}),
+            ),
+            outcome: BrowserOutcome::Dialog {
+                tab_id: 12,
+                present: true,
+                dialog_type: "prompt".into(),
+                message: Some("Name?".into()),
+                default_prompt: Some("Ada".into()),
                 url: Some("https://example.com/form".into()),
             },
         },

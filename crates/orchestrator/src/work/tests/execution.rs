@@ -4424,6 +4424,7 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         dialog_type: "prompt".into(),
         message: Some("Name?".into()),
         url: Some("https://example.com/".into()),
+        default_prompt: None,
     }));
     let status = executor.execute(
         &workspace,
@@ -4433,7 +4434,7 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
     );
     assert_eq!(
         status.summary,
-        "A JavaScript dialog is currently visible: \"Name?\"."
+        "A prompt dialog is currently visible: \"Name?\"."
     );
     assert_eq!(dialog_open(), Some(DialogKind::Prompt));
 
@@ -4443,6 +4444,7 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         dialog_type: "prompt".into(),
         message: None,
         url: Some("https://example.com/".into()),
+        default_prompt: None,
     }));
     browser.push(Ok(BrowserOutcome::DialogHandled {
         tab_id: 7,
@@ -4467,6 +4469,7 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         dialog_type: String::new(),
         message: None,
         url: None,
+        default_prompt: None,
     }));
     executor.execute(
         &workspace,
@@ -4475,6 +4478,38 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         &CancellationToken::default(),
     );
     assert_eq!(dialog_open(), None);
+}
+
+/// A prompt's status names the text in its field when the extension reports it, and its next step
+/// says that accept answers with that text, as OK does.
+#[test]
+fn a_prompts_status_names_its_field_and_what_accept_answers() {
+    let (executor, browser, _workspaces, workspace, tab_handle, _target) =
+        workspace_with_a_target();
+    browser.push(Ok(BrowserOutcome::Dialog {
+        tab_id: 7,
+        present: true,
+        dialog_type: "prompt".into(),
+        message: Some("What should it say?".into()),
+        default_prompt: Some("hello from the desk".into()),
+        url: Some("https://example.com/".into()),
+    }));
+    let status = executor.execute(
+        &workspace,
+        "browser_dialog",
+        json!({"action":"status","tab":tab_handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(status.status, Status::Succeeded);
+    assert_eq!(
+        status.summary,
+        "A prompt dialog is currently visible: \"What should it say?\". Its field holds \"hello from the desk\"."
+    );
+    assert_eq!(
+        status.next_steps,
+        vec!["Call browser_dialog with action accept to answer with the text in its field, as OK does, respond with your own text, or dismiss, before continuing."]
+    );
+    assert_eq!(status.facts["dialog_type"], "prompt");
 }
 
 /// The step of a removed handle's refusal that has no candidates to pick from.

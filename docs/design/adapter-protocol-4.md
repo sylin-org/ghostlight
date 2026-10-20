@@ -17,6 +17,11 @@
 > state, and an `adapter_incompatible` error stops the immediate reconnect and leaves the 3 s
 > retry, with the popup saying to update Ghostlight in Browser.
 
+> **2.0.1 (2026-10-20).** The `dialog` status of a prompt adds the optional `default_prompt`: the
+> text its field holds, which accept answers with, bounded to 500 characters and empty when the
+> field is empty. It is an optional field the old side ignores (section 1.7); a 2.0.0 extension
+> does not send it, and the service then words the prompt without it.
+
 
 Status: implementation spec for the owner. Written read-only against dev at `95a7e646`.
 
@@ -527,6 +532,7 @@ pub struct Captured { pub mime_type: String, pub data: String, pub width: u32, p
 #[derive(Deserialize)]
 pub struct DialogFacts { pub present: bool, #[serde(default)] pub dialog_type: String,
                          #[serde(default)] pub message: Option<String>, // bounded 500, status only
+                         #[serde(default)] pub default_prompt: Option<String>, // a prompt's field, bounded 500, status only
                          #[serde(default)] pub url: Option<String>,     // the frame that raised it, bounded to URL_CHARS
                          #[serde(default)] pub handled: bool, #[serde(default)] pub accepted: bool }
 #[derive(Deserialize)]
@@ -1401,6 +1407,7 @@ async function dialog(args, fx) {
     let d = debuggerLifecycle.currentDialog(args.tab_id);
     if (!d) { await ensureDebugger(args.tab_id); try { await sleep(50); d = debuggerLifecycle.currentDialog(args.tab_id); } finally { await releaseDebugger(args.tab_id); } }
     return { present: Boolean(d), dialog_type: d?.type ?? "unknown", message: d ? shared.bounded(d.message, 500) : undefined,
+             default_prompt: d?.type === "prompt" ? shared.bounded(d.defaultPrompt, 500) : undefined,
              ...(d?.url ? { url: shared.bounded(d.url, URL_CHARS) } : {}) };
   }
   await ensureDebugger(args.tab_id);
@@ -2085,7 +2092,7 @@ Abbreviations:
 | 39 | DropImageAt | `view`; `call(T, scroll_point)`; route; `call(deepest doc, drop_files{local x, y})` G | 3+depth |
 | 40 | EvaluateScript | `evaluate_main{settle 100}` G, with the script sent as `await (S)` when a lexical scan proves it is one expression; when the page refuses that form as `invalid_request` before it evaluates anything, the original script is sent once more as written, so the command takes one or two primitives and the script runs at most once; `exception`, which includes a rejected promise, becomes `EffectUnknown(description)`, and a promise that never settles holds the primitive until its timeout | 1-2 |
 | 41 | Observe | section 4.6 | 1-2 |
-| 42 | InspectDialog | `dialog{status}` becomes `Dialog{present, dialog_type, message, url}`; no inventory; `url` is authorized | 1 |
+| 42 | InspectDialog | `dialog{status}` becomes `Dialog{present, dialog_type, message, default_prompt, url}`; no inventory; `url` is authorized | 1 |
 | 43 | HandleDialog | `dialog{status}`, authorize `url`, then `dialog{handle}` becomes `DialogHandled`, or `DialogAbsent` when no dialog was showing or `handled:false`; no inventory | 1-2 |
 | 44 | ReadDiagnostics | `diagnostics{read{binding: hex(sha256(sorted scope ids)), guard}}` | 1 |
 | 45 | ClearDiagnostics | `diagnostics{clear}` | 1 |

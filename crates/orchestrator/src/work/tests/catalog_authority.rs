@@ -420,6 +420,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
             dialog_type: "confirm".into(),
             message: None,
             url: Some(PAGE.into()),
+            default_prompt: None,
         }],
     );
     add(
@@ -434,6 +435,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
                 dialog_type: "confirm".into(),
                 message: None,
                 url: Some(PAGE.into()),
+                default_prompt: None,
             },
             BrowserOutcome::DialogHandled {
                 tab_id: 7,

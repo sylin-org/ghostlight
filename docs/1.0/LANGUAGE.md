@@ -895,8 +895,8 @@ Facts: `tab`, `condition`, `satisfied`, `elapsed_ms`, and governed readiness.
 
 Inspect or resolve the current JavaScript dialog.
 
-- `{"action":"status"}` reports whether a dialog is blocking, and its kind and message; capability
-  `read`.
+- `{"action":"status"}` reports whether a dialog is blocking, its kind and message, and for a prompt
+  the text in its field; capability `read`.
 - `{"action":"accept"}` accepts it; capability `action`. A prompt accepted this way is answered
   with the text its field starts with, as OK does.
 - `{"action":"dismiss"}` dismisses it; capability `action`.
@@ -904,10 +904,15 @@ Inspect or resolve the current JavaScript dialog.
   included; capability `action`.
 
 `text` is required only for `respond` and is invalid for every other action. Facts: `tab`,
-`dialog_type`, `present`, `accepted`, and `handled` as applicable. Status also reports the dialog's message, one line of at most 500 characters, in its
-summary. Dialog text is never audited. When status finds a dialog, its next step is `Call
-browser_dialog with action accept or dismiss (or respond with text for a prompt) before
-continuing.`
+`dialog_type`, `present`, `accepted`, and `handled` as applicable. Status also reports the dialog's
+message, one line of at most 500 characters, in its summary. For a prompt the summary opens `A
+prompt dialog is currently visible` and, when the extension reports it (2.0.1 and newer), names
+what the field holds, bounded the same way: `Its field holds "...".`, `Its field is empty.` or `Its
+field holds only spaces.` Dialog text is never audited: the audit keeps that a prompt was showing,
+not its message or its field. When status finds a prompt, its next step is `Call browser_dialog
+with action accept to answer with the text in its field, as OK does, respond with your own text,
+or dismiss, before continuing.` For any other dialog it is `Call browser_dialog with action accept
+or dismiss (or respond with text for a prompt) before continuing.`
 
 A dialog is answered by the browser from its own record and authorized by the one document that
 raised it, not by the tab's frame inventory, because a dialog blocks the page and the inventory

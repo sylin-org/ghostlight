@@ -875,10 +875,12 @@ fn outcome_samples() -> Vec<Outcome> {
         Outcome::DialogObserved {
             present: true,
             message: None,
+            prompt: None,
         },
         Outcome::DialogObserved {
             present: false,
             message: None,
+            prompt: None,
         },
         Outcome::DiagnosticsRead {
             count: 0,

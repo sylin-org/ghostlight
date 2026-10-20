@@ -7,7 +7,7 @@ use crate::browser::adapter::{
 };
 
 use crate::governance::Capability;
-use crate::language::outcome::{DialogKind, Outcome, Refusal};
+use crate::language::outcome::{DialogKind, Outcome, PromptField, Refusal};
 use crate::language::{Diagnose, HandleDialog};
 use crate::workspace::WorkspaceLease;
 
@@ -57,13 +57,14 @@ impl ApplicationExecutor {
                             present,
                             dialog_type,
                             message,
+                            default_prompt,
                             ..
                         }) if tab_id == selected.physical_id => {
-                            self.note_dialog(
-                                context,
-                                tab_id,
-                                present.then(|| DialogKind::classify(&dialog_type)),
-                            );
+                            let kind = present.then(|| DialogKind::classify(&dialog_type));
+                            self.note_dialog(context, tab_id, kind);
+                            let prompt = (kind == Some(DialogKind::Prompt)).then(|| {
+                                default_prompt.map_or(PromptField::Unreported, PromptField::Holds)
+                            });
                             self.succeeded(
                                 context,
                                 decision,
@@ -71,7 +72,11 @@ impl ApplicationExecutor {
                                 Effect::None,
                                 readiness(selected.readiness),
                                 true,
-                                Outcome::DialogObserved { present, message },
+                                Outcome::DialogObserved {
+                                    present,
+                                    message,
+                                    prompt,
+                                },
                                 json!({"tab":selected.handle.as_str(),"present":present,"dialog_type":dialog_type}),
                             )
                         }

@@ -198,7 +198,8 @@ pub fn resize_window(
     })
 }
 
-/// Report whether a JavaScript dialog is showing, with its bounded message.
+/// Report whether a JavaScript dialog is showing, with its bounded message and, for a prompt, the
+/// text its field holds.
 ///
 /// # Errors
 ///
@@ -213,6 +214,7 @@ pub fn inspect_dialog(l: &mut Link<'_>, tab_id: u64) -> Result<BrowserOutcome, B
         present: facts.present,
         dialog_type: facts.dialog_type,
         message: facts.message,
+        default_prompt: facts.default_prompt,
         url: facts.url,
     })
 }

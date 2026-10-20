@@ -401,3 +401,24 @@ The changed packaged files are `worker.js`, `lib/sessions.js` and `lib/primitive
 permission, wire field or adapter protocol 4 behavior changes, and the default never leaves the
 extension. The freeze golden is regenerated from the new zip in the same commit, and the version
 stays 2.0.0. The tree records no 2.0 store submission yet. Decision 16's rule is unchanged.
+
+## Amendment (2026-10-20): the extension is unfrozen for 2.0.1's prompt field
+
+The owner chose, on 2026-10-20, that 2.0.1 carries a prompt's default all the way to the agent,
+knowing it "needs an extension update and a store review before 2.0.1 ships". It answers the
+Bluefin finding ([record](../testing/bluefin-2.0-bundle-2026-10-19.md)): `browser_dialog` status
+named a prompt's message but not its default, so a fresh agent asked the person what to say
+instead of accepting.
+
+The change:
+
+- The extension's `dialog` status of a prompt adds `default_prompt`: the text its field holds,
+  bounded to 500 characters like the message, and empty when the field is empty. It is an optional
+  field the old side ignores (adapter protocol 4, section 1.7), so a 2.0.0 service is unaffected.
+- The service names that text in the status summary and never audits it. For every prompt, the
+  next step says that accept answers with the text in its field, as OK does, which a 2.0.0
+  extension also does, so a 2.0.1 service with an older extension still says the right thing.
+
+The changed packaged file is `lib/primitives.js`, and the freeze golden is regenerated from the new
+zip. The version becomes 2.0.1 when 2.0.1 is prepared, and that build goes to the store for review.
+Decision 16's rule is unchanged.

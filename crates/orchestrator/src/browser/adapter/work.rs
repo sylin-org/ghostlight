@@ -1200,13 +1200,15 @@ pub enum BrowserOutcome {
         elapsed_ms: u64,
         readiness: BrowserReadiness,
     },
-    /// Dialog observation, with the dialog's bounded message and the url of the document that
-    /// raised it when the adapter reports them.
+    /// Dialog observation, with the dialog's bounded message, a prompt's field text and the url of
+    /// the document that raised it when the adapter reports them.
     Dialog {
         tab_id: u64,
         present: bool,
         dialog_type: String,
         message: Option<String>,
+        /// For a prompt, the text its field holds; absent when the adapter does not report it.
+        default_prompt: Option<String>,
         url: Option<String>,
     },
     /// Dialog handling receipt, with the url of the document that raised the dialog.
