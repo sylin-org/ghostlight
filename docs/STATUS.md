@@ -163,7 +163,12 @@ Now:
   Windows does. Deployed on the owner's machine, which runs a development build again, and checked:
   every window of the live shell allows the end. The owner's restart at 14:16 on 2026-10-20 went
   through: Windows recorded no veto from Ghostlight, and afterwards one service ran, started by an
-  agent, with the shell in the tray. Next: 2.0.1 with the fix (the owner's call).
+  agent, with the shell in the tray. The owner holds it for 2.0.1 with more (below).
+- 2.0.1, the owner's scope (2026-10-20): the shutdown fix (ac0026df); Alpine and other musl systems
+  from the release (linux-claude, linux-2 L2-01 and L2-14); `browser_dialog` status naming a
+  prompt's default, which the extension carries through, with the wording alone for an extension
+  older than 2.0.1 (an extension update and a store review); and the `browser_tabs` action
+  wording. It ships when these land, at the owner's go.
 - linux-claude on test-01, when the Linux machines are back: the public Linux one-liner on its
   real installation (`coordination/CHAT.md`). The owner directed the cutover to go on without it.
 - Owner: step 6, the clean-profile run of the public path on Windows and Linux.
@@ -182,7 +187,4 @@ Still open from before the tag:
 - The owner's look at the window on a light-mode Windows account at 100% and 150%.
 - The three 1.x users told directly, and the owner's look at the website's 2.0 pages.
 
-After 2.0: Alpine in 2.0.1 with musl images (linux-claude; a musl build already runs on test-03),
-the prompt default carried through to status (Bluefin's finding), the `browser_tabs` action
-description, which ends in "focus, close: " with no meaning (the catalog joins empty value
-descriptions), ADR-0203's sixteen deferred slices, and the CI review's deferred items.
+After 2.0.1: ADR-0203's sixteen deferred slices and the CI review's deferred items.
