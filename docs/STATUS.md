@@ -10,8 +10,9 @@ Decisions live in [adr/](adr/README.md), standing preferences in [MEMORY.md](MEM
   `v2.0.0`, npm `ghostlight@2.0.0`, the Chrome Web Store extension 2.0.0 and the MCP Registry
   record `org.sylin/ghostlight 2.0.0` (`docs/public-status.json`, `server.json`,
   `compatibility.json`, and the custody record
-  [testing/release-2.0.0-2026-10-19.md](testing/release-2.0.0-2026-10-19.md)). WinGet serves
-  1.3.14 until microsoft/winget-pkgs#456409 merges.
+  [testing/release-2.0.0-2026-10-19.md](testing/release-2.0.0-2026-10-19.md)). The WinGet
+  manifests merged on 2026-10-20 (microsoft/winget-pkgs#456409); that morning WinGet's index still
+  listed 1.3.14.
 - 1.3.15 was never released. The owner withdrew it on 2026-10-16; the `v1.3.15` tag stays as
   history.
 
@@ -151,16 +152,22 @@ Done on 2026-10-19 (custody record:
   is on `dev` and `main`, the website shows 2.0.0 (website 969866d), and
   `scripts/check-public-surfaces.ps1 -Online` passes. The registry was published before `main`
   moved, because the online check needs it; the website rebuild came last.
-- WinGet: the validated 2.0.0 manifests are in microsoft/winget-pkgs#456409, pending checks and
-  review. The store listing keeps its 1.x images until the owner replaces them.
+- WinGet: the validated 2.0.0 manifests are in microsoft/winget-pkgs#456409, merged on 2026-10-20. The store listing keeps its 1.x images until the owner replaces them.
 
 Now:
 
+- On Windows, `ghostlight-desktop.exe` vetoed every shutdown, restart and sign-out in 2.0.0: Windows
+  logged it on the owner's machine on 2026-10-20 (Winsrv event 10001). Tao's hidden thread event
+  target window answered `WM_QUERYENDSESSION` with FALSE. ac0026df takes Tao 0.36.0, which fixes it
+  (ADR-0120 amendment), and the Windows desktop journey now asks every window of each process, as
+  Windows does. Deployed on the owner's machine, which runs a development build again, and checked:
+  every window of the live shell allows the end. Owner: a real restart to confirm, then 2.0.1 with
+  the fix (the owner's call).
 - linux-claude on test-01, when the Linux machines are back: the public Linux one-liner on its
   real installation (`coordination/CHAT.md`). The owner directed the cutover to go on without it.
 - Owner: step 6, the clean-profile run of the public path on Windows and Linux.
-- After microsoft/winget-pkgs#456409 merges: step 10, the README and installation guide lines that
-  say WinGet carries 2.0, and a `main` fast-forward.
+- Once WinGet's index lists 2.0.0: step 10, the README and installation guide lines that say WinGet
+  carries 2.0, and a `main` fast-forward.
 - `scripts/publish-website.ps1` clones the website into the system temp folder, outside the folder
   whose Git configuration names the owner's GitHub account, so Git Credential Manager waited for an
   account choice. The step's commit (969866d) was pushed from the owner's website checkout
