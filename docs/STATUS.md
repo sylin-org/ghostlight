@@ -161,8 +161,9 @@ Now:
   target window answered `WM_QUERYENDSESSION` with FALSE. ac0026df takes Tao 0.36.0, which fixes it
   (ADR-0120 amendment), and the Windows desktop journey now asks every window of each process, as
   Windows does. Deployed on the owner's machine, which runs a development build again, and checked:
-  every window of the live shell allows the end. Owner: a real restart to confirm, then 2.0.1 with
-  the fix (the owner's call).
+  every window of the live shell allows the end. The owner's restart at 14:16 on 2026-10-20 went
+  through: Windows recorded no veto from Ghostlight, and afterwards one service ran, started by an
+  agent, with the shell in the tray. Next: 2.0.1 with the fix (the owner's call).
 - linux-claude on test-01, when the Linux machines are back: the public Linux one-liner on its
   real installation (`coordination/CHAT.md`). The owner directed the cutover to go on without it.
 - Owner: step 6, the clean-profile run of the public path on Windows and Linux.
@@ -175,8 +176,8 @@ Now:
 
 Still open from before the tag:
 
-- On Windows: a restart and a sign-out with an agent session, the browser and the window open: no
-  shutdown block, and one service afterwards. One `.mcpb` install in Claude Desktop from the
+- On Windows: a sign-out with an agent session, the browser and the window open: no shutdown block,
+  and one service afterwards. The restart passed on 2026-10-20 with ac0026df, not with 2.0.0. One `.mcpb` install in Claude Desktop from the
   release, and the extension in Chrome and Edge.
 - The owner's look at the window on a light-mode Windows account at 100% and 150%.
 - The three 1.x users told directly, and the owner's look at the website's 2.0 pages.
