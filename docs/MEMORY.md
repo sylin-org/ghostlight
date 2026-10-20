@@ -87,6 +87,12 @@ the owner wants, and what this project learned the hard way.
   stays the owner's: ask before changing it, even in a cleanup the owner asked for (owner,
   2026-10-18). How the 2026-09 campaign ran (lanes, escalation, evidence format) is in
   [the fleet campaign](testing/fleet-acceptance-2026-09.md).
+- **Agents may install the tools they need.** Any agent instance may install a tool that helps
+  development, on the owner's machine as on the test machines (owner, 2026-10-20).
+- **The installers need nothing from GitHub but the files.** `get.ps1` and `get.sh` download the
+  release's files over plain HTTPS and gate on `SHA256SUMS`. They never run the GitHub CLI or need a
+  GitHub account (owner, 2026-10-20, after a signed-out `gh` stopped `get.ps1` in Windows
+  PowerShell 5.1). Build provenance stays a manual check, in docs/trust/supply-chain.md.
 - **Remove deprecated content.** On a machine, retired installs, superseded versions, stale build
   output and what removed apps and browsers left behind are deleted, not kept "just in case"
   (owner, 2026-10-19, during the test-02 cleanup: "always remove deprecated content"). Look before
