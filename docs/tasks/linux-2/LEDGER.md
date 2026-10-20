@@ -228,8 +228,10 @@ owner's Chromium 152 with the store extension 2.0.0):
 - The install: the real `get.sh` from the bundle's revision on GitHub with `GHOSTLIGHT_FROM`
   printed "Checksums and build provenance verified." and chose the musl images. The first run
   went over the earlier 2.0.0 musl build from L2-01's rehearsal and left its service in place
-  (see "Found on the way"), so that home was uninstalled with `ghostlight uninstall`, kept as
-  `~/.ghostlight.pre-l214`, and the bundle installed fresh. All three images in `bin` then hash
+  (see "Found on the way"), so that home was uninstalled with `ghostlight uninstall`, moved to
+  `~/.ghostlight.pre-l214`, and the bundle installed fresh. Once nothing ran from it or named it,
+  that folder (the old build, its audit log and diagnostics) was deleted, as the owner's rule on
+  deprecated content says. All three images in `bin` then hash
   as the bundle's `x86_64-unknown-linux-musl` images; `install.json` reads the release channel.
   The owner's running Chromium connected by itself and `ghostlight doctor` read Ready.
 - Real use: a fresh Claude Code process (`claude -p --model haiku`, 8 turns, 13 s, $0.0055)
