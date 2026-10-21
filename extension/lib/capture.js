@@ -10,6 +10,7 @@
   "use strict";
 
   const { sessions, args: check } = deps;
+  const { CDP } = sessions;
   const { invalid, isObject, requireTabId, requireInteger } = check;
 
   // The `view` and `capture` primitives. A view is the numbers that relate CSS pixels to the page
@@ -20,7 +21,6 @@
   // last one ends. The service chooses the clip and the budget and reads the view facts back; this
   // module decides nothing about what to capture.
 
-  const METHOD = Object.freeze({ LAYOUT_METRICS: "Page.getLayoutMetrics", CAPTURE: "Page.captureScreenshot" });
   const CLIP = Object.freeze({ VIEWPORT: "viewport", FULL_PAGE: "full_page", VIEWPORT_RECT: "viewport_rect", PAGE_RECT: "page_rect" });
   const FAILURE = Object.freeze({
     CAPTURE_TOO_LARGE: "capture_too_large",
@@ -131,7 +131,7 @@
 
     // Reads the layout metrics once and derives the view facts. The caller holds a lease.
     async function readView(tabId) {
-      const metrics = await cdp(rootTarget(tabId), METHOD.LAYOUT_METRICS);
+      const metrics = await cdp(rootTarget(tabId), CDP.PAGE_GET_LAYOUT_METRICS);
       const visual = metrics?.cssVisualViewport || metrics?.visualViewport;
       const content = metrics?.cssContentSize || metrics?.contentSize;
       if (!visual || !content) throw sessions.failure(FAILURE.OTHER, "The browser did not report the page layout.");
@@ -204,7 +204,7 @@
             const scale = outputScale(clip.width, clip.height, budget);
             let shot = null;
             for (const quality of budget.qualities) {
-              const attempt = await cdp(rootTarget(tabId), METHOD.CAPTURE,
+              const attempt = await cdp(rootTarget(tabId), CDP.PAGE_CAPTURE_SCREENSHOT,
                 { format: FORMAT_JPEG, quality, clip: { ...clip, scale }, captureBeyondViewport: true, fromSurface: true });
               if (attempt.data.length <= budget.max_base64_chars) {
                 shot = attempt;

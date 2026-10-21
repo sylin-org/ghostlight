@@ -18,6 +18,7 @@
   "use strict";
 
   const { args: check, parser, sessions } = deps;
+  const { CDP } = sessions;
 
   // The `evaluate_main` primitive runs a script in the main world of the top frame, where the page's
   // own code lives. The script's form (a plain expression, or a function body with `return`) is
@@ -29,7 +30,6 @@
   // answers `timeout`. Terminating stops a running script; it cannot stop an awaited promise, so
   // the receipt is `timeout` with the effect marked dispatched either way.
 
-  const METHOD = Object.freeze({ EVALUATE: "Runtime.evaluate", TERMINATE: "Runtime.terminateExecution" });
   const FAILURE = Object.freeze({ TIMEOUT: "timeout" });
   const UNPARSED_FAILURE = "page script failed";
   const FUNCTION_NODES = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
@@ -163,8 +163,8 @@
           inventory.checkGuard(request.guard, await inventory.snapshot(tabId));
           fx.watch(tabId);
           fx.dispatched = true;
-          const evaluated = await withDeadline(lifecycle.cdp(target, METHOD.EVALUATE, evaluationRequest(expression)),
-            request.timeout_ms, () => { lifecycle.cdp(target, METHOD.TERMINATE).catch(() => {}); });
+          const evaluated = await withDeadline(lifecycle.cdp(target, CDP.RUNTIME_EVALUATE, evaluationRequest(expression)),
+            request.timeout_ms, () => { lifecycle.cdp(target, CDP.RUNTIME_TERMINATE_EXECUTION).catch(() => {}); });
           if (evaluated.exceptionDetails) {
             return { value: "", truncated: false, exception: exceptionText(evaluated.exceptionDetails, request.max_result_chars) };
           }

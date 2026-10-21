@@ -17,18 +17,49 @@
 
   // Every CDP method the adapter may send. Runtime.enable is listed because enableDomain
   // (opt-in diagnostics) sends it; attaching a session never does.
-  const CDP_ALLOW = Object.freeze([
-    "Page.enable", "Page.getFrameTree", "Page.addScriptToEvaluateOnNewDocument",
-    "Page.removeScriptToEvaluateOnNewDocument", "Page.createIsolatedWorld", "Page.getLayoutMetrics",
-    "Page.captureScreenshot", "Page.handleJavaScriptDialog", "Page.startScreencast", "Page.stopScreencast",
-    "Page.screencastFrameAck", "Page.getNavigationHistory", "Page.navigateToHistoryEntry",
-    "Runtime.evaluate", "Runtime.callFunctionOn", "Runtime.releaseObject", "Runtime.releaseObjectGroup",
-    "Runtime.runIfWaitingForDebugger", "Runtime.terminateExecution", "Runtime.enable", "Runtime.disable",
-    "Network.enable", "Network.disable", "Target.setAutoAttach", "DOM.getFrameOwner", "DOM.resolveNode",
-    "Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.insertText", "Input.dispatchDragEvent",
-    "Input.setInterceptDrags", "Input.cancelDragging", "Emulation.setFocusEmulationEnabled",
-    "Accessibility.getFullAXTree", "Accessibility.queryAXTree"
-  ]);
+  // Every CDP command Ghostlight sends, by name. Its values are the allow list: cdp() refuses
+  // any other method, so a module names a command through this table or not at all.
+  const CDP = Object.freeze({
+    PAGE_ENABLE: "Page.enable",
+    PAGE_GET_FRAME_TREE: "Page.getFrameTree",
+    PAGE_ADD_SCRIPT_TO_EVALUATE_ON_NEW_DOCUMENT: "Page.addScriptToEvaluateOnNewDocument",
+    PAGE_REMOVE_SCRIPT_TO_EVALUATE_ON_NEW_DOCUMENT: "Page.removeScriptToEvaluateOnNewDocument",
+    PAGE_CREATE_ISOLATED_WORLD: "Page.createIsolatedWorld",
+    PAGE_GET_LAYOUT_METRICS: "Page.getLayoutMetrics",
+    PAGE_CAPTURE_SCREENSHOT: "Page.captureScreenshot",
+    PAGE_HANDLE_JAVASCRIPT_DIALOG: "Page.handleJavaScriptDialog",
+    PAGE_START_SCREENCAST: "Page.startScreencast",
+    PAGE_STOP_SCREENCAST: "Page.stopScreencast",
+    PAGE_SCREENCAST_FRAME_ACK: "Page.screencastFrameAck",
+    PAGE_GET_NAVIGATION_HISTORY: "Page.getNavigationHistory",
+    PAGE_NAVIGATE_TO_HISTORY_ENTRY: "Page.navigateToHistoryEntry",
+    RUNTIME_EVALUATE: "Runtime.evaluate",
+    RUNTIME_CALL_FUNCTION_ON: "Runtime.callFunctionOn",
+    RUNTIME_RELEASE_OBJECT: "Runtime.releaseObject",
+    RUNTIME_RELEASE_OBJECT_GROUP: "Runtime.releaseObjectGroup",
+    RUNTIME_RUN_IF_WAITING_FOR_DEBUGGER: "Runtime.runIfWaitingForDebugger",
+    RUNTIME_TERMINATE_EXECUTION: "Runtime.terminateExecution",
+    RUNTIME_ENABLE: "Runtime.enable",
+    RUNTIME_DISABLE: "Runtime.disable",
+    NETWORK_ENABLE: "Network.enable",
+    NETWORK_DISABLE: "Network.disable",
+    TARGET_SET_AUTO_ATTACH: "Target.setAutoAttach",
+    DOM_GET_FRAME_OWNER: "DOM.getFrameOwner",
+    DOM_RESOLVE_NODE: "DOM.resolveNode",
+    INPUT_DISPATCH_MOUSE_EVENT: "Input.dispatchMouseEvent",
+    INPUT_DISPATCH_KEY_EVENT: "Input.dispatchKeyEvent",
+    INPUT_INSERT_TEXT: "Input.insertText",
+    INPUT_DISPATCH_DRAG_EVENT: "Input.dispatchDragEvent",
+    INPUT_SET_INTERCEPT_DRAGS: "Input.setInterceptDrags",
+    INPUT_CANCEL_DRAGGING: "Input.cancelDragging",
+    EMULATION_SET_FOCUS_EMULATION_ENABLED: "Emulation.setFocusEmulationEnabled",
+    ACCESSIBILITY_GET_FULL_AX_TREE: "Accessibility.getFullAXTree",
+    ACCESSIBILITY_QUERY_AX_TREE: "Accessibility.queryAXTree"
+  });
+  const CDP_ALLOW = Object.freeze(Object.values(CDP));
+  // The texts in which Chrome or this module says a debugger session is gone. A receipt reads
+  // them as `session_lost`, and so does a world call, which also drops its handle.
+  const SESSION_LOST_TEXT = /Debugger is not attached|Detached while handling command|Target closed|No session with given id|Session with given id not found|debugger session was released/i;
   const allowed = new Set(CDP_ALLOW);
 
   const EVENT_ATTACHED = "Target.attachedToTarget";
@@ -191,11 +222,11 @@
     // last, even when setup failed, so a page is never left paused.
     async function setUpChild(child, waitingForDebugger) {
       try {
-        await cdp(child.target, "Page.enable");
+        await cdp(child.target, CDP.PAGE_ENABLE);
         await installer(child);
-        await cdp(child.target, "Target.setAutoAttach", iframeAutoAttach);
+        await cdp(child.target, CDP.TARGET_SET_AUTO_ATTACH, iframeAutoAttach);
       } finally {
-        if (waitingForDebugger) await cdp(child.target, "Runtime.runIfWaitingForDebugger");
+        if (waitingForDebugger) await cdp(child.target, CDP.RUNTIME_RUN_IF_WAITING_FOR_DEBUGGER);
       }
     }
 
@@ -225,7 +256,7 @@
       } catch (_error) { /* releasing page code is best effort; detachment ends the session anyway */ }
       if (state.focusEmulated || state.focusAttempted) {
         try {
-          if (await answeredBeforeDialog(state, cdp({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: false }))) {
+          if (await answeredBeforeDialog(state, cdp({ tabId }, CDP.EMULATION_SET_FOCUS_EMULATION_ENABLED, { enabled: false }))) {
             state.focusEmulated = false;
             state.focusAttempted = false;
           }
@@ -253,7 +284,7 @@
         state.focusAttempted = true;
         let answered;
         try {
-          answered = await answeredBeforeDialog(state, cdp({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled }));
+          answered = await answeredBeforeDialog(state, cdp({ tabId }, CDP.EMULATION_SET_FOCUS_EMULATION_ENABLED, { enabled }));
         } catch (error) {
           // A failed command may have taken effect. Release the session rather than
           // leave an override whose state we cannot confirm.
@@ -274,13 +305,13 @@
         if (!state.attached) {
           await debuggerApi.attach({ tabId }, protocolVersion);
           state.attached = true;
-          await cdp(state.root.target, "Page.enable");
+          await cdp(state.root.target, CDP.PAGE_ENABLE);
           state.domains.add("Page");
         }
         if (!state.prepared) {
           const generation = state.generation;
           await installer(state.root);
-          await cdp(state.root.target, "Target.setAutoAttach", iframeAutoAttach);
+          await cdp(state.root.target, CDP.TARGET_SET_AUTO_ATTACH, iframeAutoAttach);
           if (state.generation !== generation) throw new Error("The debugger session was released during setup.");
           state.prepared = true;
         }
@@ -571,5 +602,5 @@
     });
   }
 
-  return Object.freeze({ create, CDP_ALLOW, failure, dialogOpen, DIALOG_OPEN, DIALOG_OPEN_MESSAGE });
+  return Object.freeze({ create, CDP, CDP_ALLOW, SESSION_LOST_TEXT, failure, dialogOpen, DIALOG_OPEN, DIALOG_OPEN_MESSAGE });
 });

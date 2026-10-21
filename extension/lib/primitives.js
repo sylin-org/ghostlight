@@ -22,6 +22,7 @@
   "use strict";
 
   const { args: check, protocol, sessions, shared, tabsApi } = deps;
+  const { CDP } = sessions;
 
   // Every request frame names one primitive and gets exactly one receipt. This module is the only
   // place that decides how: it looks the primitive up in a closed table (an unknown name is
@@ -59,11 +60,6 @@
   const AX_ROLE_CHARS = 100;
   const AX_TEXT_CHARS = 500;
   const AX_PROPERTIES = Object.freeze(new Set(["checked", "disabled", "expanded", "focused", "required", "selected", "level"]));
-  const METHOD = Object.freeze({
-    HANDLE_DIALOG: "Page.handleJavaScriptDialog",
-    FULL_AX_TREE: "Accessibility.getFullAXTree",
-    QUERY_AX_TREE: "Accessibility.queryAXTree"
-  });
   const DIALOG_OP = Object.freeze({ STATUS: "status", HANDLE: "handle" });
   const STEP = Object.freeze({ MOUSE: "mouse", KEY: "key", INSERT_TEXT: "insert_text", DRAG: "drag", PAUSE: "pause" });
 
@@ -72,10 +68,7 @@
   // that none of them claims is the browser refusing the call.
   const ERROR_PATTERNS = Object.freeze([
     { pattern: /No tab with (given )?id/i, code: CODE.TAB_MISSING },
-    {
-      pattern: /Debugger is not attached|Detached while handling command|Target closed|No session with given id|Session with given id not found|debugger session was released/i,
-      code: CODE.SESSION_LOST
-    },
+    { pattern: sessions.SESSION_LOST_TEXT, code: CODE.SESSION_LOST },
     { pattern: /Cannot (attach|access)|(Another debugger|debugger) is already attached/i, code: CODE.DEBUGGER_UNAVAILABLE },
     { pattern: /^\s*\{\s*"code"\s*:\s*-?\d+/, code: CODE.BROWSER_REFUSED }
   ]);
@@ -341,7 +334,7 @@
         fx.watch(tabId);
         fx.dispatched = true;
         const target = dialog?.sessionId ? { tabId, sessionId: dialog.sessionId } : { tabId };
-        await cdp(target, METHOD.HANDLE_DIALOG, { accept: request.op.accept, promptText: promptText(request.op, dialog) });
+        await cdp(target, CDP.PAGE_HANDLE_JAVASCRIPT_DIALOG, { accept: request.op.accept, promptText: promptText(request.op, dialog) });
         await lifecycle.closeDialog(tabId);
         return { present: true, dialog_type: dialog?.type ?? DIALOG_UNKNOWN, handled: true, accepted: request.op.accept, ...dialogUrl(dialog) };
       } catch (error) {
@@ -385,12 +378,12 @@
             throw sessions.failure(CODE.DOCUMENT_CHANGED, "The frame changed since it was read.");
           }
           const raw = request.query
-            ? await cdp(owner.session, METHOD.QUERY_AX_TREE, {
+            ? await cdp(owner.session, CDP.ACCESSIBILITY_QUERY_AX_TREE, {
               objectId: await world.documentObject(tabId, request.frame, snap),
               role: request.query.role ?? undefined,
               accessibleName: request.query.name ?? undefined
             })
-            : await cdp(owner.session, METHOD.FULL_AX_TREE, {
+            : await cdp(owner.session, CDP.ACCESSIBILITY_GET_FULL_AX_TREE, {
               frameId: request.frame.frame_id,
               depth: request.max_depth ?? undefined
             });

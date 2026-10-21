@@ -908,3 +908,29 @@ test("forEachSession passes over a tab that shows a dialog, before or during its
   assert.deepEqual(visited.sort(), [46, 47]);
   await lifecycle.detachAll();
 });
+
+test("no module names a CDP command but through the sessions table, and every key it uses exists", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const extension = path.join(__dirname, "..");
+  const QUOTED = /"((?:Page|Runtime|Network|Target|DOM|Input|Emulation|Accessibility|Log)\.[A-Za-z]+)"/g;
+  const KEY = /\bCDP\.([A-Z_]+)\b/g;
+  const allowed = new Set(sessions.CDP_ALLOW);
+  const keys = new Set(Object.keys(sessions.CDP));
+  const problems = (name, text) => [
+    ...[...text.matchAll(QUOTED)].map((m) => m[1])
+      .filter((method) => name !== "worker.js" || allowed.has(method))
+      .map((method) => `${name} names ${method} itself`),
+    ...[...text.matchAll(KEY)].map((m) => m[1]).filter((key) => !keys.has(key)).map((key) => `${name} uses CDP.${key}`)
+  ];
+  assert.deepEqual(problems("lib/x.js", 'cdp(t, "Page.enable"); cdp(t, CDP.PAGE_ENABLE); cdp(t, CDP.PAGE_ENABEL);'),
+    ["lib/x.js names Page.enable itself", "lib/x.js uses CDP.PAGE_ENABEL"], "the scan sees a literal and a mistyped key");
+  assert.deepEqual(problems("worker.js", 'on("Page.screencastFrame"); cdp(t, "Page.screencastFrameAck");'),
+    ["worker.js names Page.screencastFrameAck itself"], "the worker may name the events it routes, not a command");
+  const files = ["worker.js", ...fs.readdirSync(path.join(extension, "lib")).filter((name) => name.endsWith(".js"))
+    .filter((name) => name !== "sessions.js").map((name) => `lib/${name}`)];
+  assert.ok(files.length > 10);
+  assert.deepEqual(files.flatMap((name) => problems(name, fs.readFileSync(path.join(extension, name), "utf8"))), []);
+  assert.deepEqual(new Set(Object.values(sessions.CDP)).size, sessions.CDP_ALLOW.length, "one key per command");
+});
+

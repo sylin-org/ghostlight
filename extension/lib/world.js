@@ -10,6 +10,7 @@
   "use strict";
 
   const { protocol, sessions, shared } = deps;
+  const { CDP } = sessions;
 
   // The service's page assets run in the `ghostlight` isolated world of every document the
   // adapter touches. This module registers them in every debugger session, reaches each world
@@ -38,17 +39,6 @@
     DOC: "function() { return document; }"
   });
 
-  const METHOD = Object.freeze({
-    ADD_SCRIPT: "Page.addScriptToEvaluateOnNewDocument",
-    REMOVE_SCRIPT: "Page.removeScriptToEvaluateOnNewDocument",
-    CREATE_WORLD: "Page.createIsolatedWorld",
-    EVALUATE: "Runtime.evaluate",
-    CALL_FUNCTION: "Runtime.callFunctionOn",
-    RELEASE_OBJECT: "Runtime.releaseObject",
-    RELEASE_GROUP: "Runtime.releaseObjectGroup",
-    FRAME_OWNER: "DOM.getFrameOwner",
-    RESOLVE_NODE: "DOM.resolveNode"
-  });
 
   const CALL = Object.freeze({
     DOCUMENT_CHANGED: "document_changed",
@@ -76,8 +66,7 @@
       code: CALL.DOCUMENT_CHANGED, started: false, dropHandle: true },
     { pattern: /Execution context was destroyed|Inspected target navigated or closed/i,
       code: CALL.DOCUMENT_CHANGED, started: true, dropHandle: true },
-    { pattern: /Debugger is not attached|Detached while handling command|Target closed|No session with given id/i,
-      code: CALL.SESSION_LOST, started: true, dropHandle: true },
+    { pattern: sessions.SESSION_LOST_TEXT, code: CALL.SESSION_LOST, started: true, dropHandle: true },
     { pattern: /Object couldn't be returned by value/i, code: CALL.UNSERIALIZABLE, started: true, dropHandle: false }
   ]);
 
@@ -207,9 +196,9 @@
     async function register(session) {
       if (!assets) return;
       for (const identifier of session.identifiers.splice(0)) {
-        await cdp(session.target, METHOD.REMOVE_SCRIPT, { identifier }).catch(() => {});
+        await cdp(session.target, CDP.PAGE_REMOVE_SCRIPT_TO_EVALUATE_ON_NEW_DOCUMENT, { identifier }).catch(() => {});
       }
-      const { identifier } = await cdp(session.target, METHOD.ADD_SCRIPT,
+      const { identifier } = await cdp(session.target, CDP.PAGE_ADD_SCRIPT_TO_EVALUATE_ON_NEW_DOCUMENT,
         { source: registration(assets), worldName: WORLD, runImmediately: true });
       session.identifiers.push(identifier);
     }
@@ -225,8 +214,8 @@
       const owner = snap.owner.get(target.frame_id);
       if (!owner) throw callFailure(CALL.FRAME_MISSING, false, "The frame is not in the tab.");
       if (owner.loaderId !== target.loader_id) throw callFailure(CALL.DOCUMENT_CHANGED, false, "The frame holds another document.");
-      const { executionContextId } = await cdp(owner.session, METHOD.CREATE_WORLD, { frameId: target.frame_id, worldName: WORLD });
-      const { result } = await cdp(owner.session, METHOD.EVALUATE,
+      const { executionContextId } = await cdp(owner.session, CDP.PAGE_CREATE_ISOLATED_WORLD, { frameId: target.frame_id, worldName: WORLD });
+      const { result } = await cdp(owner.session, CDP.RUNTIME_EVALUATE,
         { expression: "globalThis", contextId: executionContextId, objectGroup: WORLD });
       if (await inventory.currentLoader(owner.session, target.frame_id) !== target.loader_id) {
         throw callFailure(CALL.DOCUMENT_CHANGED, false, "The frame changed document while its world was created.");
@@ -239,17 +228,17 @@
     // The owner element of a child frame, resolved in the parent's world by exact frame identity.
     async function ownerObject(tabId, ref, childFrameId, snap) {
       const handle = await worldHandle(tabId, ref, snap);
-      const { executionContextId } = await cdp(handle.session, METHOD.CREATE_WORLD, { frameId: handle.ref.frame_id, worldName: WORLD });
+      const { executionContextId } = await cdp(handle.session, CDP.PAGE_CREATE_ISOLATED_WORLD, { frameId: handle.ref.frame_id, worldName: WORLD });
       let owner;
       try {
-        owner = await cdp(handle.session, METHOD.FRAME_OWNER, { frameId: childFrameId });
+        owner = await cdp(handle.session, CDP.DOM_GET_FRAME_OWNER, { frameId: childFrameId });
       } catch (_error) {
         throw callFailure(CALL.OWNER_MISSING, false, "The frame has no owner element in this document.");
       }
-      const { object } = await cdp(handle.session, METHOD.RESOLVE_NODE,
+      const { object } = await cdp(handle.session, CDP.DOM_RESOLVE_NODE,
         { backendNodeId: owner.backendNodeId, executionContextId, objectGroup: WORLD });
       if (await inventory.currentLoader(handle.session, handle.ref.frame_id) !== handle.ref.loader_id) {
-        cdp(handle.session, METHOD.RELEASE_OBJECT, { objectId: object.objectId }).catch(() => {});
+        cdp(handle.session, CDP.RUNTIME_RELEASE_OBJECT, { objectId: object.objectId }).catch(() => {});
         throw callFailure(CALL.DOCUMENT_CHANGED, false, "The frame changed document while its owner was resolved.");
       }
       return { handle, objectId: object.objectId };
@@ -278,7 +267,7 @@
      */
     function cancelToken(entry) {
       cancelledTokens.add(entry.token);
-      cdp(entry.session, METHOD.CALL_FUNCTION,
+      cdp(entry.session, CDP.RUNTIME_CALL_FUNCTION_ON,
         { objectId: entry.global, functionDeclaration: SHIMS.CANCEL, arguments: [{ value: entry.token }] }).catch(() => {});
     }
 
@@ -421,7 +410,7 @@
           if (cancelledTokens.has(ctx.token) || isCancelled(ctx.correlation)) {
             return failed(CALL.CANCELLED, false, "The call was cancelled before it started.");
           }
-          const sent = cdp(handle.session, METHOD.CALL_FUNCTION, {
+          const sent = cdp(handle.session, CDP.RUNTIME_CALL_FUNCTION_ON, {
             objectId: target,
             functionDeclaration: SHIMS.CALL,
             awaitPromise: true,
@@ -435,7 +424,7 @@
           if (envelope?.error?.code === RUNTIME_MISSING && !reinstalled) {
             reinstalled = true;
             try {
-              await cdp(handle.session, METHOD.CALL_FUNCTION,
+              await cdp(handle.session, CDP.RUNTIME_CALL_FUNCTION_ON,
                 { objectId: handle.global, functionDeclaration: wrap(assets.source), arguments: [{ value: assets.id }] });
             } catch (error) {
               const mapped = mapCallError(error);
@@ -451,7 +440,7 @@
           return failed(mapped.code, mapped.started, error?.message);
         } finally {
           untrack(ctx.correlation, entry);
-          if (call.owner_of) cdp(handle.session, METHOD.RELEASE_OBJECT, { objectId: target }).catch(() => {});
+          if (call.owner_of) cdp(handle.session, CDP.RUNTIME_RELEASE_OBJECT, { objectId: target }).catch(() => {});
         }
       }
     }
@@ -540,7 +529,7 @@
     }
 
     async function callShim(handle, functionDeclaration, args, options = {}) {
-      return cdp(handle.session, METHOD.CALL_FUNCTION, {
+      return cdp(handle.session, CDP.RUNTIME_CALL_FUNCTION_ON, {
         objectId: handle.global,
         functionDeclaration,
         arguments: args.map((value) => ({ value })),
@@ -596,9 +585,9 @@
       }
       const rootSession = lifecycle.rootSession(tabId);
       for (const session of rootSession ? [rootSession, ...lifecycle.childSessions(tabId)] : []) {
-        await cdp(session.target, METHOD.RELEASE_GROUP, { objectGroup: WORLD }).catch(() => {});
+        await cdp(session.target, CDP.RUNTIME_RELEASE_OBJECT_GROUP, { objectGroup: WORLD }).catch(() => {});
         for (const identifier of session.identifiers.splice(0)) {
-          await cdp(session.target, METHOD.REMOVE_SCRIPT, { identifier }).catch(() => {});
+          await cdp(session.target, CDP.PAGE_REMOVE_SCRIPT_TO_EVALUATE_ON_NEW_DOCUMENT, { identifier }).catch(() => {});
         }
       }
     }

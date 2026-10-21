@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14 and EXT-15 have landed; EXT-9 is next.
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15 and EXT-9 have landed; EXT-10 is next.
 
 ## Slices
 
@@ -85,7 +85,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14 and EXT-15 have landed; EXT-9 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15 and EXT-9 have landed; EXT-10 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -94,7 +94,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14 and EXT-15 ha
 | EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | todo |
 | EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | landed (this commit) |
 | EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | landed (this commit) |
-| EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | todo |
+| EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | landed (this commit) |
 | EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | todo |
 | EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | todo |
 | EXT-13 | refactor(extension): `script-evaluator.js` folds into `evaluate.js` | - | EXT-13 | landed (this commit) |
@@ -190,3 +190,19 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14 and EXT-15 ha
   `icons/` (which of them are source art the package leaves out) and the test files, which the
   package leaves out too. The three module headers are packaged, so the freeze record is
   regenerated; the README is not packaged.
+- EXT-9, the table: `sessions.CDP` names every command Ghostlight sends, and its values are the
+  allow list (`CDP_ALLOW`), so a command a module names but the list lacks cannot exist. The eight
+  per-module tables go (`buffers`, `capture`, `evaluate`, `input`, `inventory`, `primitives`,
+  `tabs` and `world`), and so do `sessions.js`'s own bare literals; the keys are the method names
+  (`Page.captureScreenshot` is `CDP.PAGE_CAPTURE_SCREENSHOT`). The worker keeps naming the events it
+  routes, which are not commands. Guard, not packaged: "no module names a CDP command but through
+  the sessions table, and every key it uses exists" in `sessions.test.js`, with its negative
+  controls (a literal, a mistyped key, a command in the worker).
+- EXT-9, the classifier: `sessions.SESSION_LOST_TEXT` is the one text of a lost debugger session,
+  read by the receipt classifier in `primitives.js` and by the world call classifier in
+  `world.js`, whose copy had drifted. A world call that meets Chrome's "Session with given id not
+  found." (an iframe session gone before its detach event) or this module's "debugger session was
+  released" now answers `session_lost` and drops its cached handle, where it answered `other`.
+  The service reads both alike today, as the skeptic found. The coded failure it also needed
+  (`dialog_open` thrown inside the world setup) landed in P-D1. Proof: the `mapCallError` table
+  test in `world.test.js`, which reads `other` for both texts before this change.

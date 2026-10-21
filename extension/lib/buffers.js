@@ -28,6 +28,7 @@
   "use strict";
 
   const { args: check, capture: captureApi, diagnosticsApi, protocol, recordingApi, sessions, shared, worldApi } = deps;
+  const { CDP } = sessions;
 
   // The `diagnostics` and `recording` primitives. Both keep volatile, bounded state inside the
   // browser (the console and network ring of a tab, and screencast frames) and give it out only when
@@ -64,13 +65,6 @@
   });
   const RECORDING_STATE = "recording";
   const FRAME_KIND = Object.freeze({ SEED: "seed", SCREENCAST: "screencast", FINAL: "final" });
-  const METHOD = Object.freeze({
-    LAYOUT_METRICS: "Page.getLayoutMetrics",
-    CAPTURE: "Page.captureScreenshot",
-    START_SCREENCAST: "Page.startScreencast",
-    STOP_SCREENCAST: "Page.stopScreencast",
-    SCREENCAST_ACK: "Page.screencastFrameAck"
-  });
   const FAILURE = Object.freeze({ DOCUMENT_CHANGED: "document_changed" });
   const ENCODER_DOCUMENT = "offscreen.html";
   const ENCODER_TARGET = "ghostlight-offscreen";
@@ -277,7 +271,7 @@
       // A dialog blocks the renderer, so no frame can be taken until it is handled.
       if (lifecycle.currentDialog(tabId) || !(await scopeCurrent(tabId))) return false;
       return worldCalls.withHidden(tabId, async () => {
-        const metrics = await cdp(rootTarget(tabId), METHOD.LAYOUT_METRICS);
+        const metrics = await cdp(rootTarget(tabId), CDP.PAGE_GET_LAYOUT_METRICS);
         const visual = metrics.cssVisualViewport || metrics.visualViewport;
         const clip = {
           x: visual.pageX ?? 0,
@@ -286,7 +280,7 @@
           height: Math.max(1, visual.clientHeight),
           scale: Math.max(MIN_CAPTURE_SCALE, Math.min(1, recordingApi.MAX_WIDTH / visual.clientWidth, recordingApi.MAX_HEIGHT / visual.clientHeight))
         };
-        const shot = await cdp(rootTarget(tabId), METHOD.CAPTURE,
+        const shot = await cdp(rootTarget(tabId), CDP.PAGE_CAPTURE_SCREENSHOT,
           { format: JPEG, quality: recordingApi.JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
         const size = await frameSize(shot.data, clip);
         if (size.width > recordingApi.MAX_WIDTH || size.height > recordingApi.MAX_HEIGHT) {
@@ -311,7 +305,7 @@
         try {
           await captureFrame(tabId, FRAME_KIND.SEED).catch(() => false);
           if (!recording.activeForTab(tabId)) throw new Error("recording ended during startup");
-          await cdp(rootTarget(tabId), METHOD.START_SCREENCAST, {
+          await cdp(rootTarget(tabId), CDP.PAGE_START_SCREENCAST, {
             format: JPEG,
             quality: recordingApi.JPEG_QUALITY,
             maxWidth: recordingApi.MAX_WIDTH,
@@ -342,7 +336,7 @@
       try {
         await lifecycle.withLease(state.tabId, async () => {
           await captureFrame(state.tabId, FRAME_KIND.FINAL).catch(() => false);
-          await cdp(rootTarget(state.tabId), METHOD.STOP_SCREENCAST);
+          await cdp(rootTarget(state.tabId), CDP.PAGE_STOP_SCREENCAST);
         });
         const summary = recording.finishStop(state, STOP_REASON.EXPLICIT);
         return { result: RESULT.STOPPED, summary, changed: true };
@@ -529,7 +523,7 @@
      */
     async function screencastFrame(tabId, params) {
       try {
-        await cdp(rootTarget(tabId), METHOD.SCREENCAST_ACK, { sessionId: params.sessionId });
+        await cdp(rootTarget(tabId), CDP.PAGE_SCREENCAST_FRAME_ACK, { sessionId: params.sessionId });
       } catch (_error) { /* a detached target has no compositor flow left to unblock */ }
       if (await scopeCurrent(tabId)) recording.append(tabId, params.data, FRAME_KIND.SCREENCAST, now());
     }
@@ -561,7 +555,7 @@
      */
     function recordingEnded(tabId, _recordingId, reason) {
       watches.delete(tabId);
-      if (reason !== STOP_REASON.EXPLICIT) cdp(rootTarget(tabId), METHOD.STOP_SCREENCAST).catch(() => {});
+      if (reason !== STOP_REASON.EXPLICIT) cdp(rootTarget(tabId), CDP.PAGE_STOP_SCREENCAST).catch(() => {});
       worldCalls.ambientAll(tabId).catch(() => {});
       changed();
     }

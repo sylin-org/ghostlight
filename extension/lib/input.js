@@ -10,6 +10,7 @@
   "use strict";
 
   const { protocol, sessions, world } = deps;
+  const { CDP } = sessions;
 
   // Trusted input for one tab: an optional world-call precondition (for example the focus check that
   // must pass right before key input), then mouse, key, text, pause and drag steps sent through the
@@ -17,14 +18,6 @@
   // and the batch stops at the first dialog. HTML5 drags are intercepted and replayed as drag events;
   // a pointer-library drag is a plain press, move and release. The service decides what to send.
 
-  const METHOD = Object.freeze({
-    MOUSE: "Input.dispatchMouseEvent",
-    KEY: "Input.dispatchKeyEvent",
-    INSERT_TEXT: "Input.insertText",
-    DRAG_EVENT: "Input.dispatchDragEvent",
-    INTERCEPT_DRAGS: "Input.setInterceptDrags",
-    CANCEL_DRAGGING: "Input.cancelDragging"
-  });
   const STEP = Object.freeze({ MOUSE: "mouse", KEY: "key", INSERT_TEXT: "insert_text", DRAG: "drag", PAUSE: "pause" });
   const MOUSE = Object.freeze({ moved: "mouseMoved", pressed: "mousePressed", released: "mouseReleased", wheel: "mouseWheel" });
   const KEY = Object.freeze({ down: "keyDown", up: "keyUp", raw_down: "rawKeyDown", char: "char" });
@@ -58,25 +51,25 @@
     const rootTarget = (tabId) => ({ tabId });
 
     function mouse(tabId, type, point, { button = BUTTON_NONE, buttons = 0, clickCount = 0, modifiers = 0, force = 0 } = {}) {
-      return cdp(rootTarget(tabId), METHOD.MOUSE, { type, x: point.x, y: point.y, button, buttons, clickCount, modifiers, force });
+      return cdp(rootTarget(tabId), CDP.INPUT_DISPATCH_MOUSE_EVENT, { type, x: point.x, y: point.y, button, buttons, clickCount, modifiers, force });
     }
 
     function sendStep(tabId, step) {
       if (step.step === STEP.MOUSE) {
-        return cdp(rootTarget(tabId), METHOD.MOUSE, {
+        return cdp(rootTarget(tabId), CDP.INPUT_DISPATCH_MOUSE_EVENT, {
           type: MOUSE[step.action], x: step.x, y: step.y, button: step.button ?? BUTTON_NONE, buttons: step.buttons ?? 0,
           clickCount: step.click_count ?? 0, modifiers: step.modifiers ?? 0, deltaX: step.delta_x ?? 0, deltaY: step.delta_y ?? 0,
           force: step.force ?? 0
         });
       }
       if (step.step === STEP.KEY) {
-        return cdp(rootTarget(tabId), METHOD.KEY, {
+        return cdp(rootTarget(tabId), CDP.INPUT_DISPATCH_KEY_EVENT, {
           type: KEY[step.action], key: step.key, code: step.code ?? undefined, windowsVirtualKeyCode: step.key_code ?? undefined,
           nativeVirtualKeyCode: step.key_code ?? undefined, text: step.text ?? undefined, unmodifiedText: step.unmodified_text ?? undefined,
           modifiers: step.modifiers ?? 0
         });
       }
-      if (step.step === STEP.INSERT_TEXT) return cdp(rootTarget(tabId), METHOD.INSERT_TEXT, { text: step.text });
+      if (step.step === STEP.INSERT_TEXT) return cdp(rootTarget(tabId), CDP.INPUT_INSERT_TEXT, { text: step.text });
       if (step.step === STEP.PAUSE) return sleep(Math.min(protocol.MAX_PAUSE_MS, step.ms));
       return Promise.reject(sessions.failure(FAILURE.INVALID_REQUEST, `Unknown input step: ${step.step}`));
     }
@@ -124,7 +117,7 @@
         for (const waiter of Array.from(entry.waiters)) waiter(data);
         return;
       }
-      await cdp(rootTarget(tabId), METHOD.CANCEL_DRAGGING).catch(() => {});
+      await cdp(rootTarget(tabId), CDP.INPUT_CANCEL_DRAGGING).catch(() => {});
     }
 
     // Press at the first point, move through the path, release at the last. An intercepted HTML5
@@ -139,10 +132,10 @@
       let released = false;
 
       async function replay(data) {
-        await cdp(rootTarget(tabId), METHOD.INTERCEPT_DRAGS, { enabled: false });
+        await cdp(rootTarget(tabId), CDP.INPUT_SET_INTERCEPT_DRAGS, { enabled: false });
         intercepting = false;
         for (const type of DRAG_REPLAY) {
-          await cdp(rootTarget(tabId), METHOD.DRAG_EVENT, { type, x: end.x, y: end.y, data, modifiers });
+          await cdp(rootTarget(tabId), CDP.INPUT_DISPATCH_DRAG_EVENT, { type, x: end.x, y: end.y, data, modifiers });
         }
         await mouse(tabId, MOUSE.released, end, { button: BUTTON_LEFT, clickCount: 1, modifiers });
         released = true;
@@ -151,7 +144,7 @@
 
       try {
         try {
-          await cdp(rootTarget(tabId), METHOD.INTERCEPT_DRAGS, { enabled: true });
+          await cdp(rootTarget(tabId), CDP.INPUT_SET_INTERCEPT_DRAGS, { enabled: true });
           intercepting = true;
         } catch (_error) {
           cancelDragInterception(tabId);
@@ -171,10 +164,10 @@
         return { native: false };
       } finally {
         cancelDragInterception(tabId);
-        if (intercepting) await cdp(rootTarget(tabId), METHOD.INTERCEPT_DRAGS, { enabled: false }).catch(() => {});
+        if (intercepting) await cdp(rootTarget(tabId), CDP.INPUT_SET_INTERCEPT_DRAGS, { enabled: false }).catch(() => {});
         if (pressed && !released) {
           await mouse(tabId, MOUSE.released, end, { button: BUTTON_LEFT, clickCount: 1 }).catch(() => {});
-          await cdp(rootTarget(tabId), METHOD.CANCEL_DRAGGING).catch(() => {});
+          await cdp(rootTarget(tabId), CDP.INPUT_CANCEL_DRAGGING).catch(() => {});
         }
       }
     }

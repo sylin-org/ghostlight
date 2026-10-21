@@ -180,6 +180,9 @@ test("mapCallError covers the closed table", () => {
   assert.equal(World.mapCallError(new Error("Debugger is not attached to the tab with id: 12.")).code, "session_lost");
   assert.equal(World.mapCallError(new Error("Object couldn't be returned by value")).code, "unserializable");
   assert.deepEqual(World.mapCallError(new Error("Something odd")), { code: "other", started: true, dropHandle: false });
+  for (const text of ["Session with given id not found.", "debugger session was released"]) {
+    assert.deepEqual(World.mapCallError(new Error(text)), { code: "session_lost", started: true, dropHandle: true }, text);
+  }
   for (const code of ["document_changed", "session_lost", "unserializable", "other"]) assert.ok(protocol.isKnown("call_failures", code));
 });
 

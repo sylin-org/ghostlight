@@ -10,6 +10,7 @@
   "use strict";
 
   const { protocol, sessions, shared } = deps;
+  const { CDP } = sessions;
 
   // Every document of a tab, read from CDP across the root session and every child (out-of-process
   // iframe) session, keyed by frame id with its loader id. A session lists only the frames in its
@@ -17,7 +18,6 @@
   // unseen urls. The guard is a mechanical currency check run right before the adapter acts; the
   // service decides what a guard holds.
 
-  const GET_FRAME_TREE = "Page.getFrameTree";
   const TOP_FRAME_ID = 0;
   const ACTIVE_LIFECYCLE = "active";
   const DOCUMENT_CHANGED = "document_changed";
@@ -116,7 +116,7 @@
       for (const session of [rootSession, ...lifecycle.childSessions(tabId)]) {
         let tree;
         try {
-          tree = (await cdp(session.target, GET_FRAME_TREE)).frameTree;
+          tree = (await cdp(session.target, CDP.PAGE_GET_FRAME_TREE)).frameTree;
         } catch (_error) {
           complete = false;
           continue;
@@ -162,7 +162,7 @@
      */
     async function topSnapshot(tabId) {
       const rootSession = rootOf(tabId);
-      const tree = (await cdp(rootSession.target, GET_FRAME_TREE)).frameTree;
+      const tree = (await cdp(rootSession.target, CDP.PAGE_GET_FRAME_TREE)).frameTree;
       const owner = new Map();
       let top = null;
       if (tree?.frame) {
@@ -176,7 +176,7 @@
     /** Resolves the current loader id of a frame in a session, or null when the frame is gone. */
     async function currentLoader(target, frameId) {
       if (lifecycle.currentDialog(target.tabId)) throw sessions.dialogOpen();
-      const tree = (await cdp(target, GET_FRAME_TREE)).frameTree;
+      const tree = (await cdp(target, CDP.PAGE_GET_FRAME_TREE)).frameTree;
       return findFrame(tree, frameId)?.loaderId ?? null;
     }
 

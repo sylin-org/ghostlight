@@ -12,6 +12,7 @@
   "use strict";
 
   const { protocol, sessions, shared, state, args: check } = deps;
+  const { CDP } = sessions;
   const { invalid, isObject, requireTabId, requireText, requireInteger, requireArgs } = check;
 
   // Tabs, windows and zoom: list_tabs, open_tab, navigate, focus_tab, close_tab, set_zoom and
@@ -33,11 +34,6 @@
   const STATUS_LOADING = "loading";
   const STATUS_COMPLETE = "complete";
   const BEFORE_UNLOAD = "beforeunload";
-  const METHOD = Object.freeze({
-    HANDLE_DIALOG: "Page.handleJavaScriptDialog",
-    NAVIGATION_HISTORY: "Page.getNavigationHistory",
-    NAVIGATE_TO_ENTRY: "Page.navigateToHistoryEntry"
-  });
   const TARGET = Object.freeze({ URL: "url", BACK: "back", FORWARD: "forward", RELOAD: "reload" });
   const FAILURE = Object.freeze({
     TIMEOUT: "timeout",
@@ -349,14 +345,14 @@
      */
     async function traverseHistory(tabId, direction, fx) {
       await lifecycle.withLease(tabId, async () => {
-        const history = await lifecycle.cdp({ tabId }, METHOD.NAVIGATION_HISTORY);
+        const history = await lifecycle.cdp({ tabId }, CDP.PAGE_GET_NAVIGATION_HISTORY);
         const step = direction === TARGET.BACK ? -1 : 1;
         const entry = Array.isArray(history?.entries) && Number.isSafeInteger(history.currentIndex)
           ? history.entries[history.currentIndex + step]
           : undefined;
         if (!Number.isSafeInteger(entry?.id)) throw sessions.failure(FAILURE.NO_HISTORY_ENTRY, NO_ENTRY_MESSAGE[direction]);
         fx.dispatched = true;
-        await lifecycle.cdp({ tabId }, METHOD.NAVIGATE_TO_ENTRY, { entryId: entry.id });
+        await lifecycle.cdp({ tabId }, CDP.PAGE_NAVIGATE_TO_HISTORY_ENTRY, { entryId: entry.id });
       });
     }
 
@@ -508,7 +504,7 @@
     async function acceptBeforeUnload(tabId, dialog) {
       if (!beforeUnloadTabs.has(tabId) || dialog?.type !== BEFORE_UNLOAD) return false;
       const target = dialog.sessionId ? { tabId, sessionId: dialog.sessionId } : { tabId };
-      await lifecycle.cdp(target, METHOD.HANDLE_DIALOG, { accept: true });
+      await lifecycle.cdp(target, CDP.PAGE_HANDLE_JAVASCRIPT_DIALOG, { accept: true });
       return true;
     }
 
