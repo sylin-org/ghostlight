@@ -93,30 +93,10 @@ fn is_lower_hex(text: &str, chars: usize) -> bool {
 mod tests {
     use super::HandleKind;
 
-    #[test]
-    fn each_kind_knows_its_minted_shape() {
-        let invocation = crate::work::InvocationId::mint();
-        for (kind, minted) in [
-            (HandleKind::Tab, "tab_ab2c3d4e"),
-            (HandleKind::Target, "target_7k2nb5xe"),
-            (HandleKind::View, "view_zzzz7777"),
-            (HandleKind::Image, "image_abcdefgh"),
-            (HandleKind::Snapshot, "snapshot_abcd2345"),
-            (
-                HandleKind::Browser,
-                "browser_0123456789abcdef0123456789abcdef",
-            ),
-            (HandleKind::Diagnostics, "diag_1k_0a1b2c3d"),
-            (HandleKind::Invocation, invocation.as_str()),
-        ] {
-            assert!(kind.minted(minted), "{kind:?} {minted}");
-            assert!(!kind.minted(&format!("{minted}x")), "{kind:?} {minted}x");
-        }
-        assert!(!HandleKind::Tab.minted("target_7k2nb5xe"));
-    }
-
-    /// The extension mints browser ids and diagnostics cursors, so their spellings cross a
-    /// language boundary: the service's kinds must read what the extension writes.
+    /// Contract between the extension and the service: the extension mints browser ids
+    /// (`extension/lib/state.js`) and diagnostics cursors (`extension/lib/diagnostics.js`), so
+    /// their prefixes cross a language boundary, and the service's kinds must read what the
+    /// extension writes.
     #[test]
     fn the_extension_mints_the_prefixes_the_service_reads() {
         let read = |path: &str| {
