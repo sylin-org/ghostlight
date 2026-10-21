@@ -1138,6 +1138,18 @@ fn join_list(names: &[&str]) -> String {
 mod tests {
     use super::*;
     use crate::install::native_host::STORE_EXTENSION_ID;
+    use crate::language::self_check::golden::repository_path;
+
+    /// The window's setup page, which renders the view and posts its acts back.
+    const SETUP_PAGE: &str = "crates/orchestrator/ui/lib/setup-view.js";
+    /// The extension's own setup view, which shows the same three steps.
+    const EXTENSION_SETUP_VIEW: &str = "extension/lib/setup-view.js";
+    /// The kit stylesheet, which styles the lantern.
+    const KIT_CSS: &str = "extension/kit.css";
+    /// The profile directory the test browsers keep the extension in.
+    const PROFILE: &str = "Profile 1";
+    /// What every `Next:` line starts with.
+    const NEXT: &str = "Next:";
 
     fn browser(id: &str, name: &str, short: &str, form: BrowserForm) -> BrowserFact {
         BrowserFact {
@@ -1169,7 +1181,7 @@ mod tests {
 
     fn with_extension(mut fact: BrowserFact, name: Option<&str>, profiles: usize) -> BrowserFact {
         fact.extension = Some(ProfileFact {
-            directory: "Profile 1".to_owned(),
+            directory: PROFILE.to_owned(),
             name: name.map(str::to_owned),
             profiles,
         });
@@ -1207,584 +1219,6 @@ mod tests {
             .unwrap_or_else(|| panic!("no row {id}"))
     }
 
-    fn step_states(view: &SetupView) -> Vec<StepState> {
-        view.steps.iter().map(|step| step.state).collect()
-    }
-
-    #[test]
-    fn stages_resolve_in_order() {
-        let mut state = facts(vec![connected(chrome(BrowserForm::Native))], vec![]);
-        assert_eq!(stage(&state), Stage::Agent);
-        state.browsers.clear();
-        assert_eq!(stage(&state), Stage::Browser);
-        state.finish_on_this_computer = true;
-        assert_eq!(stage(&state), Stage::Computer);
-        state.complete = true;
-        assert_eq!(stage(&state), Stage::Retired);
-        state.finished = true;
-        assert_eq!(stage(&state), Stage::Done);
-        state.complete = false;
-        assert_eq!(stage(&state), Stage::Computer);
-    }
-
-    #[test]
-    fn the_computer_stage_gives_the_finishing_command_for_the_platform() {
-        let mut state = facts(vec![], vec![]);
-        state.finish_on_this_computer = true;
-        let view = compose(&state);
-        assert_eq!(view.stage, Stage::Computer);
-        assert_eq!(view.eyebrow, "Set up Ghostlight");
-        assert_eq!(
-            view.headline,
-            Headline::new("Finish installing on ", "this computer", ".")
-        );
-        assert_eq!(
-            view.lead.as_deref(),
-            Some("Run this once from a regular terminal.")
-        );
-        let code = view.code.as_ref().unwrap();
-        assert_eq!(code.label, "Paste into PowerShell from the Start menu");
-        assert_eq!(code.text, "~\\.ghostlight\\bin\\ghostlight.exe install");
-        assert_eq!(code.copy_name, "Copy command");
-        assert_eq!(
-            view.live.as_ref().unwrap().text,
-            "Waiting for this computer."
-        );
-        assert_eq!(
-            step_states(&view),
-            [StepState::Current, StepState::Todo, StepState::Todo]
-        );
-        assert_eq!(view.light, Light::Waiting);
-        assert!(view.rows.is_empty());
-
-        state.platform = Platform::Linux;
-        let code = compose(&state).code.unwrap();
-        assert_eq!(code.label, "Paste into a terminal");
-        assert_eq!(code.text, "~/.ghostlight/bin/ghostlight install");
-    }
-
-    #[test]
-    fn the_browser_stage_asks_for_a_browser() {
-        let view = compose(&facts(vec![chrome(BrowserForm::Native)], vec![]));
-        assert_eq!(view.stage, Stage::Browser);
-        assert_eq!(
-            view.headline,
-            Headline::new("Add Ghostlight to ", "your browser", ".")
-        );
-        assert_eq!(view.live.as_ref().unwrap().text, "Waiting for a browser.");
-        assert!(!view.live.as_ref().unwrap().done);
-        assert_eq!(view.light, Light::Waiting);
-        assert_eq!(
-            step_states(&view),
-            [StepState::Done, StepState::Current, StepState::Todo]
-        );
-        assert_eq!(view.steps[0].word, "Installed");
-        assert!(view.code.is_none());
-        assert!(view.connected_line.is_none());
-    }
-
-    #[test]
-    fn a_native_browser_without_the_extension_offers_add() {
-        let view = compose(&facts(
-            vec![chrome(BrowserForm::Native), brave(BrowserForm::Native)],
-            vec![],
-        ));
-        let chrome_row = row(&view, "chrome");
-        assert_eq!(chrome_row.detail, "Not added");
-        assert_eq!(chrome_row.tone, RowTone::Todo);
-        let action = chrome_row.action.as_ref().unwrap();
-        assert_eq!(
-            action.action,
-            SetupAction::AddInBrowser {
-                browser: "chrome".to_owned()
-            }
-        );
-        assert_eq!(action.label, "Add");
-        assert_eq!(action.name, "Add to Google Chrome");
-        assert!(action.primary && action.external);
-        let pending = action.pending.as_ref().unwrap();
-        assert_eq!(pending.detail, "Finish in the Chrome Web Store.");
-        assert_eq!(pending.live.as_deref(), Some("Waiting for Chrome."));
-        let brave_action = row(&view, "brave").action.as_ref().unwrap();
-        assert!(!brave_action.primary && brave_action.external);
-        assert_eq!(
-            brave_action.pending.as_ref().unwrap().live.as_deref(),
-            Some("Waiting for Brave.")
-        );
-    }
-
-    #[test]
-    fn edge_gets_add_from_the_chrome_web_store() {
-        let view = compose(&facts(vec![edge(BrowserForm::Native)], vec![]));
-        let action = row(&view, "edge").action.as_ref().unwrap();
-        assert_eq!(
-            action.action,
-            SetupAction::AddInBrowser {
-                browser: "edge".to_owned()
-            }
-        );
-        assert_eq!(action.name, "Add to Microsoft Edge");
-        assert!(action.primary);
-    }
-
-    #[test]
-    fn rows_put_connected_first_then_chrome_then_the_table_order() {
-        let rows = browser_rows(&facts(
-            vec![
-                edge(BrowserForm::Native),
-                chrome(BrowserForm::Native),
-                brave(BrowserForm::Native),
-                connected(browser(
-                    "chromium",
-                    "Chromium",
-                    "Chromium",
-                    BrowserForm::Native,
-                )),
-            ],
-            vec![],
-        ));
-        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
-        assert_eq!(ids, ["chromium", "chrome", "edge", "brave"]);
-        assert_eq!(rows[0].detail, "Connected");
-        assert_eq!(rows[0].tone, RowTone::Done);
-        assert!(rows[0].action.is_none());
-    }
-
-    #[test]
-    fn a_browser_that_is_not_installed_has_no_row() {
-        let view = compose(&facts(
-            vec![chrome(BrowserForm::Missing), brave(BrowserForm::Native)],
-            vec![],
-        ));
-        assert_eq!(view.rows.len(), 1);
-        assert_eq!(view.rows[0].id, "brave");
-    }
-
-    #[test]
-    fn an_extension_in_a_profile_offers_open() {
-        let several = compose(&facts(
-            vec![with_extension(chrome(BrowserForm::Native), Some("Work"), 3)],
-            vec![],
-        ));
-        let chrome_row = row(&several, "chrome");
-        assert_eq!(
-            chrome_row.detail,
-            "Added in your Work profile. Open Chrome to finish."
-        );
-        assert_eq!(chrome_row.tone, RowTone::Todo);
-        let action = chrome_row.action.as_ref().unwrap();
-        assert_eq!(
-            action.action,
-            SetupAction::OpenBrowser {
-                browser: "chrome".to_owned(),
-                profile: Some("Profile 1".to_owned())
-            }
-        );
-        assert_eq!(action.label, "Open Chrome");
-        assert_eq!(action.name, "Open Google Chrome");
-        assert!(!action.primary && !action.external);
-        let pending = action.pending.as_ref().unwrap();
-        assert_eq!(pending.detail, "Opening Chrome.");
-        assert_eq!(pending.live.as_deref(), Some("Waiting for Chrome."));
-
-        let unnamed = compose(&facts(
-            vec![with_extension(chrome(BrowserForm::Native), None, 3)],
-            vec![],
-        ));
-        assert_eq!(
-            row(&unnamed, "chrome").detail,
-            "Added. Open Chrome to finish."
-        );
-
-        let single = compose(&facts(
-            vec![with_extension(
-                chrome(BrowserForm::Native),
-                Some("Person 1"),
-                1,
-            )],
-            vec![],
-        ));
-        let single_row = row(&single, "chrome");
-        assert_eq!(single_row.detail, "Added. Open Chrome to finish.");
-        assert_eq!(
-            single_row.action.as_ref().unwrap().action,
-            SetupAction::OpenBrowser {
-                browser: "chrome".to_owned(),
-                profile: None
-            }
-        );
-    }
-
-    #[test]
-    fn sandboxed_browsers_show_only_when_none_is_native() {
-        let sandboxed = compose(&facts(
-            vec![
-                chrome(BrowserForm::Snap),
-                brave(BrowserForm::Flatpak),
-                edge(BrowserForm::SnapAndFlatpak),
-            ],
-            vec![],
-        ));
-        assert_eq!(
-            row(&sandboxed, "chrome").detail,
-            "Snap keeps it sealed off from the rest of this computer."
-        );
-        assert_eq!(
-            row(&sandboxed, "brave").detail,
-            "Flatpak keeps it sealed off from the rest of this computer."
-        );
-        assert_eq!(
-            row(&sandboxed, "edge").detail,
-            "Snap and Flatpak keep it sealed off from the rest of this computer."
-        );
-        for item in &sandboxed.rows {
-            assert_eq!(item.tone, RowTone::Off);
-            let action = item.action.as_ref().unwrap();
-            assert_eq!(action.action, SetupAction::GetChrome);
-            assert_eq!(action.label, "Get Google Chrome");
-            assert!(action.external);
-        }
-        assert!(sandboxed.rows[0].action.as_ref().unwrap().primary);
-        assert!(!sandboxed.rows[1].action.as_ref().unwrap().primary);
-
-        let mixed = compose(&facts(
-            vec![chrome(BrowserForm::Snap), brave(BrowserForm::Native)],
-            vec![],
-        ));
-        assert_eq!(mixed.rows.len(), 1);
-        assert_eq!(mixed.rows[0].id, "brave");
-    }
-
-    #[test]
-    fn no_browser_at_all_offers_google_chrome() {
-        for browsers in [
-            vec![],
-            vec![chrome(BrowserForm::Missing), edge(BrowserForm::Missing)],
-        ] {
-            let view = compose(&facts(browsers, vec![]));
-            assert_eq!(view.rows.len(), 1);
-            let only = &view.rows[0];
-            assert_eq!(only.name, "Google Chrome");
-            assert_eq!(only.detail, "Not installed");
-            let action = only.action.as_ref().unwrap();
-            assert_eq!(action.action, SetupAction::GetChrome);
-            assert!(action.primary && action.external);
-            assert!(view.lead.is_none());
-        }
-    }
-
-    #[test]
-    fn one_browser_is_enough_appears_with_two_actions() {
-        let one = compose(&facts(vec![chrome(BrowserForm::Native)], vec![]));
-        assert!(one.lead.is_none());
-        let two = compose(&facts(
-            vec![chrome(BrowserForm::Native), edge(BrowserForm::Native)],
-            vec![],
-        ));
-        assert_eq!(two.lead.as_deref(), Some("One browser is enough."));
-        let open_and_add = compose(&facts(
-            vec![
-                with_extension(chrome(BrowserForm::Native), None, 1),
-                brave(BrowserForm::Native),
-            ],
-            vec![],
-        ));
-        assert_eq!(open_and_add.lead.as_deref(), Some("One browser is enough."));
-    }
-
-    #[test]
-    fn the_agent_stage_asks_the_agent() {
-        let found = agent("claude-code", "Claude Code", AgentState::Found);
-        let view = compose(&facts(
-            vec![connected(chrome(BrowserForm::Native))],
-            vec![found],
-        ));
-        assert_eq!(view.stage, Stage::Agent);
-        assert_eq!(view.headline, Headline::new("Ask ", "your agent", "."));
-        let code = view.code.as_ref().unwrap();
-        assert_eq!(code.label, "Paste into your agent");
-        assert_eq!(
-            code.text,
-            "Open sylin.org/ghostlight/demo/desk and ring the bell."
-        );
-        assert_eq!(code.copy_name, "Copy prompt");
-        assert_eq!(view.live.as_ref().unwrap().text, "Waiting for your agent.");
-        assert_eq!(view.rows_label.as_deref(), Some("Agents on this computer"));
-        assert_eq!(view.light, Light::Lit);
-        assert_eq!(view.connected_line.as_deref(), Some("Chrome is connected."));
-        assert_eq!(
-            step_states(&view),
-            [StepState::Done, StepState::Done, StepState::Current]
-        );
-        assert_eq!(view.steps[1].word, "Connected in Chrome");
-        assert_eq!(view.steps[1].sr, "Your browser, done");
-        assert_eq!(view.steps[2].sr, "Your agent, current step");
-        assert_eq!(view.steps[0].sr, "This computer, done");
-        assert!(view.extra_code.is_none());
-    }
-
-    #[test]
-    fn with_no_agent_found_the_mcp_command_is_the_action() {
-        let view = compose(&facts(vec![connected(chrome(BrowserForm::Native))], vec![]));
-        assert_eq!(view.stage, Stage::Agent);
-        assert_eq!(
-            view.headline,
-            Headline::new("Add Ghostlight to ", "your agent", ".")
-        );
-        assert_eq!(
-            view.lead.as_deref(),
-            Some("No agents were found on this computer.")
-        );
-        let code = view.code.as_ref().unwrap();
-        assert_eq!(code.label, "MCP server command");
-        assert_eq!(code.text, "ghostlight mcp");
-        assert_eq!(code.copy_name, "Copy command");
-        let extra = view.extra_code.as_ref().unwrap();
-        assert_eq!(extra.label, "Then ask it");
-        assert_eq!(extra.text, PROMPT);
-        assert_eq!(extra.copy_name, "Copy prompt");
-        assert_eq!(view.live.as_ref().unwrap().text, "Waiting for your agent.");
-        assert!(view.rows.is_empty());
-        assert!(view.rows_label.is_none());
-    }
-
-    #[test]
-    fn an_agent_row_appearing_returns_the_plain_form() {
-        let mut state = facts(vec![connected(chrome(BrowserForm::Native))], vec![]);
-        assert!(compose(&state).extra_code.is_some());
-        state
-            .agents
-            .push(agent("codex", "Codex", AgentState::Found));
-        let view = compose(&state);
-        assert!(view.extra_code.is_none());
-        assert_eq!(view.headline.lead, "Ask ");
-    }
-
-    #[test]
-    fn every_agent_row_reads_its_state() {
-        let mut in_use = agent("claude-code", "Claude Code", AgentState::Written);
-        in_use.in_use = true;
-        let written = agent("codex", "Codex", AgentState::Written);
-        let found = agent("cursor", "Cursor", AgentState::Found);
-        let mut unwritable = agent("desktop", "Claude Desktop", AgentState::Found);
-        unwritable.can_install = false;
-        let attention = agent("zed", "Zed", AgentState::NeedsAttention);
-        let view = compose(&facts(
-            vec![connected(chrome(BrowserForm::Native))],
-            vec![in_use, written, found, unwritable, attention],
-        ));
-
-        let connected_row = row(&view, "claude-code");
-        assert_eq!(connected_row.detail, "Connected");
-        assert_eq!(connected_row.tone, RowTone::Done);
-        assert!(connected_row.action.is_none());
-
-        let restart = row(&view, "codex");
-        assert_eq!(restart.detail, "Restart Codex to finish.");
-        assert_eq!(restart.tone, RowTone::Attention);
-        assert!(restart.action.is_none());
-
-        let found_row = row(&view, "cursor");
-        assert_eq!(found_row.detail, "Found");
-        assert_eq!(found_row.tone, RowTone::Todo);
-        let connect = found_row.action.as_ref().unwrap();
-        assert_eq!(
-            connect.action,
-            SetupAction::ConnectAgent {
-                agent: "cursor".to_owned()
-            }
-        );
-        assert_eq!(connect.label, "Connect");
-        assert_eq!(connect.name, "Connect Cursor");
-        assert!(!connect.primary && !connect.external);
-        assert_eq!(
-            connect.pending,
-            Some(Pending {
-                detail: "Connecting".to_owned(),
-                live: None
-            })
-        );
-
-        let unwritable_row = row(&view, "desktop");
-        assert_eq!(unwritable_row.detail, "Found");
-        assert!(unwritable_row.action.is_none());
-
-        let review_row = row(&view, "zed");
-        assert_eq!(review_row.detail, "Needs attention");
-        assert_eq!(review_row.tone, RowTone::Attention);
-        let review = review_row.action.as_ref().unwrap();
-        assert_eq!(
-            review.action,
-            SetupAction::ReviewAgent {
-                agent: "zed".to_owned()
-            }
-        );
-        assert_eq!(review.label, "Review");
-        assert_eq!(review.name, "Review Zed");
-        assert!(review.pending.is_none());
-    }
-
-    #[test]
-    fn an_updatable_agent_reads_needs_an_update_and_offers_update() {
-        let view = compose(&facts(
-            vec![connected(chrome(BrowserForm::Native))],
-            vec![agent("zed", "Zed", AgentState::Updatable)],
-        ));
-        let updatable = row(&view, "zed");
-        assert_eq!(updatable.detail, "Needs an update");
-        assert_eq!(updatable.tone, RowTone::Todo);
-        let update = updatable.action.as_ref().unwrap();
-        assert_eq!(
-            update.action,
-            SetupAction::ConnectAgent {
-                agent: "zed".to_owned()
-            }
-        );
-        assert_eq!(update.label, "Update");
-        assert_eq!(update.name, "Update Zed");
-        assert_eq!(
-            update.pending,
-            Some(Pending {
-                detail: "Updating".to_owned(),
-                live: None
-            })
-        );
-    }
-
-    #[test]
-    fn an_agent_ghostlight_cannot_write_is_offered_no_connect_or_update() {
-        for state in [AgentState::Found, AgentState::Updatable] {
-            let mut refused = agent("cursor", "Cursor", state);
-            refused.can_install = false;
-            let view = compose(&facts(
-                vec![connected(chrome(BrowserForm::Native))],
-                vec![refused],
-            ));
-            assert!(row(&view, "cursor").action.is_none(), "{state:?}");
-        }
-    }
-
-    #[test]
-    fn a_copy_only_agent_offers_copy_setup_and_turns_connected_in_use() {
-        let mut goose = agent("goose", "goose", AgentState::Found);
-        goose.copy_only = true;
-        goose.can_install = false;
-        let view = compose(&facts(
-            vec![connected(chrome(BrowserForm::Native))],
-            vec![goose.clone()],
-        ));
-        let by_hand = row(&view, "goose");
-        assert_eq!(by_hand.detail, "Found, set up by hand");
-        assert_eq!(by_hand.tone, RowTone::Todo);
-        let copy = by_hand.action.as_ref().unwrap();
-        assert_eq!(
-            copy.action,
-            SetupAction::CopySetup {
-                agent: "goose".to_owned()
-            }
-        );
-        assert_eq!(copy.label, "Copy setup");
-        assert_eq!(copy.name, "Copy setup for goose");
-        assert!(!copy.primary && !copy.external && copy.pending.is_none());
-
-        goose.in_use = true;
-        let view = compose(&facts(
-            vec![connected(chrome(BrowserForm::Native))],
-            vec![goose],
-        ));
-        let connected_row = row(&view, "goose");
-        assert_eq!(connected_row.detail, "Connected");
-        assert!(connected_row.action.is_none());
-    }
-
-    #[test]
-    fn the_agent_words_the_page_shares_are_the_pages_own() {
-        let page = include_str!("../../ui/lib/words.js");
-        for line in [
-            format!("updatable: \"{WORD_NEEDS_UPDATE}\""),
-            format!("by_hand: \"{WORD_BY_HAND}\""),
-            format!("update: \"{UPDATE_LABEL}\""),
-            format!("copy: \"{COPY_SETUP_LABEL}\""),
-        ] {
-            assert!(page.contains(&line), "the page does not say {line}");
-        }
-    }
-
-    #[test]
-    fn a_copy_setup_step_serializes_with_its_kind() {
-        let json = serde_json::to_value(SetupAction::CopySetup {
-            agent: "goose".to_owned(),
-        })
-        .unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({ "kind": "copy_setup", "agent": "goose" })
-        );
-    }
-
-    #[test]
-    fn done_names_the_agent_or_falls_back() {
-        let mut state = facts(vec![connected(chrome(BrowserForm::Native))], vec![]);
-        state.complete = true;
-        state.finished = true;
-        state.agent_name = Some("Claude Code".to_owned());
-        let named = compose(&state);
-        assert_eq!(named.stage, Stage::Done);
-        assert_eq!(named.eyebrow, "Ready");
-        assert_eq!(
-            named.headline,
-            Headline::new("Claude Code just used your browser. ", "You're set.", "")
-        );
-        assert_eq!(named.steps[2].word, "Claude Code");
-        assert_eq!(named.tagline.as_deref(), Some(TAGLINE));
-        assert_eq!(named.light, Light::Lit);
-        assert!(named.live.is_none());
-        assert_eq!(
-            step_states(&named),
-            [StepState::Done, StepState::Done, StepState::Done]
-        );
-
-        state.agent_name = None;
-        let unnamed = compose(&state);
-        assert_eq!(unnamed.headline.lead, "Your agent just used your browser. ");
-        assert_eq!(unnamed.steps[2].word, "Connected");
-    }
-
-    #[test]
-    fn retired_says_nothing() {
-        let mut state = facts(vec![], vec![]);
-        state.complete = true;
-        let view = compose(&state);
-        assert_eq!(view.stage, Stage::Retired);
-        assert!(view.headline.lead.is_empty());
-        assert!(view.rows.is_empty());
-        assert!(view.live.is_none() && view.code.is_none() && view.tagline.is_none());
-    }
-
-    #[test]
-    fn the_view_serializes_with_the_tags_the_page_reads() {
-        let view = compose(&facts(vec![chrome(BrowserForm::Native)], vec![]));
-        let json = serde_json::to_value(&view).unwrap();
-        assert_eq!(json["stage"], "browser");
-        assert_eq!(json["light"], "waiting");
-        assert_eq!(json["steps"][1]["state"], "current");
-        assert_eq!(json["rows"][0]["tone"], "todo");
-        assert_eq!(
-            json["rows"][0]["action"]["action"]["kind"],
-            "add_in_browser"
-        );
-        assert_eq!(json["rows"][0]["action"]["action"]["browser"], "chrome");
-        let parsed: SetupAction =
-            serde_json::from_str(r#"{"kind":"open_browser","browser":"edge"}"#).unwrap();
-        assert_eq!(
-            parsed,
-            SetupAction::OpenBrowser {
-                browser: "edge".to_owned(),
-                profile: None
-            }
-        );
-    }
-
     fn agents_with_entries(labels: &[(&str, bool)]) -> Vec<InstallAgent> {
         labels
             .iter()
@@ -1811,263 +1245,7 @@ mod tests {
     }
 
     fn next_lines(lines: &[String]) -> Vec<&String> {
-        lines
-            .iter()
-            .filter(|line| line.starts_with("Next:"))
-            .collect()
-    }
-
-    #[test]
-    fn a_first_install_with_the_window_points_at_the_window() {
-        let lines = install_lines(&install(
-            vec![chrome(BrowserForm::Native)],
-            agents_with_entries(&[("Claude Code", true), ("Codex", true)]),
-        ));
-        assert_eq!(
-            lines,
-            [
-                "Ghostlight 2.0.0 is installed.",
-                "Ghostlight is in your notification area, and in the Start menu.",
-                "Agents: Claude Code and Codex (restart them before you ask).",
-                "Next: add Ghostlight to Chrome in the Ghostlight window.",
-            ]
-        );
-    }
-
-    #[test]
-    fn the_restart_note_names_only_the_agents_that_changed() {
-        let lines = install_lines(&install(
-            vec![chrome(BrowserForm::Native)],
-            agents_with_entries(&[("Claude Code", false), ("Codex", true)]),
-        ));
-        assert_eq!(
-            lines[2],
-            "Agents: Claude Code and Codex (restart Codex before you ask)."
-        );
-    }
-
-    #[test]
-    fn a_first_install_without_the_window_gives_the_listing() {
-        let mut facts = install(
-            vec![chrome(BrowserForm::Native)],
-            agents_with_entries(&[("Claude Code", true)]),
-        );
-        facts.window_shown = false;
-        let lines = install_lines(&facts);
-        assert_eq!(lines[2], "Agents: Claude Code (restart it before you ask).");
-        assert_eq!(
-            lines[3],
-            format!("Next: add Ghostlight to Chrome: {STORE_LISTING_URL}")
-        );
-    }
-
-    #[test]
-    fn the_next_line_names_the_first_native_browser_in_row_order() {
-        let lines = install_lines(&install(
-            vec![
-                edge(BrowserForm::Native),
-                chrome(BrowserForm::Native),
-                brave(BrowserForm::Native),
-            ],
-            agents_with_entries(&[("Codex", false)]),
-        ));
-        assert_eq!(lines[2], "Agents: Codex.");
-        assert_eq!(
-            lines[3],
-            "Next: add Ghostlight to Chrome in the Ghostlight window."
-        );
-        let lines = install_lines(&install(
-            vec![edge(BrowserForm::Native), chrome(BrowserForm::Snap)],
-            vec![],
-        ));
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("add Ghostlight to Edge")));
-    }
-
-    #[test]
-    fn an_extension_in_a_profile_asks_for_that_browser_as_the_window_does() {
-        let browsers = vec![with_extension(chrome(BrowserForm::Native), None, 1)];
-        let lines = install_lines(&install(
-            browsers.clone(),
-            agents_with_entries(&[("Claude Code", true), ("Codex", true)]),
-        ));
-        assert_eq!(
-            lines[2],
-            "Agents: Claude Code and Codex (restart them before you ask)."
-        );
-        assert_eq!(
-            lines[3],
-            "Next: open Chrome, where Ghostlight is already added."
-        );
-        let mut quiet = install(browsers, agents_with_entries(&[("Codex", false)]));
-        quiet.window_shown = false;
-        assert_eq!(
-            install_lines(&quiet)[3],
-            "Next: open Chrome, where Ghostlight is already added.",
-            "with or without the window"
-        );
-    }
-
-    #[test]
-    fn a_connected_browser_asks_for_the_prompt() {
-        let browsers = vec![connected(chrome(BrowserForm::Native))];
-        let changed = install_lines(&install(
-            browsers.clone(),
-            agents_with_entries(&[("Claude Code", true), ("Codex", true), ("Cursor", true)]),
-        ));
-        assert_eq!(changed[2], "Agents: Claude Code, Codex and Cursor.");
-        assert_eq!(
-            changed[3],
-            format!("Next: restart Claude Code, Codex and Cursor, then ask one: {PROMPT}")
-        );
-        let one = install_lines(&install(
-            browsers.clone(),
-            agents_with_entries(&[("Codex", true)]),
-        ));
-        assert_eq!(
-            one[3],
-            format!("Next: restart Codex, then ask it: {PROMPT}")
-        );
-        let unchanged = install_lines(&install(browsers, agents_with_entries(&[("Codex", false)])));
-        assert_eq!(unchanged[3], format!("Next: ask your agent: {PROMPT}"));
-    }
-
-    #[test]
-    fn a_complete_reinstall_has_no_next_line() {
-        let mut facts = install(
-            vec![connected(chrome(BrowserForm::Native))],
-            agents_with_entries(&[("Codex", false)]),
-        );
-        facts.complete = true;
-        let quiet = install_lines(&facts);
-        assert_eq!(quiet.len(), 3);
-        assert!(next_lines(&quiet).is_empty());
-
-        facts.agents = agents_with_entries(&[("Claude Code", true), ("Codex", true)]);
-        let restart = install_lines(&facts);
-        assert_eq!(
-            restart.last().unwrap(),
-            "Restart Claude Code and Codex to use Ghostlight."
-        );
-        assert!(next_lines(&restart).is_empty());
-    }
-
-    #[test]
-    fn with_no_agents_the_install_gives_the_mcp_command() {
-        let lines = install_lines(&install(vec![chrome(BrowserForm::Native)], vec![]));
-        assert_eq!(
-            lines[2],
-            "No agents were found on this computer. Ghostlight's MCP server command: ghostlight mcp"
-        );
-        assert_eq!(next_lines(&lines).len(), 1);
-    }
-
-    #[test]
-    fn a_detected_agent_without_an_entry_is_not_listed() {
-        let lines = install_lines(&install(
-            vec![chrome(BrowserForm::Native)],
-            vec![InstallAgent {
-                label: "Zed".to_owned(),
-                has_entry: false,
-                changed: false,
-            }],
-        ));
-        assert!(!lines.iter().any(|line| line.starts_with("Agents:")));
-        assert!(!lines.iter().any(|line| line.starts_with("No agents")));
-    }
-
-    #[test]
-    fn a_path_just_written_asks_for_a_new_terminal() {
-        let mut facts = install(vec![chrome(BrowserForm::Native)], vec![]);
-        facts.path_written = true;
-        let lines = install_lines(&facts);
-        assert_eq!(lines[2], OPEN_NEW_TERMINAL);
-    }
-
-    #[test]
-    fn a_command_off_the_path_is_named_by_its_full_path() {
-        let mut facts = install(vec![chrome(BrowserForm::Native)], vec![]);
-        facts.environment = Environment::LinuxGnome;
-        facts.command_off_path = Some(PathBuf::from("/home/p/.local/bin/ghostlight"));
-        let lines = install_lines(&facts);
-        assert_eq!(
-            lines[2],
-            "This terminal's PATH does not include /home/p/.local/bin, so run ghostlight by its full path: /home/p/.local/bin/ghostlight"
-        );
-        assert_eq!(next_lines(&lines).len(), 1);
-    }
-
-    #[test]
-    fn the_environment_caveat_follows_the_location() {
-        let mut facts = install(vec![chrome(BrowserForm::Native)], vec![]);
-        facts.environment = Environment::Wsl;
-        let lines = install_lines(&facts);
-        assert_eq!(lines[1], Environment::Wsl.location());
-        assert_eq!(lines[2], Environment::Wsl.caveat().unwrap());
-    }
-
-    #[test]
-    fn with_no_native_browser_the_install_points_at_chrome() {
-        let mut facts = install(vec![chrome(BrowserForm::Snap)], vec![]);
-        let shown = install_lines(&facts);
-        assert_eq!(
-            shown.last().unwrap(),
-            "Next: get Google Chrome from the Ghostlight window."
-        );
-        facts.window_shown = false;
-        let hidden = install_lines(&facts);
-        assert_eq!(
-            hidden.last().unwrap(),
-            &format!("Next: install Google Chrome, then add Ghostlight there: {STORE_LISTING_URL}")
-        );
-        facts.browsers = vec![];
-        assert_eq!(install_lines(&facts), hidden);
-    }
-
-    #[test]
-    fn an_incomplete_install_has_exactly_one_next_line_and_never_says_to_finish() {
-        let browser_sets = [
-            vec![],
-            vec![chrome(BrowserForm::Native)],
-            vec![chrome(BrowserForm::Snap)],
-            vec![with_extension(chrome(BrowserForm::Native), Some("Work"), 2)],
-            vec![connected(chrome(BrowserForm::Native))],
-        ];
-        let agent_sets = [
-            vec![],
-            agents_with_entries(&[("Codex", true)]),
-            agents_with_entries(&[("Codex", false), ("Cursor", true)]),
-        ];
-        for browsers in &browser_sets {
-            for agents in &agent_sets {
-                for window_shown in [true, false] {
-                    for path_written in [true, false] {
-                        let mut facts = install(browsers.clone(), agents.clone());
-                        facts.window_shown = window_shown;
-                        facts.path_written = path_written;
-                        let lines = install_lines(&facts);
-                        assert_eq!(next_lines(&lines).len(), 1, "{lines:?}");
-                        assert!(lines.iter().all(|line| !line.contains("to finish")));
-                        assert!(lines.iter().all(|line| line.is_ascii()));
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn lists_join_the_way_a_person_says_them() {
-        assert_eq!(join_list(&[]), "");
-        assert_eq!(join_list(&["A"]), "A");
-        assert_eq!(join_list(&["A", "B"]), "A and B");
-        assert_eq!(join_list(&["A", "B", "C"]), "A, B and C");
-        assert_eq!(join_list(&["A", "B", "C", "D"]), "A, B, C and D");
-    }
-
-    #[test]
-    fn the_listing_url_names_the_store_extension() {
-        assert!(STORE_LISTING_URL.ends_with(STORE_EXTENSION_ID));
+        lines.iter().filter(|line| line.starts_with(NEXT)).collect()
     }
 
     fn uninstall(agents: &[&str], browsers: &[&str]) -> UninstallFacts {
@@ -2081,131 +1259,774 @@ mod tests {
         }
     }
 
+    /// INTENT install journey and ACCEPTANCE D24: a setup finished in this run is Done, one
+    /// finished earlier is Retired, an app container finishes on the computer, and otherwise a
+    /// connected browser moves the person from the browser step to the agent step.
     #[test]
-    fn a_whole_uninstall_says_what_it_removed_and_what_stays() {
-        assert_eq!(
-            uninstall_lines(&uninstall(
-                &["Claude Code", "Codex"],
-                &["Google Chrome", "Microsoft Edge"]
-            )),
-            [
-                "Ghostlight is uninstalled.",
-                "Removed from agents: Claude Code and Codex.",
-                "Removed from browsers: Google Chrome and Microsoft Edge.",
-                "The running Ghostlight was stopped.",
-                r"Kept C:\Users\person\.ghostlight, with the Ghostlight programs, your audit history and your settings. Delete that folder to remove them too.",
-                "Ghostlight in Browser stays in your browser until you remove it from the browser's extensions page.",
-            ]
-        );
+    fn stages_resolve_in_order() {
+        let mut state = facts(vec![connected(chrome(BrowserForm::Native))], vec![]);
+        assert_eq!(stage(&state), Stage::Agent);
+        state.browsers.clear();
+        assert_eq!(stage(&state), Stage::Browser);
+        state.finish_on_this_computer = true;
+        assert_eq!(stage(&state), Stage::Computer);
+        state.complete = true;
+        assert_eq!(stage(&state), Stage::Retired);
+        state.finished = true;
+        assert_eq!(stage(&state), Stage::Done);
+        state.complete = false;
+        assert_eq!(stage(&state), Stage::Computer);
     }
 
+    /// ACCEPTANCE D23 and D16: every native browser is offered Add (Edge too, JQ9), a browser
+    /// that holds the extension is offered Open, in that profile only when it has several, a
+    /// browser that is not installed has no row, a sandboxed browser shows only when no browser
+    /// is native, and Get Google Chrome appears only when no supported browser is installed.
     #[test]
-    fn an_uninstall_says_when_nothing_ran_or_nothing_stopped() {
-        let mut facts = uninstall(&[], &[]);
-        facts.running = RunningAfterUninstall::Unchanged;
-        let lines = uninstall_lines(&facts);
-        assert_eq!(lines[1], "No agent or browser had Ghostlight to remove.");
-        assert!(!lines.iter().any(|line| line.contains("running Ghostlight")));
-        assert_eq!(lines.len(), 4, "{lines:?}");
-        facts.running = RunningAfterUninstall::StillRunning;
-        assert_eq!(
-            uninstall_lines(&facts)[2],
-            "The running Ghostlight did not stop in time; quit it from its icon, or sign out."
-        );
+    fn the_browser_step_offers_each_installed_browser_its_act() {
+        let add = |fact: &BrowserFact| {
+            Some(SetupAction::AddInBrowser {
+                browser: fact.id.clone(),
+            })
+        };
+        let open = |fact: &BrowserFact, profile: Option<&str>| {
+            Some(SetupAction::OpenBrowser {
+                browser: fact.id.clone(),
+                profile: profile.map(str::to_owned),
+            })
+        };
+        let get_chrome = Some(SetupAction::GetChrome);
+        let native = chrome(BrowserForm::Native);
+        let brave_native = brave(BrowserForm::Native);
+        let edge_native = edge(BrowserForm::Native);
+        let several = with_extension(chrome(BrowserForm::Native), Some("Work"), 3);
+        let single = with_extension(chrome(BrowserForm::Native), Some("Person 1"), 1);
+        let off = Some(RowTone::Off);
+        // Per case, every row the step shows: its id, its act, and its tone where the case is
+        // about the tone.
+        type Shown<'a> = (&'a str, Option<SetupAction>, Option<RowTone>);
+        let cases: Vec<(&str, Vec<BrowserFact>, Vec<Shown>)> = vec![
+            (
+                "two native browsers",
+                vec![native.clone(), brave_native.clone()],
+                vec![
+                    ("chrome", add(&native), None),
+                    ("brave", add(&brave_native), None),
+                ],
+            ),
+            (
+                "Edge",
+                vec![edge_native.clone()],
+                vec![("edge", add(&edge_native), None)],
+            ),
+            (
+                "the extension in one of several profiles",
+                vec![several.clone()],
+                vec![("chrome", open(&several, Some(PROFILE)), None)],
+            ),
+            (
+                "the extension in the only profile",
+                vec![single.clone()],
+                vec![("chrome", open(&single, None), None)],
+            ),
+            (
+                "only sandboxed browsers",
+                vec![
+                    chrome(BrowserForm::Snap),
+                    brave(BrowserForm::Flatpak),
+                    edge(BrowserForm::SnapAndFlatpak),
+                ],
+                vec![
+                    ("chrome", get_chrome.clone(), off),
+                    ("brave", get_chrome.clone(), off),
+                    ("edge", get_chrome.clone(), off),
+                ],
+            ),
+            (
+                "a sandboxed browser beside a native one",
+                vec![chrome(BrowserForm::Snap), brave_native.clone()],
+                vec![("brave", add(&brave_native), None)],
+            ),
+            (
+                "no browser",
+                vec![],
+                vec![(CHROME_ID, get_chrome.clone(), None)],
+            ),
+            (
+                "no browser installed",
+                vec![chrome(BrowserForm::Missing), edge(BrowserForm::Missing)],
+                vec![(CHROME_ID, get_chrome.clone(), None)],
+            ),
+            (
+                "a browser that is not installed",
+                vec![chrome(BrowserForm::Missing), brave_native.clone()],
+                vec![("brave", add(&brave_native), None)],
+            ),
+        ];
+        for (case, browsers, expected) in cases {
+            let view = compose(&facts(browsers, vec![]));
+            assert_eq!(view.rows.len(), expected.len(), "{case}: {:?}", view.rows);
+            for (id, act, tone) in expected {
+                let shown = row(&view, id);
+                let button = shown.action.as_ref();
+                assert_eq!(
+                    button.map(|button| &button.action),
+                    act.as_ref(),
+                    "{case}: {id}"
+                );
+                if let Some(button) = button {
+                    let leaves = matches!(
+                        button.action,
+                        SetupAction::AddInBrowser { .. } | SetupAction::GetChrome
+                    );
+                    assert_eq!(button.external, leaves, "{case}: {id} leaves Ghostlight");
+                }
+                if let Some(tone) = tone {
+                    assert_eq!(shown.tone, tone, "{case}: {id}");
+                }
+                if act == get_chrome && tone.is_none() {
+                    // The Get Google Chrome row of a computer with no supported browser.
+                    assert_eq!(shown.name, CHROME_NAME, "{case}");
+                }
+            }
+        }
     }
 
+    /// ARCHITECTURE setup paragraph, 80c6f54a and c007d102: an agent row offers Connect or Update
+    /// only where the roster says Ghostlight can install, a copy-only agent offers Copy setup, a
+    /// written entry asks for a restart, and a row reads Connected only while the agent is in
+    /// use.
     #[test]
-    fn a_partial_uninstall_names_what_it_removed_and_that_ghostlight_still_runs() {
-        let mut facts = uninstall(&["Zed"], &[]);
-        facts.whole = false;
-        facts.command_removed = false;
-        facts.running = RunningAfterUninstall::Unchanged;
-        assert_eq!(
-            uninstall_lines(&facts),
-            ["Removed from agents: Zed (restart it to unload Ghostlight's tools)."]
-        );
-        facts.agents = vec!["Zed".to_owned(), "Cursor".to_owned()];
-        facts.browsers = vec!["Brave".to_owned()];
-        facts.command_removed = true;
-        facts.running = RunningAfterUninstall::LeftRunning;
-        assert_eq!(
-            uninstall_lines(&facts),
-            [
-                "Removed from agents: Zed and Cursor (restart them to unload Ghostlight's tools).",
-                "Removed from browsers: Brave.",
-                "The ghostlight command was removed too.",
-                "Ghostlight keeps running for the agents and browsers that still have it.",
-            ]
-        );
+    fn an_agent_row_offers_only_what_the_roster_allows() {
+        /// What a row's detail must say.
+        enum Says {
+            /// Exactly these words.
+            Exactly(&'static str),
+            /// A sentence that names the agent.
+            TheAgent,
+            /// Whatever the state's own word is; the case is about the act.
+            Anything,
+        }
+        let fact = |id: &str, state, can_install, copy_only, in_use| AgentFact {
+            can_install,
+            copy_only,
+            in_use,
+            ..agent(id, &format!("Agent {id}"), state)
+        };
+        let connect = |id: &str| SetupAction::ConnectAgent { agent: id.into() };
+        let cases = [
+            (
+                fact("written-in-use", AgentState::Written, true, false, true),
+                Says::Exactly(WORD_CONNECTED),
+                Some(RowTone::Done),
+                None,
+            ),
+            (
+                fact("written", AgentState::Written, true, false, false),
+                Says::TheAgent,
+                Some(RowTone::Attention),
+                None,
+            ),
+            (
+                fact("found", AgentState::Found, true, false, false),
+                Says::Anything,
+                None,
+                Some((connect("found"), "Connect")),
+            ),
+            (
+                fact("found-private", AgentState::Found, false, false, false),
+                Says::Anything,
+                None,
+                None,
+            ),
+            (
+                fact("updatable", AgentState::Updatable, true, false, false),
+                Says::Exactly(WORD_NEEDS_UPDATE),
+                None,
+                Some((connect("updatable"), UPDATE_LABEL)),
+            ),
+            (
+                fact(
+                    "updatable-private",
+                    AgentState::Updatable,
+                    false,
+                    false,
+                    false,
+                ),
+                Says::Exactly(WORD_NEEDS_UPDATE),
+                None,
+                None,
+            ),
+            (
+                fact("attention", AgentState::NeedsAttention, true, false, false),
+                Says::Anything,
+                Some(RowTone::Attention),
+                Some((
+                    SetupAction::ReviewAgent {
+                        agent: "attention".into(),
+                    },
+                    "Review",
+                )),
+            ),
+            (
+                fact("by-hand", AgentState::Found, false, true, false),
+                Says::Exactly(WORD_BY_HAND),
+                None,
+                Some((
+                    SetupAction::CopySetup {
+                        agent: "by-hand".into(),
+                    },
+                    COPY_SETUP_LABEL,
+                )),
+            ),
+            (
+                fact("by-hand-in-use", AgentState::Found, false, true, true),
+                Says::Exactly(WORD_CONNECTED),
+                Some(RowTone::Done),
+                None,
+            ),
+        ];
+        let agents = cases.iter().map(|(fact, ..)| fact.clone()).collect();
+        let view = compose(&facts(vec![connected(chrome(BrowserForm::Native))], agents));
+        for (fact, says, tone, act) in cases {
+            let shown = row(&view, &fact.id);
+            match says {
+                Says::Exactly(words) => assert_eq!(shown.detail, words, "{}", fact.id),
+                Says::TheAgent => assert!(shown.detail.contains(&fact.label), "{}", fact.id),
+                Says::Anything => {}
+            }
+            if let Some(tone) = tone {
+                assert_eq!(shown.tone, tone, "{}", fact.id);
+            }
+            let button = shown
+                .action
+                .as_ref()
+                .map(|button| (button.action.clone(), button.label.as_str()));
+            assert_eq!(button, act, "{}", fact.id);
+        }
     }
 
+    /// Contract with `ui/lib/words.js` (80c6f54a) and `extension/lib/setup-view.js` (INTENT:
+    /// every surface that shows the install journey shows the same three steps): each word
+    /// another surface repeats is the one this module says.
     #[test]
-    fn a_whole_uninstall_does_not_single_out_the_command() {
-        let lines = uninstall_lines(&uninstall(&["Zed"], &[]));
+    fn the_words_another_surface_repeats_are_the_services() {
+        let page = include_str!("../../ui/lib/words.js");
+        for line in [
+            format!("updatable: \"{WORD_NEEDS_UPDATE}\""),
+            format!("by_hand: \"{WORD_BY_HAND}\""),
+            format!("update: \"{UPDATE_LABEL}\""),
+            format!("copy: \"{COPY_SETUP_LABEL}\""),
+        ] {
+            assert!(page.contains(&line), "the page does not say {line}");
+        }
+        let extension = std::fs::read_to_string(repository_path(EXTENSION_SETUP_VIEW))
+            .expect("the extension's setup view is readable");
+        let steps = format!(
+            "steps: Object.freeze([{}])",
+            STEP_NAMES.map(|name| format!("\"{name}\"")).join(", ")
+        );
         assert!(
-            !lines.iter().any(|line| line.contains("command")),
-            "{lines:?}"
+            extension.contains(&steps),
+            "{EXTENSION_SETUP_VIEW} does not say {steps}"
         );
     }
 
+    /// Contract with the window's setup page: every stage, step state, row tone and action kind
+    /// the view serializes is a value `ui/lib/setup-view.js` knows, every light is one
+    /// `extension/kit.css` styles, and a step the page posts back to `/api/setup/act` without a
+    /// profile decodes.
     #[test]
-    fn every_string_is_ascii() {
-        let mut state = facts(
+    fn the_view_speaks_the_vocabulary_the_page_reads() {
+        let page = std::fs::read_to_string(repository_path(SETUP_PAGE))
+            .expect("the setup page is readable");
+        let kit = std::fs::read_to_string(repository_path(KIT_CSS)).expect("the kit is readable");
+        let tag = |value: serde_json::Value| {
+            value
+                .as_str()
+                .unwrap_or_else(|| panic!("{value} is no string tag"))
+                .to_owned()
+        };
+        let mut tags: Vec<String> = Vec::new();
+        for stage in [
+            Stage::Computer,
+            Stage::Browser,
+            Stage::Agent,
+            Stage::Done,
+            Stage::Retired,
+        ] {
+            tags.push(tag(serde_json::to_value(stage).unwrap()));
+        }
+        for state in [StepState::Done, StepState::Current, StepState::Todo] {
+            tags.push(tag(serde_json::to_value(state).unwrap()));
+        }
+        for tone in [
+            RowTone::Done,
+            RowTone::Todo,
+            RowTone::Attention,
+            RowTone::Off,
+        ] {
+            tags.push(tag(serde_json::to_value(tone).unwrap()));
+        }
+        for action in [
+            SetupAction::AddInBrowser {
+                browser: "chrome".into(),
+            },
+            SetupAction::OpenBrowser {
+                browser: "chrome".into(),
+                profile: None,
+            },
+            SetupAction::GetChrome,
+            SetupAction::ConnectAgent {
+                agent: "codex".into(),
+            },
+            SetupAction::ReviewAgent {
+                agent: "codex".into(),
+            },
+            SetupAction::CopySetup {
+                agent: "codex".into(),
+            },
+        ] {
+            tags.push(tag(serde_json::to_value(action).unwrap()["kind"].clone()));
+        }
+        for value in tags {
+            assert!(
+                page.contains(&format!("\"{value}\"")),
+                "{SETUP_PAGE} does not know {value}"
+            );
+        }
+        for light in [Light::Waiting, Light::Lit] {
+            let value = tag(serde_json::to_value(light).unwrap());
+            assert!(
+                kit.contains(&format!("[data-light=\"{value}\"]")),
+                "{KIT_CSS} does not style the {value} light"
+            );
+        }
+
+        let posted: SetupAction =
+            serde_json::from_str(r#"{"kind":"open_browser","browser":"edge"}"#).unwrap();
+        assert_eq!(
+            posted,
+            SetupAction::OpenBrowser {
+                browser: "edge".to_owned(),
+                profile: None
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(SetupAction::CopySetup {
+                agent: "goose".to_owned(),
+            })
+            .unwrap(),
+            serde_json::json!({ "kind": "copy_setup", "agent": "goose" }),
+            "the page reads the agent to copy its setup"
+        );
+    }
+
+    /// Contract with `install::native_host::STORE_EXTENSION_ID`: Add and every Next line send a
+    /// person to the listing of the extension the native host admits.
+    #[test]
+    fn the_listing_url_names_the_store_extension() {
+        assert!(STORE_LISTING_URL.ends_with(STORE_EXTENSION_ID));
+    }
+
+    /// ACCEPTANCE D21: a real install prints the version, where Ghostlight lives, which agents
+    /// have it, then one Next line, or none once setup is complete; the agents line names the
+    /// agents that must restart (ecc6da85), and a command a terminal cannot find yet says how to
+    /// reach it (97217b28).
+    #[test]
+    fn an_install_prints_its_version_location_agents_and_next_step() {
+        let chrome_native = || vec![chrome(BrowserForm::Native)];
+        let first = install(
+            chrome_native(),
+            agents_with_entries(&[("Claude Code", true), ("Codex", true)]),
+        );
+        assert_eq!(
+            install_lines(&first),
+            [
+                format!("Ghostlight {} is installed.", first.version),
+                Environment::Windows.location().to_owned(),
+                "Agents: Claude Code and Codex (restart them before you ask).".to_owned(),
+                "Next: add Ghostlight to Chrome in the Ghostlight window.".to_owned(),
+            ],
+            "a first install with the window"
+        );
+
+        let with = |change: fn(&mut InstallFacts), facts: InstallFacts| {
+            let mut facts = facts;
+            change(&mut facts);
+            facts
+        };
+        let wsl = with(
+            |facts| facts.environment = Environment::Wsl,
+            install(chrome_native(), agents_with_entries(&[("Codex", false)])),
+        );
+        let path_written = with(
+            |facts| facts.path_written = true,
+            install(chrome_native(), agents_with_entries(&[("Codex", false)])),
+        );
+        let off_path = with(
+            |facts| {
+                facts.environment = Environment::LinuxGnome;
+                facts.command_off_path = Some(PathBuf::from("/home/p/.local/bin/ghostlight"));
+            },
+            install(chrome_native(), agents_with_entries(&[("Codex", false)])),
+        );
+        let no_agents = install(chrome_native(), vec![]);
+        let complete = with(
+            |facts| facts.complete = true,
+            install(
+                vec![connected(chrome(BrowserForm::Native))],
+                agents_with_entries(&[("Codex", false)]),
+            ),
+        );
+        let complete_changed = with(
+            |facts| facts.complete = true,
+            install(
+                vec![connected(chrome(BrowserForm::Native))],
+                agents_with_entries(&[("Claude Code", true), ("Codex", true)]),
+            ),
+        );
+        // Per case, the lines after the version and the location, without the Next line.
+        let cases: Vec<(&str, InstallFacts, Vec<String>)> = vec![
+            (
+                "only one agent changed",
+                install(
+                    chrome_native(),
+                    agents_with_entries(&[("Claude Code", false), ("Codex", true)]),
+                ),
+                vec!["Agents: Claude Code and Codex (restart Codex before you ask).".into()],
+            ),
+            (
+                "one agent, the window hidden",
+                with(
+                    |facts| facts.window_shown = false,
+                    install(chrome_native(), agents_with_entries(&[("Claude Code", true)])),
+                ),
+                vec!["Agents: Claude Code (restart it before you ask).".into()],
+            ),
+            (
+                "the extension in a profile",
+                install(
+                    vec![with_extension(chrome(BrowserForm::Native), None, 1)],
+                    agents_with_entries(&[("Claude Code", true), ("Codex", true)]),
+                ),
+                vec!["Agents: Claude Code and Codex (restart them before you ask).".into()],
+            ),
+            (
+                "a connected browser, where the Next line asks for the restart",
+                install(
+                    vec![connected(chrome(BrowserForm::Native))],
+                    agents_with_entries(&[("Claude Code", true), ("Codex", true), ("Cursor", true)]),
+                ),
+                vec!["Agents: Claude Code, Codex and Cursor.".into()],
+            ),
+            (
+                "an agent the install did not change",
+                install(chrome_native(), agents_with_entries(&[("Codex", false)])),
+                vec!["Agents: Codex.".into()],
+            ),
+            (
+                "WSL",
+                wsl,
+                vec![
+                    Environment::Wsl.caveat().unwrap().to_owned(),
+                    "Agents: Codex.".into(),
+                ],
+            ),
+            (
+                "a Path just written",
+                path_written,
+                vec![OPEN_NEW_TERMINAL.to_owned(), "Agents: Codex.".into()],
+            ),
+            (
+                "a command off the PATH",
+                off_path,
+                vec![
+                    "This terminal's PATH does not include /home/p/.local/bin, so run ghostlight by its full path: /home/p/.local/bin/ghostlight".into(),
+                    "Agents: Codex.".into(),
+                ],
+            ),
+            (
+                "no agents",
+                no_agents.clone(),
+                vec![format!(
+                    "No agents were found on this computer. Ghostlight's MCP server command: {}",
+                    no_agents.mcp_command
+                )],
+            ),
+            (
+                "a detected agent without an entry",
+                install(
+                    chrome_native(),
+                    vec![InstallAgent {
+                        label: "Zed".to_owned(),
+                        has_entry: false,
+                        changed: false,
+                    }],
+                ),
+                vec![],
+            ),
+            ("a complete reinstall", complete, vec!["Agents: Codex.".into()]),
+            (
+                "a complete reinstall that changed agents",
+                complete_changed,
+                vec![
+                    "Agents: Claude Code and Codex.".into(),
+                    "Restart Claude Code and Codex to use Ghostlight.".into(),
+                ],
+            ),
+        ];
+        for (case, facts, rest) in cases {
+            let lines = install_lines(&facts);
+            let mut expected = vec![
+                format!("Ghostlight {} is installed.", facts.version),
+                facts.environment.location().to_owned(),
+            ];
+            expected.extend(rest);
+            let without_next: Vec<String> = lines
+                .iter()
+                .filter(|line| !line.starts_with(NEXT))
+                .cloned()
+                .collect();
+            assert_eq!(without_next, expected, "{case}");
+            let nexts = usize::from(!facts.complete);
+            assert_eq!(next_lines(&lines).len(), nexts, "{case}: {lines:?}");
+            if !facts.complete {
+                assert!(lines.last().unwrap().starts_with(NEXT), "{case}: {lines:?}");
+            }
+        }
+    }
+
+    /// 564bf635 (linux-1, L08) and ACCEPTANCE D21: while setup is incomplete the install prints
+    /// exactly one Next line, never says "to finish", and names the step the window shows for
+    /// the same browsers.
+    #[test]
+    fn the_next_line_is_the_step_the_window_shows() {
+        let browser_sets = [
+            vec![],
+            vec![chrome(BrowserForm::Native)],
+            vec![chrome(BrowserForm::Snap)],
+            vec![with_extension(chrome(BrowserForm::Native), Some("Work"), 2)],
+            vec![connected(chrome(BrowserForm::Native))],
             vec![
-                connected(chrome(BrowserForm::Native)),
-                with_extension(edge(BrowserForm::Native), Some("Work"), 2),
+                edge(BrowserForm::Native),
+                chrome(BrowserForm::Native),
                 brave(BrowserForm::Native),
             ],
+            vec![edge(BrowserForm::Native), chrome(BrowserForm::Snap)],
             vec![
-                agent("a", "Alpha", AgentState::Found),
-                agent("b", "Beta", AgentState::Written),
-                agent("c", "Gamma", AgentState::NeedsAttention),
-                agent("d", "Delta", AgentState::Updatable),
+                chrome(BrowserForm::Native),
+                with_extension(edge(BrowserForm::Native), None, 1),
             ],
+        ];
+        let agent_sets = [
+            vec![],
+            agents_with_entries(&[("Codex", true)]),
+            agents_with_entries(&[("Codex", false), ("Cursor", true)]),
+        ];
+        for browsers in &browser_sets {
+            let view = compose(&facts(browsers.clone(), vec![]));
+            let short = |id: &str| {
+                browsers
+                    .iter()
+                    .find(|fact| fact.id == id)
+                    .map_or_else(|| panic!("no browser {id}"), |fact| fact.short.clone())
+            };
+            let opened = view.rows.iter().find_map(|row| {
+                row.action
+                    .as_ref()
+                    .filter(|button| matches!(button.action, SetupAction::OpenBrowser { .. }))
+            });
+            let primary = view
+                .rows
+                .iter()
+                .find_map(|row| row.action.as_ref().filter(|button| button.primary));
+            let shown = opened.or(primary).map(|button| &button.action);
+            for agents in &agent_sets {
+                for window_shown in [true, false] {
+                    for path_written in [true, false] {
+                        let mut facts = install(browsers.clone(), agents.clone());
+                        facts.window_shown = window_shown;
+                        facts.path_written = path_written;
+                        let lines = install_lines(&facts);
+                        let case = format!("{browsers:?} {agents:?} window {window_shown}");
+                        let nexts = next_lines(&lines);
+                        assert_eq!(nexts.len(), 1, "{case}: {lines:?}");
+                        assert!(
+                            lines.iter().all(|line| !line.contains("to finish")),
+                            "{case}: {lines:?}"
+                        );
+                        let next = nexts[0];
+                        if view.stage == Stage::Agent {
+                            assert!(next.contains(PROMPT), "{case}: {next}");
+                            continue;
+                        }
+                        let listing = |next: &str| {
+                            assert_eq!(
+                                next.contains(STORE_LISTING_URL),
+                                !window_shown,
+                                "{case}: {next}"
+                            );
+                        };
+                        match shown {
+                            Some(SetupAction::OpenBrowser { browser, .. }) => assert_eq!(
+                                next,
+                                &format!(
+                                    "Next: open {}, where Ghostlight is already added.",
+                                    short(browser)
+                                ),
+                                "{case}"
+                            ),
+                            Some(SetupAction::AddInBrowser { browser }) => {
+                                let add = format!("add Ghostlight to {}", short(browser));
+                                assert!(next.contains(&add), "{case}: {next}");
+                                listing(next);
+                            }
+                            Some(SetupAction::GetChrome) => {
+                                assert!(next.contains(CHROME_NAME), "{case}: {next}");
+                                listing(next);
+                            }
+                            other => panic!("{case}: the window shows {other:?}"),
+                        }
+                    }
+                }
+            }
+        }
+
+        let browsers = vec![connected(chrome(BrowserForm::Native))];
+        for (agents, next) in [
+            (
+                agents_with_entries(&[("Claude Code", true), ("Codex", true), ("Cursor", true)]),
+                format!("Next: restart Claude Code, Codex and Cursor, then ask one: {PROMPT}"),
+            ),
+            (
+                agents_with_entries(&[("Codex", true)]),
+                format!("Next: restart Codex, then ask it: {PROMPT}"),
+            ),
+            (
+                agents_with_entries(&[("Codex", false)]),
+                format!("Next: ask your agent: {PROMPT}"),
+            ),
+        ] {
+            let lines = install_lines(&install(browsers.clone(), agents));
+            assert_eq!(next_lines(&lines), [&next]);
+        }
+        for browsers in browser_sets {
+            let mut facts = install(browsers, agents_with_entries(&[("Codex", true)]));
+            facts.complete = true;
+            assert!(next_lines(&install_lines(&facts)).is_empty());
+        }
+    }
+
+    /// 888d9323 and 8e5597e0 (install-7, docs-9; ADR-0199 Decision 20): an uninstall says what
+    /// it removed, whether the running Ghostlight stopped, and for a whole uninstall the home it
+    /// kept and the extension the browser keeps; a partial one says when the command went too
+    /// and that Ghostlight keeps running.
+    #[test]
+    fn the_uninstall_summary_says_only_what_it_removed() {
+        let kept = |facts: &UninstallFacts| {
+            format!(
+                "Kept {}, with the Ghostlight programs, your audit history and your settings. Delete that folder to remove them too.",
+                facts.home
+            )
+        };
+        let with = |change: fn(&mut UninstallFacts), facts: UninstallFacts| {
+            let mut facts = facts;
+            change(&mut facts);
+            facts
+        };
+        let whole = uninstall(
+            &["Claude Code", "Codex"],
+            &["Google Chrome", "Microsoft Edge"],
         );
-        state.agent_name = Some("Alpha".to_owned());
-        let mut views = Vec::new();
-        for (complete, finished, finish_here) in [
-            (false, false, false),
-            (false, false, true),
-            (true, false, false),
-            (true, true, false),
-        ] {
-            state.complete = complete;
-            state.finished = finished;
-            state.finish_on_this_computer = finish_here;
-            for platform in [Platform::Windows, Platform::Linux] {
-                state.platform = platform;
-                views.push(compose(&state));
-            }
+        let nothing = with(
+            |facts| facts.running = RunningAfterUninstall::Unchanged,
+            uninstall(&[], &[]),
+        );
+        let did_not_stop = with(
+            |facts| facts.running = RunningAfterUninstall::StillRunning,
+            uninstall(&[], &[]),
+        );
+        let with_command = uninstall(&["Zed"], &[]);
+        let one_agent = with(
+            |facts| {
+                facts.whole = false;
+                facts.command_removed = false;
+                facts.running = RunningAfterUninstall::Unchanged;
+            },
+            uninstall(&["Zed"], &[]),
+        );
+        let partial = with(
+            |facts| {
+                facts.whole = false;
+                facts.running = RunningAfterUninstall::LeftRunning;
+            },
+            uninstall(&["Zed", "Cursor"], &["Brave"]),
+        );
+        let cases = [
+            (
+                "a whole uninstall",
+                vec![
+                    UNINSTALLED.to_owned(),
+                    "Removed from agents: Claude Code and Codex.".to_owned(),
+                    "Removed from browsers: Google Chrome and Microsoft Edge.".to_owned(),
+                    RUNNING_STOPPED.to_owned(),
+                    kept(&whole),
+                    EXTENSION_STAYS.to_owned(),
+                ],
+                whole,
+            ),
+            (
+                "nothing removed and nothing running",
+                vec![
+                    UNINSTALLED.to_owned(),
+                    NOTHING_REMOVED.to_owned(),
+                    kept(&nothing),
+                    EXTENSION_STAYS.to_owned(),
+                ],
+                nothing,
+            ),
+            (
+                "a running Ghostlight that did not stop",
+                vec![
+                    UNINSTALLED.to_owned(),
+                    NOTHING_REMOVED.to_owned(),
+                    RUNNING_DID_NOT_STOP.to_owned(),
+                    kept(&did_not_stop),
+                    EXTENSION_STAYS.to_owned(),
+                ],
+                did_not_stop,
+            ),
+            (
+                "a whole uninstall does not single out the command",
+                vec![
+                    UNINSTALLED.to_owned(),
+                    "Removed from agents: Zed.".to_owned(),
+                    RUNNING_STOPPED.to_owned(),
+                    kept(&with_command),
+                    EXTENSION_STAYS.to_owned(),
+                ],
+                with_command,
+            ),
+            (
+                "a partial uninstall from one agent",
+                vec!["Removed from agents: Zed (restart it to unload Ghostlight's tools).".to_owned()],
+                one_agent,
+            ),
+            (
+                "a partial uninstall that took the command",
+                vec![
+                    "Removed from agents: Zed and Cursor (restart them to unload Ghostlight's tools)."
+                        .to_owned(),
+                    "Removed from browsers: Brave.".to_owned(),
+                    COMMAND_REMOVED.to_owned(),
+                    LEFT_RUNNING.to_owned(),
+                ],
+                partial,
+            ),
+        ];
+        for (case, expected, facts) in cases {
+            assert_eq!(uninstall_lines(&facts), expected, "{case}");
         }
-        state.complete = false;
-        state.finish_on_this_computer = false;
-        state.browsers = vec![chrome(BrowserForm::Snap)];
-        views.push(compose(&state));
-        state.browsers = vec![];
-        views.push(compose(&state));
-        state.browsers = vec![connected(chrome(BrowserForm::Native))];
-        state.agents = vec![];
-        views.push(compose(&state));
-        for view in views {
-            let json = serde_json::to_string(&view).unwrap();
-            assert!(json.is_ascii(), "{json}");
-        }
-        assert!(STEP_NAMES.iter().all(|name| name.is_ascii()));
-        let mut gone = uninstall(&["Alpha"], &["Beta"]);
-        for running in [
-            RunningAfterUninstall::Unchanged,
-            RunningAfterUninstall::LeftRunning,
-            RunningAfterUninstall::Stopped,
-            RunningAfterUninstall::StillRunning,
-        ] {
-            gone.running = running;
-            for whole in [true, false] {
-                gone.whole = whole;
-                assert!(uninstall_lines(&gone).iter().all(|line| line.is_ascii()));
-            }
-        }
-        assert!(STORE_LISTING_URL.is_ascii() && PROMPT.is_ascii() && TAGLINE.is_ascii());
     }
 }
