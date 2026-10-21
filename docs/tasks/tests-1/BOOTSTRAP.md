@@ -47,7 +47,8 @@ contract tests the lanes find missing, telling the owner each grant. Granted so 
 ACCEPTANCE P3's first real test (work lane), 9 for the service area, whose last 52 tests in
 `service/` hold eight rules' last proofs (the owner's own grant), and 3 for the install area (the
 install command grammar the scripts call, the install.json the launchers read, and the dev extension
-id the native host must match); 37 left. A budget is a ceiling, not a target: an area whose meaningful tests number fewer ends
+id the native host must match), and 1 for the work area's test of be54ad44 (a stopped recording
+says it stopped), whose only test went with the language outcome table; 36 left. A budget is a ceiling, not a target: an area whose meaningful tests number fewer ends
 under it.
 
 The JavaScript ceiling for the extension (553 tests) and the page assets (275) is set after the

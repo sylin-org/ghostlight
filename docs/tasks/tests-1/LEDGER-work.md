@@ -103,3 +103,11 @@ a late receipt after a cancellation commits nothing (Executor 2); back, forward 
 landing governance (BJ 9); diagnostics exclude the client's claim (Connection reporting 5, once
 `receipt.rs`'s test goes); ACCEPTANCE BJ 25 still names a removed `reuse: never` field, and
 ADR-0185 item 4's "names that action before saying why" disagrees with b97335a4.
+- From the language lane's close (2026-10-21; `LEDGER-language.md` Notes): keep
+  `work/tests/execution.rs`'s `every_tool_gets_deadline_advice_it_can_follow` and
+  `calls_at_the_longest_timeout_are_not_told_to_raise_it` (ACCEPTANCE Executor 3),
+  `work/tests/protocol4.rs`'s `a_refused_fill_lists_what_would_succeed_and_names_each_handle` and
+  `a_fill_the_page_partly_undid_is_a_partial_failure_with_no_dialog_advice`, and one end-to-end
+  group-title assertion in `work/tests/tabs.rs`. Out of the reserve, 1 more: an executor-level test
+  of be54ad44 (a stopped recording's status says it stopped and is ready to save; a running one
+  keeps its sentence), whose only test went with the language outcome table.
