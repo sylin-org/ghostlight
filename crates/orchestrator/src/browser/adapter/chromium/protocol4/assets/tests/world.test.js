@@ -57,11 +57,52 @@ test("the bundle hash equals the pinned asset id", () => {
   assert.equal(ID, pinned, "an asset changed: update tests/golden/protocol4/assets.sha256 deliberately");
 });
 
-test("CODES equals the asset error codes of the vocabulary", () => {
-  const match = /const CODES = new Set\(\[([^\]]*)\]\);/.exec(bundle.read("world.js"));
-  assert.ok(match, "world.js defines CODES as a set literal");
-  const codes = [...match[1].matchAll(/"([a-z_]+)"/g)].map((entry) => entry[1]);
-  assert.deepEqual(codes, vocabulary.asset_error_codes);
+// The ERROR_CODES table world.js defines, as [key, code] pairs in its order.
+function errorCodes() {
+  const match = /const ERROR_CODES = Object\.freeze\(\{([^}]*)\}\);/.exec(bundle.read("world.js"));
+  assert.ok(match, "world.js defines ERROR_CODES as a frozen object literal");
+  return [...match[1].matchAll(/(\w+): "([a-z_]+)"/g)].map((entry) => [entry[1], entry[2]]);
+}
+
+// Each AssetError the text constructs whose code is not one ERROR_CODES key, as the code argument
+// it was written with. A code argument is a key reference, or a condition choosing between two.
+function unlistedCodes(text, keys) {
+  const listed = (argument) => {
+    const references = [...argument.matchAll(/ERROR_CODES\.(\w+)/g)].map((entry) => entry[1]);
+    const shape = /^(?:[\w.!]+ \? )?ERROR_CODES\.\w+(?: : ERROR_CODES\.\w+)?$/.test(argument);
+    return shape && references.every((key) => keys.has(key));
+  };
+  return [...text.matchAll(/new AssetError\(([^,]*),/g)].map((entry) => entry[1].trim()).filter((argument) => !listed(argument));
+}
+
+test("ERROR_CODES equals the asset error codes of the vocabulary", () => {
+  assert.deepEqual(errorCodes().map(([, code]) => code), vocabulary.asset_error_codes);
+});
+
+test("the unlisted-code scan catches a literal, a mistyped key and a computed code", () => {
+  const keys = new Set(["focusLost", "notFillable", "optionMissing"]);
+  const text = [
+    'new AssetError(ERROR_CODES.focusLost, "a");',
+    'new AssetError(options ? ERROR_CODES.optionMissing : ERROR_CODES.notFillable, "b");',
+    'new AssetError("focus_lost", "c");',
+    'new AssetError(ERROR_CODES.focusLots, "d");',
+    'new AssetError(options ? ERROR_CODES.optionMissing : "not_fillable", "e");',
+    'new AssetError(code, "f");'
+  ].join("\n");
+  assert.deepEqual(unlistedCodes(text, keys), [
+    '"focus_lost"',
+    "ERROR_CODES.focusLots",
+    'options ? ERROR_CODES.optionMissing : "not_fillable"',
+    "code"
+  ]);
+});
+
+test("every page failure names an ERROR_CODES key", () => {
+  const keys = new Set(errorCodes().map(([key]) => key));
+  assert.ok(SOURCE.match(/new AssetError\(/g).length > 1, "the bundle constructs page failures");
+  assert.deepEqual(unlistedCodes(SOURCE, keys), []);
+  const named = [...SOURCE.matchAll(/ERROR_CODES\.(\w+)/g)].map((entry) => entry[1]);
+  assert.deepEqual(named.filter((key) => !keys.has(key)), [], "every ERROR_CODES reference names a key");
 });
 
 const FORBIDDEN = [

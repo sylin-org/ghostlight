@@ -21,6 +21,14 @@ const presentation = (() => {
   // The service admits at most 30 seconds of work. This browser-local fallback leaves
   // room for terminal delivery, then retires decoration whose owner disappeared.
   const STALE_SIGNATURE_MS = 35_000;
+  // A confirming signature completes on its own after this long.
+  const CONFIRMING_SIGNATURE_MS = 900;
+  // A completing signature plays its glint for this long, then leaves.
+  const SIGNATURE_COMPLETE_MS = 180;
+  // A leaving signature is removed once its 420ms exit transition has run, with a margin.
+  const SIGNATURE_LEAVE_MS = 460;
+  // How long a caption stays on screen.
+  const CAPTION_MS = 1500;
 
   // The transient effect vocabulary. One row per treatment, and the row is the whole truth
   // about it: `selector` enrolls it for reduced motion, and `beat` is how long it is visibly
@@ -88,12 +96,12 @@ const presentation = (() => {
     spring: SPRING,
     cursor_ms: 150,
     border_breathe_ms: 4000,
-    ripple_ms: 620,
-    field_splash_ms: 700,
-    read_scan_ms: 1450,
-    navigation_ms: 1600,
-    screenshot_ms: 1500,
-    zoom_ms: 1150,
+    ripple_ms: EFFECT_BEATS.get("ripple"),
+    field_splash_ms: EFFECT_BEATS.get("field-splash"),
+    read_scan_ms: EFFECT_BEATS.get("read-scan"),
+    navigation_ms: EFFECT_BEATS.get("nav-pill"),
+    screenshot_ms: EFFECT_BEATS.get("capture-frame"),
+    zoom_ms: EFFECT_BEATS.get("zoom-frame"),
     denial_ms: DENIAL_MS
   });
 
@@ -478,7 +486,7 @@ const presentation = (() => {
     signatureExpiryTimer = later(() => {
       if (signature === started) removeSignature();
     }, STALE_SIGNATURE_MS);
-    if (confirming) signatureTimer = later(() => finishSignature(invocation), 900);
+    if (confirming) signatureTimer = later(() => finishSignature(invocation), CONFIRMING_SIGNATURE_MS);
   }
 
   function finishSignature(invocation) {
@@ -494,8 +502,8 @@ const presentation = (() => {
           removeSignature();
         }
         finishing.remove();
-      }, 460);
-    }, 180);
+      }, SIGNATURE_LEAVE_MS);
+    }, SIGNATURE_COMPLETE_MS);
   }
 
   function showCaption(activity, enabled) {
@@ -503,7 +511,7 @@ const presentation = (() => {
     unlater(captionTimer);
     caption.textContent = shared.activityLabel(activity);
     caption.classList.add("on");
-    captionTimer = later(() => caption.classList.remove("on"), 1500);
+    captionTimer = later(() => caption.classList.remove("on"), CAPTION_MS);
   }
 
   function showDenial(signal) {

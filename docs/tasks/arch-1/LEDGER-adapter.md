@@ -7,9 +7,10 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 ## RESUME HERE
 
 A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset waited on (see
-Notes). The lane has no open slice.
+Notes).
 
-The second sweep (2026-10-20) opens this lane again: see its section below.
+The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10 has landed;
+BROW-4 is next.
 
 ## Slices
 
@@ -138,11 +139,11 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. Nothing has landed yet; start with BROW-10.
+with its skeptic's corrections. BROW-10 has landed; BROW-4 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| BROW-10 | refactor(assets): one table of the page's error codes, tested against what `content.js` throws, and `visualIdentity` derived from its beats | - | BROW-10 as corrected; `assets.sha256` regenerates | todo |
+| BROW-10 | refactor(assets): one table of the page's error codes, tested against what `content.js` throws, and `visualIdentity` derived from its beats | - | BROW-10 as corrected; `assets.sha256` regenerates | landed (this commit) |
 | BROW-4 | refactor(adapter): one activate variant each, with a modifier list | - | BROW-4 | todo |
 | BROW-7 | refactor(adapter): one call request in place of seven arguments | - | BROW-7 | todo |
 | BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | todo |
@@ -152,3 +153,27 @@ with its skeptic's corrections. Nothing has landed yet; start with BROW-10.
 | BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | todo |
 | BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | todo |
 | BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | todo |
+
+### Notes (second sweep)
+
+- BROW-10, the table: `world.js`'s `ERROR_CODES` is a frozen table in the shape of `content.js`'s
+  `FIELD_PROBLEMS`, a camelCase key per wire word, and every `AssetError` in the bundle names its
+  code by key: 35 in `content.js` (the `option_missing` or `not_fillable` choice is a condition
+  between two keys), one in `sensor.js` and one in `world.js`. `failure` checks a code against the
+  table's values, so the separate `CODES` set goes. The wire words and their order are unchanged,
+  and `golden.rs` reads the table with the closing marker it already used for the other two, now
+  one `TABLE_CLOSE`.
+- BROW-10, the guard: "every page failure names an ERROR_CODES key" in `assets/tests/world.test.js`
+  scans the expanded bundle, so a literal code, a mistyped key or a computed code fails it. Its
+  negative control, "the unlisted-code scan catches a literal, a mistyped key and a computed code",
+  runs the scan over a sample that holds each. Every thrown code was already listed, so this is a
+  guard, not a fix.
+- BROW-10, the beats: `visualIdentity` reads its six beats (ripple, field splash, read scan,
+  navigation, screenshot, zoom) from `EFFECT_BEATS`. `cursor_ms` (150) and `border_breathe_ms`
+  (4000) stay literal: they are the stylesheet's cursor transition and breathe, not rows of
+  `TRANSIENT_EFFECTS`. The signature's 900, 180 and 460 ms and the caption's 1500 ms are named
+  constants; C18 rewrites `showCaption` and carries `CAPTION_MS`. Every value is unchanged, and
+  only `tests/golden/protocol4/assets.sha256` regenerates.
+- BROW-10, owed to docs: `docs/design/visual-language.md:87` credits `visualIdentity` with the
+  workwheel (2400 ms), waiting-light (1050 ms) and keyboard (1150 ms) beats. It holds none of them;
+  they are looping CSS animations. The file is the docs lane's.

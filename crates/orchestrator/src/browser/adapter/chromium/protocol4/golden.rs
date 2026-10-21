@@ -28,14 +28,12 @@ const GOLDEN: &str = "../../tests/golden/protocol4";
 const WORLD_JS: &str = include_str!("assets/world.js");
 /// The page asset that dispatches world messages.
 const CONTENT_JS: &str = include_str!("assets/content.js");
-/// Where `world.js` opens its set of asset error codes.
-const CODES_OPEN: &str = "const CODES = new Set([";
-/// Where that set closes.
-const CODES_CLOSE: &str = "]);";
+/// Where `world.js` opens its table of asset error codes.
+const CODES_OPEN: &str = "const ERROR_CODES = Object.freeze({";
 /// Where `content.js` opens its table of the problem words a refused fill names.
 const PROBLEMS_OPEN: &str = "const FIELD_PROBLEMS = Object.freeze({";
-/// Where that table closes.
-const PROBLEMS_CLOSE: &str = "});";
+/// Where each of those frozen tables closes.
+const TABLE_CLOSE: &str = "});";
 /// How `content.js` tests the kind of the message it dispatches.
 const DISPATCH_TEST: &str = "message.kind === \"";
 /// Where `content.js` opens its table of the routes a wrong-tool problem names.
@@ -623,7 +621,7 @@ fn asset_error_codes_agree_across_rust_the_vocabulary_and_world_js() {
     let vocabulary = vocabulary();
     let names = set(asset_error_codes());
     assert_eq!(names, listed(&vocabulary, "asset_error_codes"));
-    assert_eq!(quoted_between(WORLD_JS, CODES_OPEN, CODES_CLOSE), names);
+    assert_eq!(quoted_between(WORLD_JS, CODES_OPEN, TABLE_CLOSE), names);
     let pre_effect: BTreeSet<String> = names
         .iter()
         .filter(|code| {
@@ -636,7 +634,7 @@ fn asset_error_codes_agree_across_rust_the_vocabulary_and_world_js() {
 
 #[test]
 fn every_problem_word_content_js_names_is_one_the_service_decodes() {
-    let named = quoted_between(CONTENT_JS, PROBLEMS_OPEN, PROBLEMS_CLOSE);
+    let named = quoted_between(CONTENT_JS, PROBLEMS_OPEN, TABLE_CLOSE);
     assert!(!named.is_empty());
     let known = set(
         names!(FieldProblemKind: OptionMissing, OptionAmbiguous, OptionDisabled,
@@ -647,7 +645,7 @@ fn every_problem_word_content_js_names_is_one_the_service_decodes() {
 
 #[test]
 fn every_wrong_tool_route_content_js_names_is_one_the_service_decodes() {
-    let named = quoted_between(CONTENT_JS, ROUTES_OPEN, PROBLEMS_CLOSE);
+    let named = quoted_between(CONTENT_JS, ROUTES_OPEN, TABLE_CLOSE);
     let known = set(names!(WrongToolRoute: File, Button, Widget));
     assert_eq!(named, known);
 }

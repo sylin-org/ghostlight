@@ -299,7 +299,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // page holds (another world, never minted, or dropped from the registry). A removed locator
   // also carries what the page found when it looked for the control again.
   function staleLocator(word, lookup) {
-    return new AssetError("stale_locator", "stale browser locator", lookup ? { stale: word, ...lookup } : { stale: word });
+    return new AssetError(ERROR_CODES.staleLocator, "stale browser locator", lookup ? { stale: word, ...lookup } : { stale: word });
   }
 
   // The refusal for a locator whose control left the page, with the lookup its record allows.
@@ -355,7 +355,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   }
 
   function cancelledError() {
-    return new AssetError("cancelled", "operation cancelled");
+    return new AssetError(ERROR_CODES.cancelled, "operation cancelled");
   }
 
   // The call's context the first time it is asked for and nothing after: a locator follows its
@@ -502,7 +502,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // The refusal names the exact control so a model can ask its human for one precise thing.
   function credentialAuthorizationError(element) {
     const name = shared.bounded(accessibleName(element) || element.id || "", 80);
-    return new AssetError("credential_authorization_required", `credential-class target requires user authorization: the ${roleFor(element)}${name ? ` "${name}"` : ""}`);
+    return new AssetError(ERROR_CODES.credentialAuthorizationRequired, `credential-class target requires user authorization: the ${roleFor(element)}${name ? ` "${name}"` : ""}`);
   }
 
   // What one read remembers about the page so each element is placed once: the area of every
@@ -1417,7 +1417,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   function focusedControl() {
     const element = deepestActiveElement();
     if (!element || element === document.body || element === document.documentElement) {
-      throw new AssetError("no_focused_control", "no editable control is focused");
+      throw new AssetError(ERROR_CODES.noFocusedControl, "no editable control is focused");
     }
     return element;
   }
@@ -1816,10 +1816,10 @@ ${line}` : line;
     requireActionable(element, "type");
     if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
     if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
-      throw new AssetError("not_editable", "target is not text-editable");
+      throw new AssetError(ERROR_CODES.notEditable, "target is not text-editable");
     }
     if (element instanceof HTMLInputElement && !TEXT_INPUT_TYPES.has(element.type)) {
-      throw new AssetError("not_editable", "target is not text-editable");
+      throw new AssetError(ERROR_CODES.notEditable, "target is not text-editable");
     }
   }
 
@@ -1834,7 +1834,7 @@ ${line}` : line;
 
   function verifyBrowserTextFocus(element, allowCredentials = false) {
     validateTextEditElement(element, allowCredentials);
-    if (deepestActiveElement() !== element) throw new AssetError("focus_lost", "target did not retain browser input focus");
+    if (deepestActiveElement() !== element) throw new AssetError(ERROR_CODES.focusLost, "target did not retain browser input focus");
     return { focused: true };
   }
 
@@ -1844,12 +1844,12 @@ ${line}` : line;
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
     validateTextEditElement(element, allowCredentials);
-    if (deepestActiveElement() !== element) throw new AssetError("focus_lost", "target did not retain input focus");
+    if (deepestActiveElement() !== element) throw new AssetError(ERROR_CODES.focusLost, "target did not retain input focus");
     if (clearFirst) {
       if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.select();
       else {
         const selection = element.getRootNode().getSelection?.() ?? document.getSelection();
-        if (!selection) throw new AssetError("page_exception", "editable target has no selection");
+        if (!selection) throw new AssetError(ERROR_CODES.pageException, "editable target has no selection");
         const range = document.createRange();
         range.selectNodeContents(element);
         selection.removeAllRanges();
@@ -1857,7 +1857,7 @@ ${line}` : line;
       }
     }
     validateTextEditElement(element, allowCredentials);
-    if (deepestActiveElement() !== element) throw new AssetError("focus_lost", "target did not retain input focus");
+    if (deepestActiveElement() !== element) throw new AssetError(ERROR_CODES.focusLost, "target did not retain input focus");
     return { subject };
   }
 
@@ -1866,7 +1866,7 @@ ${line}` : line;
     if (!text && !clearFirst) return { typed: true, subject: prepared.subject };
     if (!text && clearFirst && !(element.value ?? element.textContent)) return { typed: true, subject: prepared.subject };
     if (!document.execCommand(text ? "insertText" : "delete", false, text)) {
-      throw new AssetError("page_exception", "browser could not type into editable target");
+      throw new AssetError(ERROR_CODES.pageException, "browser could not type into editable target");
     }
     return { typed: true, subject: prepared.subject };
   }
@@ -2164,7 +2164,7 @@ ${line}` : line;
     requireActionable(element, "fill");
     if (credentialClass(element) && allowCredentials !== true) throw credentialAuthorizationError(element);
     if (!(element instanceof HTMLSelectElement || element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) {
-      throw new AssetError("not_fillable", NOT_FILLABLE_MESSAGE);
+      throw new AssetError(ERROR_CODES.notFillable, NOT_FILLABLE_MESSAGE);
     }
     const resolved = resolveChoice(element, value);
     if (resolved && !resolved.problem && resolved.element !== element) requireActionable(resolved.element, "fill");
@@ -2180,7 +2180,7 @@ ${line}` : line;
     let message = options ? OPTION_MESSAGE : NOT_FILLABLE_MESSAGE;
     const words = problems.length > 1 ? `${problems.length} fields refused` : PROBLEM_WORDS[problems[0].problem];
     if (words) message += ` (${words})`;
-    return new AssetError(options ? "option_missing" : "not_fillable", message, withDetail ? boundedDetail(problems) : undefined);
+    return new AssetError(options ? ERROR_CODES.optionMissing : ERROR_CODES.notFillable, message, withDetail ? boundedDetail(problems) : undefined);
   }
 
   // How many options a listing holds, option groups flattened.
@@ -2227,7 +2227,7 @@ ${line}` : line;
     if (message.submit_locator) {
       submitElement = requireActionable(resolve(message.submit_locator, ctx), "activate");
       const owner = elements[0] ? formOwner(elements[0]) : null;
-      if (!owner || formOwner(submitElement) !== owner) throw new AssetError("submit_outside_form", "submit control is not contained in the resolved form");
+      if (!owner || formOwner(submitElement) !== owner) throw new AssetError(ERROR_CODES.submitOutsideForm, "submit control is not contained in the resolved form");
     }
     return { elements, submitElement, fieldKinds: elements.map((element) => isTextual(element) ? "browser_text" : "local") };
   }
@@ -2325,7 +2325,7 @@ ${line}` : line;
         const now = reacted ? undefined : heldNow(element, choice);
         return now === undefined ? { field: index, problem: FIELD_PROBLEMS.reverted } : { field: index, problem: FIELD_PROBLEMS.reverted, now };
       });
-    return new AssetError("not_retained", "target did not retain filled value", problems.length ? { problems } : undefined);
+    return new AssetError(ERROR_CODES.notRetained, "target did not retain filled value", problems.length ? { problems } : undefined);
   }
 
   // A browser document can be ready while a client-rendered form is still hydrating from an
@@ -2375,7 +2375,7 @@ ${line}` : line;
     const stableMs = message.stable_ms ?? FILL_RETAINED_STABLE_MS;
     const pollMs = message.poll_ms ?? FILL_RETAINED_POLL_MS;
     if (![stableMs, pollMs, message.limit_ms].every((value) => Number.isFinite(value) && value >= 0)) {
-      throw new AssetError("invalid_request", "fill verification requires a physical time budget");
+      throw new AssetError(ERROR_CODES.invalidRequest, "fill verification requires a physical time budget");
     }
     const limit = performance.now() + message.limit_ms;
     let stableSince = null;
@@ -2404,7 +2404,7 @@ ${line}` : line;
   // controls are filled by the extension through the browser's trusted input after
   // focus_text_field, so this refuses them before it looks at anything else.
   function fillLocalElement(element, value, allowCredentials = false) {
-    if (isTextual(element)) throw new AssetError("invalid_request", "text target requires browser input");
+    if (isTextual(element)) throw new AssetError(ERROR_CODES.invalidRequest, "text target requires browser input");
     const choice = validateFillElement(element, value, allowCredentials);
     const changed = choice?.element ?? element;
     changed.scrollIntoView({ block: "center", inline: "center" });
@@ -2427,13 +2427,13 @@ ${line}` : line;
         : style.visibility === "hidden" ? "visibility:hidden"
         : Number(style.opacity) === 0 ? "opacity:0"
         : "zero-size";
-      throw new AssetError("not_visible", `target is not visible for ${intent} (${reason})`);
+      throw new AssetError(ERROR_CODES.notVisible, `target is not visible for ${intent} (${reason})`);
     }
     if (isDisabled(element) || closestAcrossBoundaries(element, "[inert]")) {
-      throw new AssetError("disabled", `target is disabled for ${intent}`);
+      throw new AssetError(ERROR_CODES.disabled, `target is disabled for ${intent}`);
     }
     if (["fill", "type"].includes(intent) && (element.readOnly || element.getAttribute("aria-readonly") === "true")) {
-      throw new AssetError("read_only", `target is read-only for ${intent}`);
+      throw new AssetError(ERROR_CODES.readOnly, `target is read-only for ${intent}`);
     }
     return element;
   }
@@ -2460,7 +2460,7 @@ ${line}` : line;
   }
 
   function requireOwner(ctx) {
-    if (!ctx.owner) throw new AssetError("invalid_request", "owner call requires an owner element");
+    if (!ctx.owner) throw new AssetError(ERROR_CODES.invalidRequest, "owner call requires an owner element");
     return ctx.owner;
   }
 
@@ -2495,21 +2495,21 @@ ${line}` : line;
     try {
       binary = atob(file.data);
     } catch (_error) {
-      throw new AssetError("payload_mismatch", "file payload is not valid base64");
+      throw new AssetError(ERROR_CODES.payloadMismatch, "file payload is not valid base64");
     }
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    if (bytes.byteLength !== file.size) throw new AssetError("payload_mismatch", "file payload size mismatch");
+    if (bytes.byteLength !== file.size) throw new AssetError(ERROR_CODES.payloadMismatch, "file payload size mismatch");
     return new File([bytes], file.name, { type: file.media_type });
   }
 
   function requireUploadTarget(element) {
     if (!element.isConnected) throw removedElementError(element);
     if (!(element instanceof HTMLInputElement) || element.type !== "file") {
-      throw new AssetError("not_file_input", "target is not a file input");
+      throw new AssetError(ERROR_CODES.notFileInput, "target is not a file input");
     }
     if (isDisabled(element) || closestAcrossBoundaries(element, "[inert]")) {
-      throw new AssetError("disabled", "target is disabled for upload");
+      throw new AssetError(ERROR_CODES.disabled, "target is disabled for upload");
     }
     return element;
   }
@@ -2534,7 +2534,7 @@ ${line}` : line;
     const readiness = () => document.readyState === "complete" ? "complete" : "interactive";
     const elapsed = () => Math.round(performance.now() - started);
     const unmet = (readyState) => {
-      if (message.until_satisfied === true) throw new AssetError("unsatisfied", "condition was not satisfied before the timeout");
+      if (message.until_satisfied === true) throw new AssetError(ERROR_CODES.unsatisfied, "condition was not satisfied before the timeout");
       return { satisfied: false, elapsed_ms: elapsed(), readiness: readyState };
     };
     const settleOptions = (timeoutMs) => ({
@@ -2610,7 +2610,7 @@ ${line}` : line;
     // tail, and a handler that opens a page-blocking dialog would freeze this thread mid-click.
     if (message.kind === "submit_fill") {
       const { submitElement } = prepareFill(message);
-      if (!submitElement) throw new AssetError("invalid_request", "submit control is required");
+      if (!submitElement) throw new AssetError(ERROR_CODES.invalidRequest, "submit control is required");
       setTimeout(() => submitElement.click(), 0);
       return { submitted: true };
     }
@@ -2624,7 +2624,7 @@ ${line}` : line;
     if (message.kind === "focus_text_field") {
       const element = resolve(message.field.locator);
       validateFillElement(element, message.field.value, message.allow_credentials);
-      if (!isTextual(element)) throw new AssetError("not_editable", "target does not use browser text input");
+      if (!isTextual(element)) throw new AssetError(ERROR_CODES.notEditable, "target does not use browser text input");
       const { subject } = prepareBrowserText(element, message.allow_credentials, ctx);
       return { focused: true, subject };
     }
@@ -2670,14 +2670,14 @@ ${line}` : line;
     }
     if (message.kind === "describe_focused") return { targets: [observation(focusedControl())] };
     if (message.kind === "verify_focused_text") {
-      if (!document.hasFocus()) throw new AssetError("no_focused_control", "no editable control is focused");
+      if (!document.hasFocus()) throw new AssetError(ERROR_CODES.noFocusedControl, "no editable control is focused");
       return verifyBrowserTextFocus(deepestActiveElement(), message.allow_credentials);
     }
     if (message.kind === "clear_focused") return clearText(focusedControl(), message.allow_credentials);
     if (message.kind === "type_text") return typeText(resolve(message.locator, ctx), message.text, message.clear_first, message.allow_credentials, ctx);
     if (message.kind === "drop_files") {
       const dropTarget = deepestElementFromPoint(document, message.x, message.y);
-      if (!dropTarget) throw new AssetError("no_subject", "no element is at the drop point");
+      if (!dropTarget) throw new AssetError(ERROR_CODES.noSubject, "no element is at the drop point");
       const transfer = new DataTransfer();
       for (const file of message.files) transfer.items.add(decodeFile(file));
       dropTarget.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer }));
@@ -2721,7 +2721,7 @@ ${line}` : line;
     if (message.kind === "viewport_point") {
       const x = message.x - scrollX;
       const y = message.y - scrollY;
-      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new AssetError("outside_viewport", "drag point is outside the current viewport");
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new AssetError(ERROR_CODES.outsideViewport, "drag point is outside the current viewport");
       return { x, y, subject: subjectAtViewportPoint(x, y) };
     }
     // The routing half of pointer translation: what lies under a point in this document. An
@@ -2730,7 +2730,7 @@ ${line}` : line;
       const x = message.x - (message.page === true ? scrollX : 0);
       const y = message.y - (message.page === true ? scrollY : 0);
       const hit = deepestElementFromPoint(document, x, y);
-      if (!hit) throw new AssetError("no_subject", "point has no current document subject");
+      if (!hit) throw new AssetError(ERROR_CODES.noSubject, "point has no current document subject");
       const embed = isEmbed(hit);
       return { x, y, embed, subject: embed ? null : actionSubject(closestAcrossBoundaries(hit, ACTIONABLE_SELECTOR) || hit) };
     }
@@ -2744,7 +2744,7 @@ ${line}` : line;
     }
     if (message.kind === "focus_probe") return { focused: documentHasPageFocus() };
     if (message.kind === "require_focused") {
-      if (!documentHasPageFocus()) throw new AssetError("focus_lost", "browser focus is not in this document");
+      if (!documentHasPageFocus()) throw new AssetError(ERROR_CODES.focusLost, "browser focus is not in this document");
       return { focused: true };
     }
     if (message.kind === "hover") {
@@ -2760,14 +2760,14 @@ ${line}` : line;
     // A recording export: the bytes arrive as the call's attachment, never in the message.
     if (message.kind === "attach_file") {
       const attachment = ctx.attachment;
-      if (!attachment) throw new AssetError("invalid_request", "attach_file requires an attachment");
+      if (!attachment) throw new AssetError(ERROR_CODES.invalidRequest, "attach_file requires an attachment");
       const element = resolve(message.locator, ctx);
       const subject = actionSubject(element, ctx);
       const file = { name: message.file_name, media_type: attachment.media_type, data: attachment.data, size: attachment.size };
       return { ...uploadFiles(element, [file]), subject };
     }
     if (message.kind === "observe") return observe(message, ctx);
-    throw new AssetError("unknown_kind", "unknown content primitive");
+    throw new AssetError(ERROR_CODES.unknownKind, "unknown content primitive");
   }
 
   world.onDispose(() => {

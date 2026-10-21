@@ -15,7 +15,7 @@ const sensor = (() => {
   // Abort callbacks of the waits in progress, so dispose can end every one of them.
   const running = new Set();
 
-  const cancelledError = () => new AssetError("cancelled", "operation cancelled");
+  const cancelledError = () => new AssetError(ERROR_CODES.cancelled, "operation cancelled");
   const neverCancelled = () => false;
 
   /**

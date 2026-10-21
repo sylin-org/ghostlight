@@ -23,40 +23,43 @@ class AssetError extends Error {
     if (detail !== undefined) this.detail = detail;
   }
 }
-const CODES = new Set([
-  "stale_locator",
-  "not_visible",
-  "disabled",
-  "read_only",
-  "not_editable",
-  "not_fillable",
-  "option_missing",
-  "credential_authorization_required",
-  "submit_outside_form",
-  "not_file_input",
-  "no_focused_control",
-  "focus_lost",
-  "outside_viewport",
-  "no_subject",
-  "unknown_kind",
-  "invalid_request",
-  "runtime_missing",
-  "cancelled",
-  "unsatisfied",
-  "not_retained",
-  "payload_mismatch",
-  "page_exception"
-]);
+// The codes a page failure names. The service decodes the same closed list, and an error that
+// carries any other code answers as page_exception.
+const ERROR_CODES = Object.freeze({
+  staleLocator: "stale_locator",
+  notVisible: "not_visible",
+  disabled: "disabled",
+  readOnly: "read_only",
+  notEditable: "not_editable",
+  notFillable: "not_fillable",
+  optionMissing: "option_missing",
+  credentialAuthorizationRequired: "credential_authorization_required",
+  submitOutsideForm: "submit_outside_form",
+  notFileInput: "not_file_input",
+  noFocusedControl: "no_focused_control",
+  focusLost: "focus_lost",
+  outsideViewport: "outside_viewport",
+  noSubject: "no_subject",
+  unknownKind: "unknown_kind",
+  invalidRequest: "invalid_request",
+  runtimeMissing: "runtime_missing",
+  cancelled: "cancelled",
+  unsatisfied: "unsatisfied",
+  notRetained: "not_retained",
+  payloadMismatch: "payload_mismatch",
+  pageException: "page_exception"
+});
 /*@include page-shared.js sensor.js presentation-css.js presentation.js content.js*/
 const failure = (e) => {
-  const error = { code: CODES.has(e?.code) ? e.code : "page_exception", message: String(e?.message ?? e).slice(0, 500) };
+  const known = Object.values(ERROR_CODES).includes(e?.code);
+  const error = { code: known ? e.code : ERROR_CODES.pageException, message: String(e?.message ?? e).slice(0, 500) };
   if (e instanceof AssetError && e.detail !== undefined) error.detail = e.detail;
   return { ok: false, error };
 };
 globalThis.__ghostlightRuntime = Object.freeze({
   id: ID,
   async call(message, { local, token, attachment, owner } = {}) {
-    if (typeof message?.kind !== "string") return failure(new AssetError("invalid_request", "world call requires a kind"));
+    if (typeof message?.kind !== "string") return failure(new AssetError(ERROR_CODES.invalidRequest, "world call requires a kind"));
     const signal = { cancelled: false };
     // The locators this call followed to a node the page proved is their control.
     const rebound = [];
