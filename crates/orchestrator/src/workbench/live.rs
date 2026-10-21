@@ -565,17 +565,6 @@ impl Live {
         starts.end_stretch();
     }
 
-    /// Read the installed browsers the no-browser line is read from by running `inspect`.
-    #[cfg(test)]
-    pub fn use_browser_inspection(
-        &self,
-        inspect: impl Fn() -> Vec<crate::browser::recovery::RecoveryCandidate> + Send + Sync + 'static,
-    ) {
-        let mut starts = lock(&self.starts);
-        starts.recovery.set_test_inspection(inspect);
-        starts.end_stretch();
-    }
-
     /// Remember who brought the runtime to `state`. A request that leaves the state as it was
     /// keeps the first source: the pause came from there.
     pub fn record_runtime(&self, state: RuntimeControlState, source: RuntimeSource) {

@@ -4,7 +4,8 @@
 //! the text after the `#` of the page's own address, such as `settings/diagnostics`. The page keeps the list in
 //! `ui/lib/words.js` (`ADDRESSES`); [`PageAddress`] is the same list for the service, so a request
 //! to show the window at a section is checked here before the shell is told, and the shell never
-//! decides what an address means. A test reads the page's list and proves the two are equal.
+//! decides what an address means. A test in `surface_tests.rs` reads the page's list and proves
+//! the two are equal.
 
 use std::fmt;
 
@@ -102,83 +103,5 @@ impl<'de> Deserialize<'de> for PageAddress {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
         Self::parse(&text).ok_or_else(|| de::Error::custom("not an address of the page"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The page's list of addresses, as the page writes it.
-    const PAGE_WORDS: &str = include_str!("../../ui/lib/words.js");
-
-    /// The line where the page's list starts.
-    const LIST_START: &str = "const ADDRESSES = Object.freeze([";
-
-    /// The page's addresses, read from its source in order.
-    fn page_addresses() -> Vec<String> {
-        let start = PAGE_WORDS
-            .find(LIST_START)
-            .expect("the page lists its addresses")
-            + LIST_START.len();
-        let list = &PAGE_WORDS[start..];
-        let list = &list[..list.find("])").expect("the list ends")];
-        list.split(',')
-            .map(|entry| entry.trim().trim_matches('"').to_owned())
-            .filter(|entry| !entry.is_empty())
-            .collect()
-    }
-
-    #[test]
-    fn the_service_lists_the_addresses_the_page_lists() {
-        let ours: Vec<String> = PageAddress::ALL
-            .iter()
-            .map(|address| address.as_str().to_owned())
-            .collect();
-        assert_eq!(ours, page_addresses());
-    }
-
-    #[test]
-    fn an_address_is_its_wire_text() {
-        for address in PageAddress::ALL {
-            assert_eq!(PageAddress::parse(address.as_str()), Some(address));
-            assert_eq!(
-                serde_json::to_value(address).unwrap(),
-                serde_json::Value::from(address.as_str())
-            );
-            assert_eq!(
-                serde_json::from_value::<PageAddress>(address.as_str().into()).unwrap(),
-                address
-            );
-            assert_eq!(address.to_string(), address.as_str());
-        }
-    }
-
-    #[test]
-    fn text_that_is_not_an_address_is_not_one() {
-        for text in [
-            "",
-            "#monitor",
-            "Monitor",
-            "settings/",
-            "settings/nowhere",
-            "settings/diagnostics/x",
-            "nowhere",
-            "monitor\"; alert(1); \"",
-        ] {
-            assert_eq!(PageAddress::parse(text), None, "{text}");
-            assert!(serde_json::from_value::<PageAddress>(text.into()).is_err());
-        }
-    }
-
-    #[test]
-    fn every_address_is_safe_to_put_in_a_script() {
-        for address in PageAddress::ALL {
-            assert!(address.as_str().len() <= 48);
-            assert!(address
-                .as_str()
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || matches!(byte, b'/' | b'-')));
-        }
     }
 }

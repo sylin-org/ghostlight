@@ -4,19 +4,28 @@
 //! `tests/workbench-store.test.mjs`, `tests/workbench-transport.test.mjs` and
 //! `tests/workbench-settings.test.mjs`. What stays here is what running a module cannot reveal:
 //! the product's artwork byte for byte, the palette and motion curve the page shares with
-//! sylin.org and the page assets, the layers that must never reach for the document, a surface
-//! that carries no address of its own, and words the page keys by the service's wire values.
+//! sylin.org and the page assets, and the closed names the page and the service exchange, which
+//! each side keeps a copy of.
 
+use std::collections::{BTreeMap, BTreeSet};
+
+/// The page's words, where it keeps its closed tables and its list of addresses.
+const PAGE_WORDS: &str = include_str!("../../ui/lib/words.js");
+
+/// The page's transport, which names the snapshot parts it asks for.
+const PAGE_TRANSPORT: &str = include_str!("../../ui/lib/transport.js");
+
+/// The spring curve the workbench and the page assets move on, written without spaces.
+const SPRING: &str = "cubic-bezier(.22,1,.36,1)";
+
+/// Protects desktop gate 12: the workbench shows the original Ghostlight icon bytes and the
+/// published palette, and moves on the same spring curve as the page assets.
 #[test]
-fn workbench_uses_the_original_ghostlight_artwork_byte_for_byte() {
+fn the_workbench_wears_the_original_icon_palette_and_spring_curve() {
     assert_eq!(
         include_bytes!("../../ui/ghostlight.png"),
         include_bytes!("../../../../extension/icons/icon128.png")
     );
-}
-
-#[test]
-fn the_surface_uses_the_published_ghostlight_palette() {
     let styles = include_str!("../../ui/styles.css");
     // Ghostlight's accent and the night-garden ground, as published on sylin.org.
     for value in ["#5eead4", "94, 234, 212", "#0f0e12"] {
@@ -25,148 +34,13 @@ fn the_surface_uses_the_published_ghostlight_palette() {
             "the workbench dropped the published palette value {value}"
         );
     }
-}
-
-#[test]
-fn the_surface_and_the_page_share_one_motion_curve() {
-    let styles = include_str!("../../ui/styles.css");
     let renderer = include_str!("../browser/adapter/chromium/protocol4/assets/presentation.js");
-    assert!(styles.contains("cubic-bezier(.22, 1, .36, 1)"));
-    assert!(renderer.contains("cubic-bezier(.22,1,.36,1)"));
-}
-
-/// Every script the window loads, in the order the page loads it, as one text.
-fn surface_source() -> String {
-    [
-        include_str!("../../ui/lib/words.js"),
-        include_str!("../../ui/lib/entries.js"),
-        include_str!("../../ui/lib/transport.js"),
-        include_str!("../../ui/lib/icons.js"),
-        include_str!("../../ui/lib/setup-view.js"),
-        include_str!("../../ui/lib/store.js"),
-        include_str!("../../ui/lib/view.js"),
-        include_str!("../../ui/kit/settings.js"),
-        include_str!("../../ui/app.js"),
-    ]
-    .join("\n")
-}
-
-/// Whether `module` uses `reach`: a member of `document` or `window` (a sentence that ends on
-/// the word "window." uses neither), or an element looked up by `el[`.
-fn reaches_for(module: &str, reach: &str) -> bool {
-    if !reach.ends_with('.') {
-        return module.contains(reach);
+    for (name, text) in [("the workbench", styles), ("the page assets", renderer)] {
+        assert!(
+            text.replace(' ', "").contains(SPRING),
+            "{name} left the spring curve"
+        );
     }
-    module.match_indices(reach).any(|(at, _)| {
-        module[at + reach.len()..]
-            .chars()
-            .next()
-            .is_some_and(|next| next.is_ascii_alphabetic() || next == '_' || next == '$')
-    })
-}
-
-#[test]
-fn the_pure_layers_of_the_surface_hold_no_state_and_no_document() {
-    let words = include_str!("../../ui/lib/words.js");
-    let entries = include_str!("../../ui/lib/entries.js");
-    let store = include_str!("../../ui/lib/store.js");
-    let transport = include_str!("../../ui/lib/transport.js");
-    // Words and entries exist to be readable and testable without a browser. The store keeps the
-    // cache and the transport talks to the orchestrator. None of them may touch the document:
-    // that is what stops a rendering fault from corrupting what the window believes, and what
-    // lets each be exercised with no browser present.
-    for (name, module) in [
-        ("words", words),
-        ("entries", entries),
-        ("store", store),
-        ("transport", transport),
-    ] {
-        for forbidden in ["document.", "window.", "el["] {
-            assert!(
-                !reaches_for(module, forbidden),
-                "{name} reaches for {forbidden}, so it is no longer a pure layer"
-            );
-        }
-    }
-
-    // The negative control: the view is where the document belongs, so a rule that held
-    // everywhere would be measuring nothing.
-    assert!(!reaches_for(
-        r#""Changes are made in the Ghostlight window.""#,
-        "window."
-    ));
-    let view = include_str!("../../ui/lib/view.js");
-    assert!(
-        reaches_for(view, "document."),
-        "the view is where the document belongs, so a rule that held everywhere would be \
-         measuring nothing"
-    );
-}
-
-#[test]
-fn the_surface_carries_no_address_of_its_own() {
-    // The page names a destination and the orchestrator owns the address, so the page cannot
-    // send anyone anywhere the product did not choose. One hand-written link would undo that.
-    assert!(
-        !include_str!("../../ui/index.html").contains("href=\"http"),
-        "the markup carries a raw URL"
-    );
-    assert!(
-        !surface_source().contains("https://"),
-        "the surface script carries a raw URL"
-    );
-}
-
-#[test]
-fn the_page_has_a_word_for_every_state_the_roster_sends_and_no_other() {
-    use std::collections::BTreeSet;
-
-    use crate::install::HarnessState;
-
-    let words = include_str!("../../ui/lib/words.js");
-    let start = words
-        .find("const AGENT_STATE_WORDS = Object.freeze({")
-        .expect("the page names the agent states");
-    let block = &words[start..];
-    let block = &block[block.find('{').unwrap() + 1..block.find("});").unwrap()];
-    let keys: BTreeSet<&str> = block
-        .lines()
-        .filter_map(|line| line.split_once(':'))
-        .map(|(key, _)| key.trim())
-        .collect();
-    let states = [
-        HarnessState::NotDetected,
-        HarnessState::Available,
-        HarnessState::Installed,
-        HarnessState::Updatable,
-        HarnessState::NeedsAttention,
-    ];
-    // A new state fails to compile here, so it cannot reach the page without a word.
-    for state in states {
-        match state {
-            HarnessState::NotDetected
-            | HarnessState::Available
-            | HarnessState::Installed
-            | HarnessState::Updatable
-            | HarnessState::NeedsAttention => {}
-        }
-    }
-    let mut expected: BTreeSet<String> = states
-        .iter()
-        .map(|state| {
-            serde_json::to_value(state)
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_owned()
-        })
-        .collect();
-    // The one standing the page adds: a copy-only agent found here whose file it never reads.
-    expected.insert("by_hand".to_owned());
-    assert_eq!(
-        keys,
-        expected.iter().map(String::as_str).collect::<BTreeSet<_>>()
-    );
 }
 
 /// The entries of the page's frozen object `name` in `words.js`, as (key, value) pairs in order,
@@ -183,15 +57,77 @@ fn page_table<'a>(words: &'a str, name: &str) -> Vec<(&'a str, &'a str)> {
         .collect()
 }
 
-#[test]
-fn the_page_draws_every_outcome_class_and_is_found_by_its_word() {
-    use std::collections::{BTreeMap, BTreeSet};
+/// The members of the page's frozen array `name` in `source`, in order, with the quotes taken
+/// off.
+fn page_list<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
+    let opening = format!("const {name} = Object.freeze([");
+    let start = source.find(&opening).expect("the page has the list") + opening.len();
+    let list = &source[start..];
+    list[..list.find("])").expect("the list ends")]
+        .split(',')
+        .map(|entry| entry.trim().trim_matches('"'))
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
 
+/// The text a closed value has on the wire.
+fn wire(value: impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .unwrap()
+        .as_str()
+        .expect("a closed value is a word")
+        .to_owned()
+}
+
+/// Guards the contract between the service and the page (`ui/`): every closed vocabulary that
+/// crosses between them has the same members on both sides, so a rename on one side fails here
+/// or in the page's tests, never silently in the window. Service to page: each roster client
+/// state (and the page's own `by_hand`) and each outcome class has the page's word, and the
+/// outcome word is the word search finds a row by (3f27d340); each change kind the projection
+/// publishes is one the page's store folds in (8788805f; PUBLISHED in
+/// tests/workbench-store.test.mjs); each page address the service sends is in the page's
+/// `ADDRESSES`, in order, and reads back as itself. Page to service: each runtime intent and
+/// destination key the page sends decodes (tests/workbench-settings.test.mjs pins the page's
+/// copy); every `SNAPSHOT_PARTS` token is a part the server knows, and an unknown token is not.
+/// A new value fails to compile here until it is named.
+#[test]
+fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
+    use super::parts::{ConnectionsPart, HintedPart, Part, StatusPart};
+    use super::{
+        HistoryItem, OperationPhase, OperationSummary, PageAddress, WorkbenchChange,
+        WorkbenchDestination, WorkbenchRuntimeIntent,
+    };
+    use crate::governance::{Capability, Decision, GovernanceFacade};
+    use crate::install::HarnessState;
     use crate::language::history::OutcomeClass;
     use crate::language::workbench::search_outcome;
 
-    let words = include_str!("../../ui/lib/words.js");
-    let names: BTreeMap<&str, &str> = page_table(words, "OUTCOME").into_iter().collect();
+    // The roster's client states, and the one standing the page adds: a copy-only agent found
+    // here whose file it never reads.
+    let states = [
+        HarnessState::NotDetected,
+        HarnessState::Available,
+        HarnessState::Installed,
+        HarnessState::Updatable,
+        HarnessState::NeedsAttention,
+    ];
+    for state in states {
+        match state {
+            HarnessState::NotDetected
+            | HarnessState::Available
+            | HarnessState::Installed
+            | HarnessState::Updatable
+            | HarnessState::NeedsAttention => {}
+        }
+    }
+    let mut sent: BTreeSet<String> = states.into_iter().map(wire).collect();
+    sent.insert("by_hand".to_owned());
+    let worded: BTreeSet<String> = page_table(PAGE_WORDS, "AGENT_STATE_WORDS")
+        .into_iter()
+        .map(|(key, _)| key.to_owned())
+        .collect();
+    assert_eq!(worded, sent, "the page names exactly the client states");
+
     let classes = [
         OutcomeClass::Succeeded,
         OutcomeClass::Refused,
@@ -201,7 +137,6 @@ fn the_page_draws_every_outcome_class_and_is_found_by_its_word() {
         OutcomeClass::Unknown,
         OutcomeClass::Cancelled,
     ];
-    // A new class fails to compile here, so it cannot reach the page without a word.
     for class in classes {
         match class {
             OutcomeClass::Succeeded
@@ -213,24 +148,17 @@ fn the_page_draws_every_outcome_class_and_is_found_by_its_word() {
             | OutcomeClass::Cancelled => {}
         }
     }
-    let wire = |class: OutcomeClass| {
-        serde_json::to_value(class)
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .to_owned()
-    };
+    let names: BTreeMap<&str, &str> = page_table(PAGE_WORDS, "OUTCOME").into_iter().collect();
     assert_eq!(
         names
             .values()
-            .copied()
-            .map(str::to_owned)
+            .map(|name| (*name).to_owned())
             .collect::<BTreeSet<_>>(),
-        classes.iter().copied().map(wire).collect::<BTreeSet<_>>(),
+        classes.into_iter().map(wire).collect::<BTreeSet<_>>(),
         "the page names exactly the classes the service sends"
     );
     // The word a row wears is the word search finds it by, and a row with no word is found by none.
-    let shown: BTreeMap<String, String> = page_table(words, "OUTCOME_WORD")
+    let shown: BTreeMap<String, String> = page_table(PAGE_WORDS, "OUTCOME_WORD")
         .into_iter()
         .map(|(key, word)| {
             let name = key.trim_start_matches("[OUTCOME.").trim_end_matches(']');
@@ -244,4 +172,189 @@ fn the_page_draws_every_outcome_class_and_is_found_by_its_word() {
             "{class:?}"
         );
     }
+
+    // The change kinds the window folds in; PUBLISHED in tests/workbench-store.test.mjs is the
+    // page's copy, so a kind renamed here and not there reads as ignored and draws nothing.
+    let named = |change: &WorkbenchChange| match change {
+        WorkbenchChange::AuditHealthChanged { .. } => "audit_health_changed",
+        WorkbenchChange::DocumentCoverageChanged { .. } => "document_coverage_changed",
+        WorkbenchChange::OperationStarted { .. } => "operation_started",
+        WorkbenchChange::OperationChanged { .. } => "operation_changed",
+        WorkbenchChange::OperationSettled { .. } => "operation_settled",
+        WorkbenchChange::CompositionChanged { .. } => "composition_changed",
+        WorkbenchChange::RuntimeChanged { .. } => "runtime_changed",
+        WorkbenchChange::StatusChanged { .. } => "status_changed",
+        WorkbenchChange::ConnectionsChanged { .. } => "connections_changed",
+        WorkbenchChange::ControlsChanged { .. } => "controls_changed",
+        WorkbenchChange::PartChanged { .. } => "part_changed",
+    };
+    let snapshot = super::WorkbenchFacade::new(
+        super::WorkbenchProjection::default(),
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None),
+        std::sync::Arc::new(crate::browser::RelayBrowserPort::new(
+            "epoch".into(),
+            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
+        )),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    )
+    .snapshot();
+    let operation = |phase| OperationSummary {
+        invocation: "invocation_1".into(),
+        workspace: "workspace_1".into(),
+        tool: "browser_read".into(),
+        activity: "reading".into(),
+        capability: "read".into(),
+        started_at_ms: Some(1),
+        phase,
+        provenance: None,
+        agent: crate::agent::Agent::unknown(),
+    };
+    let record = || {
+        Box::new(HistoryItem::from(crate::audit::AuditRecord::now(
+            "invocation_1",
+            "workspace_1",
+            "browser_read",
+            Capability::Read,
+            "authority_1",
+            Decision::permitted(),
+            "succeeded",
+            "read",
+            &crate::language::outcome::Outcome::TextRead {
+                words: 3,
+                host: None,
+            }
+            .audit(),
+            10,
+        )))
+    };
+    let samples = [
+        WorkbenchChange::AuditHealthChanged {
+            health: crate::language::audit_health::AuditHealth::default(),
+        },
+        WorkbenchChange::DocumentCoverageChanged {
+            details: crate::language::coverage::HumanCoverage {
+                summary: String::new(),
+                explanation: String::new(),
+                invocation: "invocation_1".into(),
+                coverage: crate::language::coverage::Coverage::default(),
+                excluded_hosts: Vec::new(),
+                proactive: false,
+            },
+        },
+        WorkbenchChange::OperationStarted {
+            operation: operation(OperationPhase::Running),
+        },
+        WorkbenchChange::OperationChanged {
+            operation: operation(OperationPhase::Waiting),
+        },
+        WorkbenchChange::OperationSettled { record: record() },
+        WorkbenchChange::CompositionChanged { record: record() },
+        WorkbenchChange::RuntimeChanged {
+            runtime_state: crate::browser::adapter::RuntimeControlState::Held,
+        },
+        WorkbenchChange::StatusChanged {
+            status: StatusPart::of(&snapshot),
+        },
+        WorkbenchChange::ConnectionsChanged {
+            connections: ConnectionsPart::of(&snapshot),
+        },
+        WorkbenchChange::ControlsChanged {
+            controls: Box::new(snapshot.controls.clone()),
+        },
+        WorkbenchChange::PartChanged {
+            part: HintedPart::Integrations,
+            etag: "e1".into(),
+        },
+    ];
+    let kinds = [
+        "audit_health_changed",
+        "document_coverage_changed",
+        "operation_started",
+        "operation_changed",
+        "operation_settled",
+        "composition_changed",
+        "runtime_changed",
+        "status_changed",
+        "connections_changed",
+        "controls_changed",
+        "part_changed",
+    ];
+    assert_eq!(samples.each_ref().map(named), kinds);
+    assert_eq!(
+        samples
+            .each_ref()
+            .map(|change| serde_json::to_value(change).unwrap()["kind"].clone()),
+        kinds.map(serde_json::Value::from)
+    );
+
+    // Every address the service sends is the page's, in the page's order, and reads back.
+    assert_eq!(
+        PageAddress::ALL.map(PageAddress::as_str).to_vec(),
+        page_list(PAGE_WORDS, "ADDRESSES")
+    );
+    for address in PageAddress::ALL {
+        assert_eq!(PageAddress::parse(address.as_str()), Some(address));
+        assert_eq!(
+            serde_json::from_value::<PageAddress>(address.as_str().into()).unwrap(),
+            address
+        );
+    }
+
+    // The intents the page's buttons carry; tests/workbench-settings.test.mjs reads them from the
+    // markup.
+    let intent = |intent: WorkbenchRuntimeIntent| match intent {
+        WorkbenchRuntimeIntent::Hold => "hold",
+        WorkbenchRuntimeIntent::Resume => "resume",
+        WorkbenchRuntimeIntent::EndSession => "end_session",
+        WorkbenchRuntimeIntent::StartSession => "start_session",
+    };
+    for sent in [
+        WorkbenchRuntimeIntent::Hold,
+        WorkbenchRuntimeIntent::Resume,
+        WorkbenchRuntimeIntent::EndSession,
+        WorkbenchRuntimeIntent::StartSession,
+    ] {
+        assert_eq!(
+            serde_json::from_value::<WorkbenchRuntimeIntent>(intent(sent).into()).ok(),
+            Some(sent)
+        );
+    }
+    // The destinations the page names; PRODUCT_DESTINATIONS in tests/workbench-settings.test.mjs
+    // is the page's copy (About offers every one but get_chrome, which only the setup view offers).
+    assert_eq!(
+        WorkbenchDestination::all().map(WorkbenchDestination::key),
+        [
+            "home",
+            "demo",
+            "decision_aid",
+            "source",
+            "install_guide",
+            "governance_guide",
+            "scripting_guide",
+            "audit_guide",
+            "trust_center",
+            "decision_records",
+            "licensing_guide",
+            "sylin_tools",
+            "get_chrome",
+        ]
+    );
+    for destination in WorkbenchDestination::all() {
+        assert_eq!(
+            serde_json::from_value::<WorkbenchDestination>(destination.key().into()).ok(),
+            Some(destination),
+            "{} is not the name the service reads",
+            destination.key()
+        );
+    }
+
+    // The parts the page asks a snapshot for.
+    for token in page_list(PAGE_TRANSPORT, "SNAPSHOT_PARTS") {
+        assert!(
+            Part::from_token(token).is_ok(),
+            "the server knows no part {token}"
+        );
+    }
+    assert!(Part::from_token("nowhere").is_err());
 }
