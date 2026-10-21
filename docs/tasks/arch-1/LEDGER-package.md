@@ -112,7 +112,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | P-D3 | feat(extension): a group's title is the ghost and the agent's name, and a 2.0.0 group is retitled | - | the owner's request of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `language/provenance.rs` | landed (this commit) |
 | P-D4 | fix(extension): a text limit counts characters, as the service does | - | found while doing P-D3 (Notes); the coordinator | landed (this commit) |
 | P-D5 | fix(browser): half an emoji in page text no longer drops the browser connection | - | the coordinator's live check of P-D4's note (Notes) | landed (this commit) |
-| P-D6 | fix(extension): no frame over the relay bound leaves the extension, and an oversized answer says so | P-D5; core-service S-D8 | test-02's answer to the coordinator's question, 2026-10-21 (Notes); cross-lane into the adapter's receipt words and `language/` | todo |
+| P-D6 | fix(extension): no frame over the relay bound leaves the extension, and an oversized answer says so | P-D5; core-service S-D8 | test-02's answer to the coordinator's question, 2026-10-21 (Notes); cross-lane into the adapter's receipt words and `language/` | landed (this commit) |
 | B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | todo |
 
 ### Notes (second sweep)
@@ -370,3 +370,22 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   event, a hello) is dropped, not sent. Later, not in 2.0.1: the service plans a read, an inspect
   or a find across documents by its worst-case size and splits it over several `call` primitives,
   so a normal page never reaches the refusal.
+- P-D6 landed: `protocol.js` owns `fitted(frame)`, which the worker's `send` runs after
+  `wellFormed`. It measures the frame's JSON in UTF-8 only when its UTF-16 length could exceed
+  the bound (three bytes a code unit at most), against the vocabulary's new `relay_frame_bytes`,
+  which `golden.rs` pins to `tests/golden/relay4/vocabulary.json`'s `frame.max_bytes`, the bound
+  the browser relay reads. The vocabulary changes additively, as the 2.0.0 rule allows:
+  `answer_too_large` joins `receipt_failures`, and `relay_frame_bytes` is a new key, since `limits`
+  is pinned whole. The service maps the word to `PrimitiveCause::AnswerTooLarge`, so the agent gets
+  the refusal `answer_too_large` ("The page's answer was too large for the browser to send back in
+  one message.") with one next step, "Ask for less: lower max_chars, max_items or max_results, or
+  read one target."; after dispatch the link settles it as an unknown effect, like any failure
+  after an effect. The audit keeps `browser_primitive_failed`, as for the other causes. The new
+  fixture `receipts/call.answer_too_large.json` is the contract: the service's receipt pin decodes
+  it, and the extension's frame test builds it from an oversized answer. No test was added:
+  the proofs are rows of the link's receipt table, the outcome's cause table, the golden's closed
+  names and constants, and the extension's existing well-formed frame test, now "every frame leaves
+  well formed and within one relay frame". `TextEncoder` is made only when a frame needs counting,
+  so a context without it still loads `protocol.js`. No catalog or result golden names the
+  refusal. The freeze record is regenerated (a test-02 package line); the store resubmission stays
+  the owner's call.

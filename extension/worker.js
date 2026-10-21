@@ -110,8 +110,10 @@ const controlled = new Map();
 
 function send(frame) {
   if (!nativePort) return false;
+  const fitted = protocol.fitted(shared.wellFormed(frame));
+  if (!fitted) return false;
   try {
-    nativePort.postMessage(shared.wellFormed(frame));
+    nativePort.postMessage(fitted);
     return true;
   } catch (_error) {
     return false;

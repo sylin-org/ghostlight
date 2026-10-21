@@ -30,7 +30,7 @@
     primitives: ["list_tabs", "open_tab", "navigate", "focus_tab", "close_tab", "set_zoom", "resize_window", "frames", "call",
       "evaluate_main", "view", "input", "capture", "dialog", "diagnostics", "recording", "accessibility_snapshot"],
     receipt_failures: ["unsupported", "invalid_request", "tab_missing", "debugger_unavailable", "document_changed", "dialog_open",
-      "timeout", "cancelled", "local_interlock", "capture_too_large", "browser_refused", "session_lost", "no_history_entry", "other"],
+      "timeout", "cancelled", "local_interlock", "capture_too_large", "browser_refused", "session_lost", "no_history_entry", "answer_too_large", "other"],
     call_failures: ["document_changed", "frame_missing", "owner_missing", "dialog_open", "timeout", "cancelled", "session_lost",
       "page_exception", "unserializable", "other"],
     call_answers: ["returned", "failed", "skipped"],
@@ -59,6 +59,7 @@
     legacy_group_title_prefixes: ["Ghostlight - "],
     group_title_chars: 120,
     chunk_limits: { chunk_payload_bytes: 524288, transfer_max_bytes: 8388608, transfer_max_chunks: 64 },
+    relay_frame_bytes: 8388608,
     clear_diagnostics_tabs: 256,
     limits: {
       direct_frame_bytes: 786432,
@@ -90,6 +91,7 @@
   }
 
   const RECEIPT_FAILURE = named(vocabulary.receipt_failures);
+  const FRAME = named(Object.values(vocabulary.frame_kinds).flat());
   const DIALOG_OPEN_MESSAGE = "A JavaScript dialog blocks the page.";
 
   /**
@@ -127,6 +129,33 @@
     return failure(RECEIPT_FAILURE.DIALOG_OPEN, DIALOG_OPEN_MESSAGE);
   }
 
+  const ANSWER_TOO_LARGE_MESSAGE = "The answer is larger than one message to the service can carry.";
+
+  /**
+   * The frame as it may cross to the service. The browser relay reads at most
+   * `relay_frame_bytes` of UTF-8 JSON per frame and ends the connection, every session's, on a
+   * longer one. A frame that fits goes as it is; a receipt that does not becomes its request's
+   * `answer_too_large` failure, keeping what the service needs to settle it; any other frame that
+   * does not fit is dropped, and `null` says so.
+   */
+  function fitted(frame) {
+    const text = JSON.stringify(frame);
+    // A UTF-16 code unit is at most three bytes of UTF-8, so a short text needs no count.
+    if (text.length * 3 <= vocabulary.relay_frame_bytes) return frame;
+    if (new TextEncoder().encode(text).length <= vocabulary.relay_frame_bytes) return frame;
+    if (frame?.kind !== FRAME.RECEIPT) return null;
+    const fit = {
+      kind: FRAME.RECEIPT,
+      correlation: frame.correlation,
+      failure: RECEIPT_FAILURE.ANSWER_TOO_LARGE,
+      message: ANSWER_TOO_LARGE_MESSAGE,
+      dispatched: frame.dispatched === true,
+      committed_urls: Array.isArray(frame.committed_urls) ? frame.committed_urls : []
+    };
+    if (frame.tab !== undefined) fit.tab = frame.tab;
+    return fit;
+  }
+
   return Object.freeze({
     vocabulary,
     isKnown,
@@ -135,7 +164,7 @@
     groupAgentName,
     legacyGroupTitles,
     DIALOG_OPEN_MESSAGE,
-    FRAME: named(Object.values(vocabulary.frame_kinds).flat()),
+    FRAME,
     EVENT: named(vocabulary.events),
     RECEIPT_FAILURE,
     CALL_FAILURE: named(vocabulary.call_failures),
@@ -145,6 +174,8 @@
     CHUNK_PAYLOAD_BYTES: vocabulary.chunk_limits.chunk_payload_bytes,
     TRANSFER_MAX_BYTES: vocabulary.chunk_limits.transfer_max_bytes,
     TRANSFER_MAX_CHUNKS: vocabulary.chunk_limits.transfer_max_chunks,
+    RELAY_FRAME_BYTES: vocabulary.relay_frame_bytes,
+    fitted,
     PROTOCOL: vocabulary.protocol,
     WORLD_NAME: vocabulary.world_name,
     NATIVE_HOST_NAME: vocabulary.native_host_name,

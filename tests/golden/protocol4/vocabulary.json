@@ -41,6 +41,7 @@
     "browser_refused",
     "session_lost",
     "no_history_entry",
+    "answer_too_large",
     "other"
   ],
   "call_failures": [
@@ -80,6 +81,7 @@
   "legacy_group_title_prefixes": ["Ghostlight - "],
   "group_title_chars": 120,
   "chunk_limits": {"chunk_payload_bytes": 524288, "transfer_max_bytes": 8388608, "transfer_max_chunks": 64},
+  "relay_frame_bytes": 8388608,
   "clear_diagnostics_tabs": 256,
   "world_message_kinds": [
     "read_text",

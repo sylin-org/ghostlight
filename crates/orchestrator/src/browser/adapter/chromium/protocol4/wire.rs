@@ -1471,6 +1471,10 @@ pub enum Failure {
     /// Back or forward found no entry that way in the tab's history. Always `dispatched:false`.
     /// A service older than 2.0.1 reads it as `Other`.
     NoHistoryEntry,
+    /// The answer was larger than one relay frame, so the extension sent this failure in its place,
+    /// keeping `dispatched`, the committed URLs and the tab. A service older than 2.0.1 reads it as
+    /// `Other`.
+    AnswerTooLarge,
     /// Anything else, described by the receipt's message.
     #[serde(other)]
     Other,

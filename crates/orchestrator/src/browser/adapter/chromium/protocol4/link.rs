@@ -751,6 +751,10 @@ impl<'a> Link<'a> {
                 cause: PrimitiveCause::SessionLost,
             },
             wire::Failure::CaptureTooLarge => BrowserError::CaptureTooLarge { detail: message },
+            wire::Failure::AnswerTooLarge => BrowserError::Primitive {
+                detail: message,
+                cause: PrimitiveCause::AnswerTooLarge,
+            },
             wire::Failure::BrowserRefused | wire::Failure::Other => {
                 BrowserError::primitive(message)
             }

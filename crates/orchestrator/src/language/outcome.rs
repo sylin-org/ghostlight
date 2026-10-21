@@ -1597,6 +1597,8 @@ pub enum PrimitiveCause {
     DebuggerUnavailable,
     /// The browser ended Ghostlight's control of the tab before the job ran.
     SessionLost,
+    /// The page's answer was larger than one message from the browser can carry.
+    AnswerTooLarge,
 }
 
 impl PrimitiveCause {
@@ -1607,6 +1609,7 @@ impl PrimitiveCause {
             Self::Refused => "browser_primitive_failed",
             Self::DebuggerUnavailable => "debugger_unavailable",
             Self::SessionLost => "session_lost",
+            Self::AnswerTooLarge => "answer_too_large",
         }
     }
 }
@@ -1954,6 +1957,10 @@ impl Refusal {
                 cause: PrimitiveCause::SessionLost,
                 ..
             } => "The browser ended Ghostlight's control of this tab before the job ran.",
+            Self::BrowserPrimitive {
+                cause: PrimitiveCause::AnswerTooLarge,
+                ..
+            } => "The page's answer was too large for the browser to send back in one message.",
             Self::PageRefused { refusal, gesture } => {
                 return page_refusal::summary(*refusal, *gesture);
             }
@@ -2144,6 +2151,13 @@ impl Refusal {
                 cause: PrimitiveCause::SessionLost,
                 ..
             } => vec!["Repeat the call; Ghostlight takes control of the tab again.".into()],
+            Self::BrowserPrimitive {
+                cause: PrimitiveCause::AnswerTooLarge,
+                ..
+            } => vec![
+                "Ask for less: lower max_chars, max_items or max_results, or read one target."
+                    .into(),
+            ],
             Self::PageRefused { refusal, .. } => page_refusal::next_steps(*refusal),
             Self::FieldValuesRejected { fields, .. } => field_problem::rejected_next_steps(fields),
             Self::FieldsReverted { reverted, .. } => field_problem::rejected_next_steps(reverted),
@@ -3653,6 +3667,7 @@ mod tests {
             (PrimitiveCause::Refused, "browser_primitive_failed"),
             (PrimitiveCause::DebuggerUnavailable, "debugger_unavailable"),
             (PrimitiveCause::SessionLost, "session_lost"),
+            (PrimitiveCause::AnswerTooLarge, "answer_too_large"),
         ] {
             all.push((
                 Refusal::BrowserPrimitive {

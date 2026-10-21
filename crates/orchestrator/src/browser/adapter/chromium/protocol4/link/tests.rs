@@ -427,6 +427,14 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
             },
         ),
         (
+            wire::Failure::AnswerTooLarge,
+            Some("The answer is larger than one message to the service can carry."),
+            BrowserError::Primitive {
+                detail: "The answer is larger than one message to the service can carry.".into(),
+                cause: PrimitiveCause::AnswerTooLarge,
+            },
+        ),
+        (
             wire::Failure::BrowserRefused,
             Some("Zoom level is out of range."),
             BrowserError::primitive("Zoom level is out of range."),

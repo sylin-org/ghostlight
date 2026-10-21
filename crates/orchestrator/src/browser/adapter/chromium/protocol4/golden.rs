@@ -63,6 +63,9 @@ const EXTENSION: &str = "../../extension";
 const RECORDING_JS: &str = "lib/recording.js";
 /// What precedes each stop-reason literal in `recording.js`.
 const STOP_REASON_LITERALS: [&str; 3] = ["freeze(state, \"", "reason === \"", "reason = \""];
+/// The browser relay's vocabulary, from the protocol 4 fixture directory: it states the largest
+/// frame the relay reads.
+const RELAY_VOCABULARY: &str = "../relay4/vocabulary.json";
 /// The receipt fixture of a dialog status with no dialog open, which names the unknown type.
 const NO_DIALOG_RECEIPT: &str = "receipts/dialog.ok_absent.json";
 /// The file name suffix of every fixture.
@@ -457,7 +460,7 @@ fn closed_names_equal_the_vocabulary() {
         set(
             names!(Failure: Unsupported, InvalidRequest, TabMissing, DebuggerUnavailable,
             DocumentChanged, DialogOpen, Timeout, Cancelled, LocalInterlock, CaptureTooLarge,
-            BrowserRefused, SessionLost, NoHistoryEntry, Other),
+            BrowserRefused, SessionLost, NoHistoryEntry, AnswerTooLarge, Other),
         ),
     );
     check(
@@ -570,6 +573,11 @@ fn the_constants_and_limits_equal_the_vocabulary() {
         crate::language::provenance::GROUP_TITLE_PREFIX
     );
     assert_eq!(limits["direct_frame_bytes"], wire::DIRECT_FRAME_BYTES);
+    assert_eq!(
+        vocabulary["relay_frame_bytes"],
+        read(RELAY_VOCABULARY)["frame"]["max_bytes"],
+        "the extension bounds each frame by what the browser relay reads"
+    );
     assert_eq!(limits["max_world_calls"], wire::MAX_WORLD_CALLS);
     assert_eq!(limits["max_input_steps"], wire::MAX_INPUT_STEPS);
     assert_eq!(limits["max_unseen"], wire::MAX_UNSEEN);

@@ -1,0 +1,8 @@
+{
+  "kind": "receipt",
+  "correlation": "p4_0041",
+  "failure": "answer_too_large",
+  "message": "The answer is larger than one message to the service can carry.",
+  "dispatched": false,
+  "committed_urls": []
+}

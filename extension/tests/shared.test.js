@@ -7,6 +7,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const shared = require("../lib/shared.js");
 const protocol = require("../lib/protocol.js");
+const { golden } = require("./p4-chrome.js");
 const state = require("../lib/state.js");
 const presentationQueue = require("../lib/presentation-queue.js");
 
@@ -172,7 +173,9 @@ test("bounded text never ends on the first half of an emoji", () => {
   assert.equal(shared.bounded(`ab${emoji}c`, 4), `ab${emoji}`);
 });
 
-test("every string of a frame leaves well formed, and a frame that needs nothing is the same object", () => {
+// What leaves the worker: every string well formed (P-D5), and the frame within one relay frame
+// (P-D6), since the browser relay ends every session's connection on a longer one.
+test("every frame leaves well formed and within one relay frame, and one that needs nothing is the same object", () => {
   const high = String.fromCharCode(0xd83d);
   const low = String.fromCharCode(0xde00);
   const replacement = String.fromCharCode(0xfffd);
@@ -185,4 +188,20 @@ test("every string of a frame leaves well formed, and a frame that needs nothing
   assert.equal(frame.ok.tabs[0].title, `a${high}`, "the frame itself is left as it was");
   const clean = { kind: "event", event: { title: emoji, list: [1, "two", null, true] } };
   assert.equal(shared.wellFormed(clean), clean);
+
+  const bound = protocol.RELAY_FRAME_BYTES;
+  assert.equal(protocol.fitted(clean), clean);
+  const wide = { kind: "receipt", correlation: "p4_wide", ok: { text: "a".repeat(bound / 2) }, dispatched: false, committed_urls: [] };
+  assert.equal(protocol.fitted(wide), wide, "a long ASCII answer that fits is counted, not cut");
+  const cjk = String.fromCharCode(0x4e2d).repeat(Math.ceil(bound / 3) + 1);
+  const oversized = { kind: "receipt", correlation: "p4_0041", ok: { text: cjk }, dispatched: false, committed_urls: [] };
+  assert.deepEqual(protocol.fitted(oversized), golden("receipts/call.answer_too_large"));
+  const acted = { ...oversized, dispatched: true, committed_urls: ["https://example.com/"], tab: { tab_id: 12 } };
+  assert.deepEqual(protocol.fitted(acted), {
+    ...golden("receipts/call.answer_too_large"),
+    dispatched: true,
+    committed_urls: ["https://example.com/"],
+    tab: { tab_id: 12 }
+  }, "the answer goes, what the service needs to settle the effect stays");
+  assert.equal(protocol.fitted({ kind: "event", event: { title: cjk } }), null, "any other frame too large is dropped");
 });
