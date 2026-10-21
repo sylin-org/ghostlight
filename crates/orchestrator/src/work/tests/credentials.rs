@@ -72,7 +72,9 @@ fn typed_anything(browser: &FakeBrowser) -> bool {
 ///
 /// Without `user_authorized_credentials`, a fill by target, a grouped fill whose later field is a
 /// credential, and focused typing send nothing, say nothing was typed, name the acknowledgement
-/// as the way forward, and keep the field's name and the value out of the audit. With it, the
+/// as the way forward, and keep the field's name and the value out of the audit; a fill by
+/// selector is checked the same way. An upload is not typed text and needs no acknowledgement,
+/// even on a credential-like input. With it, the
 /// value reaches the browser for fill, targeted and focused typing, directly and in a flow, and
 /// stays out of the audit and the result; the next call without it is refused again. Guidance
 /// in a flow under `continue` holds no later step, and the acknowledgement never lifts a policy
@@ -117,6 +119,71 @@ fn credential_input_needs_the_users_word_on_each_call() {
         assert!(!recorded.contains("Password"));
         assert!(!recorded.contains("PRIVATE_CREDENTIAL"));
     }
+
+    // A fill by selector looks the control up and checks it, and still types nothing.
+    let (executor, browser, _, workspace, audit) = fixture();
+    inspected(&executor, &browser, &workspace, vec![]);
+    browser.push(Ok(BrowserOutcome::targets(7, vec![credential()])));
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
+        tab_id: 7,
+        targets: vec![credential()],
+    }));
+    let result = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({"fields":[{
+            "selector":{"name":"Password","role":"textbox","exact":true},
+            "value":"PRIVATE_CREDENTIAL"
+        }]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Blocked, "{result:?}");
+    assert_eq!(result.facts["values_sent"], false);
+    assert!(!typed_anything(&browser));
+    assert!(!serde_json::to_string(&*audit.0.lock().unwrap())
+        .unwrap()
+        .contains("PRIVATE_CREDENTIAL"));
+
+    // A file is not typed text: an upload to a credential-like input needs no acknowledgement,
+    // and the file's name and bytes stay out of the audit.
+    let (executor, browser, _, workspace, audit) = fixture();
+    inspected(&executor, &browser, &workspace, vec![]);
+    let input = ObservedTarget {
+        locator: "attachment".into(),
+        role: "button".into(),
+        name: "Attachment".into(),
+        credential_class: true,
+        ..Default::default()
+    };
+    browser.push(Ok(BrowserOutcome::targets(7, vec![input.clone()])));
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
+        tab_id: 7,
+        targets: vec![input],
+    }));
+    browser.push(Ok(BrowserOutcome::FilesUploaded {
+        tab_id: 7,
+        uploaded_count: 1,
+        uploaded_bytes: 1,
+        subject: None,
+    }));
+    let result = executor.execute(
+        &workspace,
+        "browser_upload",
+        json!({
+            "selector":{"name":"Attachment","role":"button","exact":true},
+            "files":[{"name":"PRIVATE_FILE.txt","data_base64":"eA=="}]
+        }),
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{result:?}");
+    assert!(browser
+        .calls()
+        .iter()
+        .any(|command| matches!(command, BrowserCommand::UploadFiles { locator, .. } if locator == "attachment")));
+    let saved = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    assert!(!saved.contains("PRIVATE_FILE") && !saved.contains("eA=="));
 
     // With it, the value reaches the browser and nowhere else, once.
     for mode in ["fill", "target", "focused"] {

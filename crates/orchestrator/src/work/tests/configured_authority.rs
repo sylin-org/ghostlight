@@ -1,419 +1,56 @@
-//! Configured authority preserves form, upload, and typing boundaries.
+//! Configured authority: one explanation per frame, and a typed effect kept under a landing that
+//! denies its check.
 
 use super::*;
-use crate::browser::adapter::{PhysicalFill, PhysicalSemantic};
 use crate::work::InvocationContext;
 use std::time::Instant;
 
+/// `policy_explain` reports the authority its frame enforces, even when the policy changes between
+/// the frame's start and the explanation, so the explanation and the frame's audit line, which
+/// records the snapshot's id, name one authority (ADR-0203 Decision 7.5).
 #[test]
-fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit_authority() {
-    for composed in [false, true] {
-        for (case, credential, submit, restrictions, expected) in [
-            (
-                "ordinary draft",
-                false,
-                false,
-                json!(["read", "write"]),
-                Status::Succeeded,
-            ),
-            (
-                "credential",
-                true,
-                false,
-                json!(["read", "write"]),
-                Status::Blocked,
-            ),
-            (
-                "missing read",
-                false,
-                false,
-                json!(["write"]),
-                Status::Blocked,
-            ),
-            (
-                "missing write",
-                false,
-                false,
-                json!(["read"]),
-                Status::Blocked,
-            ),
-            (
-                "explicit submit",
-                false,
-                true,
-                json!(["read", "action", "write"]),
-                Status::Succeeded,
-            ),
-            (
-                "missing submit action",
-                false,
-                true,
-                json!(["read", "write"]),
-                Status::Blocked,
-            ),
-        ] {
-            let policy = TestPolicy::new();
-            let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
-            browser.push(Ok(BrowserOutcome::TabOpened {
-                tab: tab(7, "https://example.com/"),
-                committed_urls: vec!["https://example.com/".into()],
-            }));
-            let opened = executor.execute(
-                &workspace,
-                "browser_navigate",
-                json!({"url":"https://example.com/"}),
-                &CancellationToken::default(),
-            );
-            assert_eq!(opened.status, Status::Succeeded);
-            let field = ObservedTarget {
-                locator: "standalone-editor".into(),
-                role: "textbox".into(),
-                name: "Visible draft".into(),
-                state: vec![],
-                credential_class: credential,
-                ..Default::default()
-            };
-            let button = ObservedTarget {
-                locator: "explicit-submit".into(),
-                role: "button".into(),
-                name: "Submit".into(),
-                state: vec![],
-                credential_class: false,
-                ..Default::default()
-            };
-            let mut arguments = json!({"tab":opened.facts["tab"],"fields":[{
-                "selector":{"name":"Visible draft","role":"textbox","exact":true},
-                "value":"PRIVATE_DRAFT"
-            }]});
-            if submit {
-                browser.push(Ok(BrowserOutcome::targets(7, vec![button.clone()])));
-                let inspected = executor.execute(
-                    &workspace,
-                    "browser_inspect",
-                    json!({}),
-                    &CancellationToken::default(),
-                );
-                assert_eq!(inspected.status, Status::Succeeded);
-                arguments["submit_target"] = inspected.facts["items"][0]["target"].clone();
-            }
-            let before = browser.calls().len();
-            browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
-            if expected != Status::Blocked || credential {
-                browser.push(Ok(BrowserOutcome::TargetsDescribed {
-                    rebound: false,
-                    tab_id: 7,
-                    targets: if submit {
-                        vec![field, button]
-                    } else {
-                        vec![field]
-                    },
-                }));
-                if !credential {
-                    browser.push(Ok(BrowserOutcome::Filled {
-                        rebound: false,
-                        tab: tab(7, "https://example.com/"),
-                        filled_count: 1,
-                        held: Vec::new(),
-                        submitted: submit,
-                        committed_urls: vec![],
-                    }));
-                }
-            }
-            let invocation = if composed {
-                json!({"steps":[{"id":"draft","tool":"browser_fill_form","arguments":arguments}]})
-            } else {
-                arguments
-            };
-            policy.set(restrictions);
-            let result = executor.execute(
-                &workspace,
-                if composed {
-                    "browser_flow"
-                } else {
-                    "browser_fill_form"
-                },
-                invocation,
-                &CancellationToken::default(),
-            );
-            let label = format!("{case}, composed={composed}");
-            assert_eq!(result.status, expected, "{label}: {result:?}");
-            let commands = browser.calls();
-            let requested = &commands[before..];
-            if expected == Status::Blocked && !credential {
-                assert_eq!(result.effect, Effect::None, "{label}");
-                assert!(
-                    requested.is_empty(),
-                    "{label}: insufficient authority never queries or fills a control"
-                );
-            } else {
-                assert!(
-                    matches!(requested.first(), Some(BrowserCommand::QuerySemantic(PhysicalSemantic {
-                    tab_id: 7, name, role: Some(role), exact: true, form_scope: false, ..
-                })) if name == "Visible draft" && role == "textbox"),
-                    "{label}: ordinary labeled controls need no form ancestor: {requested:?}"
-                );
-                assert!(
-                    matches!(requested.get(1), Some(BrowserCommand::DescribeTargets { locators, .. })
-                    if locators == &if submit { vec!["standalone-editor".to_string(), "explicit-submit".to_string()] } else { vec!["standalone-editor".to_string()] }),
-                    "{label}: final credential preflight still checks every intended control"
-                );
-                if credential {
-                    assert_eq!(result.effect, Effect::None);
-                    assert_eq!(
-                        requested.len(),
-                        2,
-                        "credential handoff sends no value or submission"
-                    );
-                    assert_eq!(
-                        executor.governance.runtime_state(),
-                        crate::browser::adapter::RuntimeControlState::Active
-                    );
-                } else {
-                    assert_eq!(
-                        requested.len(),
-                        3,
-                        "{label}: one lookup, preflight, and fill"
-                    );
-                    assert!(
-                        matches!(requested.last(), Some(BrowserCommand::Fill(PhysicalFill { fields, submit_locator, .. }))
-                        if fields.len() == 1 && fields[0].locator == "standalone-editor" && fields[0].value == crate::browser::adapter::PhysicalValue::from("PRIVATE_DRAFT")
-                            && submit_locator.as_deref() == if submit { Some("explicit-submit") } else { None }),
-                        "{label}: only an explicit submit target permits submission"
-                    );
-                    let facts = if composed {
-                        &result.facts["steps"][0]["result"]["facts"]
-                    } else {
-                        &result.facts
-                    };
-                    assert_eq!(facts["filled_count"], 1);
-                    assert_eq!(facts["submitted"], submit);
-                }
-            }
-            assert!(
-                !serde_json::to_string(&*audit.0.lock().unwrap())
-                    .unwrap()
-                    .contains("PRIVATE_DRAFT"),
-                "{label}: draft text never enters durable audit"
-            );
-        }
-    }
+fn policy_explain_and_its_audit_line_name_one_authority() {
+    let policy = TestPolicy::new();
+    let (executor, _, _, workspace, _) = fixture_with_governance(policy.facade());
+    let publication = executor.governance.published();
+    let enforced = publication.authority().clone();
+    assert_eq!(enforced.id, publication.snapshot().id());
+    policy.set(json!(["read"]));
+    let newer = executor.governance.published();
+    assert_ne!(newer.authority().id, enforced.id, "the edit was published");
+    assert_ne!(newer.authority().capabilities, enforced.capabilities);
+
+    let cancellation = CancellationToken::default();
+    let context = InvocationContext {
+        settlement_pending: &std::sync::atomic::AtomicBool::new(false),
+        settlement_requested: false,
+        provenance: &crate::provenance::ConnectionEvidence::claimed("test", IntakeChannel::Mcp),
+        invocation: &crate::work::InvocationId::mint(),
+        workspace: &workspace,
+        requested_browser: None,
+        requested_tab: None,
+        requested_target: None,
+        repeat_tool: None,
+        gesture: crate::language::page_refusal::PageGesture::Other,
+        snapshot: publication.snapshot(),
+        publication: &publication,
+        requirements: crate::governance::CapabilitySet::EMPTY,
+        deadline: Instant::now() + Duration::from_secs(1),
+        deadline_adjustable: false,
+        cancellation: &cancellation,
+        findings: &crate::work::findings::FrameFindings::default(),
+    };
+    let explained = executor.explain_policy(&context);
+    assert_eq!(explained.result.status, Status::Succeeded);
+    assert_eq!(
+        explained.result.facts["capabilities"],
+        json!(enforced.capabilities)
+    );
+    assert_eq!(context.snapshot.id(), enforced.id);
 }
 
-#[test]
-fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
-    for composed in [false, true] {
-        for credential in [false, true] {
-            let policy = TestPolicy::new();
-            let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
-            browser.push(Ok(BrowserOutcome::TabOpened {
-                tab: tab(7, "https://example.com/"),
-                committed_urls: vec!["https://example.com/".into()],
-            }));
-            let opened = executor.execute(
-                &workspace,
-                "browser_navigate",
-                json!({"url":"https://example.com/"}),
-                &CancellationToken::default(),
-            );
-            assert_eq!(opened.status, Status::Succeeded);
-            let input = ObservedTarget {
-                locator: "standalone-file".into(),
-                role: "button".into(),
-                name: "Attachment".into(),
-                state: vec![],
-                credential_class: credential,
-                ..Default::default()
-            };
-            browser.push(Ok(BrowserOutcome::targets(7, vec![input.clone()])));
-            browser.push(Ok(BrowserOutcome::TargetsDescribed {
-                rebound: false,
-                tab_id: 7,
-                targets: vec![input],
-            }));
-            browser.push(Ok(BrowserOutcome::FilesUploaded {
-                tab_id: 7,
-                uploaded_count: 1,
-                uploaded_bytes: 1,
-                subject: None,
-            }));
-            let before = browser.calls().len();
-            let arguments = json!({
-                "tab":opened.facts["tab"],
-                "selector":{"name":"Attachment","role":"button","exact":true},
-                "files":[{"name":"PRIVATE_FILE.txt","data_base64":"eA=="}]
-            });
-            let invocation = if composed {
-                json!({"steps":[{"id":"attach","tool":"browser_upload","arguments":arguments}]})
-            } else {
-                arguments
-            };
-
-            let result = executor.execute(
-                &workspace,
-                if composed {
-                    "browser_flow"
-                } else {
-                    "browser_upload"
-                },
-                invocation,
-                &CancellationToken::default(),
-            );
-            assert_eq!(
-                result.status,
-                Status::Succeeded,
-                "composed={composed}, credential={credential}: {result:?}"
-            );
-            let commands = browser.calls();
-            let requested = &commands[before..];
-            assert!(
-                matches!(requested.first(), Some(BrowserCommand::QuerySemantic(PhysicalSemantic {
-                tab_id: 7, name, role: Some(role), exact: true, form_scope: false, ..
-            })) if name == "Attachment" && role == "button"),
-                "standalone file inputs need no form ancestor: {requested:?}"
-            );
-            assert!(
-                matches!(requested.get(1), Some(BrowserCommand::DescribeTargets { tab_id: 7, locators }) if locators == &["standalone-file"])
-            );
-            {
-                assert_eq!(requested.len(), 3);
-                assert!(
-                    matches!(requested.last(), Some(BrowserCommand::UploadFiles { tab_id: 7, locator, files }) if locator == "standalone-file" && files.len() == 1 && files[0].name == "PRIVATE_FILE.txt" && files[0].data == "eA==" && files[0].size == 1)
-                );
-                let facts = if composed {
-                    &result.facts["steps"][0]["result"]["facts"]
-                } else {
-                    &result.facts
-                };
-                assert_eq!(facts["uploaded_count"], 1);
-                assert_eq!(facts["uploaded_bytes"], 1);
-            }
-            let saved = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
-            assert!(!saved.contains("PRIVATE_FILE") && !saved.contains("eA=="));
-        }
-    }
-}
-
-#[test]
-fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() {
-    for location in ["target", "focused", "selector"] {
-        for (request, destination_action) in [("action", true), ("read", true), ("action", false)] {
-            let policy = temporary_policy("typing-action-landing");
-            fs::write(&policy, serde_json::to_vec(&json!({
-                "schema":4,"name":"typing without write","version":"1","grants":[
-                    {"id":"source","hosts":{"allow":["example.com"]},"allowed":["read","action"]},
-                    {"id":"landing","hosts":{"allow":["landing.example"]},"allowed":[if destination_action {"action"} else {"read"}]}
-                ]
-            })).unwrap()).unwrap();
-            let governance = GovernanceFacade::new(Some(policy.to_path_buf()));
-            let (executor, browser, _, workspace, audit) =
-                fixture_with_governance(governance.clone());
-            browser.push(Ok(BrowserOutcome::TabOpened {
-                tab: tab(7, "https://example.com/"),
-                committed_urls: vec!["https://example.com/".into()],
-            }));
-            let opened = executor.execute(
-                &workspace,
-                "browser_navigate",
-                json!({"url":"https://example.com/"}),
-                &CancellationToken::default(),
-            );
-            let handle = &opened.facts["tab"];
-            let field = ObservedTarget {
-                locator: "draft".into(),
-                role: "textbox".into(),
-                name: "Draft".into(),
-                state: vec![],
-                credential_class: false,
-                ..Default::default()
-            };
-            let mut input = json!({"tab":handle,"text":"PRIVATE_DRAFT"});
-            if location == "focused" {
-                input["focused"] = json!(true);
-            } else if location == "selector" {
-                input["selector"] = json!({"name":"Draft","role":"textbox","exact":true});
-            } else {
-                browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
-                let inspected = executor.execute(
-                    &workspace,
-                    "browser_inspect",
-                    json!({"tab":handle}),
-                    &CancellationToken::default(),
-                );
-                input["target"] = inspected.facts["items"][0]["target"].clone();
-            }
-            let before = browser.calls().len();
-            if request == "action" {
-                if location == "selector" {
-                    browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
-                }
-                browser.push(Ok(BrowserOutcome::TargetsDescribed {
-                    rebound: false,
-                    tab_id: 7,
-                    targets: vec![field],
-                }));
-                browser.push(Ok(BrowserOutcome::Typed {
-                    tab: tab(7, "https://landing.example/"),
-                    character_count: 13,
-                    subject: None,
-                    committed_urls: vec!["https://landing.example/".into()],
-                }));
-            }
-            if request != "action" {
-                let mut document: serde_json::Value =
-                    serde_json::from_slice(&fs::read(&policy).unwrap()).unwrap();
-                document["grants"][0]["allowed"] = json!(["read"]);
-                fs::write(&policy, serde_json::to_vec(&document).unwrap()).unwrap();
-                governance.refresh_tick();
-            }
-            let result = executor.execute(
-                &workspace,
-                "browser_type_text",
-                input,
-                &CancellationToken::default(),
-            );
-            if request != "action" {
-                assert_eq!(result.status, Status::Blocked);
-                assert_eq!(result.effect, Effect::None);
-                assert_eq!(browser.calls().len(), before);
-                assert_eq!(result.facts["policy_rule"], "capability");
-            } else {
-                assert_eq!(result.effect, Effect::Applied);
-                assert!(!result.repeat_safe);
-                assert_eq!(
-                    result.status,
-                    if destination_action {
-                        Status::Succeeded
-                    } else {
-                        Status::Blocked
-                    },
-                    "{result:?}"
-                );
-                assert_eq!(
-                    browser.calls().len(),
-                    before + if location == "selector" { 3 } else { 2 }
-                );
-                if !destination_action {
-                    assert_eq!(result.facts["held"], true);
-                } else {
-                    assert!(result.facts.get("held").is_none());
-                }
-                let records = audit.0.lock().unwrap();
-                let checks = &records.last().unwrap().permissions.checks;
-                if location != "selector" {
-                    assert!(checks.iter().all(
-                        |check| check.requirements == crate::governance::CapabilitySet::ACTION
-                    ));
-                }
-                assert_eq!(
-                    checks.last().unwrap().requirements,
-                    crate::governance::CapabilitySet::ACTION
-                );
-                assert_eq!(checks.last().unwrap().allowed, destination_action);
-            }
-        }
-    }
-}
-
+/// b9c2da60: typing that landed stays applied when the landing denies the check that would
+/// follow it, and the tab is not held for it. Folds into `tests/tabs.rs` when that file is cut.
 #[test]
 fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_holding_it() {
     for location in ["target", "focused", "selector"] {
@@ -562,154 +199,4 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
             );
         }
     }
-}
-
-#[test]
-fn an_unsent_form_needs_read_and_write_under_configured_policy() {
-    for restriction in [json!(["read"]), json!(["write"]), json!(["read", "write"])] {
-        let policy = TestPolicy::new();
-        let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
-        browser.push(Ok(BrowserOutcome::TabOpened {
-            tab: tab(7, "https://example.com/"),
-            committed_urls: vec!["https://example.com/".into()],
-        }));
-        let opened = executor.execute(
-            &workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com/"}),
-            &CancellationToken::default(),
-        );
-        let handle = &opened.facts["tab"];
-        let field = ObservedTarget {
-            locator: "draft".into(),
-            role: "textbox".into(),
-            name: "Draft".into(),
-            state: vec![],
-            credential_class: false,
-            ..Default::default()
-        };
-        browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
-        let inspected = executor.execute(
-            &workspace,
-            "browser_inspect",
-            json!({"tab":handle}),
-            &CancellationToken::default(),
-        );
-        let target = &inspected.facts["items"][0]["target"];
-        let permitted = restriction.as_array().unwrap().len() == 2;
-        if permitted {
-            browser.push(Ok(BrowserOutcome::TargetsDescribed {
-                rebound: false,
-                tab_id: 7,
-                targets: vec![field],
-            }));
-            browser.push(Ok(BrowserOutcome::Filled {
-                rebound: false,
-                tab: tab(7, "https://example.com/"),
-                filled_count: 1,
-                held: Vec::new(),
-                submitted: false,
-                committed_urls: vec![],
-            }));
-        }
-        let calls_before = browser.calls().len();
-        policy.set(restriction);
-        let result = executor.execute(
-            &workspace,
-            "browser_fill_form",
-            json!({"tab":handle,"fields":[{"target":target,"value":"PRIVATE_DRAFT"}]}),
-            &CancellationToken::default(),
-        );
-        if permitted {
-            assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-            assert_eq!(result.facts["submitted"], false);
-            assert!(browser.calls().iter().any(|call| matches!(
-                call,
-                BrowserCommand::Fill(PhysicalFill {
-                    submit_locator: None,
-                    ..
-                })
-            )));
-        } else {
-            assert_eq!(result.status, Status::Blocked);
-            assert_eq!(result.effect, Effect::None);
-            assert_eq!(browser.calls().len(), calls_before);
-            assert_eq!(result.facts["policy_rule"], "capability");
-            assert_eq!(
-                result.summary,
-                "Blocked: this session may not take that kind of action."
-            );
-            assert_eq!(
-                result.next_steps,
-                vec!["Call policy_explain to see what this session may do."]
-            );
-            let records = audit.0.lock().unwrap();
-            assert_eq!(records.last().unwrap().summary, result.summary);
-            assert!(!serde_json::to_string(&*records)
-                .unwrap()
-                .contains("PRIVATE_DRAFT"));
-        }
-    }
-}
-
-#[test]
-fn retired_host_input_is_rejected_before_any_browser_work() {
-    let (executor, browser, _, workspace, _) = fixture();
-    let result = executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://excluded.example/","restrict_hosts":["allowed.example"]}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(result.status, Status::Failed);
-    assert!(result
-        .next_steps
-        .iter()
-        .any(|step| step.contains("removed")));
-    assert!(!result.summary.contains("excluded.example"));
-    assert!(browser.calls().is_empty());
-}
-
-/// `policy_explain` reports the authority its frame enforces, even when the policy changes between
-/// the frame's start and the explanation, so the explanation and the frame's audit line, which
-/// records the snapshot's id, name one authority (ADR-0203 Decision 7.5).
-#[test]
-fn policy_explain_and_its_audit_line_name_one_authority() {
-    let policy = TestPolicy::new();
-    let (executor, _, _, workspace, _) = fixture_with_governance(policy.facade());
-    let publication = executor.governance.published();
-    let enforced = publication.authority().clone();
-    assert_eq!(enforced.id, publication.snapshot().id());
-    policy.set(json!(["read"]));
-    let newer = executor.governance.published();
-    assert_ne!(newer.authority().id, enforced.id, "the edit was published");
-    assert_ne!(newer.authority().capabilities, enforced.capabilities);
-
-    let cancellation = CancellationToken::default();
-    let context = InvocationContext {
-        settlement_pending: &std::sync::atomic::AtomicBool::new(false),
-        settlement_requested: false,
-        provenance: &crate::provenance::ConnectionEvidence::claimed("test", IntakeChannel::Mcp),
-        invocation: &crate::work::InvocationId::mint(),
-        workspace: &workspace,
-        requested_browser: None,
-        requested_tab: None,
-        requested_target: None,
-        repeat_tool: None,
-        gesture: crate::language::page_refusal::PageGesture::Other,
-        snapshot: publication.snapshot(),
-        publication: &publication,
-        requirements: crate::governance::CapabilitySet::EMPTY,
-        deadline: Instant::now() + Duration::from_secs(1),
-        deadline_adjustable: false,
-        cancellation: &cancellation,
-        findings: &crate::work::findings::FrameFindings::default(),
-    };
-    let explained = executor.explain_policy(&context);
-    assert_eq!(explained.result.status, Status::Succeeded);
-    assert_eq!(
-        explained.result.facts["capabilities"],
-        json!(enforced.capabilities)
-    );
-    assert_eq!(context.snapshot.id(), enforced.id);
 }
