@@ -55,9 +55,10 @@ use crate::language::{
     field_problem::ControlRef,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
-        CheckFailure, ExtensionAdvice, Observed, Outcome, Refusal, StaleHelp, TargetRole,
-        WorkspaceReason, BROWSER_PINNED_FACT, CANDIDATE_TABS_FACT, HANDLE_TAB_FACT,
-        IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
+        CheckFailure, ExtensionAdvice, FileProblem, Observed, Outcome, PrimitiveCause, Refusal,
+        StaleHelp, TargetRole, WorkspaceReason, BROWSER_PINNED_FACT, CANDIDATE_TABS_FACT,
+        HANDLE_TAB_FACT, IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT,
+        STALE_FACT,
     },
     page_refusal::{PageGesture, PageRefusal},
     Operation, Record, TakeScreenshot,
@@ -1023,6 +1024,7 @@ impl ApplicationExecutor {
         let refusal = Refusal::ActionUnconfirmed {
             action: Box::new(action),
             cause,
+            code: decision.reason,
         };
         let mut facts = applied.result.facts;
         if let Value::Object(object) = &mut facts {
@@ -1771,12 +1773,11 @@ impl ApplicationExecutor {
         blocked_url: Option<&str>,
     ) -> Terminal {
         let facts = with_denial_facts(decision, facts);
-        let reason = blocked_reason(decision.reason);
         let refusal = Refusal::AuthorityBlocked {
-            reason,
+            code: decision.reason,
             host: blocked_url.and_then(observed_host),
             origin: blocked_url
-                .filter(|_| reason == BlockedReason::OwnWorkbench)
+                .filter(|_| decision.reason == ReasonCode::OwnWorkbench)
                 .and_then(observed_origin),
         };
         let observed = refusal.observed();
@@ -2648,6 +2649,7 @@ fn routing_refusal(
         BrowserError::Primitive(detail) => Some((
             Refusal::BrowserPrimitive {
                 detail: detail.clone(),
+                cause: PrimitiveCause::Refused,
             },
             json!({"reason":"browser_primitive_failed","detail":detail}),
         )),
@@ -2867,24 +2869,6 @@ fn named_key(key: &str) -> Option<String> {
 }
 
 /// Translate a governance reason into the language's own denial vocabulary.
-const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
-    match reason {
-        ReasonCode::HostDenied => BlockedReason::Host,
-        ReasonCode::ProtectedHost => BlockedReason::ProtectedHost,
-        ReasonCode::OwnWorkbench => BlockedReason::OwnWorkbench,
-        ReasonCode::CapabilityDenied => BlockedReason::Capability,
-        ReasonCode::TabCloseDenied => BlockedReason::TabClose,
-        ReasonCode::ScreenshotDenied => BlockedReason::Screenshot,
-        ReasonCode::InvalidAuthority => BlockedReason::InvalidAuthority,
-        ReasonCode::RuntimeHold => BlockedReason::Hold,
-        ReasonCode::SessionEnded => BlockedReason::SessionEnded,
-        ReasonCode::AuditUnavailable => BlockedReason::AuditUnavailable,
-        ReasonCode::Permitted | ReasonCode::InvalidRequest | ReasonCode::ChannelDenied => {
-            BlockedReason::Unspecified
-        }
-    }
-}
-
 /// Add the policy explanation a refusing decision carries to a result's facts.
 fn with_denial_facts(decision: Decision, mut facts: Value) -> Value {
     if let Value::Object(object) = &mut facts {
@@ -2947,7 +2931,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
 
 /// The check failure for a check that governance refused.
 const fn governed_check(reason: ReasonCode) -> CheckFailure {
-    CheckFailure::Blocked(blocked_reason(reason))
+    CheckFailure::Blocked(BlockedReason::of(reason))
 }
 
 /// The terminal status of an applied action whose check did not confirm it.
@@ -3002,30 +2986,32 @@ fn adapter_budget_ms(requested_ms: u64, remaining: Duration) -> u64 {
     requested_ms.min(available_ms)
 }
 
-fn load_physical_files(paths: &[String]) -> Result<(Vec<PhysicalFile>, u64), &'static str> {
+fn load_physical_files(paths: &[String]) -> Result<(Vec<PhysicalFile>, u64), FileProblem> {
     const MAX_UPLOAD_BYTES: u64 = 5_000_000;
     let mut files = Vec::with_capacity(paths.len());
     let mut total = 0_u64;
     for requested in paths {
         let path = Path::new(requested);
-        let mut file = File::open(path).map_err(|_| "file_unavailable")?;
-        let before = file.metadata().map_err(|_| "file_unavailable")?;
+        let mut file = File::open(path).map_err(|_| FileProblem::Unavailable)?;
+        let before = file.metadata().map_err(|_| FileProblem::Unavailable)?;
         if !before.is_file() {
-            return Err("not_a_file");
+            return Err(FileProblem::NotAFile);
         }
         if before.len() > MAX_UPLOAD_BYTES {
-            return Err("file_too_large");
+            return Err(FileProblem::FileTooLarge);
         }
-        total = total.checked_add(before.len()).ok_or("upload_too_large")?;
+        total = total
+            .checked_add(before.len())
+            .ok_or(FileProblem::UploadTooLarge)?;
         if total > MAX_UPLOAD_BYTES {
-            return Err("upload_too_large");
+            return Err(FileProblem::UploadTooLarge);
         }
         let mut bytes = Vec::with_capacity(usize::try_from(before.len()).unwrap_or(0));
         (&mut file)
             .take(MAX_UPLOAD_BYTES + 1)
             .read_to_end(&mut bytes)
-            .map_err(|_| "file_read_failed")?;
-        let after = file.metadata().map_err(|_| "file_changed")?;
+            .map_err(|_| FileProblem::ReadFailed)?;
+        let after = file.metadata().map_err(|_| FileProblem::Changed)?;
         let modified_changed = before
             .modified()
             .ok()
@@ -3035,13 +3021,13 @@ fn load_physical_files(paths: &[String]) -> Result<(Vec<PhysicalFile>, u64), &'s
             || after.len() != before.len()
             || modified_changed
         {
-            return Err("file_changed");
+            return Err(FileProblem::Changed);
         }
         let name = path
             .file_name()
             .and_then(|value| value.to_str())
             .filter(|value| !value.is_empty())
-            .ok_or("invalid_file_name")?;
+            .ok_or(FileProblem::InvalidName)?;
         files.push(PhysicalFile {
             name: bounded(name, 255),
             media_type: media_type(path).into(),

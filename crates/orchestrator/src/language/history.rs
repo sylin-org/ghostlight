@@ -540,7 +540,7 @@ mod tests {
         .audit();
         let kept = Refusal::LocalInterlock.audit();
         let policy = Refusal::AuthorityBlocked {
-            reason: BlockedReason::Capability,
+            code: crate::governance::ReasonCode::CapabilityDenied,
             host: None,
             origin: None,
         }

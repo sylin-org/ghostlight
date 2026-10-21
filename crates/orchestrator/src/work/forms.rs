@@ -14,7 +14,7 @@ use crate::governance::Capability;
 use crate::language::{
     field_echo::{self, HeldField},
     field_problem::{self, ControlRef, FieldProblem, RejectedControl, RejectedField},
-    outcome::{EmptyObject, Observed, Outcome, Refusal, TargetRole},
+    outcome::{EmptyObject, FileProblem, Observed, Outcome, Refusal, TargetRole},
     FillForm, PageCondition, PressKey, RunScript, TypeText, UploadFiles, Wait, WaitCondition,
 };
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
@@ -515,26 +515,26 @@ impl ApplicationExecutor {
         let (files, total) = if !value.paths.is_empty() {
             match load_physical_files(&value.paths) {
                 Ok(value) => value,
-                Err(reason) => {
+                Err(problem) => {
                     return self.failed(
                         context,
                         decision,
                         Some(selected.physical_id),
-                        Refusal::FilesUnreadable,
-                        json!({"reason":reason}),
+                        Refusal::FilesUnreadable { problem },
+                        json!({"reason":problem.as_str()}),
                     )
                 }
             }
         } else if !value.files.is_empty() {
             match decode_inline_files(&value.files) {
                 Ok(value) => value,
-                Err(reason) => {
+                Err(problem) => {
                     return self.failed(
                         context,
                         decision,
                         Some(selected.physical_id),
-                        Refusal::FilesUnreadable,
-                        json!({"reason":reason}),
+                        Refusal::FilesUnreadable { problem },
+                        json!({"reason":problem.as_str()}),
                     )
                 }
             }
@@ -561,8 +561,10 @@ impl ApplicationExecutor {
                         context,
                         decision,
                         Some(selected.physical_id),
-                        Refusal::FilesUnreadable,
-                        json!({"reason":"the captured image is stale or belongs elsewhere"}),
+                        Refusal::FilesUnreadable {
+                            problem: FileProblem::StaleCapture,
+                        },
+                        json!({"reason":FileProblem::StaleCapture.as_str()}),
                     )
                 }
             }
@@ -1372,7 +1374,7 @@ fn form_field_wire(value: &crate::language::FormFieldValue) -> PhysicalValue {
 
 fn decode_inline_files(
     files: &[crate::language::InlineFile],
-) -> Result<(Vec<PhysicalFile>, u64), String> {
+) -> Result<(Vec<PhysicalFile>, u64), FileProblem> {
     use base64::Engine as _;
     const UPLOAD_AGGREGATE_BYTES: usize = 5_000_000;
     let mut decoded = Vec::with_capacity(files.len());
@@ -1380,10 +1382,10 @@ fn decode_inline_files(
     for file in files {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&file.data_base64)
-            .map_err(|_| "an inline file is not valid base64".to_string())?;
+            .map_err(|_| FileProblem::NotBase64)?;
         total = total.saturating_add(bytes.len() as u64);
         if total > UPLOAD_AGGREGATE_BYTES as u64 {
-            return Err("inline files exceed the upload ceiling".into());
+            return Err(FileProblem::UploadTooLarge);
         }
         decoded.push(PhysicalFile {
             name: bounded(&file.name, 255),

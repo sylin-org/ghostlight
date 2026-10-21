@@ -238,9 +238,7 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
 mod tests {
     use super::*;
     use crate::governance::GovernanceFacade;
-    use crate::language::outcome::{
-        BlockedReason, Refusal, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE,
-    };
+    use crate::language::outcome::{Refusal, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE};
 
     use crate::intake::session::IntakeChannel;
     use crate::language::page_refusal::PageGesture;
@@ -349,7 +347,7 @@ mod tests {
             ),
             (
                 Refusal::AuthorityBlocked {
-                    reason: BlockedReason::Hold,
+                    code: crate::governance::ReasonCode::RuntimeHold,
                     host: None,
                     origin: None,
                 },
@@ -358,7 +356,7 @@ mod tests {
             ),
             (
                 Refusal::AuthorityBlocked {
-                    reason: BlockedReason::SessionEnded,
+                    code: crate::governance::ReasonCode::SessionEnded,
                     host: None,
                     origin: None,
                 },

@@ -271,23 +271,29 @@ impl Refusal {
     #[must_use]
     pub fn retained(&self) -> Self {
         match self {
-            Self::AuthorityBlocked { reason, host, .. } => Self::AuthorityBlocked {
-                reason: *reason,
+            Self::AuthorityBlocked { code, host, .. } => Self::AuthorityBlocked {
+                code: *code,
                 host: host.clone(),
                 origin: None,
             },
             Self::CredentialAuthorization { control } => Self::CredentialAuthorization {
                 control: control.unnamed(),
             },
-            Self::BrowserPrimitive { .. } => Self::BrowserPrimitive {
+            Self::BrowserPrimitive { cause, .. } => Self::BrowserPrimitive {
                 detail: String::new(),
+                cause: *cause,
             },
             Self::WorkspaceUnusable { reason } => Self::WorkspaceUnusable {
                 reason: reason.retained(),
             },
-            Self::ActionUnconfirmed { action, cause } => Self::ActionUnconfirmed {
+            Self::ActionUnconfirmed {
+                action,
+                cause,
+                code,
+            } => Self::ActionUnconfirmed {
                 action: Box::new(action.retained()),
                 cause: *cause,
+                code: *code,
             },
             Self::Capacity
             | Self::InvalidRequest
@@ -313,8 +319,8 @@ impl Refusal {
             | Self::ConnectionLost
             | Self::CancelledAfterDispatch { .. }
             | Self::EffectUnknown
-            | Self::LandingDeniedUnknown
-            | Self::FilesUnreadable
+            | Self::LandingDeniedUnknown { .. }
+            | Self::FilesUnreadable { .. }
             | Self::CaptureTooLarge
             | Self::TabNotShowing
             | Self::NoDialogVisible
@@ -383,9 +389,9 @@ impl Refusal {
             Self::CancelledBeforeStart { .. } => AuditRefusal::CancelledBeforeStart,
             Self::DeadlineBeforeStart => AuditRefusal::DeadlineBeforeStart,
             Self::Capacity => AuditRefusal::Capacity,
-            Self::AuthorityBlocked { reason, .. } => {
-                AuditRefusal::AuthorityBlocked { cause: *reason }
-            }
+            Self::AuthorityBlocked { code, .. } => AuditRefusal::AuthorityBlocked {
+                cause: BlockedReason::of(*code),
+            },
             Self::ChannelOff { channel, .. } => AuditRefusal::ChannelOff { channel: *channel },
             Self::LocalInterlock => AuditRefusal::LocalInterlock,
             Self::CredentialAuthorization { .. } => AuditRefusal::CredentialAuthorization,
@@ -416,14 +422,14 @@ impl Refusal {
             Self::ConnectionLost => AuditRefusal::ConnectionLost,
             Self::CancelledAfterDispatch { .. } => AuditRefusal::CancelledAfterDispatch,
             Self::EffectUnknown => AuditRefusal::EffectUnknown,
-            Self::LandingDeniedUnknown => AuditRefusal::LandingDeniedUnknown,
+            Self::LandingDeniedUnknown { .. } => AuditRefusal::LandingDeniedUnknown,
             Self::WorkspaceUnusable { reason } => AuditRefusal::WorkspaceUnusable {
                 cause: reason.clone(),
             },
             Self::TabHeld { .. } => AuditRefusal::WorkspaceUnusable {
                 cause: WorkspaceReason::TabHeld,
             },
-            Self::FilesUnreadable => AuditRefusal::FilesUnreadable,
+            Self::FilesUnreadable { .. } => AuditRefusal::FilesUnreadable,
             Self::CaptureTooLarge => AuditRefusal::CaptureTooLarge,
             Self::TabNotShowing => AuditRefusal::TabNotShowing,
             Self::NoDialogVisible => AuditRefusal::NoDialogVisible,
@@ -585,6 +591,7 @@ mod tests {
                     let refusal = Refusal::ActionUnconfirmed {
                         action: Box::new(action.clone()),
                         cause,
+                        code: cause.decision_code(),
                     };
                     accounts.push((refusal.summary(), refusal.audit()));
                 }
@@ -614,6 +621,7 @@ mod tests {
             Refusal::ActionUnconfirmed {
                 action: Box::new(fill),
                 cause: CheckFailure::Unmet,
+                code: CheckFailure::Unmet.decision_code(),
             }
             .audit()
             .summary(),
@@ -647,7 +655,7 @@ mod tests {
     fn the_retained_refusal_drops_the_control_page_address_the_credential_name_and_the_browsers_words(
     ) {
         let own_page = Refusal::AuthorityBlocked {
-            reason: BlockedReason::OwnWorkbench,
+            code: crate::governance::ReasonCode::OwnWorkbench,
             host: Some("127.0.0.1".into()),
             origin: Some("http://127.0.0.1:41259".into()),
         };
@@ -675,6 +683,7 @@ mod tests {
 
         let primitive = Refusal::BrowserPrimitive {
             detail: "PRIVATE_EXCEPTION".into(),
+            cause: crate::language::outcome::PrimitiveCause::Refused,
         };
         assert!(!primitive.retained().summary().contains("PRIVATE_EXCEPTION"));
     }
@@ -683,6 +692,7 @@ mod tests {
     fn retained_refusal_has_no_browser_text_but_client_detail_survives() {
         let refusal = Refusal::BrowserPrimitive {
             detail: "PRIVATE_EXCEPTION".into(),
+            cause: crate::language::outcome::PrimitiveCause::Refused,
         };
         assert!(refusal.summary().contains("PRIVATE_EXCEPTION"));
         assert!(!refusal.audit().summary().contains("PRIVATE_EXCEPTION"));
@@ -715,6 +725,7 @@ mod tests {
     fn a_browser_failure_keeps_the_kind_of_act_it_could_not_do_and_nothing_of_the_page() {
         let refusal = Refusal::BrowserPrimitive {
             detail: "PRIVATE_EXCEPTION".into(),
+            cause: crate::language::outcome::PrimitiveCause::Refused,
         };
         let typed = refusal.audit().for_gesture(PageGesture::Type);
         assert_eq!(

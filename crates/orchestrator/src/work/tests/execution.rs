@@ -11,7 +11,7 @@ fn primitive_adapter_errors_route_to_an_honest_refusal_with_detail() {
             ExtensionAdvice::Plain
         })
         .expect("primitive errors route to a refusal");
-    let crate::language::outcome::Refusal::BrowserPrimitive { detail } = refusal else {
+    let crate::language::outcome::Refusal::BrowserPrimitive { detail, .. } = refusal else {
         panic!("primitive errors must route to BrowserPrimitive");
     };
     assert_eq!(detail, "no such frame");

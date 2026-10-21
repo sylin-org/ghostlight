@@ -360,7 +360,9 @@ impl ApplicationExecutor {
                     context,
                     landing,
                     Some(controlled.physical_id),
-                    Refusal::LandingDeniedUnknown,
+                    Refusal::LandingDeniedUnknown {
+                        code: landing.reason,
+                    },
                     json!({"reason":landing.reason.as_str(),"compensated":false}),
                 ),
             };

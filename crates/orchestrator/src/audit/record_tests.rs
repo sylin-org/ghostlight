@@ -406,7 +406,7 @@ fn click_refused_by_policy() -> AuditRecord {
         "blocked",
         "none",
         &crate::language::outcome::Refusal::AuthorityBlocked {
-            reason: crate::language::outcome::BlockedReason::Capability,
+            code: crate::governance::ReasonCode::CapabilityDenied,
             host: Some("example.com".into()),
             origin: None,
         }

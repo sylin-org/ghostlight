@@ -915,6 +915,7 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::BrowserAdapterOutdated,
         Refusal::BrowserPrimitive {
             detail: "no such frame".into(),
+            cause: crate::language::outcome::PrimitiveCause::Refused,
         },
         Refusal::DocumentUnavailable,
         Refusal::BrowserContract,
@@ -931,8 +932,12 @@ fn refusal_samples() -> Vec<Refusal> {
         },
         Refusal::ConnectionLost,
         Refusal::EffectUnknown,
-        Refusal::LandingDeniedUnknown,
-        Refusal::FilesUnreadable,
+        Refusal::LandingDeniedUnknown {
+            code: crate::governance::ReasonCode::HostDenied,
+        },
+        Refusal::FilesUnreadable {
+            problem: crate::language::outcome::FileProblem::Unavailable,
+        },
         Refusal::CaptureTooLarge,
         Refusal::TabNotShowing,
         Refusal::NoDialogVisible,
@@ -976,7 +981,7 @@ fn refusal_samples() -> Vec<Refusal> {
     }
     for reason in blocked_reasons() {
         samples.push(Refusal::AuthorityBlocked {
-            reason,
+            code: reason.code(),
             host: Some("example.com".into()),
             origin: (reason == BlockedReason::OwnWorkbench)
                 .then(|| "http://example.com:8080".into()),
@@ -1000,6 +1005,7 @@ fn refusal_samples() -> Vec<Refusal> {
                 subject: ActionSubject::unnamed(TargetRole::Link),
             }),
             cause,
+            code: cause.decision_code(),
         });
     }
     samples

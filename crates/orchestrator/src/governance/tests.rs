@@ -443,7 +443,7 @@ fn an_organization_never_touch_refusal_carries_tier_rule_and_denial_id() {
         "blocked",
         "none",
         &crate::language::outcome::Refusal::AuthorityBlocked {
-            reason: crate::language::outcome::BlockedReason::ProtectedHost,
+            code: crate::governance::ReasonCode::ProtectedHost,
             host: Some("bank.example".into()),
             origin: None,
         }
@@ -793,7 +793,7 @@ fn first_applicable_denial_is_stably_attributed() {
         "blocked",
         "none",
         &crate::language::outcome::Refusal::AuthorityBlocked {
-            reason: crate::language::outcome::BlockedReason::Capability,
+            code: crate::governance::ReasonCode::CapabilityDenied,
             host: None,
             origin: None,
         }

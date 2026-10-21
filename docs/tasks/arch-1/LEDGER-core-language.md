@@ -10,9 +10,9 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D5, C17 and LANG-4 have landed. C12b-1 waits on the coordinator's answer to its
-boundary proposal (Notes); until then the slices that need nothing go first. A slice's hash is
-filled in by the next slice's commit, since a rebase before the push changes it.
+L-D1 to L-D5, C17, LANG-4 and C12b-1 have landed; the hold on work/forms.rs, work/mod.rs,
+work/composition.rs and work/recording.rs is released. Next is LANG-1, then LANG-2. A slice's
+hash is filled in by the next slice's commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -26,8 +26,8 @@ In order. "After" names what a slice waits for.
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed (b5135a14) |
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b 1b693758) |
-| C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | todo |
-| LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed |
+| C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed |
+| LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | todo |
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | todo |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | todo |
@@ -104,3 +104,22 @@ In order. "After" names what a slice waits for.
   now checks that each entry's fixture reaches that entry, and that no (tool, variant) repeats.
   `work/tests/catalog_authority.rs` still keys requirements by (tool, variant); that copy is
   core-work's.
+- C12b-1, as confirmed by the coordinator: `Refusal::reason()` is every variant's closed model
+  code. Varying codes became closed causes: `AuthorityBlocked { code: ReasonCode }` (its
+  `BlockedReason` is derived by `BlockedReason::of`, which replaces work's `blocked_reason`, and
+  durable history still keeps the group), `LandingDeniedUnknown { code }`, `ActionUnconfirmed {
+  code }` beside its persisted `CheckFailure`, `FilesUnreadable { problem: FileProblem }` and
+  `BrowserPrimitive { cause: PrimitiveCause }` (`Refused` today; `DebuggerUnavailable` and
+  `SessionLost` have their own sentences and steps for the adapter to map, Decision 5.2).
+  `every_refusal_has_one_model_code_and_one_audit_tag` pins both words for every variant and
+  cause. A temporary probe in work's builders showed that every refusal the suite reaches
+  writes exactly `reason()`, apart from the prose of the recording export. For C12b-2:
+  `CredentialAuthorization` (`credential_authorization_required`) and `NoDialogVisible`
+  (`no_dialog_visible`) write no reason fact today, and `RecordingExportFailed` and
+  `RecordingNotAttached` write the browser's bounded text, so making the result write
+  `reason()` changes those facts (and moves that text to `detail`). `FilesUnreadable` already
+  writes its closed code: model-visible here for an inline file that is not base64
+  (`inline_file_not_base64`), over the ceiling (`upload_too_large`) and a stale capture
+  (`capture_stale`), which wrote prose; no golden holds them. Cross-lane test edits:
+  `governance/tests.rs` and `audit/record_tests.rs` (two `AuthorityBlocked` literals), and
+  `work/navigation.rs` (the landing code).

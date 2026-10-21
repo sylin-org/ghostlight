@@ -51,9 +51,9 @@ const HANDLE_REPLACEMENT: &str = "[handle]";
 /// The input type of a range, whose refusal names the step it snaps to.
 const RANGE_INPUT_TYPE: &str = "range";
 /// The `reason` fact of a fill that was refused before any edit.
-const REJECTED_REASON: &str = "field_value_rejected";
+pub(super) const REJECTED_REASON: &str = "field_value_rejected";
 /// The `reason` fact of a fill the page partly undid.
-const REVERTED_REASON: &str = "fields_reverted";
+pub(super) const REVERTED_REASON: &str = "fields_reverted";
 /// What a summary says a reverted field holds when it holds nothing.
 const NO_VALUE: &str = "no value";
 /// The most reverted fields a summary describes one by one.

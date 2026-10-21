@@ -8,6 +8,7 @@ use super::field_problem::{self, ControlRef, RejectedField};
 use super::page_refusal::{self, PageGesture, PageRefusal};
 use super::wait::WaitCondition;
 use super::{adapter, deployment, setup, MAX_INSPECT_ITEMS};
+use crate::governance::ReasonCode;
 use crate::intake::session::IntakeChannel;
 use crate::workspace::{StaleReason, WorkspaceError};
 
@@ -270,8 +271,8 @@ impl ActionSubject {
 
 /// Why configured authority refused a job, in the words a person needs to act on it.
 ///
-/// This mirrors the governance reason code rather than importing it, so the model-facing voice
-/// stays independent of the governance module it reports on.
+/// It groups the governance reason codes by the sentence each reads as ([`BlockedReason::of`]).
+/// Durable history keeps this group, never the code.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockedReason {
@@ -297,6 +298,59 @@ pub enum BlockedReason {
     SessionEnded,
     /// Authority refused for a reason with no more specific wording.
     Unspecified,
+}
+
+#[cfg(test)]
+impl BlockedReason {
+    /// One governance reason code that reads as this group, for tests that build refusals.
+    pub(crate) const fn code(self) -> ReasonCode {
+        match self {
+            Self::Host => ReasonCode::HostDenied,
+            Self::ProtectedHost => ReasonCode::ProtectedHost,
+            Self::OwnWorkbench => ReasonCode::OwnWorkbench,
+            Self::Capability => ReasonCode::CapabilityDenied,
+            Self::TabClose => ReasonCode::TabCloseDenied,
+            Self::Screenshot => ReasonCode::ScreenshotDenied,
+            Self::InvalidAuthority => ReasonCode::InvalidAuthority,
+            Self::Hold => ReasonCode::RuntimeHold,
+            Self::SessionEnded => ReasonCode::SessionEnded,
+            Self::AuditUnavailable => ReasonCode::AuditUnavailable,
+            Self::Unspecified => ReasonCode::InvalidRequest,
+        }
+    }
+}
+
+#[cfg(test)]
+impl CheckFailure {
+    /// The reason code of the decision a result with this check failure reports, for tests.
+    pub(crate) const fn decision_code(self) -> ReasonCode {
+        match self {
+            Self::Blocked(reason) => reason.code(),
+            _ => ReasonCode::Permitted,
+        }
+    }
+}
+
+impl BlockedReason {
+    /// The sentence group a governance reason code reads as.
+    #[must_use]
+    pub const fn of(code: ReasonCode) -> Self {
+        match code {
+            ReasonCode::HostDenied => Self::Host,
+            ReasonCode::ProtectedHost => Self::ProtectedHost,
+            ReasonCode::OwnWorkbench => Self::OwnWorkbench,
+            ReasonCode::CapabilityDenied => Self::Capability,
+            ReasonCode::TabCloseDenied => Self::TabClose,
+            ReasonCode::ScreenshotDenied => Self::Screenshot,
+            ReasonCode::InvalidAuthority => Self::InvalidAuthority,
+            ReasonCode::RuntimeHold => Self::Hold,
+            ReasonCode::SessionEnded => Self::SessionEnded,
+            ReasonCode::AuditUnavailable => Self::AuditUnavailable,
+            ReasonCode::Permitted | ReasonCode::InvalidRequest | ReasonCode::ChannelDenied => {
+                Self::Unspecified
+            }
+        }
+    }
 }
 
 /// Whose policy layer refused a request, in the words its refusal names it by.
@@ -1254,6 +1308,22 @@ pub enum BrowserRecoveryReason {
     HandshakeTimeout,
 }
 
+impl BrowserRecoveryReason {
+    /// The reason's model code.
+    #[must_use]
+    pub const fn fact(self) -> &'static str {
+        match self {
+            Self::BrowserAbsent => "browser_absent",
+            Self::LaunchFailed => "browser_launch_failed",
+            Self::SandboxedPackage => "browser_sandboxed",
+            Self::ExtensionAbsent => "browser_extension_absent",
+            Self::NativeHostUnavailable => "native_host_unavailable",
+            Self::OwnedElsewhere => "native_host_owned_elsewhere",
+            Self::HandshakeTimeout => "browser_handshake_timeout",
+        }
+    }
+}
+
 /// Closed product-language reason the browser a call needed could not take it. In every case
 /// nothing was sent, and the call waited first when there was evidence the browser was returning
 /// (ADR-0196 Decision 12).
@@ -1268,6 +1338,19 @@ pub enum BrowserUnavailableReason {
     WrongProfile,
     /// The browser connection stayed busy with other work.
     Busy,
+}
+
+impl BrowserUnavailableReason {
+    /// The reason's model code.
+    #[must_use]
+    pub const fn fact(self) -> &'static str {
+        match self {
+            Self::NotAnswering => "browser_not_answering",
+            Self::NotConnected => "browser_disconnected",
+            Self::WrongProfile => "browser_wrong_profile",
+            Self::Busy => "browser_busy",
+        }
+    }
 }
 
 /// Why the condition a caller asked Ghostlight to check after an applied action was not
@@ -1402,6 +1485,29 @@ fn unconfirmed_summary(action: &Outcome, cause: CheckFailure) -> String {
     }
 }
 
+/// Recovery for a refusal of configured authority, by the sentence group of its code.
+fn blocked_next_steps(reason: BlockedReason) -> Vec<String> {
+    match reason {
+        // Policy is the one thing the caller can ask about. The human controls are pinned
+        // step-free by ADR-0126, a storage outage recovers by itself, and an unreadable policy
+        // has nothing to explain.
+        BlockedReason::Host
+        | BlockedReason::ProtectedHost
+        | BlockedReason::Capability
+        | BlockedReason::TabClose
+        | BlockedReason::Screenshot
+        | BlockedReason::Unspecified => {
+            vec!["Call policy_explain to see what this session may do.".into()]
+        }
+        // No policy lifts it, and the sentence already says other ports are open.
+        BlockedReason::OwnWorkbench
+        | BlockedReason::AuditUnavailable
+        | BlockedReason::InvalidAuthority
+        | BlockedReason::Hold
+        | BlockedReason::SessionEnded => vec![],
+    }
+}
+
 /// Recovery for an applied action whose check did not confirm it.
 ///
 /// Human controls and the history requirement stay step-free, as their own refusals are. A
@@ -1414,12 +1520,7 @@ fn unconfirmed_next_steps(cause: CheckFailure) -> Vec<String> {
             | BlockedReason::AuditUnavailable
             | BlockedReason::InvalidAuthority,
         ) => vec![],
-        CheckFailure::Blocked(reason) => Refusal::AuthorityBlocked {
-            reason,
-            host: None,
-            origin: None,
-        }
-        .next_steps(),
+        CheckFailure::Blocked(reason) => blocked_next_steps(reason),
         CheckFailure::Unmet
         | CheckFailure::Cancelled
         | CheckFailure::DeadlineExpired
@@ -1492,6 +1593,70 @@ impl QuitCause {
 /// the call repeated in a moment.
 pub(crate) const REPEAT_IN_A_MOMENT: &str = "Try the call again in a moment.";
 
+/// What kind of refusal the browser answered a job with.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrimitiveCause {
+    /// The browser refused the job in words of its own.
+    Refused,
+    /// Another debugger, such as the browser's developer tools, holds the tab.
+    DebuggerUnavailable,
+    /// The browser ended Ghostlight's control of the tab before the job ran.
+    SessionLost,
+}
+
+impl PrimitiveCause {
+    /// The cause's model code.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Refused => "browser_primitive_failed",
+            Self::DebuggerUnavailable => "debugger_unavailable",
+            Self::SessionLost => "session_lost",
+        }
+    }
+}
+
+/// What kept the files of an upload from being prepared.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileProblem {
+    /// A path could not be opened or read for its size.
+    Unavailable,
+    /// A path names something that is not a file.
+    NotAFile,
+    /// One file is over the upload ceiling.
+    FileTooLarge,
+    /// The files together are over the upload ceiling.
+    UploadTooLarge,
+    /// A file could not be read to its end.
+    ReadFailed,
+    /// A file changed while it was read.
+    Changed,
+    /// A path has no usable file name.
+    InvalidName,
+    /// An inline file's data is not standard base64.
+    NotBase64,
+    /// The captured image the call named is stale or belongs to another tab.
+    StaleCapture,
+}
+
+impl FileProblem {
+    /// The problem's model code.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unavailable => "file_unavailable",
+            Self::NotAFile => "not_a_file",
+            Self::FileTooLarge => "file_too_large",
+            Self::UploadTooLarge => "upload_too_large",
+            Self::ReadFailed => "file_read_failed",
+            Self::Changed => "file_changed",
+            Self::InvalidName => "invalid_file_name",
+            Self::NotBase64 => "inline_file_not_base64",
+            Self::StaleCapture => "capture_stale",
+        }
+    }
+}
+
 /// Why a browser job did not complete in Ghostlight's product language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Refusal {
@@ -1514,7 +1679,8 @@ pub enum Refusal {
     /// because the rest of that sentence is about which port is refused. The observed facts and
     /// the audit summary never carry it: they keep the host alone.
     AuthorityBlocked {
-        reason: BlockedReason,
+        /// The governance reason code, the refusal's model code.
+        code: ReasonCode,
         host: Option<String>,
         origin: Option<String>,
     },
@@ -1545,7 +1711,12 @@ pub enum Refusal {
         timeout_adjustable: bool,
     },
     /// The browser answered the job with its own bounded refusal.
-    BrowserPrimitive { detail: String },
+    BrowserPrimitive {
+        /// The browser's own words; never retained.
+        detail: String,
+        /// What kind of refusal the browser's answer was.
+        cause: PrimitiveCause,
+    },
     /// The page refused the call's control before acting on it, so nothing happened.
     PageRefused {
         /// Why the page refused the control.
@@ -1613,7 +1784,10 @@ pub enum Refusal {
     /// A dispatched effect cannot be determined.
     EffectUnknown,
     /// A denied new-tab landing has an unknown final state.
-    LandingDeniedUnknown,
+    LandingDeniedUnknown {
+        /// The governance reason code that denied the landing, the refusal's model code.
+        code: ReasonCode,
+    },
     /// The selected workspace resource is unusable.
     WorkspaceUnusable { reason: WorkspaceReason },
     /// The selected tab shows a page governance refused, on `host` when its address has one
@@ -1623,7 +1797,10 @@ pub enum Refusal {
     /// workspace cause `tab_held` alone, as audit v2 has always written it.
     TabHeld { host: Option<String> },
     /// Explicit local files could not be prepared safely.
-    FilesUnreadable,
+    FilesUnreadable {
+        /// What kept the files from being prepared.
+        problem: FileProblem,
+    },
     /// A screenshot exceeded the result bound.
     CaptureTooLarge,
     /// A capture of a tab its window is not showing: the browser does not draw it.
@@ -1652,10 +1829,82 @@ pub enum Refusal {
         action: Box<Outcome>,
         /// Why the check did not confirm it.
         cause: CheckFailure,
+        /// The reason code of the decision the result reports: the refusing one when governance
+        /// refused the check, which is then the refusal's model code.
+        code: ReasonCode,
     },
 }
 
+/// The model code of a call cancelled before the browser confirmed anything.
+const CANCELLED_CODE: &str = "cancelled";
+/// The model code of a call whose deadline passed.
+const DEADLINE_CODE: &str = "deadline";
+/// The model code of a call whose page access could not be verified.
+const DOCUMENT_UNAVAILABLE_CODE: &str = "document_unavailable";
+/// The model code of a disagreement about the bridge contract.
+const BROWSER_CONTRACT_CODE: &str = "browser_contract_failed";
+/// The model code of a dispatched effect that cannot be determined.
+const EFFECT_UNKNOWN_CODE: &str = "browser_effect_unknown";
+
 impl Refusal {
+    /// The refusal's closed model code: the `reason` fact its result carries (ADR-0203 Decision
+    /// 5.1). It is distinct from the tag durable history keeps, which `audit()` writes.
+    #[must_use]
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::Capacity => "capacity",
+            Self::InvalidRequest => "invalid_input",
+            Self::CancelledBeforeStart { .. } | Self::CancelledBeforeDispatch { .. } => {
+                CANCELLED_CODE
+            }
+            Self::DeadlineBeforeStart | Self::DeadlineExpired { .. } => DEADLINE_CODE,
+            Self::AuthorityBlocked { code, .. } | Self::LandingDeniedUnknown { code } => {
+                code.as_str()
+            }
+            Self::ChannelOff { .. } => ReasonCode::ChannelDenied.as_str(),
+            Self::LocalInterlock => "browser_local_interlock",
+            Self::CredentialAuthorization { .. } => "credential_authorization_required",
+            Self::IncompatibleReceipt => "incompatible_browser_receipt",
+            Self::BrowserAdapterOutdated | Self::BrowserContract => BROWSER_CONTRACT_CODE,
+            Self::BrowserPrimitive { cause, .. } => cause.as_str(),
+            Self::PageRefused { refusal, .. } => refusal.as_str(),
+            Self::FieldsReverted { .. } => field_problem::REVERTED_REASON,
+            Self::FieldValuesRejected { .. } => field_problem::REJECTED_REASON,
+            Self::DocumentUnavailable => DOCUMENT_UNAVAILABLE_CODE,
+            Self::BrowserUnavailable { reason } => reason.fact(),
+            Self::BrowserAmbiguous => "browser_ambiguous",
+            Self::BrowserUnknown => "browser_unknown",
+            Self::BrowserPinned => BROWSER_PINNED_FACT,
+            Self::BrowserStartupManual { .. } => "browser_startup_manual",
+            Self::BrowserRecoveryFailed { reason, .. } => reason.fact(),
+            Self::ConnectionLost | Self::CancelledAfterDispatch { .. } | Self::EffectUnknown => {
+                EFFECT_UNKNOWN_CODE
+            }
+            Self::WorkspaceUnusable { reason } => reason.as_fact(),
+            Self::TabHeld { .. } => WorkspaceReason::TabHeld.as_fact(),
+            Self::FilesUnreadable { problem } => problem.as_str(),
+            Self::CaptureTooLarge => "screenshot_too_large",
+            Self::TabNotShowing => "tab_not_showing",
+            Self::NoDialogVisible => "no_dialog_visible",
+            Self::DialogOpen => "dialog_open",
+            Self::NoHistoryEntry { .. } => "no_history_entry",
+            Self::RecordingUnavailable => "not_found",
+            Self::RecordingHeld => "held",
+            Self::RecordingExportFailed => "recording_export_failed",
+            Self::RecordingNotAttached => "recording_not_attached",
+            Self::ActionUnconfirmed { cause, code, .. } => match cause {
+                CheckFailure::Unmet => "expectation_unmet",
+                CheckFailure::Blocked(_) => code.as_str(),
+                CheckFailure::Cancelled => CANCELLED_CODE,
+                CheckFailure::DeadlineExpired => DEADLINE_CODE,
+                CheckFailure::Disconnected => BrowserUnavailableReason::NotConnected.fact(),
+                CheckFailure::BrowserUnavailable => "browser_unavailable",
+                CheckFailure::DocumentUnavailable => DOCUMENT_UNAVAILABLE_CODE,
+                CheckFailure::BrowserRefused => "browser_refused",
+            },
+        }
+    }
+
     /// Render the bounded Ghostlight-authored account of the refusal.
     #[must_use]
     pub fn summary(&self) -> String {
@@ -1672,11 +1921,9 @@ impl Refusal {
             Self::DeadlineBeforeStart => {
                 "The browser job deadline expired while waiting for the workspace."
             }
-            Self::AuthorityBlocked {
-                reason,
-                host,
-                origin,
-            } => return blocked(*reason, host, origin),
+            Self::AuthorityBlocked { code, host, origin } => {
+                return blocked(BlockedReason::of(*code), host, origin)
+            }
             Self::ChannelOff { channel, author } => return channel_off(*channel, *author),
             Self::LocalInterlock => {
                 "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings."
@@ -1690,9 +1937,20 @@ impl Refusal {
             Self::BrowserAdapterOutdated => {
                 "This browser command needs a newer Ghostlight extension."
             }
-            Self::BrowserPrimitive { detail } => {
+            Self::BrowserPrimitive {
+                detail,
+                cause: PrimitiveCause::Refused,
+            } => {
                 return format!("The browser refused this job: {detail}.");
             }
+            Self::BrowserPrimitive {
+                cause: PrimitiveCause::DebuggerUnavailable,
+                ..
+            } => "The browser would not let Ghostlight control this tab: another debugger holds it.",
+            Self::BrowserPrimitive {
+                cause: PrimitiveCause::SessionLost,
+                ..
+            } => "The browser ended Ghostlight's control of this tab before the job ran.",
             Self::PageRefused { refusal, gesture } => {
                 return page_refusal::summary(*refusal, *gesture);
             }
@@ -1784,12 +2042,14 @@ impl Refusal {
             Self::CancelledAfterDispatch { by: Some(CancelCause::Quit(_)) } => {
                 "Ghostlight quit before the browser confirmed what the sent command did."
             }
-            Self::LandingDeniedUnknown => {
+            Self::LandingDeniedUnknown { .. } => {
                 "The new tab's final state is unknown after its landing was blocked."
             }
             Self::WorkspaceUnusable { reason } => return reason.summary(),
             Self::TabHeld { host } => return held_tab_summary(host.as_deref()),
-            Self::FilesUnreadable => "The selected local files could not be prepared safely.",
+            Self::FilesUnreadable { .. } => {
+                "The selected local files could not be prepared safely."
+            }
             Self::CaptureTooLarge => "The screenshot was too large to return.",
             Self::TabNotShowing => {
                 "Nothing was captured: another tab is showing in this tab's window, and the browser draws only the tab it shows."
@@ -1808,7 +2068,7 @@ impl Refusal {
             Self::RecordingNotAttached => {
                 "The page did not take the replay at that target, so nothing was attached; the recording is kept."
             }
-            Self::ActionUnconfirmed { action, cause } => {
+            Self::ActionUnconfirmed { action, cause, .. } => {
                 return unconfirmed_summary(action, *cause);
             }
         }
@@ -1829,25 +2089,7 @@ impl Refusal {
             Self::CancelledBeforeStart {
                 by: CancelCause::Quit(quit),
             } if quit.repeat_helps() => vec![REPEAT_IN_A_MOMENT.into()],
-            Self::AuthorityBlocked { reason, .. } => match reason {
-                // Policy is the one thing the caller can ask about. The human controls are
-                // pinned step-free by ADR-0126, a storage outage recovers by itself, and an
-                // unreadable policy has nothing to explain.
-                BlockedReason::Host
-                | BlockedReason::ProtectedHost
-                | BlockedReason::Capability
-                | BlockedReason::TabClose
-                | BlockedReason::Screenshot
-                | BlockedReason::Unspecified => {
-                    vec!["Call policy_explain to see what this session may do.".into()]
-                }
-                // No policy lifts it, and the sentence already says other ports are open.
-                BlockedReason::OwnWorkbench
-                | BlockedReason::AuditUnavailable
-                | BlockedReason::InvalidAuthority
-                | BlockedReason::Hold
-                | BlockedReason::SessionEnded => vec![],
-            },
+            Self::AuthorityBlocked { code, .. } => blocked_next_steps(BlockedReason::of(*code)),
             Self::LocalInterlock => vec![
                 "The tab stays open because the user chose to keep Ghostlight's tabs; continue without closing it."
                     .into(),
@@ -1874,10 +2116,24 @@ impl Refusal {
                 BrowserUnavailableReason::Busy => "Repeat the call.",
             }
             .into()],
-            Self::BrowserPrimitive { .. } => vec![
+            Self::BrowserPrimitive {
+                cause: PrimitiveCause::Refused,
+                ..
+            } => vec![
                 "Read the browser's stated reason, adjust the call or the page, then repeat."
                     .into(),
             ],
+            Self::BrowserPrimitive {
+                cause: PrimitiveCause::DebuggerUnavailable,
+                ..
+            } => vec![
+                "Ask the user to close the browser's developer tools for this tab, then repeat the call."
+                    .into(),
+            ],
+            Self::BrowserPrimitive {
+                cause: PrimitiveCause::SessionLost,
+                ..
+            } => vec!["Repeat the call; Ghostlight takes control of the tab again.".into()],
             Self::PageRefused { refusal, .. } => page_refusal::next_steps(*refusal),
             Self::FieldValuesRejected { fields, .. } => field_problem::rejected_next_steps(fields),
             Self::FieldsReverted { reverted, .. } => field_problem::rejected_next_steps(reverted),
@@ -1940,7 +2196,7 @@ impl Refusal {
             },
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
             Self::TabHeld { .. } => vec![LEAVE_HELD_TAB.into()],
-            Self::FilesUnreadable => vec![
+            Self::FilesUnreadable { .. } => vec![
                 "Confirm each path is an existing file within Ghostlight's upload limits.".into(),
             ],
             Self::TabNotShowing => vec![
@@ -2652,9 +2908,10 @@ mod tests {
     use super::{
         workspace_refusal, ActionSubject, BlockedReason, BrowserRecoveryReason,
         BrowserUnavailableReason, CancelCause, CaptureKind, CheckFailure, DialogKind, EmptyObject,
-        ExtensionAdvice, ImageSize, Observed, Outcome, PolicyAuthor, PromptField, QuitCause,
-        Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
-        HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, REPEAT_IN_A_MOMENT, TARGET_LABEL_MAX_CHARS,
+        ExtensionAdvice, FileProblem, ImageSize, Observed, Outcome, PolicyAuthor, PrimitiveCause,
+        PromptField, QuitCause, Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole,
+        WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, REPEAT_IN_A_MOMENT,
+        TARGET_LABEL_MAX_CHARS,
     };
     use crate::intake::session::IntakeChannel;
     use crate::language::area::{LeftOut, LeftOutKey};
@@ -3468,7 +3725,7 @@ Changes are \"unsaved\".".into()),
     #[test]
     fn stop_outcome_begins_with_the_pinned_directive() {
         let refusal = Refusal::AuthorityBlocked {
-            reason: BlockedReason::SessionEnded,
+            code: crate::governance::ReasonCode::SessionEnded,
             host: None,
             origin: None,
         };
@@ -3485,7 +3742,7 @@ Changes are \"unsaved\".".into()),
     #[test]
     fn pause_outcome_uses_its_own_pinned_directive() {
         let refusal = Refusal::AuthorityBlocked {
-            reason: BlockedReason::Hold,
+            code: crate::governance::ReasonCode::RuntimeHold,
             host: None,
             origin: None,
         };
@@ -3501,7 +3758,7 @@ Changes are \"unsaved\".".into()),
     fn stop_recommends_no_automatic_retry() {
         for reason in [BlockedReason::SessionEnded, BlockedReason::Hold] {
             let refusal = Refusal::AuthorityBlocked {
-                reason,
+                code: reason.code(),
                 host: None,
                 origin: None,
             };
@@ -3577,6 +3834,7 @@ Changes are \"unsaved\".".into()),
             let refusal = Refusal::ActionUnconfirmed {
                 action: Box::new(action.clone()),
                 cause,
+                code: cause.decision_code(),
             };
             assert_eq!(refusal.summary(), summary, "{cause:?}");
             assert_eq!(refusal.next_steps(), steps, "{cause:?}");
@@ -3600,6 +3858,7 @@ Changes are \"unsaved\".".into()),
                 Refusal::ActionUnconfirmed {
                     action: Box::new(action.clone()),
                     cause: CheckFailure::Blocked(BlockedReason::Hold),
+                    code: CheckFailure::Blocked(BlockedReason::Hold).decision_code(),
                 }
                 .audit()
                 .refusal()
@@ -3640,7 +3899,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::AuthorityBlocked {
-                    reason: BlockedReason::Host,
+                    code: crate::governance::ReasonCode::HostDenied,
                     host: Some("example.com".into()),
                     origin: None,
                 },
@@ -3648,7 +3907,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::AuthorityBlocked {
-                    reason: BlockedReason::Hold,
+                    code: crate::governance::ReasonCode::RuntimeHold,
                     host: None,
                     origin: None,
                 },
@@ -3656,7 +3915,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::AuthorityBlocked {
-                    reason: BlockedReason::SessionEnded,
+                    code: crate::governance::ReasonCode::SessionEnded,
                     host: None,
                     origin: None,
                 },
@@ -3757,7 +4016,9 @@ Changes are \"unsaved\".".into()),
                 "The browser never confirmed what the sent command did.",
             ),
             (
-                Refusal::LandingDeniedUnknown,
+                Refusal::LandingDeniedUnknown {
+            code: crate::governance::ReasonCode::HostDenied,
+        },
                 "The new tab's final state is unknown after its landing was blocked.",
             ),
             (
@@ -3779,7 +4040,9 @@ Changes are \"unsaved\".".into()),
                 "More than one tab is open in this session, so the call must name one.",
             ),
             (
-                Refusal::FilesUnreadable,
+                Refusal::FilesUnreadable {
+            problem: crate::language::outcome::FileProblem::Unavailable,
+        },
                 "The selected local files could not be prepared safely.",
             ),
             (
@@ -3857,7 +4120,10 @@ Changes are \"unsaved\".".into()),
             vec![UPDATE_EXTENSION_STEP]
         );
         assert_eq!(
-            Refusal::FilesUnreadable.next_steps(),
+            Refusal::FilesUnreadable {
+                problem: FileProblem::Unavailable
+            }
+            .next_steps(),
             vec!["Confirm each path is an existing file within Ghostlight's upload limits."]
         );
         assert_eq!(
@@ -3927,7 +4193,7 @@ Changes are \"unsaved\".".into()),
 
         // Localhost is protected only when an authored policy marks it never-touch.
         let refusal = Refusal::AuthorityBlocked {
-            reason: BlockedReason::ProtectedHost,
+            code: crate::governance::ReasonCode::ProtectedHost,
             host: Some("localhost".into()),
             origin: None,
         };
@@ -3981,6 +4247,7 @@ Changes are \"unsaved\".".into()),
     fn primitive_refusal_carries_the_browser_reason_without_claiming_a_disconnection() {
         let refusal = Refusal::BrowserPrimitive {
             detail: "target is not visible for focus".into(),
+            cause: crate::language::outcome::PrimitiveCause::Refused,
         };
         let summary = refusal.summary();
         assert!(summary.contains("target is not visible for focus"));
@@ -4037,7 +4304,7 @@ Changes are \"unsaved\".".into()),
             "http://[::1]:41259",
         ] {
             let refusal = Refusal::AuthorityBlocked {
-                reason: BlockedReason::OwnWorkbench,
+                code: crate::governance::ReasonCode::OwnWorkbench,
                 host: Some("127.0.0.1".into()),
                 origin: Some(origin.into()),
             };
@@ -4049,7 +4316,7 @@ Changes are \"unsaved\".".into()),
             assert_eq!(refusal.observed().host.as_deref(), Some("127.0.0.1"));
         }
         let unnamed = Refusal::AuthorityBlocked {
-            reason: BlockedReason::OwnWorkbench,
+            code: crate::governance::ReasonCode::OwnWorkbench,
             host: None,
             origin: None,
         };
@@ -4058,7 +4325,7 @@ Changes are \"unsaved\".".into()),
             "Blocked: that address is Ghostlight's own control page and is never automated. Other ports on this computer are not affected."
         );
         let protected = Refusal::AuthorityBlocked {
-            reason: BlockedReason::ProtectedHost,
+            code: crate::governance::ReasonCode::ProtectedHost,
             host: Some("localhost".into()),
             origin: None,
         };
@@ -4082,7 +4349,7 @@ Changes are \"unsaved\".".into()),
             BlockedReason::Unspecified,
         ] {
             let refusal = Refusal::AuthorityBlocked {
-                reason,
+                code: reason.code(),
                 host: Some("example.com".into()),
                 origin: None,
             };
@@ -4095,7 +4362,7 @@ Changes are \"unsaved\".".into()),
             BlockedReason::SessionEnded,
         ] {
             let refusal = Refusal::AuthorityBlocked {
-                reason,
+                code: reason.code(),
                 host: None,
                 origin: None,
             };
@@ -4115,7 +4382,7 @@ Changes are \"unsaved\".".into()),
             .summary(),
             Outcome::RecordingBoundary { duration_ms: 3_000 }.summary(),
             Refusal::AuthorityBlocked {
-                reason: BlockedReason::Screenshot,
+                code: crate::governance::ReasonCode::ScreenshotDenied,
                 host: None,
                 origin: None,
             }
@@ -4828,5 +5095,495 @@ Changes are \"unsaved\".".into()),
         let cut = listed(TargetNoun::Control, &[(LeftOutKey::Chrome, 96)]);
         let whole = listed(TargetNoun::Control, &[]);
         assert_eq!(cut.observed(), whole.observed());
+    }
+
+    /// One refusal of every variant, and of every closed cause that changes its model code.
+    fn every_refusal() -> Vec<Refusal> {
+        use crate::governance::ReasonCode;
+        use crate::language::page_refusal::{PageGesture, PageRefusal};
+        let mut all = vec![
+            Refusal::Capacity,
+            Refusal::InvalidRequest,
+            Refusal::CancelledBeforeStart {
+                by: CancelCause::Client,
+            },
+            Refusal::DeadlineBeforeStart,
+            Refusal::AuthorityBlocked {
+                code: ReasonCode::HostDenied,
+                host: None,
+                origin: None,
+            },
+            Refusal::AuthorityBlocked {
+                code: ReasonCode::ChannelDenied,
+                host: None,
+                origin: None,
+            },
+            Refusal::ChannelOff {
+                channel: IntakeChannel::Mcp,
+                author: PolicyAuthor::User,
+            },
+            Refusal::LocalInterlock,
+            Refusal::CredentialAuthorization {
+                control: ControlRef::new(TargetRole::Textbox, "Password", None, true),
+            },
+            Refusal::IncompatibleReceipt,
+            Refusal::BrowserAdapterOutdated,
+            Refusal::DeadlineExpired {
+                before_dispatch: true,
+                timeout_adjustable: false,
+            },
+            Refusal::PageRefused {
+                refusal: PageRefusal::Disabled,
+                gesture: PageGesture::Other,
+            },
+            Refusal::FieldsReverted {
+                set: 1,
+                reverted: vec![],
+            },
+            Refusal::FieldValuesRejected {
+                fields: vec![],
+                total: 1,
+            },
+            Refusal::DocumentUnavailable,
+            Refusal::CancelledBeforeDispatch { by: None },
+            Refusal::BrowserContract,
+            Refusal::BrowserAmbiguous,
+            Refusal::BrowserUnknown,
+            Refusal::BrowserPinned,
+            Refusal::BrowserStartupManual {
+                browsers: vec![],
+                extension: ExtensionAdvice::Plain,
+            },
+            Refusal::ConnectionLost,
+            Refusal::CancelledAfterDispatch { by: None },
+            Refusal::EffectUnknown,
+            Refusal::LandingDeniedUnknown {
+                code: ReasonCode::HostDenied,
+            },
+            Refusal::WorkspaceUnusable {
+                reason: WorkspaceReason::NoTab,
+            },
+            Refusal::TabHeld { host: None },
+            Refusal::CaptureTooLarge,
+            Refusal::TabNotShowing,
+            Refusal::NoDialogVisible,
+            Refusal::DialogOpen,
+            Refusal::NoHistoryEntry { forward: false },
+            Refusal::RecordingUnavailable,
+            Refusal::RecordingHeld,
+            Refusal::RecordingExportFailed,
+            Refusal::RecordingNotAttached,
+        ];
+        for cause in [
+            PrimitiveCause::Refused,
+            PrimitiveCause::DebuggerUnavailable,
+            PrimitiveCause::SessionLost,
+        ] {
+            all.push(Refusal::BrowserPrimitive {
+                detail: "Frame gone".into(),
+                cause,
+            });
+        }
+        for reason in [
+            BrowserUnavailableReason::NotAnswering,
+            BrowserUnavailableReason::NotConnected,
+            BrowserUnavailableReason::WrongProfile,
+            BrowserUnavailableReason::Busy,
+        ] {
+            all.push(Refusal::BrowserUnavailable { reason });
+        }
+        for reason in [
+            BrowserRecoveryReason::BrowserAbsent,
+            BrowserRecoveryReason::LaunchFailed,
+            BrowserRecoveryReason::SandboxedPackage,
+            BrowserRecoveryReason::ExtensionAbsent,
+            BrowserRecoveryReason::NativeHostUnavailable,
+            BrowserRecoveryReason::OwnedElsewhere,
+            BrowserRecoveryReason::HandshakeTimeout,
+        ] {
+            all.push(Refusal::BrowserRecoveryFailed {
+                reason,
+                extension: ExtensionAdvice::Plain,
+            });
+        }
+        for problem in [
+            FileProblem::Unavailable,
+            FileProblem::NotAFile,
+            FileProblem::FileTooLarge,
+            FileProblem::UploadTooLarge,
+            FileProblem::ReadFailed,
+            FileProblem::Changed,
+            FileProblem::InvalidName,
+            FileProblem::NotBase64,
+            FileProblem::StaleCapture,
+        ] {
+            all.push(Refusal::FilesUnreadable { problem });
+        }
+        for cause in [
+            CheckFailure::Unmet,
+            CheckFailure::Blocked(BlockedReason::Capability),
+            CheckFailure::Cancelled,
+            CheckFailure::DeadlineExpired,
+            CheckFailure::Disconnected,
+            CheckFailure::BrowserUnavailable,
+            CheckFailure::DocumentUnavailable,
+            CheckFailure::BrowserRefused,
+        ] {
+            all.push(Refusal::ActionUnconfirmed {
+                action: Box::new(Outcome::DialogHandled { accepted: true }),
+                cause,
+                code: cause.decision_code(),
+            });
+        }
+        all
+    }
+
+    /// The name of a refusal's variant. The match is exhaustive, so a new variant fails to
+    /// compile here until the table below gives it a model code and an audit tag.
+    const fn variant_name(refusal: &Refusal) -> &'static str {
+        match refusal {
+            Refusal::Capacity => "Capacity",
+            Refusal::InvalidRequest => "InvalidRequest",
+            Refusal::CancelledBeforeStart { .. } => "CancelledBeforeStart",
+            Refusal::DeadlineBeforeStart => "DeadlineBeforeStart",
+            Refusal::AuthorityBlocked { .. } => "AuthorityBlocked",
+            Refusal::ChannelOff { .. } => "ChannelOff",
+            Refusal::LocalInterlock => "LocalInterlock",
+            Refusal::CredentialAuthorization { .. } => "CredentialAuthorization",
+            Refusal::IncompatibleReceipt => "IncompatibleReceipt",
+            Refusal::BrowserAdapterOutdated => "BrowserAdapterOutdated",
+            Refusal::DeadlineExpired { .. } => "DeadlineExpired",
+            Refusal::BrowserPrimitive { .. } => "BrowserPrimitive",
+            Refusal::PageRefused { .. } => "PageRefused",
+            Refusal::FieldsReverted { .. } => "FieldsReverted",
+            Refusal::FieldValuesRejected { .. } => "FieldValuesRejected",
+            Refusal::DocumentUnavailable => "DocumentUnavailable",
+            Refusal::CancelledBeforeDispatch { .. } => "CancelledBeforeDispatch",
+            Refusal::BrowserUnavailable { .. } => "BrowserUnavailable",
+            Refusal::BrowserContract => "BrowserContract",
+            Refusal::BrowserAmbiguous => "BrowserAmbiguous",
+            Refusal::BrowserUnknown => "BrowserUnknown",
+            Refusal::BrowserPinned => "BrowserPinned",
+            Refusal::BrowserStartupManual { .. } => "BrowserStartupManual",
+            Refusal::BrowserRecoveryFailed { .. } => "BrowserRecoveryFailed",
+            Refusal::ConnectionLost => "ConnectionLost",
+            Refusal::CancelledAfterDispatch { .. } => "CancelledAfterDispatch",
+            Refusal::EffectUnknown => "EffectUnknown",
+            Refusal::LandingDeniedUnknown { .. } => "LandingDeniedUnknown",
+            Refusal::WorkspaceUnusable { .. } => "WorkspaceUnusable",
+            Refusal::TabHeld { .. } => "TabHeld",
+            Refusal::FilesUnreadable { .. } => "FilesUnreadable",
+            Refusal::CaptureTooLarge => "CaptureTooLarge",
+            Refusal::TabNotShowing => "TabNotShowing",
+            Refusal::NoDialogVisible => "NoDialogVisible",
+            Refusal::DialogOpen => "DialogOpen",
+            Refusal::NoHistoryEntry { .. } => "NoHistoryEntry",
+            Refusal::RecordingUnavailable => "RecordingUnavailable",
+            Refusal::RecordingHeld => "RecordingHeld",
+            Refusal::RecordingExportFailed => "RecordingExportFailed",
+            Refusal::RecordingNotAttached => "RecordingNotAttached",
+            Refusal::ActionUnconfirmed { .. } => "ActionUnconfirmed",
+        }
+    }
+
+    /// How many variants `Refusal` has; `variant_name` names each once.
+    const REFUSAL_VARIANTS: usize = 41;
+
+    fn audit_tag(refusal: &Refusal) -> String {
+        let tag = serde_json::to_value(refusal.audit().refusal()).expect("an audit tag encodes");
+        tag["reason"]
+            .as_str()
+            .expect("an audit tag has a reason")
+            .to_owned()
+    }
+
+    /// Each refusal has one closed model code, the `reason` fact its result carries, and one
+    /// audit tag, the closed fact durable history keeps. The two spell some refusals differently;
+    /// aligning them is a separate, visible choice (ADR-0203 Decision 5.1).
+    #[test]
+    fn every_refusal_has_one_model_code_and_one_audit_tag() {
+        let expected = [
+            ("Capacity", "capacity", "capacity"),
+            ("InvalidRequest", "invalid_input", "invalid_request"),
+            (
+                "CancelledBeforeStart",
+                "cancelled",
+                "cancelled_before_start",
+            ),
+            ("DeadlineBeforeStart", "deadline", "deadline_before_start"),
+            ("AuthorityBlocked", "host_denied", "authority_blocked"),
+            ("AuthorityBlocked", "channel_denied", "authority_blocked"),
+            ("ChannelOff", "channel_denied", "channel_off"),
+            (
+                "LocalInterlock",
+                "browser_local_interlock",
+                "local_interlock",
+            ),
+            (
+                "CredentialAuthorization",
+                "credential_authorization_required",
+                "credential_authorization",
+            ),
+            (
+                "IncompatibleReceipt",
+                "incompatible_browser_receipt",
+                "incompatible_receipt",
+            ),
+            (
+                "BrowserAdapterOutdated",
+                "browser_contract_failed",
+                "browser_adapter_outdated",
+            ),
+            ("DeadlineExpired", "deadline", "deadline_expired"),
+            ("PageRefused", "disabled", "page_refused"),
+            ("FieldsReverted", "fields_reverted", "fields_reverted"),
+            (
+                "FieldValuesRejected",
+                "field_value_rejected",
+                "field_values_rejected",
+            ),
+            (
+                "DocumentUnavailable",
+                "document_unavailable",
+                "document_unavailable",
+            ),
+            (
+                "CancelledBeforeDispatch",
+                "cancelled",
+                "cancelled_before_dispatch",
+            ),
+            (
+                "BrowserContract",
+                "browser_contract_failed",
+                "browser_contract",
+            ),
+            ("BrowserAmbiguous", "browser_ambiguous", "browser_ambiguous"),
+            ("BrowserUnknown", "browser_unknown", "browser_unknown"),
+            ("BrowserPinned", "browser_pinned", "browser_pinned"),
+            (
+                "BrowserStartupManual",
+                "browser_startup_manual",
+                "browser_startup_manual",
+            ),
+            (
+                "ConnectionLost",
+                "browser_effect_unknown",
+                "connection_lost",
+            ),
+            (
+                "CancelledAfterDispatch",
+                "browser_effect_unknown",
+                "cancelled_after_dispatch",
+            ),
+            ("EffectUnknown", "browser_effect_unknown", "effect_unknown"),
+            (
+                "LandingDeniedUnknown",
+                "host_denied",
+                "landing_denied_unknown",
+            ),
+            ("WorkspaceUnusable", "no_tab", "workspace_unusable"),
+            ("TabHeld", "tab_held", "workspace_unusable"),
+            (
+                "CaptureTooLarge",
+                "screenshot_too_large",
+                "capture_too_large",
+            ),
+            ("TabNotShowing", "tab_not_showing", "tab_not_showing"),
+            ("NoDialogVisible", "no_dialog_visible", "no_dialog_visible"),
+            ("DialogOpen", "dialog_open", "dialog_open"),
+            ("NoHistoryEntry", "no_history_entry", "no_history_entry"),
+            ("RecordingUnavailable", "not_found", "recording_unavailable"),
+            ("RecordingHeld", "held", "recording_held"),
+            (
+                "RecordingExportFailed",
+                "recording_export_failed",
+                "recording_export_failed",
+            ),
+            (
+                "RecordingNotAttached",
+                "recording_not_attached",
+                "recording_not_attached",
+            ),
+            (
+                "BrowserPrimitive",
+                "browser_primitive_failed",
+                "browser_primitive_failed",
+            ),
+            (
+                "BrowserPrimitive",
+                "debugger_unavailable",
+                "browser_primitive_failed",
+            ),
+            (
+                "BrowserPrimitive",
+                "session_lost",
+                "browser_primitive_failed",
+            ),
+            (
+                "BrowserUnavailable",
+                "browser_not_answering",
+                "browser_unavailable",
+            ),
+            (
+                "BrowserUnavailable",
+                "browser_disconnected",
+                "browser_unavailable",
+            ),
+            (
+                "BrowserUnavailable",
+                "browser_wrong_profile",
+                "browser_unavailable",
+            ),
+            ("BrowserUnavailable", "browser_busy", "browser_unavailable"),
+            (
+                "BrowserRecoveryFailed",
+                "browser_absent",
+                "browser_recovery_failed",
+            ),
+            (
+                "BrowserRecoveryFailed",
+                "browser_launch_failed",
+                "browser_recovery_failed",
+            ),
+            (
+                "BrowserRecoveryFailed",
+                "browser_sandboxed",
+                "browser_recovery_failed",
+            ),
+            (
+                "BrowserRecoveryFailed",
+                "browser_extension_absent",
+                "browser_recovery_failed",
+            ),
+            (
+                "BrowserRecoveryFailed",
+                "native_host_unavailable",
+                "browser_recovery_failed",
+            ),
+            (
+                "BrowserRecoveryFailed",
+                "native_host_owned_elsewhere",
+                "browser_recovery_failed",
+            ),
+            (
+                "BrowserRecoveryFailed",
+                "browser_handshake_timeout",
+                "browser_recovery_failed",
+            ),
+            ("FilesUnreadable", "file_unavailable", "files_unreadable"),
+            ("FilesUnreadable", "not_a_file", "files_unreadable"),
+            ("FilesUnreadable", "file_too_large", "files_unreadable"),
+            ("FilesUnreadable", "upload_too_large", "files_unreadable"),
+            ("FilesUnreadable", "file_read_failed", "files_unreadable"),
+            ("FilesUnreadable", "file_changed", "files_unreadable"),
+            ("FilesUnreadable", "invalid_file_name", "files_unreadable"),
+            (
+                "FilesUnreadable",
+                "inline_file_not_base64",
+                "files_unreadable",
+            ),
+            ("FilesUnreadable", "capture_stale", "files_unreadable"),
+            (
+                "ActionUnconfirmed",
+                "expectation_unmet",
+                "action_unconfirmed",
+            ),
+            (
+                "ActionUnconfirmed",
+                "capability_denied",
+                "action_unconfirmed",
+            ),
+            ("ActionUnconfirmed", "cancelled", "action_unconfirmed"),
+            ("ActionUnconfirmed", "deadline", "action_unconfirmed"),
+            (
+                "ActionUnconfirmed",
+                "browser_disconnected",
+                "action_unconfirmed",
+            ),
+            (
+                "ActionUnconfirmed",
+                "browser_unavailable",
+                "action_unconfirmed",
+            ),
+            (
+                "ActionUnconfirmed",
+                "document_unavailable",
+                "action_unconfirmed",
+            ),
+            ("ActionUnconfirmed", "browser_refused", "action_unconfirmed"),
+        ];
+        let refusals = every_refusal();
+        assert_eq!(refusals.len(), expected.len());
+        for (refusal, (variant, code, tag)) in refusals.iter().zip(expected) {
+            assert_eq!(variant_name(refusal), variant);
+            assert_eq!(refusal.reason(), code, "{variant}");
+            assert_eq!(audit_tag(refusal), tag, "{variant}");
+        }
+        let named: std::collections::HashSet<&str> = refusals.iter().map(variant_name).collect();
+        assert_eq!(named.len(), REFUSAL_VARIANTS, "every variant has a row");
+    }
+
+    /// A browser refusal with a closed cause says what happened in Ghostlight's words; only the
+    /// open refusal repeats the browser's text, and history keeps none of it.
+    #[test]
+    fn a_closed_primitive_cause_reads_its_own_sentence() {
+        for cause in [
+            PrimitiveCause::DebuggerUnavailable,
+            PrimitiveCause::SessionLost,
+        ] {
+            let refusal = Refusal::BrowserPrimitive {
+                detail: "Cannot access a chrome:// URL".into(),
+                cause,
+            };
+            assert!(!refusal.summary().contains("chrome://"), "{cause:?}");
+            assert_eq!(refusal.next_steps().len(), 1, "{cause:?}");
+            assert!(
+                !refusal.audit().summary().contains("chrome://"),
+                "{cause:?}"
+            );
+        }
+        let open = Refusal::BrowserPrimitive {
+            detail: "Frame gone".into(),
+            cause: PrimitiveCause::Refused,
+        };
+        assert_eq!(open.summary(), "The browser refused this job: Frame gone.");
+    }
+
+    /// The recovery words are the browser recovery's own fact words.
+    #[test]
+    fn recovery_reasons_say_the_recovery_fact_words() {
+        use crate::browser::recovery::RecoveryFailure;
+        for (reason, failure) in [
+            (
+                BrowserRecoveryReason::BrowserAbsent,
+                RecoveryFailure::BrowserAbsent,
+            ),
+            (
+                BrowserRecoveryReason::LaunchFailed,
+                RecoveryFailure::LaunchFailed,
+            ),
+            (
+                BrowserRecoveryReason::SandboxedPackage,
+                RecoveryFailure::SandboxedPackage,
+            ),
+            (
+                BrowserRecoveryReason::ExtensionAbsent,
+                RecoveryFailure::ExtensionAbsent,
+            ),
+            (
+                BrowserRecoveryReason::NativeHostUnavailable,
+                RecoveryFailure::NativeHostUnavailable,
+            ),
+            (
+                BrowserRecoveryReason::OwnedElsewhere,
+                RecoveryFailure::OwnedElsewhere,
+            ),
+            (
+                BrowserRecoveryReason::HandshakeTimeout,
+                RecoveryFailure::HandshakeTimeout,
+            ),
+        ] {
+            assert_eq!(reason.fact(), failure.as_str());
+        }
     }
 }
