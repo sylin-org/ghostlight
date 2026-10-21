@@ -354,7 +354,6 @@ pub struct Line {
 /// One command's primitives over one connection, and the facts their receipts reported.
 pub struct Link<'a> {
     line: Line,
-    workspace: &'a str,
     dispatch: BrowserDispatch<'a>,
     effect_started: bool,
     refused_invalid: bool,
@@ -374,12 +373,11 @@ pub enum Answer<T> {
 }
 
 impl<'a> Link<'a> {
-    /// Carry one command of `workspace` over `line` under the caller's dispatch controls.
+    /// Carry one command over `line` under the caller's dispatch controls.
     #[must_use]
-    pub fn new(line: Line, workspace: &'a str, dispatch: BrowserDispatch<'a>) -> Self {
+    pub fn new(line: Line, dispatch: BrowserDispatch<'a>) -> Self {
         Self {
             line,
-            workspace,
             dispatch,
             effect_started: false,
             refused_invalid: false,
@@ -396,12 +394,6 @@ impl<'a> Link<'a> {
     /// and the failure is a stale locator that navigated.
     pub fn names_one_locator(&mut self) {
         self.one_locator = true;
-    }
-
-    /// The workspace the command belongs to.
-    #[must_use]
-    pub const fn workspace(&self) -> &str {
-        self.workspace
     }
 
     /// Every top-frame URL the command's receipts reported committed, in order, each once.

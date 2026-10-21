@@ -68,7 +68,6 @@ impl PresentationPort for BrowserPresentation {
         self.browser
             .call(
                 &browser,
-                workspace,
                 BrowserCommand::Present { signal },
                 deadline,
                 &cancelled,
@@ -92,19 +91,18 @@ impl BrowserPresentation {
         match tabs.as_slice() {
             [] => None,
             [only] => Some(*only),
-            several => match self.browser.call(
-                browser,
-                workspace,
-                BrowserCommand::ListTabs,
-                deadline,
-                cancelled,
-            ) {
-                Ok(BrowserOutcome::Tabs { tabs: listed }) => listed
-                    .iter()
-                    .find(|tab| tab.active && several.contains(&tab.tab_id))
-                    .map(|tab| tab.tab_id),
-                _ => None,
-            },
+            several => {
+                match self
+                    .browser
+                    .call(browser, BrowserCommand::ListTabs, deadline, cancelled)
+                {
+                    Ok(BrowserOutcome::Tabs { tabs: listed }) => listed
+                        .iter()
+                        .find(|tab| tab.active && several.contains(&tab.tab_id))
+                        .map(|tab| tab.tab_id),
+                    _ => None,
+                }
+            }
         }
     }
 }

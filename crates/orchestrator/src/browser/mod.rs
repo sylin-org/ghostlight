@@ -190,7 +190,6 @@ pub trait BrowserPort: Send + Sync {
     fn call(
         &self,
         browser: &str,
-        workspace: &str,
         command: Work,
         deadline: Instant,
         cancelled: &AtomicBool,
@@ -204,19 +203,12 @@ pub trait BrowserPort: Send + Sync {
     fn call_guarded(
         &self,
         browser: &str,
-        workspace: &str,
         command: Work,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         (dispatch.admit)()?;
         dispatch.written.store(true, Ordering::SeqCst);
-        self.call(
-            browser,
-            workspace,
-            command,
-            dispatch.deadline,
-            dispatch.cancelled,
-        )
+        self.call(browser, command, dispatch.deadline, dispatch.cancelled)
     }
 
     /// Every connected browser, most recently attended first.
@@ -1054,7 +1046,6 @@ impl RelayBrowserPort {
     fn call_inner(
         &self,
         browser: &str,
-        workspace: &str,
         command: Work,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
@@ -1074,7 +1065,7 @@ impl RelayBrowserPort {
             }
             connection.line.clone()
         };
-        protocol4::run(command, &mut Link::new(line, workspace, dispatch))
+        protocol4::run(command, &mut Link::new(line, dispatch))
     }
 
     /// Wait for one browser's connection to be registered and answering.
@@ -1124,14 +1115,12 @@ impl BrowserPort for RelayBrowserPort {
     fn call(
         &self,
         browser: &str,
-        workspace: &str,
         command: Work,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
         self.call_inner(
             browser,
-            workspace,
             command,
             BrowserDispatch {
                 deadline,
@@ -1145,11 +1134,10 @@ impl BrowserPort for RelayBrowserPort {
     fn call_guarded(
         &self,
         browser: &str,
-        workspace: &str,
         command: Work,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
-        self.call_inner(browser, workspace, command, dispatch)
+        self.call_inner(browser, command, dispatch)
     }
 
     fn browsers(&self) -> Vec<BrowserSummary> {
@@ -1791,7 +1779,6 @@ pub(crate) mod testing {
         fn call(
             &self,
             browser: &str,
-            _workspace: &str,
             command: Work,
             _deadline: Instant,
             _cancelled: &AtomicBool,
@@ -1802,7 +1789,6 @@ pub(crate) mod testing {
         fn call_guarded(
             &self,
             browser: &str,
-            _workspace: &str,
             command: Work,
             dispatch: super::BrowserDispatch<'_>,
         ) -> Result<BrowserOutcome, BrowserError> {

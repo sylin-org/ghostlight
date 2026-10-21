@@ -24,7 +24,6 @@ use crate::language::{FindScope, PointerButton, ReadMode};
 use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
-const WORKSPACE: &str = "workspace_translate";
 const PATIENCE: Duration = Duration::from_secs(30);
 const TOP: &str = "https://example.com/";
 const CHILD: &str = "https://child.example/";
@@ -69,13 +68,7 @@ fn port_with(script: super::super::fake::Script) -> (RelayBrowserPort, FakeExten
 
 fn call(port: &RelayBrowserPort, command: BrowserCommand) -> Result<BrowserOutcome, BrowserError> {
     let cancelled = AtomicBool::new(false);
-    port.call(
-        FOUR,
-        WORKSPACE,
-        command,
-        Instant::now() + PATIENCE,
-        &cancelled,
-    )
+    port.call(FOUR, command, Instant::now() + PATIENCE, &cancelled)
 }
 
 fn frame(frame_id: &str, loader_id: &str, parent: Option<&str>, url: &str) -> Value {

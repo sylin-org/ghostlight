@@ -533,7 +533,6 @@ impl crate::browser::BrowserPort for ControlledBrowser {
     fn call(
         &self,
         _: &str,
-        _: &str,
         _: crate::browser::adapter::BrowserCommand,
         _: std::time::Instant,
         _: &std::sync::atomic::AtomicBool,
@@ -836,7 +835,6 @@ struct BusyBrowser {
 impl crate::browser::BrowserPort for BusyBrowser {
     fn call(
         &self,
-        _: &str,
         _: &str,
         _: crate::browser::adapter::BrowserCommand,
         _: std::time::Instant,
@@ -2012,7 +2010,6 @@ impl ComingAndGoing {
 impl crate::browser::BrowserPort for ComingAndGoing {
     fn call(
         &self,
-        _: &str,
         _: &str,
         _: crate::browser::adapter::BrowserCommand,
         _: std::time::Instant,

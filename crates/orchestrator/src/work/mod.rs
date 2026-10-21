@@ -1427,7 +1427,6 @@ impl ApplicationExecutor {
         let asked = AtomicBool::new(false);
         let outcome = self.browser.call_guarded(
             browser,
-            context.workspace.as_str(),
             command,
             crate::browser::BrowserDispatch {
                 deadline,

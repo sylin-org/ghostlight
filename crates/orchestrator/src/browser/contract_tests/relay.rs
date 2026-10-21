@@ -29,7 +29,6 @@ fn two_browsers_are_two_adapters_and_each_keeps_its_own_work() {
     for browser in ["browser_chrome", "browser_edge"] {
         let Ok(BrowserOutcome::Tabs { tabs }) = port.call(
             browser,
-            "workspace_test",
             BrowserCommand::ListTabs,
             Instant::now() + Duration::from_secs(5),
             &AtomicBool::new(false),

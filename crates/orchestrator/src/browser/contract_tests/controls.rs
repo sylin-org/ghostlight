@@ -39,7 +39,6 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
             let call = scope.spawn(|| {
                 port.call_guarded(
                     TEST_BROWSER,
-                    "workspace",
                     BrowserCommand::Navigate {
                         tab_id: 5,
                         url: "https://example.com/".into(),

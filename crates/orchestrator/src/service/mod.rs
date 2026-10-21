@@ -932,13 +932,7 @@ impl Farewell {
             state.releasing += 1;
         }
         let released = self.workspaces.release(workspace);
-        cleanup_released_tabs(
-            workspace.as_str(),
-            &released,
-            self.port.as_ref(),
-            &self.workspaces,
-            None,
-        );
+        cleanup_released_tabs(&released, self.port.as_ref(), &self.workspaces, None);
         lock(&self.state).releasing -= 1;
         self.closed.notify_all();
     }
@@ -1026,13 +1020,13 @@ impl Farewell {
         let mut held = Vec::new();
         for workspace in ending {
             match self.workspaces.release_unleased(&workspace, Instant::now()) {
-                Some(released) => self.close_released(&workspace, &released, until),
+                Some(released) => self.close_released(&released, until),
                 None => held.push(workspace),
             }
         }
         for workspace in held {
             if let Some(released) = self.workspaces.release_unleased(&workspace, until) {
-                self.close_released(&workspace, &released, until);
+                self.close_released(&released, until);
             }
         }
         let state = lock(&self.state);
@@ -1044,14 +1038,8 @@ impl Farewell {
     }
 
     /// Close the tabs `released` names before `until`.
-    fn close_released(&self, workspace: &WorkspaceId, released: &ReleasedTabs, until: Instant) {
-        cleanup_released_tabs(
-            workspace.as_str(),
-            released,
-            self.port.as_ref(),
-            &self.workspaces,
-            Some(until),
-        );
+    fn close_released(&self, released: &ReleasedTabs, until: Instant) {
+        cleanup_released_tabs(released, self.port.as_ref(), &self.workspaces, Some(until));
     }
 }
 
@@ -2226,7 +2214,7 @@ fn register_missing_browsers(home: &Path, executable: &Path) {
 /// Close the tabs of every session whose owning process is gone.
 fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
     for released in workspaces.reap(&owner_alive) {
-        cleanup_released_tabs("reaped", &released, browser, workspaces, None);
+        cleanup_released_tabs(&released, browser, workspaces, None);
     }
 }
 
@@ -2243,7 +2231,6 @@ fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort
 /// `until`: a command that would start after it is not sent, and its tab leaves the pool as one
 /// whose close did not answer.
 fn cleanup_released_tabs(
-    workspace: &str,
     released: &ReleasedTabs,
     browser: &dyn BrowserPort,
     workspaces: &WorkspaceStore,
@@ -2268,7 +2255,6 @@ fn cleanup_released_tabs(
         };
         let _ = browser.call(
             target,
-            workspace,
             BrowserCommand::ClearDiagnostics {
                 tab_ids: tab_ids.to_vec(),
             },
@@ -2280,7 +2266,6 @@ fn cleanup_released_tabs(
         let kept_open = call_deadline().is_some_and(|deadline| {
             let closed = browser.call(
                 target,
-                workspace,
                 BrowserCommand::CloseTab {
                     tab_id,
                     released: true,
@@ -2688,7 +2673,7 @@ mod tests {
         for _ in &released.physical_ids {
             browser.push(Err(BrowserError::LocalInterlock("preserved".into())));
         }
-        cleanup_released_tabs("released", released, &browser, workspaces, None);
+        cleanup_released_tabs(released, &browser, workspaces, None);
     }
 
     /// The tab a later session of the same client opening example.com would reuse, if any.
@@ -2722,7 +2707,7 @@ mod tests {
         browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 1 }));
         browser.push(Err(BrowserError::LocalInterlock("preserved".into())));
         browser.push(Err(BrowserError::DeadlineAfterDispatch));
-        cleanup_released_tabs("released", &released, &browser, &workspaces, None);
+        cleanup_released_tabs(&released, &browser, &workspaces, None);
 
         assert_eq!(
             browser.calls(),
@@ -2857,7 +2842,7 @@ mod tests {
         sink.on_event(FAKE_BROWSER, BrowserEvent::Disconnected { life: None });
         let released = workspaces.release(&workspace);
         let browser = FakeBrowser::default();
-        cleanup_released_tabs("released", &released, &browser, &workspaces, None);
+        cleanup_released_tabs(&released, &browser, &workspaces, None);
         assert!(browser.calls().is_empty(), "{:?}", browser.calls());
         assert_eq!(reusable_example_tab(&workspaces), None);
     }
@@ -5313,7 +5298,6 @@ mod tests {
         };
 
         cleanup_released_tabs(
-            "workspace-1",
             &released,
             &browser,
             &crate::workspace::WorkspaceStore::default(),

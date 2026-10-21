@@ -544,7 +544,6 @@ fn a_pause_between_fields_after_an_edit_leaves_the_effect_unknown() {
     let error = port
         .call_guarded(
             FOUR,
-            WORKSPACE,
             scoped(
                 all_open(),
                 fill(

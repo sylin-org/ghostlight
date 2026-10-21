@@ -25,7 +25,7 @@ In order. "After" names what a slice waits for.
 | W-D3 | fix(work): a selector wait gives the readiness fact the other waits give | - | WORK-13; a deliberate model-visible change | landed (f6d9fdc3) |
 | C19c | refactor(work): the completion path's leftovers go | - | ADR-0203 C19c, moved from core; WORK-7's `CompletionGate`; the service half is core-service's | landed (244875d3) |
 | C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | landed (616bfffa) |
-| C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | first commit landed; the port's workspace parameter next |
+| C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | landed (c43e2e20 and the port commit) |
 | C12b-2 | refactor(work): the typed refusal builds its result (the work half) | C12b-1 | ADR-0203 C12b; WORK-4, WORK-2 and WORK-3's refusal sites | landed (c1603722) |
 | WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | todo |
 | WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | todo |
@@ -134,3 +134,11 @@ the held start in `a_session_holds_one_recording_and_never_names_it` (nothing is
 discard naming the saved recording in `a_session_starts_a_new_recording_after_saving_one`. The
 adapter's three index tests moved to those executor tests, and
 `each_recording_command_names_its_recording` pins the ids on the wire.
+
+C16, second commit: `BrowserPort::call` and `call_guarded` lose their `workspace` parameter, which
+existed only so the adapter could key the recording index (this amends ADR-0202 Decision 23, as
+Decision 6.7 says). `Link::new` and `Link::workspace` follow, as do the executor's one caller,
+`service/mod.rs`'s `cleanup_released_tabs` with its `"reaped"` and `"released"` placeholders and
+`close_released`, `presentation/mod.rs`'s two calls, and every fake port: four in `work/tests`, three
+in `workbench/tests.rs` (test-04's hold), the relay port's own and the contract tests'. Nothing on
+the wire changes.

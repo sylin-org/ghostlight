@@ -833,7 +833,6 @@ fn a_target_screenshot_under_one_second_still_measures() {
     let deadline = Instant::now() + Duration::from_millis(800);
     let result = port.call(
         FOUR,
-        WORKSPACE,
         BrowserCommand::Screenshot {
             tab_id: 12,
             locator: Some(NESTED.into()),

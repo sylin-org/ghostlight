@@ -368,7 +368,6 @@ impl BrowserPort for ControlledBrowser {
     fn call(
         &self,
         browser: &str,
-        workspace: &str,
         command: BrowserCommand,
         deadline: Instant,
         cancelled: &AtomicBool,
@@ -377,9 +376,7 @@ impl BrowserPort for ControlledBrowser {
             command.primitive(),
             BrowserCommand::DescribeFocused { .. } | BrowserCommand::EvaluateScript { .. }
         );
-        let result = self
-            .inner
-            .call(browser, workspace, command, deadline, cancelled);
+        let result = self.inner.call(browser, command, deadline, cancelled);
         if prepare && !self.before {
             self.governance.apply_runtime_intent(self.intent);
         }
@@ -388,7 +385,6 @@ impl BrowserPort for ControlledBrowser {
     fn call_guarded(
         &self,
         browser: &str,
-        workspace: &str,
         command: BrowserCommand,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
@@ -402,13 +398,7 @@ impl BrowserPort for ControlledBrowser {
             self.governance.apply_runtime_intent(self.intent);
         }
         (dispatch.admit)()?;
-        self.call(
-            browser,
-            workspace,
-            command,
-            dispatch.deadline,
-            dispatch.cancelled,
-        )
+        self.call(browser, command, dispatch.deadline, dispatch.cancelled)
     }
     fn browsers(&self) -> Vec<BrowserSummary> {
         self.inner.browsers()
@@ -504,17 +494,15 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
         fn call(
             &self,
             b: &str,
-            w: &str,
             command: BrowserCommand,
             d: Instant,
             c: &AtomicBool,
         ) -> Result<BrowserOutcome, BrowserError> {
-            self.0.inner.call(b, w, command, d, c)
+            self.0.inner.call(b, command, d, c)
         }
         fn call_guarded(
             &self,
             b: &str,
-            w: &str,
             command: BrowserCommand,
             d: BrowserDispatch<'_>,
         ) -> Result<BrowserOutcome, BrowserError> {
@@ -527,7 +515,7 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
                     .apply_runtime_intent(RuntimeControlIntent::Hold);
             }
             (d.admit)()?;
-            self.call(b, w, command, d.deadline, d.cancelled)
+            self.call(b, command, d.deadline, d.cancelled)
         }
         fn browsers(&self) -> Vec<BrowserSummary> {
             self.0.inner.browsers()

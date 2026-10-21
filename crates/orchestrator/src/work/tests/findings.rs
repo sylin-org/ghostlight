@@ -186,7 +186,6 @@ impl BrowserPort for HeldRead {
     fn call(
         &self,
         browser: &str,
-        workspace: &str,
         command: Work,
         deadline: Instant,
         cancelled: &AtomicBool,
@@ -198,8 +197,7 @@ impl BrowserPort for HeldRead {
                 release.recv().unwrap();
             }
         }
-        self.fake
-            .call(browser, workspace, command, deadline, cancelled)
+        self.fake.call(browser, command, deadline, cancelled)
     }
 
     fn browsers(&self) -> Vec<BrowserSummary> {

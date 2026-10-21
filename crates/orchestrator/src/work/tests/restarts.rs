@@ -516,25 +516,20 @@ impl BrowserPort for RestartsAfterOneCrossing {
     fn call(
         &self,
         browser: &str,
-        workspace: &str,
         command: BrowserCommand,
         deadline: std::time::Instant,
         cancelled: &std::sync::atomic::AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
-        self.browser
-            .call(browser, workspace, command, deadline, cancelled)
+        self.browser.call(browser, command, deadline, cancelled)
     }
 
     fn call_guarded(
         &self,
         browser: &str,
-        workspace: &str,
         command: BrowserCommand,
         dispatch: crate::browser::BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
-        let outcome = self
-            .browser
-            .call_guarded(browser, workspace, command, dispatch);
+        let outcome = self.browser.call_guarded(browser, command, dispatch);
         self.after_crossing();
         outcome
     }

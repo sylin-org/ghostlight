@@ -24,7 +24,6 @@ use crate::sync::lock;
 use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
-const WORKSPACE: &str = "workspace_link";
 const GROUP_TITLE: &str = "Ghostlight - Claude Code";
 const PATIENCE: Duration = Duration::from_secs(30);
 
@@ -55,13 +54,7 @@ fn scripted(next: &Arc<Mutex<wire::Receipt>>) -> Script {
 
 fn call(port: &RelayBrowserPort, command: BrowserCommand) -> Result<BrowserOutcome, BrowserError> {
     let cancelled = AtomicBool::new(false);
-    port.call(
-        FOUR,
-        WORKSPACE,
-        command,
-        Instant::now() + PATIENCE,
-        &cancelled,
-    )
+    port.call(FOUR, command, Instant::now() + PATIENCE, &cancelled)
 }
 
 fn tab(url: &str) -> Value {
@@ -463,7 +456,6 @@ fn a_stale_locator_after_a_started_effect_settles_as_an_unknown_effect() {
     let stale = || BrowserError::stale(StaleReason::Removed);
     let mut link = Link::new(
         line(&port),
-        WORKSPACE,
         BrowserDispatch {
             deadline: Instant::now() + PATIENCE,
             cancelled: &cancelled,
@@ -593,7 +585,6 @@ fn cancelled_navigate(dispatched: bool) -> (Result<BrowserOutcome, BrowserError>
         });
         port.call(
             FOUR,
-            WORKSPACE,
             BrowserCommand::Navigate {
                 tab_id: 12,
                 url: "https://example.com/".into(),
@@ -637,7 +628,7 @@ fn the_deadline_forwards_a_cancel_and_returns_at_once() {
         ),
     ] {
         let deadline = Instant::now() + Duration::from_millis(300);
-        let result = port.call(FOUR, WORKSPACE, command, deadline, &cancelled);
+        let result = port.call(FOUR, command, deadline, &cancelled);
         let late = Instant::now().saturating_duration_since(deadline);
         assert_eq!(result, Err(expected));
         assert!(late < Duration::from_millis(200), "returned {late:?} late");
@@ -663,7 +654,6 @@ fn runtime_control_refusing_an_effect_writes_nothing() {
     assert_eq!(
         port.call_guarded(
             FOUR,
-            WORKSPACE,
             BrowserCommand::Navigate {
                 tab_id: 12,
                 url: "https://example.com/".into()
@@ -677,7 +667,7 @@ fn runtime_control_refusing_an_effect_writes_nothing() {
         "the refused effect never reached the browser"
     );
     assert_eq!(
-        port.call_guarded(FOUR, WORKSPACE, BrowserCommand::ListTabs, dispatch()),
+        port.call_guarded(FOUR, BrowserCommand::ListTabs, dispatch()),
         Ok(BrowserOutcome::Tabs { tabs: vec![] }),
         "a read does not ask runtime control"
     );
@@ -706,7 +696,6 @@ fn a_written_command_reached_the_browser_whatever_its_failure() {
         let written = AtomicBool::new(false);
         let outcome = port.call_guarded(
             browser,
-            WORKSPACE,
             command,
             BrowserDispatch {
                 deadline: Instant::now() + patience,
@@ -792,10 +781,7 @@ fn a_downloads_save_whose_receipt_is_lost_reads_as_after_dispatch() {
             max_output_bytes: 4096,
         };
         let deadline = Instant::now() + Duration::from_millis(300);
-        assert_eq!(
-            port.call(FOUR, WORKSPACE, save, deadline, &cancelled),
-            Err(expected)
-        );
+        assert_eq!(port.call(FOUR, save, deadline, &cancelled), Err(expected));
     }
     assert_eq!(fake.wait(|seen| seen.cancels.len() == 2).requests.len(), 2);
 }
@@ -1041,7 +1027,6 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
         };
         let mut link = Link::new(
             line(&port),
-            WORKSPACE,
             BrowserDispatch {
                 deadline: Instant::now() + PATIENCE,
                 cancelled: &cancelled,
@@ -1063,7 +1048,6 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
         };
         let mut link = Link::new(
             line(&port),
-            WORKSPACE,
             BrowserDispatch {
                 deadline: Instant::now() + PATIENCE,
                 cancelled: &cancelled,
@@ -1102,7 +1086,6 @@ fn cancelled_call(dispatched: bool) -> Result<Answers, BrowserError> {
     let admit = || Ok(());
     let mut link = Link::new(
         line(&port),
-        WORKSPACE,
         BrowserDispatch {
             deadline: Instant::now() + PATIENCE,
             cancelled: &cancelled,
@@ -1148,7 +1131,6 @@ fn requests_route_by_correlation_and_large_ones_arrive_in_chunks() {
     let admit = || Ok(());
     let mut link = Link::new(
         line(&port),
-        WORKSPACE,
         BrowserDispatch {
             deadline: Instant::now() + PATIENCE,
             cancelled: &cancelled,
@@ -1192,7 +1174,6 @@ fn the_tab_comes_from_the_last_receipt_or_one_listing() {
     let admit = || Ok(());
     let mut link = Link::new(
         line(&port),
-        WORKSPACE,
         BrowserDispatch {
             deadline: Instant::now() + PATIENCE,
             cancelled: &cancelled,
