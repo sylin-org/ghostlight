@@ -126,7 +126,7 @@ impl UserDirs {
 
     /// The roaming application data directory only when `APPDATA` names it. Only the Windows
     /// Start-menu shortcut reads it.
-    #[cfg(any(windows, test))]
+    #[cfg(windows)]
     #[must_use]
     pub(super) fn named_roaming(&self) -> Option<&Path> {
         self.app_data.as_deref()
@@ -183,115 +183,5 @@ impl UserDirs {
             },
             Path::to_path_buf,
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A lookup over fixed `variables`.
-    fn set(variables: Vec<(&'static str, String)>) -> impl Fn(&str) -> Option<OsString> {
-        move |name| {
-            variables
-                .iter()
-                .find(|(set, _)| *set == name)
-                .map(|(_, value)| OsString::from(value))
-        }
-    }
-
-    /// An absolute path on this system.
-    fn absolute(path: &str) -> String {
-        if cfg!(windows) {
-            format!("C:{path}")
-        } else {
-            path.to_owned()
-        }
-    }
-
-    #[test]
-    fn a_set_absolute_variable_names_its_directory() {
-        let codex = absolute("/work/codex");
-        assert_eq!(
-            directory_in(&set(vec![("CODEX_HOME", codex.clone())]), "CODEX_HOME"),
-            Some(PathBuf::from(codex))
-        );
-    }
-
-    #[test]
-    fn an_empty_variable_names_no_directory() {
-        let lookup = set(vec![("CODEX_HOME", String::new())]);
-        assert_eq!(directory_in(&lookup, "CODEX_HOME"), None);
-    }
-
-    #[test]
-    fn a_relative_variable_names_no_directory() {
-        let lookup = set(vec![("CODEX_HOME", "codex".to_owned())]);
-        assert_eq!(directory_in(&lookup, "CODEX_HOME"), None);
-    }
-
-    #[test]
-    fn an_unset_variable_names_no_directory() {
-        assert_eq!(directory_in(&set(Vec::new()), "CODEX_HOME"), None);
-    }
-
-    #[test]
-    fn empty_and_relative_roots_fall_back_below_the_home() {
-        let home = absolute("/home/test");
-        let lookup = set(vec![
-            (HOME_VARIABLE, home.clone()),
-            (USER_PROFILE_VARIABLE, home.clone()),
-            (APP_DATA_VARIABLE, String::new()),
-            (LOCAL_APP_DATA_VARIABLE, "Local".to_owned()),
-            (XDG_CONFIG_HOME_VARIABLE, String::new()),
-            (XDG_DATA_HOME_VARIABLE, "share".to_owned()),
-        ]);
-        let home = PathBuf::from(home);
-        for windows in [false, true] {
-            let dirs = UserDirs::from_lookup(&lookup, windows);
-            assert_eq!(dirs.home(), home);
-            assert_eq!(dirs.roaming(), home.join("AppData").join("Roaming"));
-            assert_eq!(dirs.local(), home.join("AppData").join("Local"));
-            assert_eq!(dirs.xdg_config(), home.join(".config"));
-            assert_eq!(dirs.xdg_data(), home.join(".local").join("share"));
-            assert_eq!(dirs.named_roaming(), None);
-            assert_eq!(dirs.named_local(), None);
-            assert_eq!(dirs.named_xdg_data(), None);
-        }
-    }
-
-    #[test]
-    fn the_home_follows_the_platform_variable_only() {
-        let profile = absolute("/Users/profile");
-        let home = absolute("/home/other");
-        let both = set(vec![
-            (USER_PROFILE_VARIABLE, profile.clone()),
-            (HOME_VARIABLE, home.clone()),
-        ]);
-        assert_eq!(
-            UserDirs::from_lookup(&both, true).home(),
-            Path::new(&profile)
-        );
-        assert_eq!(UserDirs::from_lookup(&both, false).home(), Path::new(&home));
-        let only_home = set(vec![(HOME_VARIABLE, home)]);
-        assert_eq!(
-            UserDirs::from_lookup(&only_home, true).home(),
-            Path::new("")
-        );
-    }
-
-    #[test]
-    fn named_roots_are_taken_as_they_are() {
-        let roaming = absolute("/Profiles/Roaming");
-        let program = absolute("/Program Files");
-        let lookup = set(vec![
-            (APP_DATA_VARIABLE, roaming.clone()),
-            ("ProgramFiles", program.clone()),
-            ("ProgramFiles(x86)", program.clone()),
-        ]);
-        let dirs = UserDirs::from_lookup(&lookup, true);
-        assert_eq!(dirs.roaming(), PathBuf::from(&roaming));
-        assert_eq!(dirs.named_roaming(), Some(Path::new(&roaming)));
-        assert_eq!(dirs.program_files(), [PathBuf::from(program)]);
     }
 }

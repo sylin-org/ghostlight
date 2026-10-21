@@ -3416,6 +3416,9 @@ mod tests {
         assert_eq!(fs::read_to_string(&link).unwrap(), r#"{"new":true}"#);
     }
 
+    /// Defect I-D1 (c51204ca) and INST-4: a root variable that is set but empty or relative names
+    /// no directory, so a client's file lands below the home, never in the working directory, and
+    /// the home is the platform's own variable alone (`USERPROFILE` on Windows, `HOME` elsewhere).
     #[test]
     fn empty_root_variables_resolve_below_the_home_not_the_working_directory() {
         let home = if cfg!(windows) {
@@ -3427,11 +3430,16 @@ mod tests {
             user_dirs::USER_PROFILE_VARIABLE | user_dirs::HOME_VARIABLE => {
                 Some(OsString::from(home))
             }
-            user_dirs::XDG_CONFIG_HOME_VARIABLE
-            | user_dirs::APP_DATA_VARIABLE
-            | CODEX_HOME_VARIABLE => Some(OsString::new()),
+            user_dirs::XDG_CONFIG_HOME_VARIABLE | CODEX_HOME_VARIABLE => Some(OsString::new()),
+            user_dirs::APP_DATA_VARIABLE => Some(OsString::from("Roaming")),
             _ => None,
         };
+        let only_home =
+            |name: &str| (name == user_dirs::HOME_VARIABLE).then(|| OsString::from(home));
+        assert_eq!(
+            UserDirs::from_lookup(&only_home, true).home(),
+            Path::new("")
+        );
         let home = Path::new(home);
 
         for windows in [false, true] {

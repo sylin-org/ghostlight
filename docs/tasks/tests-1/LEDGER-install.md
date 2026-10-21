@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 603 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 596 |
 | `crates/desktop` | 161 | 20 | 161 |
 
 ## Slices
@@ -29,6 +29,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I5 | `install/container.rs`: five tests of the container probe fold into one, every assertion kept | 615 | 611 | defect 1 (53a04ef2) | landed (this commit) |
 | T-I6 | `install/packaged.rs`: six tests fold into one rank rule; the path-mapping, absent-package and own-copy-without-file cases go to the writer golden's Store seeds | 611 | 606 | defect 1 (236485f4, 4fac15a7) | landed (this commit) |
 | T-I7 | `install/entry.rs`: four path-spelling tests fold into one; its two entry-rule tests wait for the `cli/start.rs` slice, which absorbs them | 606 | 603 | defect 1 (664d0573) | landed (this commit) |
+| T-I8 | `install/user_dirs.rs`: its seven tests fold into the harness-roots test in `install/mod.rs`, which now adds a relative value and the platform home rule | 603 | 596 | defect (I-D1, INST-4), counted under mod.rs | landed (this commit) |
 
 ## Notes
 
