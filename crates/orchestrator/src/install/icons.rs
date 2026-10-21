@@ -1,7 +1,7 @@
 //! Each agent's own icon: where the catalog says it may be found, the one resolver that reads it
 //! from the installed app, and the cache the window serves it from.
 //!
-//! The roster names, per host, the places an agent's icon may be found ([`IconSource`]), in
+//! The roster names, per host, the places an agent's icon may be found ([`AppPlace`]), in
 //! order, and the agent whose icon stands for it when none of its own is found
 //! ([`AgentIconSources::family`]). The resolver tries the sources in order, off the request path
 //! and bounded in time, and keeps the first icon it finds as `state/icons/<agent id>.<png|ico>`
@@ -193,9 +193,9 @@ pub enum ProgramPlace {
     Below(KnownFolder, &'static str),
 }
 
-/// One place the catalog says an agent's own icon may be found on a host.
+/// One place the catalog says an agent's app is installed on a host, which its icon is read from.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum IconSource {
+pub enum AppPlace {
     /// The icon resource of a Windows program, at the first of these places that holds one.
     WindowsExe(&'static [ProgramPlace]),
     /// The logo of a Microsoft Store (MSIX) app, by its package name. Its package family name is
@@ -205,7 +205,7 @@ pub enum IconSource {
     LinuxDesktop(&'static [&'static str]),
 }
 
-impl IconSource {
+impl AppPlace {
     /// The kind of place this source reads an icon from.
     #[must_use]
     pub const fn kind(self) -> IconSourceKind {
@@ -238,7 +238,7 @@ pub struct AgentIconSources {
     /// The agent's name, which is also the name of its app.
     pub name: &'static str,
     /// Where its own icon may be found, in order: its hosts' sources in roster order.
-    pub sources: Vec<IconSource>,
+    pub sources: Vec<AppPlace>,
     /// The agent whose icon stands for this one when none of its own is found.
     pub family: Option<&'static str>,
 }
@@ -875,28 +875,28 @@ impl IconCache {
     }
 
     /// The files `source` names that exist on this computer, in order.
-    fn locate(&self, agent_id: &str, source: IconSource) -> Vec<Located> {
+    fn locate(&self, agent_id: &str, source: AppPlace) -> Vec<Located> {
         let places = &self.inner.places;
         match source {
-            IconSource::WindowsExe(programs) if places.windows => programs
+            AppPlace::WindowsExe(programs) if places.windows => programs
                 .iter()
                 .filter_map(|place| program(places, *place))
                 .map(Located::Program)
                 .collect(),
-            IconSource::WindowsPackage(name) if places.windows => self
+            AppPlace::WindowsPackage(name) if places.windows => self
                 .package_logos(agent_id, name)
                 .into_iter()
                 .map(Located::Png)
                 .collect(),
-            IconSource::LinuxDesktop(ids) if !places.windows => ids
+            AppPlace::LinuxDesktop(ids) if !places.windows => ids
                 .iter()
                 .filter_map(|id| self.desktop_icon(agent_id, id))
                 .map(Located::Png)
                 .collect(),
             // A source for the other system names nothing here.
-            IconSource::WindowsPackage(_)
-            | IconSource::WindowsExe(_)
-            | IconSource::LinuxDesktop(_) => Vec::new(),
+            AppPlace::WindowsPackage(_) | AppPlace::WindowsExe(_) | AppPlace::LinuxDesktop(_) => {
+                Vec::new()
+            }
         }
     }
 

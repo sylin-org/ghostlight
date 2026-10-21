@@ -1,8 +1,8 @@
 //! Which catalog agent's app a running program belongs to, found by where the program is
 //! installed, and which programs only start another.
 //!
-//! An agent's app is where the catalog says its program or Store app is (the [`IconSource`]s its
-//! icon is read from) and where its commands are found on `PATH`. [`AppLocations::discover`] looks
+//! An agent's app is where the catalog says its program or Store app is (its [`AppPlace`]s, which
+//! its icon is read from too) and where its commands are found on `PATH`. [`AppLocations::discover`] looks
 //! for each of them on this computer on every call, with the same lookups the icon resolver uses:
 //! a Store app is the install folders Windows names for its package families, a program below a
 //! known folder is that program's own folder, and a command on `PATH` or the program a Linux
@@ -24,7 +24,7 @@ use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME};
 
 use super::entry::{lies_within, same_path};
 use super::icons::{
-    desktop_entry_value, program, read_text, IconPlaces, IconSource, KnownFolder, ProgramPlace,
+    desktop_entry_value, program, read_text, AppPlace, IconPlaces, KnownFolder, ProgramPlace,
 };
 
 /// The programs that only start another, by file stem in lowercase: shells, consoles, script
@@ -117,7 +117,7 @@ pub struct AgentAppSources {
     /// The agent's catalog id.
     pub agent_id: &'static str,
     /// Where its program or Store app may be, in order: its hosts' icon sources in roster order.
-    pub sources: Vec<IconSource>,
+    pub sources: Vec<AppPlace>,
     /// The commands on `PATH` its hosts are started by, in roster order.
     pub commands: Vec<&'static str>,
     /// Folders the agent's own programs live in, below a known folder, that no icon source
@@ -207,9 +207,9 @@ fn owned_folder(places: &IconPlaces, known: KnownFolder, relative: &str) -> Opti
 }
 
 /// Where `source` says an app is, as it is installed on the computer `places` describes.
-fn locations(places: &IconPlaces, source: IconSource) -> Vec<Location> {
+fn locations(places: &IconPlaces, source: AppPlace) -> Vec<Location> {
     match source {
-        IconSource::WindowsExe(programs) if places.is_windows() => programs
+        AppPlace::WindowsExe(programs) if places.is_windows() => programs
             .iter()
             .filter_map(|place| {
                 let found = program(places, *place)?;
@@ -219,18 +219,18 @@ fn locations(places: &IconPlaces, source: IconSource) -> Vec<Location> {
                 })
             })
             .collect(),
-        IconSource::WindowsPackage(name) if places.is_windows() => places
+        AppPlace::WindowsPackage(name) if places.is_windows() => places
             .package_install_folders(name)
             .into_iter()
             .map(Location::Folder)
             .collect(),
-        IconSource::LinuxDesktop(ids) if !places.is_windows() => ids
+        AppPlace::LinuxDesktop(ids) if !places.is_windows() => ids
             .iter()
             .filter_map(|id| desktop_program(places, id))
             .map(Location::File)
             .collect(),
         // A source for the other system names nothing here.
-        IconSource::WindowsPackage(_) | IconSource::WindowsExe(_) | IconSource::LinuxDesktop(_) => {
+        AppPlace::WindowsPackage(_) | AppPlace::WindowsExe(_) | AppPlace::LinuxDesktop(_) => {
             Vec::new()
         }
     }
@@ -315,7 +315,7 @@ mod tests {
         let catalog = [
             AgentAppSources {
                 agent_id: "cursor",
-                sources: vec![IconSource::WindowsExe(&[ProgramPlace::Below(
+                sources: vec![AppPlace::WindowsExe(&[ProgramPlace::Below(
                     KnownFolder::LocalAppData,
                     "Programs/cursor/Cursor.exe",
                 )])],
@@ -358,7 +358,7 @@ mod tests {
         places.set_package_folders(installed);
         let catalog = [AgentAppSources {
             agent_id: "claude-desktop",
-            sources: vec![IconSource::WindowsPackage("Claude")],
+            sources: vec![AppPlace::WindowsPackage("Claude")],
             commands: Vec::new(),
             folders: Vec::new(),
         }];
@@ -406,13 +406,13 @@ mod tests {
         let catalog = [
             AgentAppSources {
                 agent_id: "vscode",
-                sources: vec![IconSource::LinuxDesktop(&["code"])],
+                sources: vec![AppPlace::LinuxDesktop(&["code"])],
                 commands: Vec::new(),
                 folders: Vec::new(),
             },
             AgentAppSources {
                 agent_id: "zed",
-                sources: vec![IconSource::LinuxDesktop(&["zed"])],
+                sources: vec![AppPlace::LinuxDesktop(&["zed"])],
                 commands: Vec::new(),
                 folders: Vec::new(),
             },

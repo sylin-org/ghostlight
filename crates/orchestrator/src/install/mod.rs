@@ -52,7 +52,7 @@ use crate::language::deployment as words;
 use crate::sync::lock;
 
 use container::{AppContainer, Residence};
-use icons::{AgentIconSources, IconSource, KnownFolder, ProgramPlace};
+use icons::{AgentIconSources, AppPlace, KnownFolder, ProgramPlace};
 use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
 use packaged::{CopyPlace, DataRoots, Packages, SettingsCopy};
 use record::{Access, Link, Replace};
@@ -1073,7 +1073,7 @@ struct AgentRow {
     own_package: Option<&'static str>,
     /// Where this host's own app icon may be found, in order ([`icons`]). Empty when the host has
     /// no app of its own or none is known with confidence.
-    icons: &'static [IconSource],
+    app_places: &'static [AppPlace],
     /// The catalog id of the agent whose icon stands for this one when none of its own is found:
     /// a terminal tool wears its vendor's desktop app's icon. `None` shows the agent's monogram
     /// instead.
@@ -1112,13 +1112,13 @@ const KILO_FILES: &[&str] = &["kilo.jsonc", "kilo.json", "opencode.jsonc", "open
 
 /// Where the Codex desktop app's icon may be found: its Store package. The Codex CLI shares the
 /// agent, so it wears the app's icon.
-const CODEX_ICONS: &[IconSource] = &[IconSource::WindowsPackage(CODEX_PACKAGE)];
+const CODEX_APP_PLACES: &[AppPlace] = &[AppPlace::WindowsPackage(CODEX_PACKAGE)];
 
 /// Where Claude Desktop's icon may be found: its Store package, then the per-user installer's
 /// program.
-const CLAUDE_DESKTOP_ICONS: &[IconSource] = &[
-    IconSource::WindowsPackage(CLAUDE_DESKTOP_PACKAGE),
-    IconSource::WindowsExe(&[ProgramPlace::Below(
+const CLAUDE_DESKTOP_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsPackage(CLAUDE_DESKTOP_PACKAGE),
+    AppPlace::WindowsExe(&[ProgramPlace::Below(
         KnownFolder::LocalAppData,
         "AnthropicClaude/claude.exe",
     )]),
@@ -1137,19 +1137,19 @@ const AGENT_APP_FOLDERS: &[(&str, KnownFolder, &str)] = &[(
 
 /// Where Cursor's icon may be found: its per-user install, the launcher on `PATH`, and its Linux
 /// desktop entry.
-const CURSOR_ICONS: &[IconSource] = &[
-    IconSource::WindowsExe(&[
+const CURSOR_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
         ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/cursor/Cursor.exe"),
         ProgramPlace::OnPath("cursor"),
     ]),
-    IconSource::LinuxDesktop(&["cursor"]),
+    AppPlace::LinuxDesktop(&["cursor"]),
 ];
 
 /// Where Visual Studio Code's icon may be found: the program its `code` launcher starts, its
 /// per-user and machine-wide installs, and its desktop entry from a package, the Snap or the
 /// Flatpak.
-const VSCODE_ICONS: &[IconSource] = &[
-    IconSource::WindowsExe(&[
+const VSCODE_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
         ProgramPlace::OnPath("code"),
         ProgramPlace::Below(
             KnownFolder::LocalAppData,
@@ -1157,46 +1157,46 @@ const VSCODE_ICONS: &[IconSource] = &[
         ),
         ProgramPlace::Below(KnownFolder::ProgramFiles, "Microsoft VS Code/Code.exe"),
     ]),
-    IconSource::LinuxDesktop(&["code", "code_code", "com.visualstudio.code"]),
+    AppPlace::LinuxDesktop(&["code", "code_code", "com.visualstudio.code"]),
 ];
 
 /// Where Windsurf's icon may be found: its per-user install, the launcher on `PATH`, and its
 /// Linux desktop entry.
-const WINDSURF_ICONS: &[IconSource] = &[
-    IconSource::WindowsExe(&[
+const WINDSURF_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
         ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Windsurf/Windsurf.exe"),
         ProgramPlace::OnPath("windsurf"),
     ]),
-    IconSource::LinuxDesktop(&["windsurf"]),
+    AppPlace::LinuxDesktop(&["windsurf"]),
 ];
 
 /// Where Zed's icon may be found: its per-user install, the program on `PATH`, and its Linux
 /// desktop entry.
-const ZED_ICONS: &[IconSource] = &[
-    IconSource::WindowsExe(&[
+const ZED_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
         ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Zed/Zed.exe"),
         ProgramPlace::OnPath("zed"),
     ]),
-    IconSource::LinuxDesktop(&["dev.zed.Zed", "zed"]),
+    AppPlace::LinuxDesktop(&["dev.zed.Zed", "zed"]),
 ];
 
 /// Where Kiro's icon may be found: its per-user install, the launcher on `PATH`, and its Linux
 /// desktop entry.
-const KIRO_ICONS: &[IconSource] = &[
-    IconSource::WindowsExe(&[
+const KIRO_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
         ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Kiro/Kiro.exe"),
         ProgramPlace::OnPath("kiro"),
     ]),
-    IconSource::LinuxDesktop(&["kiro"]),
+    AppPlace::LinuxDesktop(&["kiro"]),
 ];
 
 /// Where Antigravity's icon may be found: its per-user install and its Linux desktop entry.
-const ANTIGRAVITY_ICONS: &[IconSource] = &[
-    IconSource::WindowsExe(&[ProgramPlace::Below(
+const ANTIGRAVITY_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[ProgramPlace::Below(
         KnownFolder::LocalAppData,
         "Programs/Antigravity/Antigravity.exe",
     )]),
-    IconSource::LinuxDesktop(&["antigravity"]),
+    AppPlace::LinuxDesktop(&["antigravity"]),
 ];
 
 /// Every agent Ghostlight can set up, one row per host.
@@ -1205,7 +1205,7 @@ const ROSTER: &[AgentRow] = &[
         aliases: &["codex-mcp-client"],
         download_url: Some("https://developers.openai.com/codex/cli/"),
         executables: &["codex"],
-        icons: CODEX_ICONS,
+        app_places: CODEX_APP_PLACES,
         ..AgentRow::new(
             "codex",
             "Codex",
@@ -1238,7 +1238,7 @@ const ROSTER: &[AgentRow] = &[
     AgentRow {
         aliases: &["claude-ai"],
         own_package: Some(CLAUDE_DESKTOP_PACKAGE),
-        icons: CLAUDE_DESKTOP_ICONS,
+        app_places: CLAUDE_DESKTOP_APP_PLACES,
         ..AgentRow::new(
             "claude-desktop",
             "Claude Desktop",
@@ -1256,7 +1256,7 @@ const ROSTER: &[AgentRow] = &[
         aliases: &["cursor-vscode"],
         download_url: Some("https://cursor.com/downloads"),
         executables: &["cursor", "cursor-agent"],
-        icons: CURSOR_ICONS,
+        app_places: CURSOR_APP_PLACES,
         ..AgentRow::new(
             "cursor",
             "Cursor",
@@ -1269,7 +1269,7 @@ const ROSTER: &[AgentRow] = &[
     AgentRow {
         download_url: Some("https://code.visualstudio.com/download"),
         executables: &["code"],
-        icons: VSCODE_ICONS,
+        app_places: VSCODE_APP_PLACES,
         ..AgentRow::new(
             "vscode",
             "Visual Studio Code",
@@ -1282,7 +1282,7 @@ const ROSTER: &[AgentRow] = &[
     AgentRow {
         download_url: Some("https://windsurf.com/editor/download"),
         executables: &["windsurf"],
-        icons: WINDSURF_ICONS,
+        app_places: WINDSURF_APP_PLACES,
         ..AgentRow::new(
             "windsurf",
             "Windsurf",
@@ -1308,7 +1308,7 @@ const ROSTER: &[AgentRow] = &[
     AgentRow {
         download_url: Some("https://zed.dev/download"),
         executables: &["zed", "zeditor"],
-        icons: ZED_ICONS,
+        app_places: ZED_APP_PLACES,
         ..AgentRow::new(
             "zed",
             "Zed",
@@ -1438,7 +1438,7 @@ const ROSTER: &[AgentRow] = &[
     AgentRow {
         download_url: Some("https://kiro.dev/downloads/"),
         executables: &["kiro", "kiro-cli"],
-        icons: KIRO_ICONS,
+        app_places: KIRO_APP_PLACES,
         ..AgentRow::new(
             "kiro",
             "Kiro",
@@ -1512,7 +1512,7 @@ const ROSTER: &[AgentRow] = &[
     AgentRow {
         download_url: Some("https://antigravity.google/download?platform=linux"),
         executables: &["agy"],
-        icons: ANTIGRAVITY_ICONS,
+        app_places: ANTIGRAVITY_APP_PLACES,
         ..AgentRow::new(
             "antigravity",
             "Antigravity",
@@ -1550,7 +1550,7 @@ impl AgentRow {
             executables: &[],
             dialect,
             own_package: None,
-            icons: &[],
+            app_places: &[],
             icon_family: None,
             runs_inside: &[],
         }
@@ -1577,9 +1577,9 @@ impl AgentRow {
     fn store_packages(&self) -> Vec<&'static str> {
         self.own_package
             .into_iter()
-            .chain(self.icons.iter().filter_map(|source| match source {
-                IconSource::WindowsPackage(name) => Some(*name),
-                IconSource::WindowsExe(_) | IconSource::LinuxDesktop(_) => None,
+            .chain(self.app_places.iter().filter_map(|source| match source {
+                AppPlace::WindowsPackage(name) => Some(*name),
+                AppPlace::WindowsExe(_) | AppPlace::LinuxDesktop(_) => None,
             }))
             .collect()
     }
@@ -1716,56 +1716,69 @@ pub(crate) fn monograms() -> Vec<Monogram> {
     ROSTER.iter().map(|row| row.monogram).collect()
 }
 
-/// Where each catalog agent's own icon may be found, one entry per agent in roster order: its name,
-/// its hosts' icon sources in roster order, and the first family a host names.
-#[must_use]
-pub fn icon_catalog() -> Vec<AgentIconSources> {
-    let mut catalog: Vec<AgentIconSources> = Vec::new();
+/// One catalog agent's app as the roster gives it: every host's install places and commands in
+/// roster order, and the first icon family a host names.
+struct AgentApp {
+    agent_id: &'static str,
+    name: &'static str,
+    places: Vec<AppPlace>,
+    commands: Vec<&'static str>,
+    family: Option<&'static str>,
+}
+
+/// The roster grouped by agent, one entry per agent in roster order.
+fn agent_apps() -> Vec<AgentApp> {
+    let mut apps: Vec<AgentApp> = Vec::new();
     for row in ROSTER {
-        if let Some(agent) = catalog
-            .iter_mut()
-            .find(|agent| agent.agent_id == row.agent_id)
-        {
-            agent.sources.extend_from_slice(row.icons);
-            agent.family = agent.family.or(row.icon_family);
+        if let Some(app) = apps.iter_mut().find(|app| app.agent_id == row.agent_id) {
+            app.places.extend_from_slice(row.app_places);
+            app.commands.extend_from_slice(row.executables);
+            app.family = app.family.or(row.icon_family);
         } else {
-            catalog.push(AgentIconSources {
+            apps.push(AgentApp {
                 agent_id: row.agent_id,
                 name: row.name,
-                sources: row.icons.to_vec(),
+                places: row.app_places.to_vec(),
+                commands: row.executables.to_vec(),
                 family: row.icon_family,
             });
         }
     }
-    catalog
+    apps
+}
+
+/// Where each catalog agent's own icon may be found, one entry per agent in roster order: its name,
+/// its hosts' app places in roster order, and the first family a host names.
+#[must_use]
+pub fn icon_catalog() -> Vec<AgentIconSources> {
+    agent_apps()
+        .into_iter()
+        .map(|app| AgentIconSources {
+            agent_id: app.agent_id,
+            name: app.name,
+            sources: app.places,
+            family: app.family,
+        })
+        .collect()
 }
 
 /// Where each catalog agent's app may be installed, one entry per agent in roster order: its
-/// hosts' icon sources and the commands they are started by, in roster order ([`apps`]).
+/// hosts' app places and the commands they are started by, in roster order ([`apps`]).
 #[must_use]
 pub fn app_catalog() -> Vec<apps::AgentAppSources> {
-    let mut catalog: Vec<apps::AgentAppSources> = Vec::new();
-    for row in ROSTER {
-        if let Some(agent) = catalog
-            .iter_mut()
-            .find(|agent| agent.agent_id == row.agent_id)
-        {
-            agent.sources.extend_from_slice(row.icons);
-            agent.commands.extend_from_slice(row.executables);
-        } else {
-            catalog.push(apps::AgentAppSources {
-                agent_id: row.agent_id,
-                sources: row.icons.to_vec(),
-                commands: row.executables.to_vec(),
-                folders: AGENT_APP_FOLDERS
-                    .iter()
-                    .filter(|(agent_id, ..)| *agent_id == row.agent_id)
-                    .map(|(_, known, relative)| (*known, *relative))
-                    .collect(),
-            });
-        }
-    }
-    catalog
+    agent_apps()
+        .into_iter()
+        .map(|app| apps::AgentAppSources {
+            agent_id: app.agent_id,
+            sources: app.places,
+            commands: app.commands,
+            folders: AGENT_APP_FOLDERS
+                .iter()
+                .filter(|(agent_id, ..)| *agent_id == app.agent_id)
+                .map(|(_, known, relative)| (*known, *relative))
+                .collect(),
+        })
+        .collect()
 }
 
 fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
