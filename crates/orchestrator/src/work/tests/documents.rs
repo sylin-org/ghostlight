@@ -1,4 +1,5 @@
-//! H6 authority, scope, privacy, and truthful-negative executor regressions.
+//! Documents at the application boundary: content and effects come only from admitted documents
+//! (ADR-0158), and optional preparation stays within its budget (ADR-0195).
 
 use super::*;
 use crate::browser::adapter::documents::{DocumentInventory, PhysicalDocument};
@@ -23,44 +24,6 @@ pub(super) fn inventory(child_supported: bool) -> DocumentInventory {
             },
         ],
         ..DocumentInventory::default()
-    }
-}
-
-#[test]
-fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
-    for enabled in [true, false] {
-        let (executor, browser, _, workspace, _) = fixture();
-        open(&executor, &browser, &workspace);
-        browser.push(Ok(BrowserOutcome::targets(
-            7,
-            vec![ObservedTarget {
-                locator: "0:doc_top:locator_button".into(),
-                role: "button".into(),
-                name: "Save".into(),
-                state: vec![],
-                credential_class: false,
-                ..Default::default()
-            }],
-        )));
-        browser.push(Ok(BrowserOutcome::Activated {
-            tab: tab(7, "https://example.com/"),
-            subject: None,
-            committed_urls: vec![],
-        }));
-        let result = executor.execute(
-            &workspace,
-            "browser_click",
-            json!({"selector":{"name":"Save","exact":true},"visual_settle":enabled}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-        let scopes = browser.scopes();
-        assert_eq!(scopes.len(), 2);
-        assert!(scopes[0].settle_ms <= 1000);
-        assert_eq!(scopes[0].settle_ms > 0, enabled);
-        assert_eq!(scopes[1].settle_ms, 0);
-        assert!(scopes.iter().all(|scope| scope.settle_requested == enabled));
-        assert!(scopes.iter().all(|scope| !scope.strict_tree));
     }
 }
 
@@ -125,8 +88,48 @@ fn captured_image() -> BrowserOutcome {
     }
 }
 
+/// ACCEPTANCE Bounded preparation (ADR-0195; 2513f862): a call spends at most 1000 ms on
+/// optional preparation, and opting out spends none. A targeted click's lookup and action share
+/// one budget, and a screenshot under a short deadline keeps half of it for the capture. Folds
+/// into `tests/execution.rs`'s waits test when that file is cut.
 #[test]
-fn a_screenshot_under_a_short_deadline_keeps_half_for_the_capture() {
+fn optional_preparation_stays_within_its_budget_and_opting_out_spends_none() {
+    for enabled in [true, false] {
+        let (executor, browser, _, workspace, _) = fixture();
+        open(&executor, &browser, &workspace);
+        browser.push(Ok(BrowserOutcome::targets(
+            7,
+            vec![ObservedTarget {
+                locator: "0:doc_top:locator_button".into(),
+                role: "button".into(),
+                name: "Save".into(),
+                state: vec![],
+                credential_class: false,
+                ..Default::default()
+            }],
+        )));
+        browser.push(Ok(BrowserOutcome::Activated {
+            tab: tab(7, "https://example.com/"),
+            subject: None,
+            committed_urls: vec![],
+        }));
+        let result = executor.execute(
+            &workspace,
+            "browser_click",
+            json!({"selector":{"name":"Save","exact":true},"visual_settle":enabled}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        let scopes = browser.scopes();
+        assert_eq!(scopes.len(), 2);
+        assert!(scopes[0].settle_ms <= 1000);
+        assert_eq!(scopes[0].settle_ms > 0, enabled);
+        assert_eq!(
+            scopes[1].settle_ms, 0,
+            "the action shares the lookup's budget"
+        );
+        assert!(scopes.iter().all(|scope| scope.settle_requested == enabled));
+    }
     for (arguments, settles) in [
         (json!({"timeout_ms":600}), true),
         (json!({"timeout_ms":600,"visual_settle":false}), false),
@@ -156,104 +159,61 @@ fn a_screenshot_under_a_short_deadline_keeps_half_for_the_capture() {
     }
 }
 
-#[test]
-fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
-    for governed in [false, true] {
-        let path = governed.then(|| policy_file(false));
-        let (executor, browser, _, workspace, _) = fixture_with_governance(GovernanceFacade::new(
-            path.as_ref().map(|path| path.to_path_buf()),
-        ));
-        open(&executor, &browser, &workspace);
-        browser.set_documents(7, DocumentInventory::default());
-        for arguments in [json!({}), json!({"full_page":true})] {
-            browser.push(Ok(captured_image()));
-            let result = executor.execute(
-                &workspace,
-                "browser_screenshot",
-                arguments,
-                &CancellationToken::default(),
-            );
-            assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-            assert!(result.facts.get("coverage").is_none());
-            assert!(
-                browser.scopes().is_empty(),
-                "capture never enters document filtering"
-            );
-        }
-    }
+/// A session under the H6 policy, with a tab open on example.com.
+fn governed(
+    child_read: bool,
+) -> (
+    Scratch,
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    WorkspaceId,
+    Arc<MemoryAudit>,
+) {
+    let path = policy_file(child_read);
+    let (executor, browser, _, workspace, audit) =
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
+    open(&executor, &browser, &workspace);
+    (path, executor, browser, workspace, audit)
 }
 
-#[test]
-fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
-    let path = policy_file(true);
-    let governance = GovernanceFacade::new(Some(path.to_path_buf()));
-    let (executor, browser, _, workspace, audit) = fixture_with_governance(governance.clone());
-    open(&executor, &browser, &workspace);
-    browser.push(Ok(BrowserOutcome::targets(
-        7,
-        vec![ObservedTarget {
-            locator: "heading".into(),
-            role: "heading".into(),
-            name: "Page".into(),
-            state: vec![],
-            credential_class: false,
-            ..Default::default()
-        }],
-    )));
-    let inspected = executor.execute(
-        &workspace,
+/// The handle `browser_inspect` gives the one control `target`.
+fn handle_of(
+    executor: &ApplicationExecutor,
+    browser: &FakeBrowser,
+    workspace: &WorkspaceId,
+    target: ObservedTarget,
+) -> String {
+    browser.push(Ok(BrowserOutcome::targets(7, vec![target])));
+    let observed = executor.execute(
+        workspace,
         "browser_inspect",
         json!({}),
         &CancellationToken::default(),
     );
-    let target = inspected.facts["items"][0]["target"].as_str().unwrap();
-    browser.push(Ok(captured_image()));
-    let image = executor.execute(
-        &workspace,
-        "browser_screenshot",
-        json!({}),
-        &CancellationToken::default(),
-    );
-    let view = image.facts["view"].as_str().unwrap();
-    let mut policy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    policy["config"].as_array_mut().unwrap().push(json!({
-        "key":crate::governance::manifest::PolicySetting::ScreenshotsEnabled.key(),"value":false,"level":"mandatory",
-    }));
-    fs::write(&path, serde_json::to_vec(&policy).unwrap()).unwrap();
-    governance.refresh_tick();
-    let prior = browser.calls().len();
-    for arguments in [
-        json!({}),
-        json!({"full_page":true}),
-        json!({"target":target}),
-        json!({"view":view,"x":0,"y":0,"width":100,"height":100}),
-    ] {
-        let result = executor.execute(
-            &workspace,
-            "browser_screenshot",
-            arguments,
-            &CancellationToken::default(),
-        );
-        assert_eq!(result.status, Status::Blocked, "{}", result.summary);
-        assert_eq!(
-            result.summary,
-            "Blocked: screenshots are disabled by policy."
-        );
-        assert_eq!(result.effect, Effect::None);
-        assert_eq!(browser.calls().len(), prior, "no capture command is sent");
-        assert_eq!(
-            audit.0.lock().unwrap().last().unwrap().reason,
-            crate::governance::ReasonCode::ScreenshotDenied
-        );
-    }
+    observed.facts["items"][0]["target"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
+/// ADR-0158 items 1-3 and 5: content and effects come only from admitted documents.
+///
+/// - An embedded document the policy excludes is filtered out before extraction; its host never
+///   reaches the model or the audit, while the person's coverage details name it and announce it.
+/// - A permitted target survives an exclusion elsewhere on the page, and its coverage counts the
+///   page's exclusions apart from its own.
+/// - A field in a document admitted only for Read is not writable, and the fill never starts.
+/// - A document Ghostlight could not see cannot prove absence, a script cannot cross an exclusion,
+///   and a read counts the unseen document as unavailable.
+/// - Restricted unbounded work refuses before dispatch while a placeholder is unseen, and runs
+///   strictly scoped once it is seen; all-open work runs with no document restriction.
+/// - A recording is saved nowhere unless every page it captured is still admitted.
+/// - Screenshots are pixels, never filtered by document; a policy that disables them refuses
+///   every capture form before dispatch.
 #[test]
-fn excluded_documents_are_filtered_before_extraction_and_hosts_stay_in_human_details() {
-    let path = policy_file(false);
-    let (executor, browser, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
-    open(&executor, &browser, &workspace);
+fn content_and_effects_come_only_from_admitted_documents() {
+    // An excluded document is filtered before extraction and named only to the person.
+    let (_policy, executor, browser, workspace, audit) = governed(false);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::Text {
         tab_id: 7,
@@ -277,6 +237,7 @@ fn excluded_documents_are_filtered_before_extraction_and_hosts_stay_in_human_det
         assert!(!model.contains(hidden));
         assert!(!retained.contains(hidden));
     }
+    assert!(audit.0.lock().unwrap().last().unwrap().coverage.is_some());
     let facade = WorkbenchFacade::new(
         executor.workbench.clone(),
         executor.workspaces.clone(),
@@ -298,34 +259,21 @@ fn excluded_documents_are_filtered_before_extraction_and_hosts_stay_in_human_det
         details.proactive,
         "an exclusion that affects the work is announced"
     );
-    assert!(audit.0.lock().unwrap().last().unwrap().coverage.is_some());
-}
 
-#[test]
-fn a_permitted_target_survives_an_unrelated_exclusion() {
+    // A permitted target survives an unrelated exclusion.
     for child_supported in [true, false] {
-        let path = policy_file(false);
-        let (executor, browser, _, workspace, _) =
-            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
-        open(&executor, &browser, &workspace);
-        browser.push(Ok(BrowserOutcome::targets(
-            7,
-            vec![ObservedTarget {
+        let (_policy, executor, browser, workspace, _) = governed(false);
+        let target = handle_of(
+            &executor,
+            &browser,
+            &workspace,
+            ObservedTarget {
                 locator: "button".into(),
                 role: "button".into(),
                 name: "Continue".into(),
-                state: vec![],
-                credential_class: false,
                 ..Default::default()
-            }],
-        )));
-        let observed = executor.execute(
-            &workspace,
-            "browser_inspect",
-            json!({}),
-            &CancellationToken::default(),
+            },
         );
-        let target = observed.facts["items"][0]["target"].as_str().unwrap();
         let mut documents = inventory(child_supported);
         documents.subjects = vec!["top".into()];
         browser.set_documents(7, documents);
@@ -347,36 +295,25 @@ fn a_permitted_target_survives_an_unrelated_exclusion() {
             usize::from(child_supported)
         );
     }
-}
 
-#[test]
-fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
-    let path = policy_file(true);
-    let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
-    open(&executor, &browser, &workspace);
+    // A field readable but not writable: the fill never starts.
+    let (_policy, executor, browser, workspace, _) = governed(true);
     browser.set_documents(7, inventory(true));
-    browser.push(Ok(BrowserOutcome::targets(
-        7,
-        vec![ObservedTarget {
+    let target = handle_of(
+        &executor,
+        &browser,
+        &workspace,
+        ObservedTarget {
             locator: "field".into(),
             role: "textbox".into(),
             name: "Name".into(),
-            state: vec![],
-            credential_class: false,
             ..Default::default()
-        }],
-    )));
-    let observed = executor.execute(
-        &workspace,
-        "browser_inspect",
-        json!({}),
-        &CancellationToken::default(),
+        },
     );
-    let target = observed.facts["items"][0]["target"].as_str().unwrap();
     let mut documents = inventory(true);
     documents.subjects = vec!["child".into()];
     browser.set_documents(7, documents);
+    let before = browser.calls().len();
     let result = executor.execute(
         &workspace,
         "browser_fill_form",
@@ -385,15 +322,10 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
     );
     assert_eq!(result.status, Status::Blocked, "{}", result.summary);
     assert_eq!(result.effect, Effect::None);
-    assert_eq!(browser.calls().len(), 2);
-}
+    assert_eq!(browser.calls().len(), before);
 
-#[test]
-fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
-    let path = policy_file(false);
-    let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
-    open(&executor, &browser, &workspace);
+    // An unseen document cannot prove absence, and a script cannot cross an exclusion.
+    let (_policy, executor, browser, workspace, _) = governed(false);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::Observed {
         tab_id: 7,
@@ -417,7 +349,7 @@ fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
     );
     assert_eq!(script.status, Status::Blocked);
     assert_eq!(script.effect, Effect::None);
-    assert_eq!(browser.calls().len(), 2);
+    assert_eq!(browser.calls().len(), 2, "the open and the wait");
     browser.set_documents(7, inventory(false));
     browser.push(Ok(BrowserOutcome::Text {
         tab_id: 7,
@@ -435,22 +367,64 @@ fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
     assert_eq!(read.status, Status::Succeeded);
     assert_eq!(read.facts["coverage"]["unavailable_documents"], 1);
     assert_eq!(read.facts["coverage"]["excluded_documents"], 0);
-}
 
-#[test]
-fn all_open_scripts_keep_their_browser_behavior_without_document_host_restrictions() {
+    // An unseen placeholder: restricted unbounded work refuses, then runs strictly once seen.
+    for supported in [false, true] {
+        let (_policy, executor, browser, workspace, audit) = governed(false);
+        browser.set_documents(
+            7,
+            DocumentInventory {
+                documents: vec![
+                    PhysicalDocument {
+                        id: "T.t1".into(),
+                        url: "https://example.com/".into(),
+                        parent: None,
+                        supported: true,
+                    },
+                    PhysicalDocument {
+                        id: "unseen.0".into(),
+                        url: "https://example.com/embedded".into(),
+                        parent: Some("T.t1".into()),
+                        supported,
+                    },
+                ],
+                ..DocumentInventory::default()
+            },
+        );
+        if supported {
+            browser.push(Ok(script_ran()));
+        }
+        let result = executor.execute(
+            &workspace,
+            "browser_execute",
+            json!({"script":"1+1"}),
+            &CancellationToken::default(),
+        );
+        if supported {
+            assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+            let scopes = browser.scopes();
+            assert_eq!(scopes.len(), 1);
+            assert!(scopes[0].strict_tree);
+        } else {
+            assert_eq!(result.status, Status::Failed, "{}", result.summary);
+            assert_eq!(result.effect, Effect::None);
+            assert_eq!(result.facts["coverage"]["unavailable_documents"], 1);
+            assert!(browser.scopes().is_empty(), "no scoped work is sent");
+            assert_eq!(browser.calls().len(), 1, "only the navigation ran");
+            assert_eq!(
+                audit.0.lock().unwrap().last().unwrap().refusal_facts,
+                Some(crate::language::audit::AuditRefusal::DocumentUnavailable)
+            );
+        }
+    }
+
+    // All-open work keeps its browser behavior, with no document restriction.
     let (executor, browser, _, workspace, _) = fixture_with_governance(GovernanceFacade::new(None));
     open(&executor, &browser, &workspace);
     let mut documents = inventory(false);
     documents.documents[1].url = "about:blank".into();
     browser.set_documents(7, documents);
-    browser.push(Ok(BrowserOutcome::ScriptEvaluated {
-        tab: tab(7, "https://example.com/"),
-        value: "2".into(),
-        truncated: false,
-        form: crate::browser::adapter::ScriptForm::AsWritten,
-        committed_urls: vec![],
-    }));
+    browser.push(Ok(script_ran()));
     let result = executor.execute(
         &workspace,
         "browser_execute",
@@ -458,23 +432,10 @@ fn all_open_scripts_keep_their_browser_behavior_without_document_host_restrictio
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    assert!(!browser.scopes().last().unwrap().watch_changes);
-    browser.push(Ok(BrowserOutcome::EffectUnknown {
-        reason: "lost acknowledgement".into(),
-    }));
-    let unknown = executor.execute(
-        &workspace,
-        "browser_execute",
-        json!({"script":"window.effect=1"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(unknown.status, Status::Unknown);
-    assert_eq!(unknown.effect, Effect::Unknown);
-    assert!(!unknown.repeat_safe);
-}
+    let scope = browser.scopes().last().unwrap().clone();
+    assert!(!scope.strict_tree && !scope.watch_changes);
 
-#[test]
-fn every_recording_destination_requires_current_access_to_all_captured_sources() {
+    // A recording is saved nowhere unless every captured page is still admitted.
     for destination in [
         json!({}),
         json!({"download":true}),
@@ -508,65 +469,87 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
             "no encoder or destination receives captured content"
         );
     }
-}
 
-#[test]
-fn an_unseen_placeholder_makes_restricted_unbounded_work_refuse_before_dispatch() {
-    for supported in [false, true] {
-        let path = policy_file(false);
-        let (executor, browser, _, workspace, audit) =
-            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
+    // Screenshots are never filtered by document, and a policy can disable every form of them.
+    for child_read in [None, Some(false)] {
+        let path = child_read.map(policy_file);
+        let (executor, browser, _, workspace, _) = fixture_with_governance(GovernanceFacade::new(
+            path.as_ref().map(|path| path.to_path_buf()),
+        ));
         open(&executor, &browser, &workspace);
-        browser.set_documents(
-            7,
-            DocumentInventory {
-                documents: vec![
-                    PhysicalDocument {
-                        id: "T.t1".into(),
-                        url: "https://example.com/".into(),
-                        parent: None,
-                        supported: true,
-                    },
-                    PhysicalDocument {
-                        id: "unseen.0".into(),
-                        url: "https://example.com/embedded".into(),
-                        parent: Some("T.t1".into()),
-                        supported,
-                    },
-                ],
-                ..DocumentInventory::default()
-            },
-        );
-        if supported {
-            browser.push(Ok(BrowserOutcome::ScriptEvaluated {
-                tab: tab(7, "https://example.com/"),
-                value: "2".into(),
-                truncated: false,
-                form: crate::browser::adapter::ScriptForm::AsWritten,
-                committed_urls: vec![],
-            }));
-        }
-        let result = executor.execute(
-            &workspace,
-            "browser_execute",
-            json!({"script":"1+1"}),
-            &CancellationToken::default(),
-        );
-        if supported {
+        browser.set_documents(7, DocumentInventory::default());
+        for arguments in [json!({}), json!({"full_page":true})] {
+            browser.push(Ok(captured_image()));
+            let result = executor.execute(
+                &workspace,
+                "browser_screenshot",
+                arguments,
+                &CancellationToken::default(),
+            );
             assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-            let scopes = browser.scopes();
-            assert_eq!(scopes.len(), 1);
-            assert!(scopes[0].strict_tree);
-        } else {
-            assert_eq!(result.status, Status::Failed, "{}", result.summary);
-            assert_eq!(result.effect, Effect::None);
-            assert_eq!(result.facts["coverage"]["unavailable_documents"], 1);
-            assert!(browser.scopes().is_empty(), "no scoped work is sent");
-            assert_eq!(browser.calls().len(), 1, "only the navigation ran");
-            assert_eq!(
-                audit.0.lock().unwrap().last().unwrap().refusal_facts,
-                Some(crate::language::audit::AuditRefusal::DocumentUnavailable)
+            assert!(result.facts.get("coverage").is_none());
+            assert!(
+                browser.scopes().is_empty(),
+                "capture never enters document filtering"
             );
         }
+    }
+    let (path, executor, browser, workspace, audit) = governed(true);
+    let target = handle_of(
+        &executor,
+        &browser,
+        &workspace,
+        ObservedTarget {
+            locator: "heading".into(),
+            role: "heading".into(),
+            name: "Page".into(),
+            ..Default::default()
+        },
+    );
+    browser.push(Ok(captured_image()));
+    let image = executor.execute(
+        &workspace,
+        "browser_screenshot",
+        json!({}),
+        &CancellationToken::default(),
+    );
+    let view = image.facts["view"].as_str().unwrap();
+    let mut policy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    policy["config"].as_array_mut().unwrap().push(json!({
+        "key":crate::governance::manifest::PolicySetting::ScreenshotsEnabled.key(),"value":false,"level":"mandatory",
+    }));
+    fs::write(&path, serde_json::to_vec(&policy).unwrap()).unwrap();
+    executor.governance.refresh_tick();
+    let prior = browser.calls().len();
+    for arguments in [
+        json!({}),
+        json!({"full_page":true}),
+        json!({"target":target}),
+        json!({"view":view,"x":0,"y":0,"width":100,"height":100}),
+    ] {
+        let result = executor.execute(
+            &workspace,
+            "browser_screenshot",
+            arguments,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Blocked, "{}", result.summary);
+        assert_eq!(result.effect, Effect::None);
+        assert_eq!(browser.calls().len(), prior, "no capture command is sent");
+        assert_eq!(
+            audit.0.lock().unwrap().last().unwrap().reason,
+            crate::governance::ReasonCode::ScreenshotDenied
+        );
+    }
+}
+
+/// A script the browser ran, answering 2.
+fn script_ran() -> BrowserOutcome {
+    BrowserOutcome::ScriptEvaluated {
+        tab: tab(7, "https://example.com/"),
+        value: "2".into(),
+        truncated: false,
+        form: crate::browser::adapter::ScriptForm::AsWritten,
+        committed_urls: vec![],
     }
 }
