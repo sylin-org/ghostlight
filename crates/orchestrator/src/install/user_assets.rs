@@ -19,7 +19,6 @@
 //! ([`RETIRED_PAGES`]). Install and uninstall remove each one 1.x wrote, so `man` never describes a
 //! program that is gone, and inspection counts one that lingers as out of date.
 
-use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -176,14 +175,13 @@ struct UserAssetContext {
 
 impl UserAssetContext {
     fn system() -> Self {
-        let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let home = super::user_dirs::directory("HOME").unwrap_or_default();
         Self {
             linux: cfg!(target_os = "linux"),
             executable: super::layout::Layout::current()
                 .map(|layout| layout.service_executable())
                 .unwrap_or_default(),
-            data_home: env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
+            data_home: super::user_dirs::directory("XDG_DATA_HOME")
                 .unwrap_or_else(|| home.join(".local/share")),
         }
     }

@@ -56,8 +56,7 @@ pub(crate) struct BrowserPackageContext {
 
 impl BrowserPackageContext {
     pub(crate) fn system(home: &Path, linux: bool) -> Self {
-        let data_home = env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
+        let data_home = super::user_dirs::directory("XDG_DATA_HOME")
             .unwrap_or_else(|| home.join(".local/share"));
         Self {
             linux,

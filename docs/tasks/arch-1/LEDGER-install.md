@@ -402,7 +402,7 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| I-D1 | fix(install): an empty `XDG_CONFIG_HOME`, `APPDATA` or `CODEX_HOME` counts as unset | - | INST-4's defect | todo |
+| I-D1 | fix(install): an empty `XDG_CONFIG_HOME`, `APPDATA` or `CODEX_HOME` counts as unset | - | INST-4's defect | landed (this commit); see Notes, second sweep |
 | I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | todo |
 | I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | todo |
 | INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | todo |
@@ -424,3 +424,18 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
 | SERV-11c | refactor(cli): one name per meaning in `cli/` | SERV-13 | SERV-11's CLI half | todo |
 | EXT-2 | refactor(win-peer): the user's SID comes from relay | - | EXT-2 | todo |
 | I-lock | refactor(install): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |
+
+### Notes, second sweep
+
+- I-D1: the defect is wider than the three variables its subject names. Every install resolver
+  that turns a variable into a write root took an empty value as a path, which is the working
+  directory: the harness roots (also `LOCALAPPDATA` and `CRUSH_GLOBAL_CONFIG`), the native-host
+  roots (an empty `GHOSTLIGHT_NATIVE_HOST_DIR` also isolated the registry), the desktop entry and
+  user assets (`XDG_DATA_HOME`), the browser-package exports, the Start-menu shortcut
+  (`APPDATA`), the command path, the icon places, and the Store-container probe, which wrote its
+  probe file below an empty `LOCALAPPDATA`. One reader, `install/user_dirs.rs`, now counts an
+  unset and an empty variable alike, and every one of those reads goes through it; an empty
+  `USERPROFILE` now falls back to `HOME` where the resolver already did for an unset one.
+  `user_dirs.rs` is the seed INST-4 grows into `UserDirs`. The migration's own 1.x rule
+  (absolute only) and `workbench/parts.rs` (surface) are left as they are. Regression tests: the
+  reader's own, the harness roots and the native-host roots with empty variables.

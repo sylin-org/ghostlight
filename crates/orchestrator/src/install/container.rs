@@ -95,11 +95,14 @@ impl Residence {
                 if !cfg!(target_os = "windows") {
                     return Self::Regular;
                 }
-                std::env::var_os(LOCAL_APP_DATA_VARIABLE).map_or(Self::Regular, |local| {
-                    Probe::write_in(PathBuf::from(local))
-                        .as_ref()
-                        .map_or(Self::Regular, Self::of_probe)
-                })
+                super::user_dirs::directory(LOCAL_APP_DATA_VARIABLE).map_or(
+                    Self::Regular,
+                    |local| {
+                        Probe::write_in(local)
+                            .as_ref()
+                            .map_or(Self::Regular, Self::of_probe)
+                    },
+                )
             })
             .clone()
     }

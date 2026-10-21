@@ -21,6 +21,7 @@ pub mod record;
 pub mod setup_state;
 pub mod swap;
 pub mod user_assets;
+mod user_dirs;
 pub mod user_path;
 pub mod version_directories;
 #[cfg(windows)]
@@ -749,19 +750,13 @@ impl HarnessContext {
     fn system() -> Self {
         let windows = cfg!(target_os = "windows");
         let home = if windows {
-            env::var_os(USER_PROFILE_VARIABLE).or_else(|| env::var_os(HOME_VARIABLE))
+            user_dirs::directory(USER_PROFILE_VARIABLE)
+                .or_else(|| user_dirs::directory(HOME_VARIABLE))
         } else {
-            env::var_os(HOME_VARIABLE)
+            user_dirs::directory(HOME_VARIABLE)
         }
-        .map(PathBuf::from)
         .unwrap_or_default();
-        let roots = harness_roots(
-            &home,
-            env::var_os(XDG_CONFIG_HOME_VARIABLE).map(PathBuf::from),
-            env::var_os(APP_DATA_VARIABLE).map(PathBuf::from),
-            env::var_os(CODEX_HOME_VARIABLE).map(PathBuf::from),
-            windows,
-        );
+        let roots = environment_roots(&home, &|name| env::var_os(name), windows);
         let layout = layout::Layout::current();
         let edge = layout
             .as_ref()
@@ -776,8 +771,8 @@ impl HarnessContext {
             .unwrap_or_default()
             .join(HARNESS_LOCATIONS_FILE);
         let local_app_data = windows.then(|| {
-            env::var_os(LOCAL_APP_DATA_VARIABLE)
-                .map_or_else(|| home.join("AppData/Local"), PathBuf::from)
+            user_dirs::directory(LOCAL_APP_DATA_VARIABLE)
+                .unwrap_or_else(|| home.join("AppData/Local"))
         });
         let private_view = local_app_data.as_ref().and_then(|local| {
             Residence::detect()
@@ -797,7 +792,7 @@ impl HarnessContext {
                 stored_variable(CLAUDE_CONFIG_VARIABLE),
                 &|name| env::var(name).ok(),
             ),
-            crush_config: env::var_os(CRUSH_CONFIG_VARIABLE).map(PathBuf::from),
+            crush_config: user_dirs::directory(CRUSH_CONFIG_VARIABLE),
             edge,
             path_entries,
             locations,
@@ -857,6 +852,19 @@ fn stored_variable(name: &str) -> Option<user_path::PathValue> {
 #[cfg(not(windows))]
 fn stored_variable(_name: &str) -> Option<user_path::PathValue> {
     None
+}
+
+/// The configuration roots the variables `lookup` reads name, below `home` where they name none.
+/// An empty variable names none ([`user_dirs`]), so no client's file lands in the working
+/// directory.
+fn environment_roots(home: &Path, lookup: user_dirs::Lookup<'_>, windows: bool) -> HarnessRoots {
+    harness_roots(
+        home,
+        user_dirs::directory_in(lookup, XDG_CONFIG_HOME_VARIABLE),
+        user_dirs::directory_in(lookup, APP_DATA_VARIABLE),
+        user_dirs::directory_in(lookup, CODEX_HOME_VARIABLE),
+        windows,
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3253,6 +3261,7 @@ pub enum HarnessError {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -3266,14 +3275,15 @@ mod tests {
 
     use super::{
         agent_called, client_ids, command_registration_state, definition, definitions, edit_json,
-        edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots,
-        holds_owned_entry, inspect, inspect_json, inspect_toml, json_entry_args,
+        edit_toml, environment_roots, executable_name, expected_json_entry, fix_toml,
+        harness_roots, holds_owned_entry, inspect, inspect_json, inspect_toml, json_entry_args,
         json_entry_command, json_entry_defaults, jsonc_options, manual_json_setup,
         mcp_command_line, packaged, remove_stray_temporaries_in, replace_with_backup, AppContainer,
         Attention, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
         HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, LauncherPin,
-        NpmLauncher, Packages, PrivateView, RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME,
-        HARNESS_LOCATIONS_FILE, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
+        NpmLauncher, Packages, PrivateView, RegistrationState, APP_DATA_VARIABLE, CLINE_SETTINGS,
+        CODEX_HOME_VARIABLE, EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE, MCP_ARGUMENT,
+        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME, XDG_CONFIG_HOME_VARIABLE,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -3410,6 +3420,39 @@ mod tests {
         assert!(metadata.file_type().is_symlink());
         assert_eq!(fs::read_to_string(&real).unwrap(), r#"{"new":true}"#);
         assert_eq!(fs::read_to_string(&link).unwrap(), r#"{"new":true}"#);
+    }
+
+    #[test]
+    fn empty_root_variables_resolve_below_the_home_not_the_working_directory() {
+        let empty = |name: &str| {
+            [
+                XDG_CONFIG_HOME_VARIABLE,
+                APP_DATA_VARIABLE,
+                CODEX_HOME_VARIABLE,
+            ]
+            .contains(&name)
+            .then(OsString::new)
+        };
+
+        let linux = environment_roots(Path::new("/home/test"), &empty, false);
+        assert_eq!(
+            linux,
+            HarnessRoots {
+                config: PathBuf::from("/home/test/.config"),
+                roaming: PathBuf::from("/home/test/.config"),
+                codex_config: PathBuf::from("/home/test/.codex/config.toml"),
+            }
+        );
+
+        let windows = environment_roots(Path::new("C:/Users/test"), &empty, true);
+        assert_eq!(
+            windows,
+            HarnessRoots {
+                config: PathBuf::from("C:/Users/test/AppData/Roaming"),
+                roaming: PathBuf::from("C:/Users/test/AppData/Roaming"),
+                codex_config: PathBuf::from("C:/Users/test/.codex/config.toml"),
+            }
+        );
     }
 
     #[test]

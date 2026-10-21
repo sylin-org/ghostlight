@@ -27,6 +27,10 @@ use super::container::{AppContainer, Residence};
 use super::entry::{canonical_path, same_location_on};
 use super::layout::{Layout, EDGE_COMMAND_NAME, MANIFESTS_DIRECTORY_NAME};
 use super::record;
+use super::user_dirs;
+use super::{
+    HOME_VARIABLE, LOCAL_APP_DATA_VARIABLE, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE,
+};
 use crate::language::deployment as words;
 
 /// Stable native-messaging identity used by every supported Chromium browser.
@@ -323,21 +327,16 @@ struct NativeHostContext {
 
 impl NativeHostContext {
     fn system() -> Self {
-        let home = env::var_os("USERPROFILE")
-            .or_else(|| env::var_os("HOME"))
-            .map(PathBuf::from)
+        let home = user_dirs::directory(USER_PROFILE_VARIABLE)
+            .or_else(|| user_dirs::directory(HOME_VARIABLE))
             .unwrap_or_default();
         let platform = if cfg!(target_os = "windows") {
             NativeHostPlatform::Windows
         } else {
             NativeHostPlatform::Linux
         };
-        let (home, local, config, registry_isolated) = native_host_roots(
-            env::var_os(NATIVE_HOST_DIR_VARIABLE).map(PathBuf::from),
-            env::var_os("LOCALAPPDATA").map(PathBuf::from),
-            env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
-            &home,
-        );
+        let (home, local, config, registry_isolated) =
+            environment_native_host_roots(&|name| env::var_os(name), &home);
         let layout = Layout::current().unwrap_or_else(|_| Layout::new(PathBuf::new()));
         let connector = layout
             .bin()
@@ -396,6 +395,21 @@ impl NativeHostContext {
             windows_registry_key(browser)
         }
     }
+}
+
+/// The manifest roots and the registry scope the variables `lookup` reads name. An empty
+/// variable names none ([`user_dirs`]): an empty explicit root isolates nothing, and an empty
+/// per-user root falls back below `home` instead of the working directory.
+fn environment_native_host_roots(
+    lookup: user_dirs::Lookup<'_>,
+    home: &Path,
+) -> (PathBuf, PathBuf, PathBuf, bool) {
+    native_host_roots(
+        user_dirs::directory_in(lookup, NATIVE_HOST_DIR_VARIABLE),
+        user_dirs::directory_in(lookup, LOCAL_APP_DATA_VARIABLE),
+        user_dirs::directory_in(lookup, XDG_CONFIG_HOME_VARIABLE),
+        home,
+    )
 }
 
 /// Resolve the manifest roots and the registry scope for this process.
@@ -1718,6 +1732,25 @@ mod tests {
             residence: Residence::Regular,
         };
         (root, context)
+    }
+
+    #[test]
+    fn empty_native_host_variables_resolve_below_the_home_and_isolate_nothing() {
+        let empty = |name: &str| {
+            [
+                NATIVE_HOST_DIR_VARIABLE,
+                LOCAL_APP_DATA_VARIABLE,
+                XDG_CONFIG_HOME_VARIABLE,
+            ]
+            .contains(&name)
+            .then(std::ffi::OsString::new)
+        };
+        let (home, local, config, isolated) =
+            environment_native_host_roots(&empty, Path::new("/home/test"));
+        assert_eq!(home, PathBuf::from("/home/test"));
+        assert_eq!(local, PathBuf::from("/home/test/AppData/Local"));
+        assert_eq!(config, PathBuf::from("/home/test/.config"));
+        assert!(!isolated);
     }
 
     #[test]

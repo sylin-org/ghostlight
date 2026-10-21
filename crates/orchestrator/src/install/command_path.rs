@@ -166,7 +166,7 @@ struct CommandPathContext {
 
 impl CommandPathContext {
     fn system(residence: &Residence) -> Self {
-        let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let home = super::user_dirs::directory("HOME").unwrap_or_default();
         Self {
             unix: cfg!(unix),
             executable: super::layout::Layout::current()
@@ -174,7 +174,7 @@ impl CommandPathContext {
                 .unwrap_or_default(),
             bin_home: home.join(".local/bin"),
             user_path: system_user_path(),
-            profile: env::var_os(PROFILE_VARIABLE).map(PathBuf::from),
+            profile: super::user_dirs::directory(PROFILE_VARIABLE),
             container: residence.container().cloned(),
             search_path: env::var_os(SEARCH_PATH_VARIABLE)
                 .map(|value| env::split_paths(&value).collect())

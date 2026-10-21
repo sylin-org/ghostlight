@@ -13,7 +13,6 @@
 //! shortcut when it targets a program in this home's `bin` or carries the AppUserModelID, the key
 //! when its command or location points into this home. Anything else is left and named.
 
-use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -463,7 +462,7 @@ fn shortcut_target(layout: &Layout) -> PathBuf {
 
 /// The Start-menu shortcut path, when this user has a roaming profile.
 fn shortcut_path() -> Option<PathBuf> {
-    let app_data = env::var_os("APPDATA").map(PathBuf::from)?;
+    let app_data = super::user_dirs::directory("APPDATA")?;
     let folder = PROGRAMS_FOLDER
         .iter()
         .fold(app_data, |path, part| path.join(part));

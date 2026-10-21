@@ -41,7 +41,7 @@ use sha2::{Digest, Sha256};
 use super::apps::is_wrapper;
 use super::packaged::{is_family_of, PACKAGES_DIRECTORY};
 use super::record::atomic_replace;
-use super::{lock, HOME_VARIABLE, USER_PROFILE_VARIABLE};
+use super::{lock, user_dirs, HOME_VARIABLE, USER_PROFILE_VARIABLE};
 
 /// The longest a look at every agent's sources takes before it stops; agents it did not reach
 /// keep what was cached for them.
@@ -313,11 +313,11 @@ impl IconPlaces {
     pub fn system() -> Self {
         let windows = cfg!(target_os = "windows");
         let home = if windows {
-            env::var_os(USER_PROFILE_VARIABLE).or_else(|| env::var_os(HOME_VARIABLE))
+            user_dirs::directory(USER_PROFILE_VARIABLE)
+                .or_else(|| user_dirs::directory(HOME_VARIABLE))
         } else {
-            env::var_os(HOME_VARIABLE)
+            user_dirs::directory(HOME_VARIABLE)
         }
-        .map(PathBuf::from)
         .unwrap_or_default();
         let path_entries = env::var_os(PATH_VARIABLE)
             .map(|path| env::split_paths(&path).collect())
@@ -326,10 +326,10 @@ impl IconPlaces {
             Self {
                 windows,
                 local_app_data: Some(
-                    env::var_os(LOCAL_APP_DATA_VARIABLE)
-                        .map_or_else(|| home.join("AppData").join("Local"), PathBuf::from),
+                    user_dirs::directory(LOCAL_APP_DATA_VARIABLE)
+                        .unwrap_or_else(|| home.join("AppData").join("Local")),
                 ),
-                program_files: env::var_os(PROGRAM_FILES_VARIABLE).map(PathBuf::from),
+                program_files: user_dirs::directory(PROGRAM_FILES_VARIABLE),
                 path_entries,
                 data_dirs: Vec::new(),
                 packages: Some(ghostlight_win_peer::package_install_folders),
