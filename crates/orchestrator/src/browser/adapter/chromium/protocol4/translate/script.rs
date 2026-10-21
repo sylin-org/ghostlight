@@ -299,10 +299,14 @@ fn end_of_string(chars: &[char], start: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::single_expression;
+    use super::{single_expression, AWAIT_CLOSE, AWAIT_OPEN};
 
+    /// `browser_execute` awaits a script only when the scan reads it with certainty as one
+    /// expression, wrapping it on lines of its own so a trailing comment cannot eat the
+    /// parenthesis; anything else it cannot read with certainty is sent as written, so a wrap
+    /// never changes what a script means.
     #[test]
-    fn a_script_that_is_one_expression_is_awaited() {
+    fn only_a_script_that_is_certainly_one_expression_is_awaited() {
         for script in [
             "fetch('/a').then(r => r.json())",
             "new Promise(r => setTimeout(() => r(42), 50))",
@@ -318,22 +322,15 @@ mod tests {
             "document.title",
         ] {
             let wrapped = single_expression(script).unwrap_or_else(|| panic!("wraps {script:?}"));
-            assert!(wrapped.starts_with("await (\n"), "{script:?}");
-            assert!(wrapped.ends_with("\n)"), "{script:?}");
+            assert!(wrapped.starts_with(AWAIT_OPEN), "{script:?}");
+            assert!(wrapped.ends_with(AWAIT_CLOSE), "{script:?}");
         }
-        assert_eq!(
-            single_expression("  x ;  ").as_deref(),
-            Some("await (\nx\n)")
-        );
-        assert_eq!(
-            single_expression("a // note").as_deref(),
-            Some("await (\na // note\n)"),
-            "the line break keeps the comment from eating the parenthesis"
-        );
-    }
-
-    #[test]
-    fn anything_that_is_not_certainly_one_expression_is_left_as_written() {
+        for (script, expression) in [("  x ;  ", "x"), ("a // note", "a // note")] {
+            assert_eq!(
+                single_expression(script),
+                Some(format!("{AWAIT_OPEN}{expression}{AWAIT_CLOSE}"))
+            );
+        }
         for script in [
             "",
             "   ;",
