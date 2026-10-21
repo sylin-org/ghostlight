@@ -41,7 +41,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL17 | test(language): outcome.rs and audit.rs keep the 8 tests of what happened | 57 | 8 | 4 promise, 2 contract, 2 defect | landed (6b472ef4) |
 | TL18 | test(language): history.rs keeps the window words and the outcome class | 8 | 2 | 2 promise | landed (41b52bc6) |
 | TL19 | test(language): page_refusal.rs and composition.rs drop tests the executor proves | 7 | 0 | - | landed (40dbbeae) |
-| TL20 | test(language): audit_health.rs keeps L-D2 and L-D3 | 3 | 2 | 2 defect | landed (this commit) |
+| TL20 | test(language): audit_health.rs keeps L-D2 and L-D3 | 3 | 2 | 2 defect | landed (cda38355) |
+| TL21 | test(language): settlement.rs keeps one table of what settles | 1 | 1 | 1 promise | landed (this commit) |
 
 ## Notes
 

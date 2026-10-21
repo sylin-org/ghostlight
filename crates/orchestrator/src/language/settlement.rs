@@ -30,8 +30,12 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// ACCEPTANCE "Bounded preparation" (ADR-0195): each ordinary page tool the catalog marks as
+    /// settling settles when the call says nothing, advertises default true, and skips settlement
+    /// for `visual_settle: false`; an explicit wait owns its own condition. The only test that
+    /// catches a missing `enabled` arm.
     #[test]
-    fn every_similar_page_tool_defaults_to_bounded_settlement_and_accepts_opt_out() {
+    fn every_ordinary_page_tool_settles_by_default_and_false_opts_out() {
         let attachment = crate::scratch::Scratch::file("settlement-attachment.txt");
         let cases = [
             ("browser_read", json!({})),
@@ -72,11 +76,9 @@ mod tests {
             );
             input["visual_settle"] = json!(false);
             assert!(
-                !enabled(&super::super::decode(name, input.clone()).unwrap()),
+                !enabled(&super::super::decode(name, input).unwrap()),
                 "{name}"
             );
-            input["visual_settle"] = json!("false");
-            assert!(super::super::decode(name, input).is_err(), "{name}");
             let tool = super::super::catalog()
                 .into_iter()
                 .find(|tool| tool.name == name)
