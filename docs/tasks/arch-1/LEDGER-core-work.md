@@ -26,8 +26,8 @@ In order. "After" names what a slice waits for.
 | C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | landed (616bfffa) |
 | C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | landed (c43e2e20 and the port commit) |
 | C12b-2 | refactor(work): the typed refusal builds its result (the work half) | C12b-1 | ADR-0203 C12b; WORK-4, WORK-2 and WORK-3's refusal sites | landed (c1603722) |
-| WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | landed |
-| WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | todo |
+| WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | landed (39a70d19) |
+| WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | landed |
 | WORK-10 | refactor(work): timings and limits are named | - | WORK-10 | todo |
 | WORK-7 | refactor(work): dead code goes | C19c | WORK-7; the two unused lease methods go | lease methods landed (6e38949a); `substitute_references`'s `Option` todo |
 | WORK-9 | refactor(work): one name per contract | - | WORK-9; no persisted word changes | todo |

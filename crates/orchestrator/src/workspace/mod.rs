@@ -1957,8 +1957,9 @@ impl WorkspaceLease {
         data: &str,
         decoded_bytes: usize,
     ) -> Result<Option<ImageHandle>, WorkspaceError> {
-        const UPLOAD_AGGREGATE_BYTES: usize = 5_000_000;
-        if decoded_bytes > UPLOAD_AGGREGATE_BYTES {
+        if u64::try_from(decoded_bytes).unwrap_or(u64::MAX)
+            > crate::language::UPLOAD_AGGREGATE_BYTES
+        {
             return Ok(None);
         }
         let mut state = self.store.lock();

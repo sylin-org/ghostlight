@@ -2966,7 +2966,7 @@ fn adapter_budget_ms(requested_ms: u64, remaining: Duration) -> u64 {
 }
 
 fn load_physical_files(paths: &[String]) -> Result<(Vec<PhysicalFile>, u64), FileProblem> {
-    const MAX_UPLOAD_BYTES: u64 = 5_000_000;
+    use crate::language::UPLOAD_AGGREGATE_BYTES as MAX_UPLOAD_BYTES;
     let mut files = Vec::with_capacity(paths.len());
     let mut total = 0_u64;
     for requested in paths {

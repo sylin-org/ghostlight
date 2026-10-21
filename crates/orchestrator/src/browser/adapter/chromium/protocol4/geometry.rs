@@ -38,8 +38,8 @@ const MIN_SCALE: f64 = 0.05;
 /// The JPEG qualities a capture tries, best first. The second is the fallback for an image too
 /// large for the best.
 const JPEG_QUALITIES: [u8; 2] = [55, 30];
-/// The longest base64 image a receipt may carry.
-const MAX_BASE64_CHARS: usize = 6_000_000;
+/// The longest base64 image a receipt may carry. The service refuses a longer one as too large.
+pub(crate) const MAX_BASE64_CHARS: usize = 6_000_000;
 
 /// A measurement that cannot describe a capture.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]

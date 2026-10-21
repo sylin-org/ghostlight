@@ -544,7 +544,9 @@ impl ApplicationExecutor {
                 .expect("validated source_image");
             match lease.take_image(image, &selected) {
                 Some((mime_type, data)) => {
-                    let decoded = base64_decoded_len(&data);
+                    // A captured image travels as base64, and the page refuses a file whose stated size is
+                    // not its byte count.
+                    let decoded = crate::language::base64_decoded_len(&data);
                     (
                         vec![PhysicalFile {
                             name: "capture".into(),
@@ -1360,7 +1362,6 @@ fn decode_inline_files(
     files: &[crate::language::InlineFile],
 ) -> Result<(Vec<PhysicalFile>, u64), FileProblem> {
     use base64::Engine as _;
-    const UPLOAD_AGGREGATE_BYTES: usize = 5_000_000;
     let mut decoded = Vec::with_capacity(files.len());
     let mut total = 0u64;
     for file in files {
@@ -1368,7 +1369,7 @@ fn decode_inline_files(
             .decode(&file.data_base64)
             .map_err(|_| FileProblem::NotBase64)?;
         total = total.saturating_add(bytes.len() as u64);
-        if total > UPLOAD_AGGREGATE_BYTES as u64 {
+        if total > crate::language::UPLOAD_AGGREGATE_BYTES {
             return Err(FileProblem::UploadTooLarge);
         }
         decoded.push(PhysicalFile {
@@ -1379,16 +1380,4 @@ fn decode_inline_files(
         });
     }
     Ok((decoded, total))
-}
-
-/// The number of bytes a standard base64 text decodes to, with or without padding. A captured
-/// image travels as base64, and the page refuses a file whose stated size is not its byte count.
-fn base64_decoded_len(data: &str) -> u64 {
-    let digits = data.trim_end_matches('=').len();
-    let partial = match digits % 4 {
-        2 => 1,
-        3 => 2,
-        _ => 0,
-    };
-    (digits / 4 * 3 + partial) as u64
 }

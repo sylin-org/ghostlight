@@ -396,7 +396,9 @@ impl ApplicationExecutor {
                 height,
                 viewport,
             }) if tab_id == selected.physical_id => {
-                if data.len() > 7_000_000 {
+                if data.len()
+                    > crate::browser::adapter::chromium::protocol4::geometry::MAX_BASE64_CHARS
+                {
                     return self.failed(
                         context,
                         decision,
