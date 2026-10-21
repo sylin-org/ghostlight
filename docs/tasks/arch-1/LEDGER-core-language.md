@@ -69,6 +69,11 @@ next step are not. Say that the script threw and quote the bounded description. 
 unknown, and drop the dialog hint when the cause is a page exception. This predates the second
 sweep: the 2.0.1 extension's `script-evaluator.js` reported the same unknown.
 
+L-D6, follow-up: `tests/script-browser-journey.mjs` still expected `browser_effect_unknown` for a
+script that changes the page and then throws, and CI's real-Chromium journeys failed on both systems
+from 28ea74b3 on. The journey now expects `script_threw` with the exception's text, and keeps its
+checks that the script ran once and its change happened.
+
 The fix types the cause where it is learned. `translate/script.rs` raises
 `BrowserError::ScriptThrew` with the page's description, `work/mod.rs` routes it to
 `Refusal::ScriptThrew`, and the result keeps `status` and `effect` unknown. It carries the new reason

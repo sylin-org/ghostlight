@@ -69,7 +69,9 @@ try {
     assert.equal(result.status, "unknown", JSON.stringify(result));
     assert.equal(result.effect, "unknown");
     assert.equal(result.repeat_safe, false);
-    assert.equal(result.facts.reason, "browser_effect_unknown");
+    // L-D6: the agent is told the script threw, and what it threw.
+    assert.equal(result.facts.reason, "script_threw", JSON.stringify(result));
+    assert.ok(typeof result.facts.exception === "string" && result.facts.exception.length > 0, JSON.stringify(result));
     assert.equal(await evaluations() - before, 1);
     assert.equal(await raw("document.getElementById('effect').textContent"), "1");
     checks += 1;
