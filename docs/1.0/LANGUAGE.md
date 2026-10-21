@@ -104,8 +104,10 @@ authority the refused address is decided again and that decision is recorded (AD
 
 Tab handles are durable correlation slots: navigating by a handle whose
 tab has closed recreates that tab through the governed open path under the same handle and says
-so in the summary. Closing a handle whose tab is already gone succeeds without touching the
-browser. Target handles are different by design -- they are perception, not identity. A target
+so in the summary. Closing a handle this session no longer holds sends nothing to the browser and
+says only that: "This session no longer holds that tab, so nothing was closed.", with the step to
+list this session's tabs. Its tab may have closed, or a service before this one held it and it may
+still be open, so the answer claims nothing about the tab (W-D4). Target handles are different by design -- they are perception, not identity. A target
 handle is tied to one tab and document generation, and a committed navigation makes prior target
 handles stale. Within one document a handle follows its control through a re-render when the page
 proves it is the same control: its row's own link, unique on the page, its declared row name, its
