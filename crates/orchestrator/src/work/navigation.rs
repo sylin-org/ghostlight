@@ -551,7 +551,7 @@ impl ApplicationExecutor {
                 context,
                 BrowserCommand::TraverseHistory {
                     tab_id: selected.physical_id,
-                    direction: direction.as_str().into(),
+                    direction,
                 },
             );
             // The browser looked and sent nothing, so the refusal can say which way was empty.

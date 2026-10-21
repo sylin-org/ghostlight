@@ -34,7 +34,7 @@ impl ApplicationExecutor {
                 let command = if target.is_none() {
                     BrowserCommand::ReadDocument {
                         tab_id: selected.physical_id,
-                        mode: mode.unwrap_or(ReadMode::Visible).as_str().to_string(),
+                        mode: mode.unwrap_or(ReadMode::Visible),
                         max_chars,
                     }
                 } else {
@@ -104,7 +104,7 @@ impl ApplicationExecutor {
             requested_tab,
             BrowserCommand::Inspect {
                 tab_id: 0,
-                kind: kind.as_str().into(),
+                kind,
                 max_items: request.max_items,
             },
             if kind == InspectScope::Controls {
@@ -207,7 +207,7 @@ impl ApplicationExecutor {
             BrowserCommand::Find {
                 tab_id: 0,
                 text: text.into(),
-                kind: kind.as_str().into(),
+                kind,
                 max_results,
             },
             TargetNoun::Match,

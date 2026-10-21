@@ -72,7 +72,7 @@ impl ApplicationExecutor {
                 let command = BrowserCommand::Activate(PhysicalClick {
                     tab_id: tab.physical_id,
                     locator: target.locator,
-                    button: value.button.as_str().into(),
+                    button: value.button,
                     click_count: value.click_count,
                     modifiers: value.modifiers.clone(),
                 });
@@ -89,7 +89,7 @@ impl ApplicationExecutor {
                         point,
                         expected_viewport: view.viewport,
                     },
-                    button: value.button.as_str().into(),
+                    button: value.button,
                     click_count: value.click_count,
                     modifiers: value.modifiers.clone(),
                 });
@@ -174,8 +174,6 @@ impl ApplicationExecutor {
                                 value
                                     .direction
                                     .unwrap_or(SCROLL_DIRECTION_DEFAULT)
-                                    .as_str()
-                                    .into()
                             }),
                         amount: value
                             .target
@@ -184,8 +182,6 @@ impl ApplicationExecutor {
                                 value
                                     .amount
                                     .unwrap_or(SCROLL_AMOUNT_DEFAULT)
-                                    .as_str()
-                                    .into()
                             }),
                     }),
                 ) {
@@ -284,9 +280,7 @@ impl ApplicationExecutor {
                 },
                 direction: value
                     .direction
-                    .expect("language fills a wheel scroll's direction")
-                    .as_str()
-                    .into(),
+                    .expect("language fills a wheel scroll's direction"),
                 ticks: value.ticks.expect("language validated ticks"),
             }),
         ) {

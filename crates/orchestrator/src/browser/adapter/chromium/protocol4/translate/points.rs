@@ -23,6 +23,9 @@ use crate::browser::adapter::{
 };
 use crate::browser::BrowserError;
 
+/// The failure of a wheel scroll sideways, which the language never sends: a wheel turns up or
+/// down.
+const WHEEL_SIDEWAYS: &str = "a wheel scroll turns up or down";
 /// How long the page may take to settle after a wheel turn, in milliseconds.
 const WHEEL_SETTLE_MS: u64 = 120;
 
@@ -117,7 +120,7 @@ pub fn activate(
     let aim = aim(l, scope, &click.at)?;
     let steps = keys::click(
         aim.at,
-        keys::mouse_button(&click.button),
+        keys::mouse_button(click.button),
         click.click_count,
         keys::modifier_mask(&click.modifiers),
     );
@@ -178,7 +181,8 @@ pub fn wheel(
     let aim = aim(l, scope, &wheel.at)?;
     let steps = keys::wheel(
         aim.at,
-        WheelDirection::from_name(&wheel.direction),
+        WheelDirection::of(wheel.direction)
+            .ok_or_else(|| BrowserError::Protocol(WHEEL_SIDEWAYS.into()))?,
         wheel.ticks,
     );
     let input = input_for(

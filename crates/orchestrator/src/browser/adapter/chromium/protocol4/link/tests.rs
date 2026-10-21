@@ -20,6 +20,7 @@ use crate::browser::adapter::{
 use crate::browser::{BrowserDispatch, BrowserError, BrowserPort, RelayBrowserPort};
 use crate::governance::ReasonCode;
 use crate::language::outcome::PrimitiveCause;
+use crate::language::HistoryDirection;
 use crate::sync::lock;
 use crate::workspace::StaleReason;
 
@@ -211,7 +212,7 @@ fn rows() -> Vec<Row> {
         Row {
             command: BrowserCommand::TraverseHistory {
                 tab_id: 12,
-                direction: "back".into(),
+                direction: HistoryDirection::Back,
             },
             primitive: navigated(json!({"to": "back"}), false),
             receipt: effect(json!({"tab": tab(example)}), &[example]),
@@ -220,7 +221,7 @@ fn rows() -> Vec<Row> {
         Row {
             command: BrowserCommand::TraverseHistory {
                 tab_id: 12,
-                direction: "forward".into(),
+                direction: HistoryDirection::Forward,
             },
             primitive: navigated(json!({"to": "forward"}), false),
             receipt: effect(json!({"tab": tab(example)}), &[example]),
@@ -381,26 +382,6 @@ fn each_browser_native_row_sends_its_primitive_and_maps_its_outcome() {
 #[test]
 fn the_group_key_is_the_digest_prefix_of_the_group_title() {
     assert_eq!(group_key(GROUP_TITLE), "g_0308773300b3c6a8");
-}
-
-#[test]
-fn a_history_direction_other_than_back_or_forward_sends_nothing() {
-    let next = Arc::new(Mutex::new(answer(json!({"tabs": []}))));
-    let (port, fake) = port(scripted(&next));
-    let result = call(
-        &port,
-        BrowserCommand::TraverseHistory {
-            tab_id: 12,
-            direction: "sideways".into(),
-        },
-    );
-    assert!(matches!(result, Err(BrowserError::Primitive { .. })));
-    assert_eq!(
-        call(&port, BrowserCommand::ListTabs),
-        Ok(BrowserOutcome::Tabs { tabs: vec![] })
-    );
-    let seen = fake.wait(|seen| !seen.requests.is_empty());
-    assert_eq!(seen.requests.len(), 1, "only the listing was sent");
 }
 
 #[test]

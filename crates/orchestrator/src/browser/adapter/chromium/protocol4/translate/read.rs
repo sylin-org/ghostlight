@@ -15,18 +15,11 @@ use super::super::world::{self, Article, Message, Targets, Text, TreeValue};
 use super::value;
 use crate::browser::adapter::{BrowserOutcome, Listing, ObservedTarget, PhysicalSemantic};
 use crate::browser::BrowserError;
+use crate::language::{FindScope, InspectScope, ReadMode};
 
 /// The most nodes one structure tree holds across every document. Every document is asked
 /// for its share as `max_nodes`, and the merged tree is trimmed to it once.
 pub const TREE_NODE_LIMIT: usize = 400;
-
-/// The extraction modes of a document read.
-pub mod mode {
-    /// The main article, read from the top document alone.
-    pub const ARTICLE: &str = "article";
-    /// The visible text of every document.
-    pub const VISIBLE: &str = "visible";
-}
 
 /// Read bounded text from one target, or from the top document.
 ///
@@ -72,14 +65,14 @@ pub fn inspect(
     l: &mut Link<'_>,
     scope: &mut Scope,
     tab_id: u64,
-    kind: &str,
+    kind: InspectScope,
     max_items: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
     targets(
         l,
         scope,
         tab_id,
-        &world::inspect(kind, max_items),
+        &world::inspect(kind.as_str(), max_items),
         max_items,
     )
 }
@@ -94,14 +87,14 @@ pub fn find(
     scope: &mut Scope,
     tab_id: u64,
     text: &str,
-    kind: &str,
+    kind: FindScope,
     max_results: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
     targets(
         l,
         scope,
         tab_id,
-        &world::find(text, kind, max_results),
+        &world::find(text, kind.as_str(), max_results),
         max_results,
     )
 }
@@ -180,15 +173,18 @@ pub fn read_document(
     l: &mut Link<'_>,
     scope: &mut Scope,
     tab_id: u64,
-    read_mode: &str,
+    read_mode: ReadMode,
     max_chars: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
     let docs = scope.content_docs();
     let top = scope.top();
     let top_readable = docs.first() == Some(&top);
     let mut top_answer: Option<Text> = None;
-    if read_mode == mode::ARTICLE && top_readable {
-        let plan = scope.call(&top, world::read_text(None, Some(mode::ARTICLE), max_chars))?;
+    if read_mode == ReadMode::Article && top_readable {
+        let plan = scope.call(
+            &top,
+            world::read_text(None, Some(ReadMode::Article.as_str()), max_chars),
+        )?;
         let answers = one(l, scope, tab_id, plan)?;
         if let Ok(article) = value::<Article>(&answers[0]) {
             if article.article_found {
@@ -207,7 +203,7 @@ pub fn read_document(
     };
     let plan = scope.call(
         first,
-        world::read_text(None, Some(mode::VISIBLE), max_chars),
+        world::read_text(None, Some(ReadMode::Visible.as_str()), max_chars),
     )?;
     let answers = one(l, scope, tab_id, plan)?;
     let first_text = value::<Text>(&answers[0]).ok();
@@ -217,7 +213,7 @@ pub fn read_document(
     let mut sections = vec![first_text];
     let remaining = merge::remaining_after(sections.iter().map(Option::as_ref), max_chars);
     if remaining > 0 && !rest.is_empty() {
-        let message = world::read_text(None, Some(mode::VISIBLE), remaining);
+        let message = world::read_text(None, Some(ReadMode::Visible.as_str()), remaining);
         let plans = plan_each(scope, rest, |_| message.clone())?;
         let answers = all(l, scope, tab_id, &plans, false)?;
         sections.extend(answers.iter().map(|answer| value::<Text>(answer).ok()));

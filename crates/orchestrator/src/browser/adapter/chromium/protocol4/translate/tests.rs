@@ -20,6 +20,7 @@ use crate::browser::adapter::{
 };
 use crate::browser::{BrowserError, BrowserPort, RelayBrowserPort};
 use crate::language::PageCondition;
+use crate::language::{FindScope, PointerButton, ReadMode};
 use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
@@ -384,7 +385,7 @@ fn only_admitted_documents_are_asked_and_visited_stays_inside_them() {
                 BrowserCommand::Find {
                     tab_id: 12,
                     text: "Save".into(),
-                    kind: "any".into(),
+                    kind: FindScope::Any,
                     max_results: 10,
                 },
             ),
@@ -404,7 +405,7 @@ fn only_admitted_documents_are_asked_and_visited_stays_inside_them() {
 /// Read a document over the top and the documents it embeds, with `read` answering each world
 /// call from its frame id, mode and character bound.
 fn read_document(
-    mode: &str,
+    mode: ReadMode,
     max_chars: usize,
     read: fn(&str, &str, u64) -> Value,
 ) -> (BrowserOutcome, Vec<(String, String, u64)>) {
@@ -430,7 +431,7 @@ fn read_document(
                 scope(&["T.t1", "C.c1", "D.d1"], false),
                 BrowserCommand::ReadDocument {
                     tab_id: 12,
-                    mode: mode.into(),
+                    mode,
                     max_chars,
                 },
             ),
@@ -472,7 +473,7 @@ fn text(frame_id: &str, body: &str, maximum: u64) -> Value {
 
 #[test]
 fn a_document_read_merges_like_the_frames_cases() {
-    let (visible, asked) = read_document("visible", 15, |frame, _, maximum| match frame {
+    let (visible, asked) = read_document(ReadMode::Visible, 15, |frame, _, maximum| match frame {
         "T" => text(frame, "1234567890", maximum),
         "C" => text(frame, "abcdef", maximum),
         _ => text(frame, "never reached", maximum),
@@ -490,7 +491,7 @@ fn a_document_read_merges_like_the_frames_cases() {
     assert_eq!(asked[0], ("T".into(), "visible".into(), 15));
     assert_eq!(asked[1], ("C".into(), "visible".into(), 3));
 
-    let (article, asked) = read_document("article", 500, |_, _, _| {
+    let (article, asked) = read_document(ReadMode::Article, 500, |_, _, _| {
         returned(json!({"text": "Useful article prose", "truncated": false,
                         "article_found": true, "title": "Article",
                         "url": "https://article.test/"}))
@@ -507,13 +508,15 @@ fn a_document_read_merges_like_the_frames_cases() {
     );
     assert_eq!(asked, [("T".into(), "article".into(), 500)]);
 
-    let (fallback, asked) = read_document("article", 100, |frame, mode, _| match (frame, mode) {
-        (_, "article") => returned(json!({"text": "", "truncated": false,
+    let (fallback, asked) = read_document(ReadMode::Article, 100, |frame, mode, _| {
+        match (frame, mode) {
+            (_, "article") => returned(json!({"text": "", "truncated": false,
                 "article_found": false, "title": "Shell", "url": "https://shell.test/"})),
-        ("T", _) => refused("page_exception"),
-        ("C", _) => returned(json!({"text": "Embedded application", "truncated": false,
+            ("T", _) => refused("page_exception"),
+            ("C", _) => returned(json!({"text": "Embedded application", "truncated": false,
                 "title": "Embed", "url": "https://embed.test/"})),
-        _ => returned(json!({"text": "", "truncated": false, "title": "", "url": ""})),
+            _ => returned(json!({"text": "", "truncated": false, "title": "", "url": ""})),
+        }
     });
     assert_eq!(
         fallback,
@@ -831,14 +834,14 @@ fn a_content_command_without_a_scope_is_a_protocol_error() {
         BrowserCommand::Find {
             tab_id: 12,
             text: "Save".into(),
-            kind: "all".into(),
+            kind: FindScope::Any,
             max_results: 5,
         },
         wait(PageCondition::LoadReady),
         BrowserCommand::Activate(PhysicalClick {
             tab_id: 12,
             locator: locator.into(),
-            button: "left".into(),
+            button: PointerButton::Primary,
             click_count: 1,
             modifiers: vec![],
         }),

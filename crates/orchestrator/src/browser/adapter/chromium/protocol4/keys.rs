@@ -8,6 +8,7 @@
 //! All of it is pure: names in, wire steps out.
 
 use super::wire::{InputStep, KeyAction, MouseAction, MouseButton, Point};
+use crate::language::{PointerButton, ScrollDirection};
 
 /// The modifier bit for Alt in the mask Chromium reads.
 const ALT: u8 = 1;
@@ -27,13 +28,6 @@ const MODIFIER_BITS: [(&str, u8); 4] = [
     ("Meta", META),
     ("Shift", SHIFT),
 ];
-
-/// The button name for the middle button.
-const BUTTON_MIDDLE: &str = "middle";
-/// The button name for the secondary button.
-const BUTTON_SECONDARY: &str = "secondary";
-/// The direction name that turns the wheel up.
-const DIRECTION_UP: &str = "up";
 
 /// The wheel delta of one tick, in CSS pixels.
 const WHEEL_TICK: f64 = 120.0;
@@ -298,14 +292,13 @@ fn type_key(key: &str) -> [InputStep; 2] {
     ]
 }
 
-/// The button a work button name means. Anything but middle and secondary is the primary
-/// button.
+/// The wire button a pointer button presses.
 #[must_use]
-pub fn mouse_button(name: &str) -> MouseButton {
-    match name {
-        BUTTON_MIDDLE => MouseButton::Middle,
-        BUTTON_SECONDARY => MouseButton::Right,
-        _ => MouseButton::Left,
+pub const fn mouse_button(button: PointerButton) -> MouseButton {
+    match button {
+        PointerButton::Primary => MouseButton::Left,
+        PointerButton::Middle => MouseButton::Middle,
+        PointerButton::Secondary => MouseButton::Right,
     }
 }
 
@@ -370,13 +363,14 @@ pub enum WheelDirection {
 }
 
 impl WheelDirection {
-    /// The direction a work direction name means. Anything but up is down.
+    /// The way the wheel turns for a scroll direction, or `None` for a sideways one, which a
+    /// wheel scroll does not take.
     #[must_use]
-    pub fn from_name(name: &str) -> Self {
-        if name == DIRECTION_UP {
-            Self::Up
-        } else {
-            Self::Down
+    pub const fn of(direction: ScrollDirection) -> Option<Self> {
+        match direction {
+            ScrollDirection::Up => Some(Self::Up),
+            ScrollDirection::Down => Some(Self::Down),
+            ScrollDirection::Left | ScrollDirection::Right => None,
         }
     }
 

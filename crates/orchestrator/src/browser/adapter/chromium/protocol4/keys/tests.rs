@@ -1,4 +1,5 @@
 use super::*;
+use crate::language::{PointerButton, ScrollDirection};
 
 fn key_step(step: &InputStep) -> (KeyAction, &str, Option<&str>, u8) {
     match step {
@@ -343,11 +344,10 @@ fn no_clicks_send_nothing() {
 }
 
 #[test]
-fn button_names_map_to_wire_buttons() {
-    assert_eq!(mouse_button("primary"), MouseButton::Left);
-    assert_eq!(mouse_button("middle"), MouseButton::Middle);
-    assert_eq!(mouse_button("secondary"), MouseButton::Right);
-    assert_eq!(mouse_button("anything"), MouseButton::Left);
+fn pointer_buttons_map_to_wire_buttons() {
+    assert_eq!(mouse_button(PointerButton::Primary), MouseButton::Left);
+    assert_eq!(mouse_button(PointerButton::Middle), MouseButton::Middle);
+    assert_eq!(mouse_button(PointerButton::Secondary), MouseButton::Right);
 }
 
 #[test]
@@ -373,10 +373,17 @@ fn the_wheel_turns_one_hundred_twenty_pixels_a_tick() {
 }
 
 #[test]
-fn wheel_directions_map_from_names() {
-    assert_eq!(WheelDirection::from_name("up"), WheelDirection::Up);
-    assert_eq!(WheelDirection::from_name("down"), WheelDirection::Down);
-    assert_eq!(WheelDirection::from_name("sideways"), WheelDirection::Down);
+fn a_wheel_turns_up_or_down_and_never_sideways() {
+    assert_eq!(
+        WheelDirection::of(ScrollDirection::Up),
+        Some(WheelDirection::Up)
+    );
+    assert_eq!(
+        WheelDirection::of(ScrollDirection::Down),
+        Some(WheelDirection::Down)
+    );
+    assert_eq!(WheelDirection::of(ScrollDirection::Left), None);
+    assert_eq!(WheelDirection::of(ScrollDirection::Right), None);
 }
 
 #[test]

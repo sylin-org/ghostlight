@@ -711,7 +711,7 @@ mod tests {
             });
             let command = BrowserCommand::ReadDocument {
                 tab_id: tab,
-                mode: "visible".into(),
+                mode: crate::language::ReadMode::Visible,
                 max_chars: 500,
             };
             reactor.bind_command("shared-workspace", invocation, &command);

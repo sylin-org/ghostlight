@@ -14,6 +14,7 @@ use crate::browser::adapter::{
     PhysicalClick, PhysicalPressKey, PhysicalScroll, PhysicalTypeFocused, PhysicalTypeText,
 };
 use crate::language::page_refusal::PageRefusal;
+use crate::language::{PointerButton, ScrollAmount, ScrollDirection};
 
 const NESTED: &str = "C:c1:locator_a1_1";
 const TOP_LOCATOR: &str = "T:t1:locator_a1_2";
@@ -159,7 +160,7 @@ fn activate(locator: &str) -> BrowserCommand {
     BrowserCommand::Activate(PhysicalClick {
         tab_id: 12,
         locator: locator.into(),
-        button: "left".into(),
+        button: PointerButton::Primary,
         click_count: 1,
         modifiers: vec![],
     })
@@ -249,7 +250,7 @@ fn a_click_goes_to_the_targets_centre_in_the_top_viewport() {
         inputs[0].steps,
         keys::click(
             Point { x: 130.0, y: 75.0 },
-            keys::mouse_button("left"),
+            keys::mouse_button(PointerButton::Primary),
             1,
             0
         ),
@@ -273,7 +274,12 @@ fn a_click_in_the_top_document_needs_no_owner_box() {
     assert_eq!(kinds(&calls[0]), ["activate"]);
     assert_eq!(
         inputs_seen(&fake)[0].steps,
-        keys::click(Point { x: 30.0, y: 25.0 }, keys::mouse_button("left"), 1, 0)
+        keys::click(
+            Point { x: 30.0, y: 25.0 },
+            keys::mouse_button(PointerButton::Primary),
+            1,
+            0
+        )
     );
 }
 
@@ -287,7 +293,7 @@ fn a_modified_click_holds_its_modifiers() {
             BrowserCommand::Activate(PhysicalClick {
                 tab_id: 12,
                 locator: TOP_LOCATOR.into(),
-                button: "left".into(),
+                button: PointerButton::Primary,
                 click_count: 2,
                 modifiers: vec!["Shift".into()],
             }),
@@ -298,7 +304,7 @@ fn a_modified_click_holds_its_modifiers() {
         inputs_seen(&fake)[0].steps,
         keys::click(
             Point { x: 30.0, y: 25.0 },
-            keys::mouse_button("left"),
+            keys::mouse_button(PointerButton::Primary),
             2,
             keys::modifier_mask(&["Shift"])
         )
@@ -439,8 +445,8 @@ fn a_scroll_in_a_nested_document_reports_the_top_documents_offset() {
         BrowserCommand::Scroll(PhysicalScroll {
             tab_id: 12,
             locator: locator.map(Into::into),
-            direction: Some("down".into()),
-            amount: Some("page".into()),
+            direction: Some(ScrollDirection::Down),
+            amount: Some(ScrollAmount::Page),
         })
     };
     let (port, fake) = rig(page(), |_| Out::Value(Value::Null));

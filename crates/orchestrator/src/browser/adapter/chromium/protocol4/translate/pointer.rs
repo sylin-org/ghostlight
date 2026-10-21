@@ -23,6 +23,7 @@ use crate::browser::adapter::{
     BrowserOutcome, PhysicalActionSubject, PhysicalClick, PhysicalDrag, PhysicalScroll,
 };
 use crate::browser::BrowserError;
+use crate::language::{ScrollAmount, ScrollDirection};
 
 /// How long the page may take to settle after a click, in milliseconds.
 pub(super) const CLICK_SETTLE_MS: u64 = 250;
@@ -119,7 +120,7 @@ pub fn activate(
     admit_aim(l, scope, click.tab_id, &aim)?;
     let steps = keys::click(
         aim.point,
-        keys::mouse_button(&click.button),
+        keys::mouse_button(click.button),
         click.click_count,
         keys::modifier_mask(&click.modifiers),
     );
@@ -186,8 +187,8 @@ pub fn scroll(
         &doc,
         world::scroll(
             local.as_deref(),
-            request.direction.as_deref(),
-            request.amount.as_deref(),
+            request.direction.map(ScrollDirection::as_str),
+            request.amount.map(ScrollAmount::as_str),
         ),
     )?];
     let nested = doc != top;

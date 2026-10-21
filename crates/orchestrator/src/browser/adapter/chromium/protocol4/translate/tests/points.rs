@@ -19,6 +19,7 @@ use crate::browser::adapter::{
     PhysicalClick, PhysicalDrag, PhysicalPointClick, PhysicalPointDrag, PhysicalPointDrop,
     PhysicalPointWheel, PhysicalViewPoint,
 };
+use crate::language::{PointerButton, ScrollDirection};
 
 /// How far the top document is scrolled, in pixels.
 const SCROLL: f64 = 100.0;
@@ -262,7 +263,7 @@ fn click_at(point: (f64, f64)) -> BrowserCommand {
             point: at(point.0, point.1),
             expected_viewport: expected_view(),
         },
-        button: "left".into(),
+        button: PointerButton::Primary,
         click_count: 1,
         modifiers: vec![],
     })
@@ -276,14 +277,14 @@ fn hover_at(point: (f64, f64)) -> BrowserCommand {
     })
 }
 
-fn wheel_at(point: (f64, f64), direction: &str, ticks: u8) -> BrowserCommand {
+fn wheel_at(point: (f64, f64), direction: ScrollDirection, ticks: u8) -> BrowserCommand {
     BrowserCommand::WheelAt(PhysicalPointWheel {
         at: PhysicalViewPoint {
             tab_id: 12,
             point: at(point.0, point.1),
             expected_viewport: expected_view(),
         },
-        direction: direction.into(),
+        direction,
         ticks,
     })
 }
@@ -359,7 +360,7 @@ fn an_open_scope_sends_a_point_click_without_routing_it() {
         inputs[0].steps,
         keys::click(
             Point { x: 150.0, y: 100.0 },
-            keys::mouse_button("left"),
+            keys::mouse_button(PointerButton::Primary),
             1,
             0
         ),
@@ -382,7 +383,7 @@ fn a_modified_point_click_holds_its_modifiers() {
                     point: at(OVER_E.0, OVER_E.1),
                     expected_viewport: expected_view(),
                 },
-                button: "left".into(),
+                button: PointerButton::Primary,
                 click_count: 2,
                 modifiers: vec!["Shift".into()],
             }),
@@ -393,7 +394,7 @@ fn a_modified_point_click_holds_its_modifiers() {
         inputs_seen(&fake)[0].steps,
         keys::click(
             Point { x: 550.0, y: 100.0 },
-            keys::mouse_button("left"),
+            keys::mouse_button(PointerButton::Primary),
             2,
             keys::modifier_mask(&["Shift"])
         )
@@ -408,7 +409,7 @@ fn a_stale_view_refuses_the_point_before_anything_is_sent() {
     for command in [
         click_at(OVER_G),
         hover_at(OVER_G),
-        wheel_at(OVER_G, "down", 1),
+        wheel_at(OVER_G, ScrollDirection::Down, 1),
         drag_points(OVER_G, OVER_E),
         drop_at(OVER_G),
     ] {
@@ -461,7 +462,7 @@ fn a_scoped_point_is_routed_through_nested_documents_to_its_subject() {
         input.steps,
         keys::click(
             Point { x: 150.0, y: 100.0 },
-            keys::mouse_button("left"),
+            keys::mouse_button(PointerButton::Primary),
             1,
             0
         ),
@@ -497,7 +498,7 @@ fn a_point_over_a_document_the_scope_leaves_out_is_refused_before_input() {
     for command in [
         click_at(OVER_G),
         hover_at(OVER_G),
-        wheel_at(OVER_G, "down", 1),
+        wheel_at(OVER_G, ScrollDirection::Down, 1),
     ] {
         let (port, fake) = exact();
         assert_eq!(
@@ -543,7 +544,7 @@ fn a_restricted_click_on_a_target_lands_when_the_point_is_where_the_target_is() 
                 BrowserCommand::Activate(PhysicalClick {
                     tab_id: 12,
                     locator: "T:t1:locator_a1_2".into(),
-                    button: "left".into(),
+                    button: PointerButton::Primary,
                     click_count: 1,
                     modifiers: vec![],
                 }),
@@ -571,7 +572,7 @@ fn a_restricted_click_covered_by_a_denied_document_is_refused_before_input() {
                 BrowserCommand::Activate(PhysicalClick {
                     tab_id: 12,
                     locator: "T:t1:locator_a1_9".into(),
-                    button: "left".into(),
+                    button: PointerButton::Primary,
                     click_count: 1,
                     modifiers: vec![],
                 }),
@@ -603,8 +604,27 @@ fn a_hover_at_a_point_moves_the_pointer_there() {
 }
 
 #[test]
+fn a_sideways_wheel_turn_is_refused_before_any_input() {
+    for direction in [ScrollDirection::Left, ScrollDirection::Right] {
+        let (port, fake) = exact();
+        let result = call(&port, scoped(all_open(), wheel_at(OVER_E, direction, 1)));
+        assert!(
+            matches!(result, Err(BrowserError::Protocol(_))),
+            "{direction:?}: {result:?}"
+        );
+        assert!(
+            inputs_seen(&fake).is_empty(),
+            "{direction:?}: no wheel turned down instead"
+        );
+    }
+}
+
+#[test]
 fn a_wheel_turns_once_a_tick_in_the_direction_asked() {
-    for (direction, ticks, delta) in [("down", 3_u8, 120.0), ("up", 2, -120.0)] {
+    for (direction, ticks, delta) in [
+        (ScrollDirection::Down, 3_u8, 120.0),
+        (ScrollDirection::Up, 2, -120.0),
+    ] {
         let (port, fake) = exact();
         let result = unscoped(
             call(

@@ -131,7 +131,7 @@ fn translate(
             tabs::navigate(l, tab_id, wire::NavigationTarget::Url { url }, false)
         }
         BrowserCommand::TraverseHistory { tab_id, direction } => {
-            tabs::traverse_history(l, tab_id, &direction)
+            tabs::traverse_history(l, tab_id, direction)
         }
         BrowserCommand::Reload {
             tab_id,
@@ -155,12 +155,12 @@ fn translate(
             tab_id,
             kind,
             max_items,
-        } => read::inspect(l, reach(scope)?, tab_id, &kind, max_items),
+        } => read::inspect(l, reach(scope)?, tab_id, kind, max_items),
         BrowserCommand::ReadDocument {
             tab_id,
             mode,
             max_chars,
-        } => read::read_document(l, reach(scope)?, tab_id, &mode, max_chars),
+        } => read::read_document(l, reach(scope)?, tab_id, mode, max_chars),
         BrowserCommand::InspectTree {
             tab_id,
             locator,
@@ -171,7 +171,7 @@ fn translate(
             text,
             kind,
             max_results,
-        } => read::find(l, reach(scope)?, tab_id, &text, &kind, max_results),
+        } => read::find(l, reach(scope)?, tab_id, &text, kind, max_results),
         BrowserCommand::DescribeTargets { tab_id, locators } => {
             read::describe_targets(l, reach(scope)?, tab_id, &locators)
         }

@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use super::documents;
 use crate::language::area::LeftOut;
 use crate::language::field_echo::ChoiceMatch;
-use crate::language::PageCondition;
+use crate::language::{
+    FindScope, HistoryDirection, InspectScope, PageCondition, PointerButton, ReadMode,
+    ScrollAmount, ScrollDirection,
+};
 
 /// The service's internal browser work vocabulary, by its executor name.
 pub type Work = BrowserCommand;
@@ -687,7 +690,10 @@ pub enum BrowserCommand {
     /// Navigate a physical tab.
     Navigate { tab_id: u64, url: String },
     /// Move through browser history.
-    TraverseHistory { tab_id: u64, direction: String },
+    TraverseHistory {
+        tab_id: u64,
+        direction: HistoryDirection,
+    },
     /// Reload a physical tab.
     Reload { tab_id: u64, bypass_cache: bool },
     /// Close a physical tab.
@@ -707,13 +713,13 @@ pub enum BrowserCommand {
     /// Inspect semantic controls or structure.
     Inspect {
         tab_id: u64,
-        kind: String,
+        kind: InspectScope,
         max_items: usize,
     },
     /// Read one composed document with visible-text or explicit article extraction.
     ReadDocument {
         tab_id: u64,
-        mode: String,
+        mode: ReadMode,
         max_chars: usize,
     },
     /// Observe one bounded hierarchical document tree.
@@ -726,7 +732,7 @@ pub enum BrowserCommand {
     Find {
         tab_id: u64,
         text: String,
-        kind: String,
+        kind: FindScope,
         max_results: usize,
     },
     /// Capture a screenshot.
@@ -857,7 +863,7 @@ pub struct PhysicalClick {
     /// The target's encoded locator.
     pub locator: String,
     /// The button's name.
-    pub button: String,
+    pub button: PointerButton,
     /// How many clicks, one after another.
     pub click_count: u8,
     /// The modifier names held during the clicks.
@@ -870,7 +876,7 @@ pub struct PhysicalPointClick {
     /// The point and the view it was read in.
     pub at: PhysicalViewPoint,
     /// The button's name.
-    pub button: String,
+    pub button: PointerButton,
     /// How many clicks, one after another.
     pub click_count: u8,
     /// The modifier names held during the clicks.
@@ -883,7 +889,7 @@ pub struct PhysicalPointWheel {
     /// The point and the view it was read in.
     pub at: PhysicalViewPoint,
     /// The direction's name.
-    pub direction: String,
+    pub direction: ScrollDirection,
     /// How many ticks.
     pub ticks: u8,
 }
@@ -896,9 +902,9 @@ pub struct PhysicalScroll {
     /// The target to reveal, when the scroll names one.
     pub locator: Option<String>,
     /// The direction to scroll the page in, when it names no target.
-    pub direction: Option<String>,
+    pub direction: Option<ScrollDirection>,
     /// How far to scroll the page, when it names no target.
-    pub amount: Option<String>,
+    pub amount: Option<ScrollAmount>,
 }
 
 /// A page point on a view the model looked at.
@@ -1418,10 +1424,11 @@ mod tests {
         use crate::browser::adapter::{
             BrowserCommand, PhysicalClick, PhysicalDrag, PhysicalScroll, RecordingDestination,
         };
+        use crate::language::{PointerButton, ScrollDirection};
         let click = BrowserCommand::Activate(PhysicalClick {
             tab_id: 1,
             locator: "F:L:locator_a_1".into(),
-            button: "left".into(),
+            button: PointerButton::Primary,
             click_count: 1,
             modifiers: vec![],
         });
@@ -1442,7 +1449,7 @@ mod tests {
         let page_scroll = BrowserCommand::Scroll(PhysicalScroll {
             tab_id: 1,
             locator: None,
-            direction: Some("down".into()),
+            direction: Some(ScrollDirection::Down),
             amount: None,
         });
         assert_eq!(page_scroll.sole_locator(), None);

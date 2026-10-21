@@ -6,6 +6,7 @@ use crate::browser::adapter::{
     PhysicalTypeFocused, PhysicalViewPoint, PhysicalWait,
 };
 use crate::language::outcome::Refusal;
+use crate::language::ReadMode;
 
 /// A primitive adapter error routes to an honest refusal that carries the browser's own
 /// detail, instead of falling through to the browser-stopped rendering.
@@ -2264,7 +2265,7 @@ fn open_read_close_is_one_truthful_result_per_call() {
     assert!(matches!(
         &calls[1],
         BrowserCommand::ReadDocument { mode, max_chars, .. }
-            if mode == "visible" && *max_chars == 8_000
+            if *mode == ReadMode::Visible && *max_chars == 8_000
     ));
 }
 

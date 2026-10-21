@@ -5,6 +5,7 @@ use super::super::wire;
 use crate::browser::adapter::BrowserOutcome;
 use crate::browser::BrowserError;
 use crate::install::icons::sha256_hex;
+use crate::language::HistoryDirection;
 
 /// The longest wait for an opened or navigated tab to become ready, in milliseconds.
 pub const READY_TIMEOUT_MS: u64 = 8_000;
@@ -12,16 +13,6 @@ pub const READY_TIMEOUT_MS: u64 = 8_000;
 const GROUP_KEY_PREFIX: &str = "g_";
 /// How many hex characters of the group title's digest a group key keeps.
 const GROUP_KEY_HEX_CHARS: usize = 16;
-/// The failure for a history direction that is neither back nor forward.
-const UNKNOWN_DIRECTION: &str = "browser history direction must be back or forward";
-
-/// The history directions work may name.
-pub mod direction {
-    /// One entry back.
-    pub const BACK: &str = "back";
-    /// One entry forward.
-    pub const FORWARD: &str = "forward";
-}
 
 /// List every tab.
 ///
@@ -132,12 +123,11 @@ pub fn navigate(
 pub fn traverse_history(
     l: &mut Link<'_>,
     tab_id: u64,
-    direction: &str,
+    direction: HistoryDirection,
 ) -> Result<BrowserOutcome, BrowserError> {
     let to = match direction {
-        direction::BACK => wire::NavigationTarget::Back,
-        direction::FORWARD => wire::NavigationTarget::Forward,
-        _ => return Err(BrowserError::primitive(UNKNOWN_DIRECTION)),
+        HistoryDirection::Back => wire::NavigationTarget::Back,
+        HistoryDirection::Forward => wire::NavigationTarget::Forward,
     };
     navigate(l, tab_id, to, false)
 }

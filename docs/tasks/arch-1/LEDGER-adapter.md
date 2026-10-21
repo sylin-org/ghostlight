@@ -10,8 +10,8 @@ A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset 
 Notes).
 
 The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7,
-BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52, D52(c) and BROW-12a have landed; BROW-3a is
-next.
+BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52, D52(c), BROW-12a and BROW-3a have landed; the
+second sweep's adapter slices are done.
 
 ## Slices
 
@@ -140,7 +140,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52, D52(c) and BROW-12a have landed; BROW-3a is next.
+with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52, D52(c), BROW-12a and BROW-3a have landed; the second sweep's adapter slices are done.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -152,7 +152,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | landed (this commit) |
 | BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | landed (this commit) |
 | BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | landed (this commit) |
-| BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | todo |
+| BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | landed (this commit) |
 | BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | landed (this commit) |
 | D52 | fix(adapter): Decision 5.2's receipt codes reach the refusal as a typed cause | SERV-7 | the coordinator's placement: `BrowserError::Primitive { detail, cause }` with `language::outcome::PrimitiveCause`; core-work's routing_refusal half is D52(c) in its ledger | landed (696fa557) |
 | D52(c) | fix(work): a refusal names its typed cause, and a capture over its budget says so | D52 | test-03 handed core-work's D52(c) to this lane on 2026-10-20; cross-lane in `work/mod.rs` | landed (this commit) |
@@ -300,3 +300,24 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   `install/icons.rs` is a reuse, not a move: the other lanes' hex copies (governance,
   `workbench/parts.rs`, `workspace/mod.rs`) are theirs, and a crate-level digest module would be
   core-service's `lib.rs`.
+- BROW-3a: `BrowserCommand` carries LANG-3's types where it carried their words:
+  `TraverseHistory.direction` is a `HistoryDirection`, `Inspect.kind` an `InspectScope`,
+  `ReadDocument.mode` a `ReadMode`, `Find.kind` a `FindScope`, the two click structs' `button` a
+  `PointerButton`, `PhysicalScroll`'s direction and amount a `ScrollDirection` and a
+  `ScrollAmount`, and `PhysicalPointWheel.direction` a `ScrollDirection`. The executors drop their
+  `.as_str().into()`, and the translator writes `as_str()` into the world message, so the page
+  and wire words are unchanged. The translator's own word copies go (`read::mode`,
+  `tabs::direction` and its `UNKNOWN_DIRECTION`, and `keys.rs`'s button and direction names), and
+  its two fallbacks become exhaustive matches: `keys::mouse_button(PointerButton)` maps every
+  button, where any unknown name was the primary, and `WheelDirection::of(ScrollDirection)` is
+  `None` for a sideways turn, which the translator refuses as a protocol error before any input,
+  where any word but up turned the wheel down. The language never sends a sideways wheel turn
+  (`WHEEL_DIRECTIONS`), so no agent meets the refusal. The test of an unknown history direction
+  goes: the type rules it out. Eight test commands that sent the button `"left"`, a word the
+  language never decodes, now send `PointerButton::Primary`. Not taken: modifiers and keys stay
+  strings, since LANG-3 named no type for them; `ClickShape.button` stays a string, since it is a
+  serde mirror the page reads; and the adapter's `DiagnosticSource` and `DiagnosticDetail` stay
+  apart from the language's, which have the same words but only decode, while the adapter's are
+  the serde mirrors' physical side. Proofs: `pointer_buttons_map_to_wire_buttons` and
+  `a_wheel_turns_up_or_down_and_never_sideways` (`keys/tests.rs`) and
+  `a_sideways_wheel_turn_is_refused_before_any_input` (`translate/tests/points.rs`).
