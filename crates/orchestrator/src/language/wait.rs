@@ -7,8 +7,6 @@
 
 use serde::de::{Deserialize, Deserializer, Error as _};
 
-use super::LanguageError;
-
 /// The condition `layout_stable` became `visual_settle`; a call that still names it is told so.
 const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
 
@@ -134,28 +132,6 @@ impl WaitCondition {
     }
 }
 
-impl TryFrom<&str> for WaitCondition {
-    type Error = LanguageError;
-
-    fn try_from(name: &str) -> Result<Self, Self::Error> {
-        Self::named(name).map_err(LanguageError::Invalid)
-    }
-}
-
-impl From<PageCondition> for WaitCondition {
-    fn from(condition: PageCondition) -> Self {
-        match condition {
-            PageCondition::LoadReady => Self::LoadReady,
-            PageCondition::UrlContains => Self::UrlContains,
-            PageCondition::TextPresent => Self::TextPresent,
-            PageCondition::TextAbsent => Self::TextAbsent,
-            PageCondition::TargetPresent => Self::TargetPresent,
-            PageCondition::TargetAbsent => Self::TargetAbsent,
-            PageCondition::VisualSettle => Self::VisualSettle,
-        }
-    }
-}
-
 /// A condition the page evaluates: what `BrowserCommand::Observe` carries.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PageCondition {
@@ -233,104 +209,4 @@ pub(super) fn decode_expected<'de, D: Deserializer<'de>>(
 ) -> Result<PageCondition, D::Error> {
     let name = String::deserialize(deserializer)?;
     PageCondition::expected(&name).map_err(D::Error::custom)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{PageCondition, WaitCondition};
-
-    #[test]
-    fn every_condition_round_trips_through_its_name() {
-        for condition in WaitCondition::ALL {
-            assert_eq!(
-                WaitCondition::try_from(condition.as_str()).ok(),
-                Some(condition)
-            );
-            if let Some(page) = condition.page() {
-                assert_eq!(WaitCondition::from(page), condition);
-                assert_eq!(page.as_str(), condition.as_str());
-            }
-        }
-        for page in PageCondition::EXPECTABLE {
-            assert_eq!(PageCondition::expected(page.as_str()), Ok(page));
-        }
-    }
-
-    #[test]
-    fn every_condition_settles_and_scopes_as_the_catalog_says() {
-        let description = crate::language::catalog()
-            .into_iter()
-            .find(|tool| tool.name == "browser_wait")
-            .expect("browser_wait is in the catalog")
-            .input_schema["properties"]["visual_settle"]["description"]
-            .as_str()
-            .expect("visual_settle is described")
-            .to_owned();
-        // The catalog derives these words from `settles_by_default`; the words themselves are
-        // what an agent was promised.
-        assert!(
-            description.contains(
-                "Off by default for url_contains, text_present, text_absent, and target_absent; \
-                 on for the rest."
-            ),
-            "{description}"
-        );
-        for condition in WaitCondition::ALL {
-            let default = condition.settles(None);
-            assert_eq!(
-                default,
-                condition.settles_by_default() && condition != WaitCondition::VisualSettle
-            );
-            assert!(!condition.settles(Some(false)));
-            assert_eq!(
-                condition.settles(Some(true)),
-                condition != WaitCondition::VisualSettle
-            );
-        }
-        assert!(PageCondition::TextPresent.reads_whole_page());
-        assert!(PageCondition::TextAbsent.reads_whole_page());
-        assert!(!PageCondition::TargetAbsent.reads_whole_page());
-        let absent: Vec<PageCondition> = WaitCondition::ALL
-            .into_iter()
-            .filter_map(WaitCondition::page)
-            .filter(|page| page.tests_absence())
-            .collect();
-        assert_eq!(
-            absent,
-            [PageCondition::TextAbsent, PageCondition::TargetAbsent]
-        );
-    }
-
-    #[test]
-    fn an_unknown_or_retired_condition_is_refused_with_the_curated_words() {
-        assert_eq!(
-            WaitCondition::named("soon").unwrap_err(),
-            "condition must be one of load_ready, url_contains, text_present, text_absent, \
-             target_present, target_absent, visual_settle, duration: got `soon`"
-        );
-        assert!(WaitCondition::named("layout_stable")
-            .unwrap_err()
-            .contains("merged into visual_settle"));
-        let refusal = |tool: &str, input: serde_json::Value| {
-            crate::language::decode(tool, input)
-                .unwrap_err()
-                .to_string()
-        };
-        assert_eq!(
-            refusal("browser_wait", serde_json::json!({"condition":"soon"})),
-            "invalid input: condition must be one of load_ready, url_contains, text_present, \
-             text_absent, target_present, target_absent, visual_settle, duration: got `soon`"
-        );
-        assert_eq!(
-            refusal(
-                "browser_click",
-                serde_json::json!({"target":"target_x","expect":{"condition":"duration"}})
-            ),
-            "invalid input: expect supports load_ready, url_contains, text_present, or text_absent"
-        );
-        assert_eq!(
-            PageCondition::expected("duration").unwrap_err(),
-            "expect supports load_ready, url_contains, text_present, or text_absent"
-        );
-    }
 }

@@ -158,16 +158,3 @@ impl Tool {
         Self::ALL.into_iter().find(|tool| tool.name() == name)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Tool;
-
-    #[test]
-    fn every_tool_round_trips_through_its_name() {
-        for tool in Tool::ALL {
-            assert_eq!(Tool::named(tool.name()), Some(tool));
-        }
-        assert_eq!(Tool::named("browser_sequence"), None);
-    }
-}

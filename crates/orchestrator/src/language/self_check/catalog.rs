@@ -11,8 +11,12 @@ use serde_json::{json, Value};
 
 use super::golden::{check_golden, golden_text, CATALOG_GOLDEN};
 use super::schema::{is_valid, violations};
+use crate::language::bounds::{
+    FIELD_CHOICES, FIELD_VALUE_CHARS, HANDLE_CHARS, MAX_POSTCONDITION_VALUE_CHARS,
+};
 use crate::language::catalog::EXAMPLE_UPLOAD_PATH;
-use crate::language::{catalog, decode};
+use crate::language::wait::EXPECT_REFUSAL;
+use crate::language::{catalog, decode, HandleKind, WaitCondition, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS};
 
 /// An absolute path the decoder accepts on the platform the tests run on.
 #[cfg(windows)]
@@ -325,12 +329,79 @@ fn assert_accepted(tool: &str, call: &Value) {
     }
 }
 
-/// Every call the gate-2 checks read: the known-good calls and every example each tool advertises.
+/// The first example a tool advertises, the call the bound rows change one field of.
+fn first_example(tool: &str) -> Value {
+    advertised(tool)["examples"][0].clone()
+}
+
+/// `call` with `field` set to `value`.
+fn with(mut call: Value, field: &str, value: Value) -> Value {
+    call[field] = value;
+    call
+}
+
+/// The tools that advertise an action's `expect`.
+fn expecting_tools() -> Vec<String> {
+    catalog()
+        .into_iter()
+        .filter(|tool| tool.input_schema["properties"].get("expect").is_some())
+        .map(|tool| tool.name)
+        .collect()
+}
+
+/// A fill of one target field with `value`.
+fn fill(value: Value) -> Value {
+    json!({"fields":[{"target":"target_1","value":value}]})
+}
+
+/// A target handle `chars` characters long.
+fn target_handle(chars: usize) -> String {
+    let prefix = HandleKind::Target.prefix();
+    format!("{prefix}{}", "x".repeat(chars - prefix.len()))
+}
+
+/// Calls at an advertised bound, built from the bounds the decoder enforces: every tool's
+/// shortest and longest `timeout_ms`, the longest `expect` value, a fill list of the most
+/// choices and its longest item, and the longest handle. Each must be accepted, so a schema
+/// bound tighter than the decoder's fails here, and one looser fails the invalid-call rows.
+fn boundary_calls() -> Vec<(String, Value)> {
+    let mut calls = Vec::new();
+    for tool in catalog() {
+        for ms in [MIN_TIMEOUT_MS, MAX_TIMEOUT_MS] {
+            calls.push((
+                tool.name.clone(),
+                with(first_example(&tool.name), "timeout_ms", json!(ms)),
+            ));
+        }
+    }
+    for tool in expecting_tools() {
+        let expect =
+            json!({"condition":"text_present","value":"x".repeat(MAX_POSTCONDITION_VALUE_CHARS)});
+        calls.push((tool.clone(), with(first_example(&tool), "expect", expect)));
+    }
+    calls.push((
+        "browser_fill_form".into(),
+        fill(json!(vec!["x"; FIELD_CHOICES])),
+    ));
+    calls.push((
+        "browser_fill_form".into(),
+        fill(json!(["x".repeat(FIELD_VALUE_CHARS)])),
+    ));
+    calls.push((
+        "browser_read".into(),
+        json!({"target": target_handle(HANDLE_CHARS)}),
+    ));
+    calls
+}
+
+/// Every call the gate-2 checks read: the known-good calls, the calls at an advertised bound and
+/// every example each tool advertises.
 fn every_call() -> Vec<(String, Value)> {
     let mut calls: Vec<(String, Value)> = known_good_calls()
         .into_iter()
         .map(|(tool, call)| (tool.to_owned(), call))
         .collect();
+    calls.extend(boundary_calls());
     for tool in catalog() {
         for example in tool.input_schema["examples"]
             .as_array()
@@ -427,8 +498,9 @@ fn each_subschema(schema: &Value, visit: &mut impl FnMut(&Value)) {
 }
 
 /// ACCEPTANCE contract gate 2 (MSURF-1, 0ddb34af): under a strict JSON Schema check, every
-/// advertised example and at least two ordinary calls per tool that takes input satisfy the
-/// tool's own schema, match each `oneOf` they reach exactly once, and decode. Every `oneOf` in the
+/// advertised example, at least two ordinary calls per tool that takes input, and a call at each
+/// advertised bound satisfy the tool's own schema, match each `oneOf` they reach exactly once, and
+/// decode. Every `oneOf` in the
 /// catalog is reached by some call, and the checker flags the ambiguous schema MSURF-1 shipped, so
 /// the check cannot pass vacuously.
 #[test]
@@ -566,129 +638,597 @@ fn an_advertised_default_means_the_same_as_leaving_the_field_out() {
     }
 }
 
-/// What a strict client refuses is what Ghostlight refuses (ACCEPTANCE gate 2: the schemas carry
-/// every decoder requirement). Each invalid call breaks one keyword the catalog uses; the
-/// advertised schema reports that keyword and the decoder refuses the call, so the checks above
-/// are not vacuous.
-#[test]
-fn the_schema_and_the_decoder_refuse_the_same_invalid_calls() {
-    let invalid = [
-        // L-D7: a nested object the schema closes is closed in the decoder too.
-        (
+/// What the decoder's refusal of an invalid call says.
+enum Says {
+    /// A refusal; its words are not checked.
+    Refused,
+    /// Exactly this refusal.
+    Exactly(String),
+    /// A refusal that names this word.
+    Naming(&'static str),
+}
+
+/// One invalid call: the tool, the call, the keyword the advertised schema reports for it, and
+/// what the decoder's refusal says. The keyword is none for a call the one wide envelope a tool
+/// advertises admits, which only the decoder refuses.
+struct Invalid {
+    tool: String,
+    call: Value,
+    schema: Option<&'static str>,
+    says: Says,
+}
+
+fn invalid(tool: &str, call: Value, schema: Option<&'static str>, says: Says) -> Invalid {
+    Invalid {
+        tool: tool.to_owned(),
+        call,
+        schema,
+        says,
+    }
+}
+
+/// The words a closed field advertises at `pointer` in `tool`'s schema, as a refusal lists them.
+fn advertised_words(tool: &str, pointer: &str) -> Vec<String> {
+    let schema = advertised(tool);
+    let field = schema
+        .pointer(pointer)
+        .unwrap_or_else(|| panic!("{tool} advertises nothing at {pointer}"));
+    field["enum"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{tool} {pointer} is not a closed field"))
+        .iter()
+        .map(|word| word.as_str().expect("a closed word is text").to_owned())
+        .collect()
+}
+
+/// The refusal of `bad` for the closed field `field`, listing the words the catalog advertises
+/// for it at `pointer`.
+fn refused_word(tool: &str, pointer: &str, field: &str, bad: &str) -> Says {
+    Says::Exactly(format!(
+        "invalid input: {field} must be one of {}: got `{bad}`",
+        advertised_words(tool, pointer).join(", ")
+    ))
+}
+
+/// The refusal of `value` for the whole-number field `field`, naming the bounds the catalog
+/// advertises for it at `pointer`.
+fn refused_number(tool: &str, pointer: &str, field: &str, value: u64) -> Says {
+    let schema = advertised(tool);
+    let bounds = schema
+        .pointer(pointer)
+        .unwrap_or_else(|| panic!("{tool} advertises nothing at {pointer}"));
+    Says::Exactly(format!(
+        "invalid input: {field} must be between {} and {}; got {value}",
+        bounds["minimum"], bounds["maximum"]
+    ))
+}
+
+/// The refusal of a field the tool's schema does not advertise, at the top level or inside a
+/// nested object (L-D7: a nested unknown field reads as a top-level one does).
+fn unknown_field(field: &str) -> Says {
+    Says::Exactly(format!(
+        "invalid input: unknown field `{field}`: check this tool's advertised fields"
+    ))
+}
+
+/// Every invalid call the gate-2 refusal check sends.
+fn invalid_calls() -> Vec<Invalid> {
+    let mut calls = vec![
+        // L-D7 (4b1cdea0): a nested object the schema closes is closed in the decoder too, and
+        // a field it does not name is refused in the top level's words rather than dropped (a
+        // dropped `role` widened what a click could land on).
+        invalid(
             "browser_click",
             json!({"selector":{"name":"Save","rol":"button"}}),
-            "unknown field `rol`",
+            Some("unknown field `rol`"),
+            unknown_field("rol"),
         ),
-        (
+        invalid(
             "browser_click",
             json!({"target":"target_1","expect":{"condition":"load_ready","valu":"x"}}),
-            "unknown field `valu`",
+            Some("unknown field `valu`"),
+            unknown_field("valu"),
         ),
-        (
+        invalid(
             "browser_upload",
             json!({"target":"target_1","files":[{"name":"a.txt","data_base64":"SGk=","mime":"x"}]}),
-            "unknown field `mime`",
+            Some("unknown field `mime`"),
+            unknown_field("mime"),
         ),
-        (
+        invalid(
+            "browser_fill_form",
+            json!({"fields":[{"selector":{"name":"Email","exactly":true},"value":"a"}]}),
+            Some("unknown field `exactly`"),
+            unknown_field("exactly"),
+        ),
+        invalid(
             "browser_dialog",
             json!({"accept":true}),
-            "unknown field `accept`",
+            Some("unknown field `accept`"),
+            unknown_field("accept"),
         ),
-        ("browser_tabs", json!({"action":"open"}), "is not one of"),
-        (
-            "browser_wait",
-            json!({"condition":"never"}),
-            "is not one of",
-        ),
-        (
-            "browser_wait",
-            json!({"condition":"layout_stable"}),
-            "is not one of",
-        ),
-        (
-            "browser_type_text",
-            json!({"target":"target_1"}),
-            "missing required field `text`",
-        ),
-        (
-            "browser_scroll",
-            json!({"direction":"sideways"}),
-            "is not one of",
-        ),
-        (
-            "browser_navigate",
-            json!({"url":"ftp://example.com"}),
-            "does not match",
-        ),
-        (
-            "browser_press_key",
-            json!({"strokes":["Control","a"]}),
-            "matches no oneOf branch",
-        ),
-        (
-            "browser_click",
-            json!({"target":"view_1"}),
-            "does not match",
-        ),
-        (
+        invalid(
             "browser_record",
             json!({"action":"stop","recording":"recording_1"}),
-            "unknown field `recording`",
+            Some("unknown field `recording`"),
+            unknown_field("recording"),
         ),
-        ("browser_read", json!({"timeout_ms":99}), "breaks minimum"),
-        (
+        invalid(
+            "browser_read",
+            json!({"max_chars":8000,"max_char":1}),
+            Some("unknown field `max_char`"),
+            unknown_field("max_char"),
+        ),
+        // A closed word is refused with the words the catalog advertises for that field.
+        invalid(
+            "browser_tabs",
+            json!({"action":"open"}),
+            Some("is not one of"),
+            refused_word("browser_tabs", "/properties/action", "action", "open"),
+        ),
+        invalid(
+            "browser_history",
+            json!({"action":"up"}),
+            Some("is not one of"),
+            refused_word("browser_history", "/properties/action", "action", "up"),
+        ),
+        invalid(
+            "browser_window",
+            json!({"action":"maximize"}),
+            Some("is not one of"),
+            refused_word("browser_window", "/properties/action", "action", "maximize"),
+        ),
+        invalid(
+            "browser_navigate",
+            json!({"url":"https://example.com","reuse":"sometimes"}),
+            Some("is not one of"),
+            refused_word(
+                "browser_navigate",
+                "/properties/reuse",
+                "reuse",
+                "sometimes",
+            ),
+        ),
+        invalid(
+            "browser_navigate",
+            json!({"url":"https://example.com","beforeunload":"keep"}),
+            Some("is not one of"),
+            refused_word(
+                "browser_navigate",
+                "/properties/beforeunload",
+                "beforeunload",
+                "keep",
+            ),
+        ),
+        invalid(
+            "browser_inspect",
+            json!({"scope":"links"}),
+            Some("is not one of"),
+            refused_word("browser_inspect", "/properties/scope", "scope", "links"),
+        ),
+        invalid(
+            "browser_find",
+            json!({"text":"Save","scope":"links"}),
+            Some("is not one of"),
+            refused_word("browser_find", "/properties/scope", "scope", "links"),
+        ),
+        invalid(
+            "browser_click",
+            json!({"target":"target_1","button":"left"}),
+            Some("is not one of"),
+            refused_word("browser_click", "/properties/button", "button", "left"),
+        ),
+        invalid(
+            "browser_click",
+            json!({"target":"target_1","modifiers":["Hyper"]}),
+            Some("is not one of"),
+            refused_word(
+                "browser_click",
+                "/properties/modifiers/items",
+                "modifiers",
+                "Hyper",
+            ),
+        ),
+        invalid(
+            "browser_scroll",
+            json!({"direction":"sideways"}),
+            Some("is not one of"),
+            refused_word(
+                "browser_scroll",
+                "/properties/direction",
+                "direction",
+                "sideways",
+            ),
+        ),
+        invalid(
+            "browser_scroll",
+            json!({"amount":"huge"}),
+            Some("is not one of"),
+            refused_word("browser_scroll", "/properties/amount", "amount", "huge"),
+        ),
+        invalid(
+            "browser_dialog",
+            json!({"action":"close"}),
+            Some("is not one of"),
+            refused_word("browser_dialog", "/properties/action", "action", "close"),
+        ),
+        invalid(
+            "browser_record",
+            json!({"action":"pause"}),
+            Some("is not one of"),
+            refused_word("browser_record", "/properties/action", "action", "pause"),
+        ),
+        invalid(
+            "browser_flow",
+            json!({"steps":[{"tool":"browser_read"}],"on_error":"retry"}),
+            Some("is not one of"),
+            refused_word("browser_flow", "/properties/on_error", "on_error", "retry"),
+        ),
+        invalid(
+            "browser_diagnose",
+            json!({"source":"dom"}),
+            Some("is not one of"),
+            refused_word("browser_diagnose", "/properties/source", "source", "dom"),
+        ),
+        invalid(
+            "browser_diagnose",
+            json!({"detail":"some"}),
+            Some("is not one of"),
+            refused_word("browser_diagnose", "/properties/detail", "detail", "some"),
+        ),
+        invalid(
+            "browser_press_key",
+            json!({"key":"PageLeft"}),
+            Some("matches no oneOf branch"),
+            Says::Exactly(format!(
+                "invalid input: key must be one character or a supported named key: {}",
+                advertised_words("browser_press_key", "/properties/key/oneOf/1").join(", ")
+            )),
+        ),
+        // LANGUAGE.md browser_wait (C17a): an unknown condition is refused with the curated list,
+        // which has never named selector_present, a condition a wait names with its selector; a
+        // retired layout_stable points to visual_settle; and an expect that names a condition it
+        // does not take lists the four it does.
+        invalid(
+            "browser_wait",
+            json!({"condition":"never"}),
+            Some("is not one of"),
+            Says::Exactly(format!(
+                "invalid input: condition must be one of {}: got `never`",
+                advertised_words("browser_wait", "/properties/condition")
+                    .into_iter()
+                    .filter(|word| word != WaitCondition::SelectorPresent.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        ),
+        invalid(
+            "browser_wait",
+            json!({"condition":"layout_stable"}),
+            Some("is not one of"),
+            Says::Naming(WaitCondition::VisualSettle.as_str()),
+        ),
+        invalid(
+            "browser_click",
+            json!({"target":"target_1","expect":{"condition":"duration"}}),
+            Some("is not one of"),
+            Says::Exactly(format!("invalid input: {EXPECT_REFUSAL}")),
+        ),
+        // A refused number names the advertised bounds; a refused handle names its prefix.
+        invalid(
+            "browser_window",
+            json!({"action":"zoom","percent":900}),
+            Some("breaks maximum"),
+            refused_number("browser_window", "/properties/percent", "percent", 900),
+        ),
+        invalid(
+            "browser_tabs",
+            json!({"action":"close","tab":"nope"}),
+            Some("does not match"),
+            Says::Naming(HandleKind::Tab.prefix()),
+        ),
+        invalid(
+            "browser_type_text",
+            json!({"target":"target_1"}),
+            Some("missing required field `text`"),
+            Says::Refused,
+        ),
+        invalid(
+            "browser_navigate",
+            json!({"url":"ftp://example.com"}),
+            Some("does not match"),
+            Says::Refused,
+        ),
+        invalid(
+            "browser_press_key",
+            json!({"strokes":["Control","a"]}),
+            Some("matches no oneOf branch"),
+            Says::Refused,
+        ),
+        invalid(
+            "browser_click",
+            json!({"target":"view_1"}),
+            Some("does not match"),
+            Says::Naming(HandleKind::Target.prefix()),
+        ),
+        invalid(
+            "browser_read",
+            json!({"timeout_ms":MIN_TIMEOUT_MS - 1}),
+            Some("breaks minimum"),
+            refused_number(
+                "browser_read",
+                "/properties/timeout_ms",
+                "timeout_ms",
+                MIN_TIMEOUT_MS - 1,
+            ),
+        ),
+        invalid(
             "browser_click",
             json!({"target":"target_1","click_count":"2"}),
-            "is not of type integer",
+            Some("is not of type integer"),
+            Says::Refused,
         ),
-        (
+        invalid(
             "browser_press_key",
             json!({"key":"Enter","repeat":1.5}),
-            "is not of type integer",
+            Some("is not of type integer"),
+            Says::Refused,
         ),
-        ("browser_find", json!({"text":""}), "breaks minLength"),
-        (
+        invalid(
+            "browser_find",
+            json!({"text":""}),
+            Some("breaks minLength"),
+            Says::Refused,
+        ),
+        invalid(
             "browser_find",
             json!({"text":"a".repeat(501)}),
-            "breaks maxLength",
+            Some("breaks maxLength"),
+            Says::Refused,
         ),
-        (
+        invalid(
             "browser_click",
             json!({"target":"target_1","click_count":4}),
-            "breaks maximum",
+            Some("breaks maximum"),
+            Says::Refused,
         ),
-        (
+        invalid(
             "browser_screenshot",
             json!({"view":"view_1","x":0,"y":0,"width":0,"height":10}),
-            "breaks exclusiveMinimum",
+            Some("breaks exclusiveMinimum"),
+            Says::Refused,
         ),
-        ("browser_fill_form", json!({"fields":[]}), "break minItems"),
-        (
+        invalid(
+            "browser_fill_form",
+            json!({"fields":[]}),
+            Some("break minItems"),
+            Says::Refused,
+        ),
+        invalid(
             "browser_press_key",
             json!({"strokes":vec!["a"; 21]}),
-            "break maxItems",
+            Some("break maxItems"),
+            Says::Refused,
         ),
-        (
+        invalid(
             "browser_press_key",
             json!({"key":"a","modifiers":["Shift","Shift"]}),
-            "not unique",
+            Some("not unique"),
+            Says::Refused,
         ),
-        (
+        invalid(
             "browser_fill_form",
             json!({"fields":[{"target":"target_1","value":{}}]}),
-            "matches no anyOf branch",
+            Some("matches no anyOf branch"),
+            Says::Refused,
+        ),
+        // One step past each bound the boundary calls sit on.
+        invalid(
+            "browser_fill_form",
+            fill(json!(vec!["x"; FIELD_CHOICES + 1])),
+            Some("matches no anyOf branch"),
+            Says::Refused,
+        ),
+        invalid(
+            "browser_fill_form",
+            fill(json!(["x".repeat(FIELD_VALUE_CHARS + 1)])),
+            Some("matches no anyOf branch"),
+            Says::Refused,
+        ),
+        invalid(
+            "browser_read",
+            json!({"target": target_handle(HANDLE_CHARS + 1)}),
+            Some("breaks maxLength"),
+            Says::Refused,
+        ),
+        invalid(
+            "browser_read",
+            json!({"target":""}),
+            Some("does not match"),
+            Says::Refused,
+        ),
+        invalid(
+            "browser_read",
+            json!({"target": HandleKind::Target.prefix()}),
+            Some("does not match"),
+            Says::Refused,
+        ),
+        // The wide envelope admits these; the decoder refuses each one outside its branch.
+        invalid(
+            "browser_wait",
+            json!({"condition":"text_present"}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_wait",
+            json!({"condition":"target_present","value":"x"}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_click",
+            json!({"target":"target_1","expect":{"condition":"load_ready","value":"x"}}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_screenshot",
+            json!({"target":"target_1","full_page":true}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_screenshot",
+            json!({"x":0,"y":0,"width":300,"height":200}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_screenshot",
+            json!({"view":"view_1","x":0,"y":0,"width":300}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_screenshot",
+            json!({"view":"view_1","x":0,"y":0,"width":300,"height":200,"full_page":true}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_screenshot",
+            json!({"view":"view_1","x":0,"y":0,"width":300,"height":200,"target":"target_1"}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_click",
+            json!({"target":"target_1","view":"view_1","x":1,"y":1}),
+            None,
+            Says::Refused,
+        ),
+        invalid("browser_click", json!({"x":1,"y":1}), None, Says::Refused),
+        invalid(
+            "browser_scroll",
+            json!({"target":"target_1","direction":"up"}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_scroll",
+            json!({"target":"target_1","amount":"page"}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_upload",
+            json!({"target":"target_1","paths":["relative.txt"]}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_tabs",
+            json!({"action":"list","tab":"tab_1"}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_history",
+            json!({"action":"back","bypass_cache":true}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_window",
+            json!({"action":"zoom","width":800,"height":600}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_dialog",
+            json!({"action":"accept","text":"yes"}),
+            None,
+            Says::Refused,
+        ),
+        invalid(
+            "browser_record",
+            json!({"action":"stop","target":"target_1"}),
+            None,
+            Says::Refused,
         ),
     ];
+    for tool in catalog() {
+        let past = MAX_TIMEOUT_MS + 1;
+        calls.push(invalid(
+            &tool.name,
+            with(first_example(&tool.name), "timeout_ms", json!(past)),
+            Some("breaks maximum"),
+            refused_number(&tool.name, "/properties/timeout_ms", "timeout_ms", past),
+        ));
+    }
+    for tool in expecting_tools() {
+        let expect = json!({"condition":"text_present","value":"x".repeat(MAX_POSTCONDITION_VALUE_CHARS + 1)});
+        calls.push(invalid(
+            &tool,
+            with(first_example(&tool), "expect", expect),
+            Some("breaks maxLength"),
+            Says::Refused,
+        ));
+    }
+    calls
+}
+
+/// What a strict client refuses is what Ghostlight refuses, and the refusal says what the field
+/// takes in the catalog's own words (ACCEPTANCE gate 2: the schemas carry every decoder
+/// requirement and conditional branch; LANGUAGE.md's contract rules). Each invalid call breaks one
+/// keyword the catalog uses, or one branch the wide envelope cannot express: the advertised
+/// schema reports that keyword, and the decoder refuses the call before dispatch. A refused word
+/// lists the enum the catalog advertises for the field, a refused number its advertised bounds, a
+/// refused handle its prefix, and an unknown field, nested ones included (L-D7, 4b1cdea0), is
+/// named; every refusal carries guidance that is itself without its `invalid input: ` prefix, the
+/// words a next step quotes. So the checks above are not vacuous.
+#[test]
+fn an_invalid_call_is_refused_before_dispatch_by_both_sides_in_the_catalogs_words() {
     let mut disagreements = Vec::new();
-    for (tool, call, fragment) in invalid {
-        let found = violations(&advertised(tool), &call);
-        if !found.iter().any(|violation| violation.contains(fragment)) {
-            disagreements.push(format!(
-                "{tool} {call}: schema says {found:?}, not {fragment:?}"
-            ));
+    for Invalid {
+        tool,
+        call,
+        schema,
+        says,
+    } in invalid_calls()
+    {
+        if let Some(fragment) = schema {
+            let found = violations(&advertised(&tool), &call);
+            if !found.iter().any(|violation| violation.contains(fragment)) {
+                disagreements.push(format!(
+                    "{tool} {call}: schema says {found:?}, not {fragment:?}"
+                ));
+            }
         }
-        if let Ok(operation) = decode(tool, call.clone()) {
-            disagreements.push(format!("{tool} {call}: decodes to {operation:?}"));
+        let error = match decode(&tool, call.clone()) {
+            Ok(operation) => {
+                disagreements.push(format!("{tool} {call}: decodes to {operation:?}"));
+                continue;
+            }
+            Err(error) => error,
+        };
+        let said = error.to_string();
+        if said != format!("invalid input: {}", error.guidance()) {
+            disagreements.push(format!("{tool} {call}: guidance {:?}", error.guidance()));
+        }
+        let expected = match &says {
+            Says::Refused => true,
+            Says::Exactly(refusal) => said == *refusal,
+            Says::Naming(word) => said.contains(word),
+        };
+        if !expected {
+            let wanted = match says {
+                Says::Refused => String::new(),
+                Says::Exactly(refusal) => refusal,
+                Says::Naming(word) => format!("naming {word}"),
+            };
+            disagreements.push(format!("{tool} {call}: refused {said:?}, not {wanted:?}"));
         }
     }
     assert!(disagreements.is_empty(), "{disagreements:#?}");

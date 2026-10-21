@@ -31,20 +31,6 @@ use super::{
 };
 use super::{HISTORY_RELOAD, WHEEL_DIRECTIONS};
 
-/// Canonical tool names in the complete catalog.
-pub const EXPECTED_TOOL_NAMES: [&str; Tool::ALL.len()] = {
-    let mut names = [""; Tool::ALL.len()];
-    let mut index = 0;
-    while index < Tool::ALL.len() {
-        names[index] = Tool::ALL[index].name();
-        index += 1;
-    }
-    names
-};
-
-/// Canonical tool count for the complete catalog.
-pub const CATALOG_TOOL_COUNT: usize = EXPECTED_TOOL_NAMES.len();
-
 /// Return the complete native Ghostlight language in deterministic order.
 #[must_use]
 pub fn catalog() -> Vec<ToolDefinition> {
@@ -1642,445 +1628,126 @@ fn extent() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::language::HandleKind;
     use std::fs;
 
-    use serde_json::{json, Value};
+    use serde_json::Value;
 
-    use super::{
-        boolean, catalog, catalog_for, constant, enumeration, handle, integer, object, text, union,
-        CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES,
-    };
+    use super::{catalog, catalog_for};
     use crate::governance::GovernanceFacade;
+    use crate::language::Tool;
 
-    #[test]
-    fn catalog_is_exact_deterministic_and_fully_described() {
-        let tools = catalog();
-        assert_eq!(tools.len(), CATALOG_TOOL_COUNT);
-        let names: Vec<_> = tools.iter().map(|tool| tool.name.as_str()).collect();
-        assert_eq!(names, EXPECTED_TOOL_NAMES);
-        for tool in tools {
-            assert!(
-                tool.annotations.is_some(),
-                "{} lacks annotations",
-                tool.name
-            );
-            assert!(
-                tool.input_schema.get("examples").is_some(),
-                "{} lacks examples",
-                tool.name
-            );
+    /// The one object a schema leaves open: a flow step's arguments, which the child tool's own
+    /// decoder closes.
+    const FLOW_STEP_ARGUMENTS: (&str, &str) = (
+        "browser_flow",
+        "/properties/steps/items/properties/arguments",
+    );
+
+    /// Every object schema in `schema`, with its JSON pointer, through properties, items and the
+    /// branches of `oneOf` and `anyOf`.
+    fn objects<'a>(schema: &'a Value, at: String, found: &mut Vec<(String, &'a Value)>) {
+        let is_object = schema.get("type") == Some(&Value::String("object".into()))
+            || schema.get("properties").is_some();
+        if is_object {
+            found.push((at.clone(), schema));
+        }
+        if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+            for (name, field) in properties {
+                objects(field, format!("{at}/properties/{name}"), found);
+            }
+        }
+        if let Some(items) = schema.get("items") {
+            objects(items, format!("{at}/items"), found);
+        }
+        for keyword in ["oneOf", "anyOf"] {
+            for (index, branch) in schema
+                .get(keyword)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                objects(branch, format!("{at}/{keyword}/{index}"), found);
+            }
         }
     }
 
+    /// LANGUAGE.md's contract rules and ACCEPTANCE Contract 2 ("typo-closed at every object
+    /// level"): every input schema is a top-level object with no root `oneOf`, `anyOf` or `allOf`,
+    /// which Kiro and Bedrock refuse, and every object at every level sets
+    /// `additionalProperties: false`, except a flow step's arguments.
     #[test]
-    fn postconditions_are_discoverable_on_the_tools_that_execute_them() {
-        let supported = [
-            "browser_click",
-            "browser_fill_form",
-            "browser_type_text",
-            "browser_press_key",
-        ];
+    fn every_schema_is_a_portable_typo_closed_object() {
+        let mut open = Vec::new();
         for tool in catalog() {
-            let expectation = &tool.input_schema["properties"]["expect"];
-            if !supported.contains(&tool.name.as_str()) {
+            let schema = &tool.input_schema;
+            assert_eq!(schema["type"], "object", "{}", tool.name);
+            for keyword in ["oneOf", "anyOf", "allOf"] {
                 assert!(
-                    expectation.is_null(),
-                    "{} does not execute expect",
+                    schema.get(keyword).is_none(),
+                    "{} has a root {keyword}",
                     tool.name
                 );
-                continue;
             }
-            assert_eq!(expectation["type"], "object", "{}", tool.name);
-            assert_eq!(expectation["additionalProperties"], false);
-            let mut input = tool.input_schema["examples"][0].clone();
-            input["expect"] = json!({"condition":"text_present","value":"Ready"});
-            assert!(crate::language::decode(&tool.name, input.clone()).is_ok());
-            input["expect"]["value"] = json!("x".repeat(
-                expectation["properties"]["value"]["maxLength"]
-                    .as_u64()
-                    .expect("advertised text bound") as usize
-                    + 1
-            ));
-            assert!(crate::language::decode(&tool.name, input.clone()).is_err());
-            input["expect"] = json!({"condition":"load_ready"});
-            assert!(crate::language::decode(&tool.name, input.clone()).is_ok());
-            input["expect"]["value"] = json!("unexpected");
-            assert!(crate::language::decode(&tool.name, input).is_err());
+            let mut found = Vec::new();
+            objects(schema, String::new(), &mut found);
+            assert!(found.iter().any(|(at, _)| at.is_empty()), "{}", tool.name);
+            for (at, object) in found {
+                if object.get("additionalProperties") != Some(&Value::Bool(false)) {
+                    open.push((tool.name.clone(), at));
+                }
+            }
         }
+        let expected = vec![(
+            FLOW_STEP_ARGUMENTS.0.to_owned(),
+            FLOW_STEP_ARGUMENTS.1.to_owned(),
+        )];
+        assert_eq!(open, expected);
     }
 
+    /// ACCEPTANCE Governance 21: all-open lists the exact canonical catalog, a read-only grant
+    /// drops the tools no grant can admit and keeps the ones it can, and screenshots off drops
+    /// exactly browser_screenshot.
     #[test]
-    fn screenshots_off_removes_browser_screenshot_from_the_catalog() {
-        let path = crate::scratch::Scratch::file("catalog-screenshots-off.json");
-        fs::write(
-            &path,
-            r#"{"schema":4,"name":"no screenshots","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}],"config":[{"key":"browser.screenshots.enabled","value":false,"level":"mandatory"}]}"#,
-        )
-        .unwrap();
-        let off = GovernanceFacade::new(Some(path.to_path_buf())).snapshot();
-        let listed: Vec<_> = catalog_for(&off)
-            .into_iter()
-            .map(|tool| tool.name)
-            .collect();
-        let mut expected: Vec<_> = catalog().into_iter().map(|tool| tool.name).collect();
-        expected.retain(|name| name != crate::language::Tool::Screenshot.name());
-        assert_eq!(listed, expected);
-    }
-
-    #[test]
-    fn policy_projection_is_quiet_when_all_open_and_removes_impossible_tools() {
+    fn the_listed_catalog_follows_the_authority_snapshot() {
         let all_open = GovernanceFacade::new(None).snapshot();
         assert_eq!(catalog_for(&all_open), catalog());
 
-        let path = crate::scratch::Scratch::file("catalog-policy.json");
-        fs::write(
-            &path,
+        let listed = |name: &str, policy: &str| -> Vec<String> {
+            let path = crate::scratch::Scratch::file(name);
+            fs::write(&path, policy).expect("the policy is written");
+            let snapshot = GovernanceFacade::new(Some(path.to_path_buf())).snapshot();
+            catalog_for(&snapshot)
+                .into_iter()
+                .map(|tool| tool.name)
+                .collect()
+        };
+
+        let read_only = listed(
+            "catalog-policy.json",
             r#"{"schema":4,"name":"read only","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
-        )
-        .unwrap();
-        let read_only = GovernanceFacade::new(Some(path.to_path_buf())).snapshot();
-        let names: Vec<_> = catalog_for(&read_only)
-            .into_iter()
-            .map(|tool| tool.name)
-            .collect();
-        assert!(names.contains(&"browser_read".into()));
-        assert!(names.contains(&"browser_tabs".into()));
-        assert!(names.contains(&"browser_record".into()));
-        assert!(!names.contains(&"browser_click".into()));
-        assert!(!names.contains(&"browser_fill_form".into()));
-        assert!(!names.contains(&"browser_execute".into()));
-    }
-
-    #[test]
-    fn catalog_annotations_are_conservative_for_every_tool() {
-        let expected = [
-            ("browser_tabs", false, true, false, true),
-            ("browser_navigate", false, true, false, true),
-            ("browser_history", false, true, false, true),
-            ("browser_window", false, false, false, false),
-            ("browser_read", true, false, true, true),
-            ("browser_inspect", true, false, true, true),
-            ("browser_find", true, false, true, true),
-            ("browser_screenshot", true, false, true, true),
-            ("browser_click", false, true, false, true),
-            ("browser_scroll", false, false, false, true),
-            ("browser_hover", false, false, false, true),
-            ("browser_fill_form", false, true, false, true),
-            ("browser_type_text", false, true, false, true),
-            ("browser_press_key", false, true, false, true),
-            ("browser_drag", false, true, false, true),
-            ("browser_wait", true, false, true, true),
-            ("browser_dialog", false, true, false, true),
-            ("browser_upload", false, true, false, true),
-            ("browser_execute", false, true, false, true),
-            ("browser_flow", false, true, false, true),
-            ("browser_record", false, true, false, true),
-            ("browser_diagnose", true, false, true, true),
-            ("policy_explain", true, false, true, false),
-        ];
-
-        for (tool, &(name, read_only, destructive, idempotent, open_world)) in
-            catalog().iter().zip(expected.iter())
-        {
-            let annotations = tool.annotations.as_ref().expect("annotations are required");
-            assert_eq!(tool.name, name);
-            assert_eq!(annotations.read_only_hint, Some(read_only), "{name}");
-            assert_eq!(annotations.destructive_hint, Some(destructive), "{name}");
-            assert_eq!(annotations.idempotent_hint, Some(idempotent), "{name}");
-            assert_eq!(annotations.open_world_hint, Some(open_world), "{name}");
-        }
-    }
-
-    #[test]
-    fn catalog_descriptions_teach_the_remedy() {
-        let tools = catalog();
-        let description = |name: &str| -> String {
-            tools
-                .iter()
-                .find(|tool| tool.name == name)
-                .unwrap_or_else(|| panic!("missing {name}"))
-                .description
-                .clone()
-        };
-
-        assert!(
-            description("browser_history").contains("collect fresh ones"),
-            "navigation must teach that stale handles need recollection"
         );
-        assert!(
-            description("browser_window").contains("take a fresh screenshot"),
-            "window changes must teach that coordinate work needs a new view"
-        );
-        assert!(
-            description("browser_dialog").contains("blocks its page"),
-            "dialog handling must teach that dialogs block their page"
-        );
-        assert!(
-            description("browser_diagnose").contains("Observation begins with the first call"),
-            "diagnose must teach when observation starts"
-        );
-
-        let screenshot = tool_schema("browser_screenshot");
-        let view = property(&screenshot, "view").expect("screenshot view property");
-        assert!(
-            view.get("description")
-                .and_then(Value::as_str)
-                .is_some_and(|text| text.contains("take a screenshot first")),
-            "region capture must teach where its view comes from"
-        );
-
-        let click = tool_schema("browser_click");
-        let click_view = property(&click, "view").expect("click view property");
-        assert!(
-            click_view
-                .get("description")
-                .and_then(Value::as_str)
-                .is_some_and(|text| text.contains("take one first")),
-            "coordinate clicks must teach where their view comes from"
-        );
-    }
-
-    #[test]
-    fn catalog_strings_are_ascii() {
-        for tool in catalog() {
-            assert!(tool.name.is_ascii(), "{} name", tool.name);
-            assert!(tool.description.is_ascii(), "{} description", tool.name);
-            let annotations = tool.annotations.as_ref().expect("annotations are required");
-            let title = annotations.title.as_deref().expect("title is required");
-            assert!(title.is_ascii(), "{} title", tool.name);
-            let schema = serde_json::to_string(&tool.input_schema).expect("schema serializes");
-            assert!(schema.is_ascii(), "{} schema", tool.name);
-        }
-    }
-
-    #[test]
-    fn catalog_uses_portable_top_level_object_schemas() {
-        for tool in catalog() {
-            assert_eq!(
-                tool.input_schema.get("type"),
-                Some(&Value::String("object".into()))
-            );
-            assert_eq!(
-                tool.input_schema.get("additionalProperties"),
-                Some(&Value::Bool(false)),
-                "{}",
-                tool.name
-            );
-            for keyword in ["oneOf", "anyOf", "allOf"] {
-                assert!(
-                    tool.input_schema.get(keyword).is_none(),
-                    "{} has unsupported top-level {keyword}",
-                    tool.name
-                );
-            }
-        }
-
-        // Overlapping branches become one field schema, never a field oneOf a value can match
-        // twice (MSURF-1).
-        let screenshot = tool_schema("browser_screenshot");
-        let full_page = property(&screenshot, "full_page").expect("full_page property");
-        assert_eq!(full_page["type"], "boolean");
-        assert!(full_page.get("const").is_none() && full_page.get("oneOf").is_none());
-
-        let typing = tool_schema("browser_type_text");
-        let text = property(&typing, "text").expect("text property");
-        assert_eq!(
-            (&text["type"], &text["minLength"], &text["maxLength"]),
-            (&json!("string"), &json!(0), &json!(8_000))
-        );
-
-        let wait = tool_schema("browser_wait");
-        let condition = property(&wait, "condition").expect("condition property");
-        assert_eq!(condition["enum"].as_array().map(Vec::len), Some(9));
-        let meaning = condition["description"]
-            .as_str()
-            .expect("condition meaning");
-        for value in condition["enum"].as_array().expect("condition values") {
-            let value = value.as_str().expect("string condition");
+        for kept in [Tool::Read, Tool::Tabs, Tool::Record] {
             assert!(
-                meaning.contains(&format!("{value}: ")),
-                "{value} lacks a meaning"
+                read_only.contains(&kept.name().to_owned()),
+                "{}",
+                kept.name()
             );
         }
-    }
-
-    #[test]
-    fn union_merges_overlapping_branch_fields_into_one_schema() {
-        let merged = union(
-            vec![
-                object(
-                    vec![
-                        ("action", constant("list", "List them.")),
-                        ("text", text(1, 10, "Words.")),
-                        ("clear", boolean(false, "Clear first.")),
-                        (
-                            "direction",
-                            enumeration(&["up", "down", "left"], Some("down"), "Way."),
-                        ),
-                        ("target", handle(HandleKind::Target, "First meaning.")),
-                        ("count", integer(1, 5, None, "How many.")),
-                    ],
-                    vec!["action", "text"],
-                ),
-                object(
-                    vec![
-                        ("action", constant("show", "Show one.")),
-                        ("text", constant("", "Empty.")),
-                        ("clear", json!({"type":"boolean","const":true})),
-                        (
-                            "direction",
-                            enumeration(&["up", "down"], Some("down"), "Way."),
-                        ),
-                        ("target", handle(HandleKind::Target, "Second meaning.")),
-                        ("count", integer(3, 9, None, "How many.")),
-                    ],
-                    vec!["action"],
-                ),
-                object(
-                    vec![("action", constant("hide", "List them."))],
-                    vec!["action"],
-                ),
-            ],
-            vec![],
-        );
-        let field = |name: &str| merged["properties"][name].clone();
-        assert_eq!(merged["required"], json!(["action"]));
-        assert_eq!(
-            field("action"),
-            json!({"type":"string","enum":["list","show","hide"],"description":"list, hide: List them. show: Show one."})
-        );
-        assert_eq!(
-            field("text"),
-            json!({"type":"string","minLength":0,"maxLength":10,"description":"Words. Empty."})
-        );
-        assert_eq!(
-            field("clear"),
-            json!({"type":"boolean","default":false,"description":"Clear first."})
-        );
-        assert_eq!(
-            field("direction"),
-            json!({"type":"string","enum":["up","down","left"],"default":"down","description":"Way."})
-        );
-        assert_eq!(field("target")["pattern"], "^target_.+$");
-        assert_eq!(
-            field("target")["description"],
-            "First meaning. Second meaning."
-        );
-        assert_eq!(
-            (
-                field("count")["minimum"].clone(),
-                field("count")["maximum"].clone()
-            ),
-            (json!(1), json!(9))
-        );
-
-        let mixed = union(
-            vec![
-                object(vec![("value", text(0, 5, "Text."))], vec![]),
-                object(vec![("value", boolean(false, "Flag."))], vec![]),
-            ],
-            vec![],
-        );
-        assert_eq!(
-            mixed["properties"]["value"],
-            json!({"description":"Text. Flag.","anyOf":[
-                {"type":"string","minLength":0,"maxLength":5},
-                {"type":"boolean","default":false}
-            ]})
-        );
-    }
-
-    #[test]
-    fn the_fill_value_admits_a_bounded_list_of_options_and_nothing_else_does() {
-        let fill = tool_schema("browser_fill_form");
-        let fields = property(&fill, "fields").expect("fields property");
-        let value = &fields["items"]["properties"]["value"];
-        let list = value["anyOf"]
-            .as_array()
-            .and_then(|branches| branches.iter().find(|branch| branch["type"] == "array"))
-            .expect("a list branch");
-        assert_eq!(
-            list,
-            &json!({"type":"array","items":{"type":"string","maxLength":8000},"maxItems":100})
-        );
-
-        let call = |value: Value| {
-            let field = json!({"target":"target_1","value":value});
-            crate::language::decode("browser_fill_form", json!({"fields":[field]}))
-        };
-        assert!(call(json!(["Alpha", "Beta"])).is_ok());
-        assert!(call(json!([])).is_ok());
-        assert!(call(json!(vec!["x"; 100])).is_ok());
-        assert!(call(json!(vec!["x"; 101])).is_err());
-        assert!(call(json!(["x".repeat(8_001)])).is_err());
-        assert!(call(json!([1, 2])).is_err());
-        assert!(call(json!([["nested"]])).is_err());
-        assert!(call(json!({"a": 1})).is_err());
-
-        let typing = json!({"target":"target_1","text":["x"]});
-        assert!(crate::language::decode("browser_type_text", typing).is_err());
-    }
-
-    #[test]
-    fn a_handle_field_refuses_an_empty_value_without_a_minimum_length() {
-        let read = tool_schema("browser_read");
-        let target = property(&read, "target").expect("target property");
-        assert!(target.get("minLength").is_none());
-        let valid = json!({"tab":"tab_1","target":"target_1"});
-        assert!(crate::language::decode("browser_read", valid).is_ok());
-        for empty in ["", "target_"] {
-            let call = json!({"tab":"tab_1","target":empty});
-            assert!(crate::language::decode("browser_read", call).is_err());
+        for dropped in [Tool::Click, Tool::FillForm, Tool::Execute] {
+            assert!(
+                !read_only.contains(&dropped.name().to_owned()),
+                "{}",
+                dropped.name()
+            );
         }
-    }
 
-    #[test]
-    #[should_panic(expected = "differ in `items`")]
-    fn union_refuses_variants_it_cannot_merge_honestly() {
-        union(
-            vec![
-                object(
-                    vec![("list", json!({"type":"array","items":{"type":"string"}}))],
-                    vec![],
-                ),
-                object(
-                    vec![("list", json!({"type":"array","items":{"type":"integer"}}))],
-                    vec![],
-                ),
-            ],
-            vec![],
+        let screenshots_off = listed(
+            "catalog-screenshots-off.json",
+            r#"{"schema":4,"name":"no screenshots","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}],"config":[{"key":"browser.screenshots.enabled","value":false,"level":"mandatory"}]}"#,
         );
-    }
-
-    #[test]
-    fn flow_schema_unifies_batches_without_client_authority_or_simulation() {
-        for tool in catalog() {
-            let encoded = serde_json::to_string(&tool.input_schema).unwrap();
-            assert!(!encoded.contains("restrict_hosts"));
-            assert!(!encoded.contains("restrict_capabilities"));
-        }
-        let schema = tool_schema("browser_flow");
-        assert!(property(&schema, "dry_run").is_none());
-        assert_eq!(
-            schema.pointer("/properties/steps/items/required"),
-            Some(&serde_json::json!(["tool"]))
-        );
-        assert_eq!(
-            schema.pointer("/properties/steps/items/additionalProperties"),
-            Some(&Value::Bool(false))
-        );
-    }
-
-    fn tool_schema(name: &str) -> Value {
-        catalog()
-            .into_iter()
-            .find(|tool| tool.name == name)
-            .unwrap_or_else(|| panic!("missing {name}"))
-            .input_schema
-    }
-
-    fn property<'a>(branch: &'a Value, name: &str) -> Option<&'a Value> {
-        branch.get("properties").and_then(|value| value.get(name))
+        let mut expected: Vec<String> = catalog().into_iter().map(|tool| tool.name).collect();
+        expected.retain(|name| name != Tool::Screenshot.name());
+        assert_eq!(screenshots_off, expected);
     }
 }

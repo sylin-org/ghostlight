@@ -26,8 +26,8 @@ authority is whatever AGENTS.md and docs/MEMORY.md say); manual ASCII-scan one-l
 before committing text changes, and by staging only your own paths with `git add -- <paths>`);
 dependency bans; and trained-tool-surface fences (tools.json, tests/tool_schema_fidelity.rs,
 EXPECTED_TRAINED and hand-bumped tool counts name files that no longer exist; the 1.0 catalog
-lives in crates/orchestrator/src/language/ and is pinned by EXPECTED_TOOL_NAMES and
-CATALOG_TOOL_COUNT; catalog wording is delegated to the agent and recorded in an ADR per
+lives in crates/orchestrator/src/language/ and is pinned by the catalog golden
+docs/1.0/catalog.json; catalog wording is delegated to the agent and recorded in an ADR per
 docs/MEMORY.md, while adding, removing or reclassifying a tool still changes governance, which
 stays the owner's). The ADRs those batches implement stay in force. The license is declared per
 package (Cargo workspace license, packaging/npm/package.json, LICENSE), and

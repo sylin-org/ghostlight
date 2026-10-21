@@ -122,6 +122,8 @@ pub(crate) const UPLOAD_PATH_CHARS: usize = 4_096;
 pub(crate) const FILE_NAME_CHARS: usize = 255;
 /// The longest media type an inline file may name.
 pub(crate) const MEDIA_TYPE_CHARS: usize = 100;
+/// The most bytes the inline files of one upload may decode to, together.
+pub(crate) const UPLOAD_AGGREGATE_BYTES: u64 = 5_000_000;
 
 /// The longest URL a navigation takes. The decoder counts bytes and the schema characters; an
 /// ASCII URL, which every encoded URL is, has as many of one as the other.

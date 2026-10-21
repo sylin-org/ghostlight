@@ -1205,8 +1205,6 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
     Ok(())
 }
 
-const UPLOAD_AGGREGATE_BYTES: u64 = 5_000_000;
-
 /// How many bytes standard base64 decodes to, counted exactly: the digits without their `=`
 /// padding give three bytes per four, and a final group of two or three digits one or two more.
 #[must_use]

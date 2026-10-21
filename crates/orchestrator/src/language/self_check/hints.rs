@@ -11,7 +11,8 @@
 //!   the words after it joined by `or` must be values it accepts.
 //! - Snake_case words after `with`, and words in backticks or quotes or written as `name:`, are
 //!   field names too. In a clause that names no tool ("repeat the call with ..."), each must be a
-//!   field some catalog tool advertises.
+//!   field some catalog tool advertises. A word written `name:value` with no space, as the server
+//!   instructions write `new_tab:true`, is the field `name` followed by its value.
 //!
 //! - A handle value (a handle prefix, then eight lowercase base32 characters, such as
 //!   `target_7k2nb5xe`) is never a field name. When it directly follows a field whose schema
@@ -77,16 +78,23 @@ struct Word {
 }
 
 fn words(clause: &str) -> Vec<Word> {
+    let word = |raw: &str| {
+        let marked = raw.contains('`') || raw.contains('"') || raw.ends_with(':');
+        let text = raw
+            .trim_matches(|character: char| {
+                !(character.is_ascii_alphanumeric() || character == '_')
+            })
+            .to_owned();
+        Word { text, marked }
+    };
     clause
         .split_whitespace()
-        .map(|raw| {
-            let marked = raw.contains('`') || raw.contains('"') || raw.ends_with(':');
-            let text = raw
-                .trim_matches(|character: char| {
-                    !(character.is_ascii_alphanumeric() || character == '_')
-                })
-                .to_owned();
-            Word { text, marked }
+        .flat_map(|raw| match raw.split_once(':') {
+            // `name:value` names the field, then its value; `name:` stays one marked word.
+            Some((name, value)) if !name.is_empty() && !value.is_empty() => {
+                vec![word(name), word(value)]
+            }
+            _ => vec![word(raw)],
         })
         .filter(|word| !word.text.is_empty())
         .collect()
@@ -1219,11 +1227,14 @@ fn every_next_step_names_only_what_the_catalog_offers() {
 /// The plugin skill an agent loads beside the tools.
 const PLUGIN_SKILL: &str = "packaging/plugin/ghostlight/skills/control-browser/SKILL.md";
 
-/// Contract (ADR-0203 C20, 6f37117f): the plugin skill an agent loads beside the tools names only
-/// tools and fields the catalog advertises. Its YAML front matter is not a hint, so the body after
-/// it is read, and a field the catalog lacks, appended to it, fails the check.
+/// Contract (ADR-0203 C20, 6f37117f; eebf8ff6): the prose a client reads beside the catalog names
+/// only tools and fields the catalog advertises: the plugin skill an agent loads beside the
+/// tools, and the server instructions a deferred-loading client chooses its first calls from,
+/// whose shared-session advice is `browser_navigate new_tab:true`. The skill's YAML front matter
+/// is not a hint, so the body after it is read. A field the catalog lacks, appended to either
+/// text, fails the check, so neither is read vacuously.
 #[test]
-fn the_plugin_skill_names_only_catalog_tools_and_fields() {
+fn the_skill_and_the_server_instructions_name_only_catalog_tools_and_fields() {
     let advertised = Advertised::read();
     let text = std::fs::read_to_string(super::golden::repository_path(PLUGIN_SKILL))
         .expect("the plugin skill exists");
@@ -1232,13 +1243,28 @@ fn the_plugin_skill_names_only_catalog_tools_and_fields() {
         .and_then(|rest| rest.split_once("\n---\n"))
         .map_or(text.as_str(), |(_, body)| body);
     assert!(body.contains("browser_find"), "the skill body was not read");
-    let found = hint_violations(body, &advertised);
-    assert!(found.is_empty(), "{PLUGIN_SKILL}: {found:?}");
-    let drifted = format!("{body}\nCall browser_read with `max_result_chars` set higher.");
-    assert!(
-        hint_violations(&drifted, &advertised)
-            .iter()
-            .any(|violation| violation.contains("max_result_chars")),
-        "a field the catalog does not advertise must fail the skill"
-    );
+    for (source, said, drift, unadvertised) in [
+        (
+            PLUGIN_SKILL,
+            body,
+            "Call browser_read with `max_result_chars` set higher.",
+            "max_result_chars",
+        ),
+        (
+            "SERVER_INSTRUCTIONS",
+            crate::language::SERVER_INSTRUCTIONS,
+            "Open your own tab with browser_navigate new_tabs:true.",
+            "new_tabs",
+        ),
+    ] {
+        let found = hint_violations(said, &advertised);
+        assert!(found.is_empty(), "{source}: {found:?}");
+        let drifted = format!("{said}\n{drift}");
+        assert!(
+            hint_violations(&drifted, &advertised)
+                .iter()
+                .any(|violation| violation.contains(unadvertised)),
+            "{source}: a field the catalog does not advertise must fail the check"
+        );
+    }
 }
