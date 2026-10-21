@@ -18,7 +18,7 @@ added there in the commit that deletes it. Then `governance/`.
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 373 | 55 | 355 |
+| `work/` and `workspace/` | 373 | 55 | 349 |
 | `governance/` | 136 | 40 | 136 |
 
 ## Slices
@@ -30,7 +30,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | --- | --- | --- | --- | --- | --- |
 | W1 | the inline modules: `invocation_id.rs`, `receipt.rs`, `pending.rs` and `documents.rs` keep no test, `item.rs` keeps only its three credential-masking tests until they fold into the credentials test | 373 | 357 | none kept; the 3 left fold later (promise E7) | landed (0d55d314) |
 | W2 | `tests/channels.rs` and `tests/audit_health.rs`: one test per promise, with the channel refusal's words read from the typed refusal and the storage note from its constant | 357 | 354 | promise 2 (Gov 4, ADR-0159 1-2), contract 1 (`channel_refusal.json`) | landed (71fee018) |
-| R1 | reserve: `a_stopped_recordings_status_says_it_stopped_and_a_running_one_that_it_runs` in `tests/execution.rs`, the coverage be54ad44 lost with the language outcome table | 354 | 355 | defect 1 (be54ad44), from the reserve | landed |
+| R1 | reserve: `a_stopped_recordings_status_says_it_stopped_and_a_running_one_that_it_runs` in `tests/execution.rs`, the coverage be54ad44 lost with the language outcome table | 354 | 355 | defect 1 (be54ad44), from the reserve | landed (d6a305f9) |
+| W3 | credentials: `tests/credentials.rs`'s four tests are one, with a new grouped-fill row; `item.rs`'s three masking tests fold into `tests/controls.rs`'s executor-level masking test; the golden and provenance tests say what they protect | 355 | 349 | promise 2 (ADR-0185 3; Executor 7 masking), contract 5 goldens and 1 promise (Connection reporting 3, 5) kept as they were | landed |
 
 ## Notes
 

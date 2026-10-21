@@ -5,6 +5,9 @@ use crate::intake::session::SessionMarker;
 use crate::provenance::ConnectionEvidence;
 use crate::work::{Admission, InvocationId, PreparedInvocation};
 
+/// ACCEPTANCE Connection reporting 3 and 5, and ADR-0185 item 4: a call refused while it waited
+/// keeps the evidence of the connection that sent it, after another connection joins and its
+/// workspace is released.
 #[test]
 fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace_release() {
     let (executor, browser, store, _, audit) = fixture();

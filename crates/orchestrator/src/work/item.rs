@@ -40,7 +40,7 @@ const CONTEXT_MAX: usize = 80;
 /// The longest declared limit.
 const LIMIT_MAX: usize = 120;
 /// What a set credential-class value reads as.
-const MASKED_VALUE: &str = "[hidden]";
+pub(super) const MASKED_VALUE: &str = "[hidden]";
 /// The constraint attributes a control can declare, as strings.
 const LIMIT_ATTRIBUTES: [&str; 7] = [
     "min",
@@ -227,77 +227,4 @@ fn bounded_limits(limits: &Value) -> Option<Value> {
         kept.insert(MULTIPLE_LIMIT.into(), Value::Bool(true));
     }
     (!kept.is_empty()).then_some(Value::Object(kept))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn target() -> ObservedTarget {
-        ObservedTarget {
-            locator: "l1".into(),
-            role: "combobox".into(),
-            name: "Role".into(),
-            ..ObservedTarget::default()
-        }
-    }
-
-    #[test]
-    fn a_credential_control_never_carries_context_or_nth() {
-        let mut secret = target();
-        secret.credential_class = true;
-        secret.context = Some("Account".into());
-        secret.nth = Some(1);
-        let item = control_item("target_1", &secret);
-        assert!(item.get("context").is_none() && item.get("nth").is_none());
-    }
-
-    #[test]
-    fn a_credential_control_keeps_its_structure_and_nothing_else() {
-        let mut secret = target();
-        secret.credential_class = true;
-        secret.area = Some("dialog".into());
-        secret.form = Some(1);
-        secret.hint = Some("seven characters".into());
-        let item = control_item("target_1", &secret);
-        assert_eq!(item["area"], json!("dialog"));
-        assert_eq!(item["form"], json!(1));
-        assert!(item.get("hint").is_none());
-    }
-
-    #[test]
-    fn a_credential_class_control_shows_only_the_marker_whatever_the_adapter_sent() {
-        let mut secret = target();
-        secret.credential_class = true;
-        secret.value = Some(json!("hunter2"));
-        secret.value_chars = Some(7);
-        secret.options = Some(json!(["Alpha"]));
-        secret.hint = Some("your secret".into());
-        secret.error = Some("is too short".into());
-        secret.limits = Some(json!({"maxlength":"20"}));
-        secret.input_type = Some("email".into());
-        secret.group = Some("Account".into());
-
-        let item = control_item("target_1", &secret);
-
-        let mut keys: Vec<_> = item.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            [
-                "credential_class",
-                "name",
-                "role",
-                "state",
-                "target",
-                "value"
-            ]
-        );
-        assert_eq!(item["value"], json!("[hidden]"));
-
-        secret.value = Some(json!(""));
-        assert_eq!(control_item("target_1", &secret)["value"], json!(""));
-        secret.value = None;
-        assert!(control_item("target_1", &secret).get("value").is_none());
-    }
 }

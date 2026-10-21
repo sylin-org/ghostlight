@@ -14,30 +14,115 @@ fn credential() -> ObservedTarget {
     }
 }
 
+fn ordinary() -> ObservedTarget {
+    ObservedTarget {
+        locator: "email".into(),
+        role: "textbox".into(),
+        name: "Email".into(),
+        state: vec![],
+        credential_class: false,
+        ..Default::default()
+    }
+}
+
+/// A session with one tab on example.com whose inspection listed `targets`; answers their handles.
+fn inspected(
+    executor: &ApplicationExecutor,
+    browser: &FakeBrowser,
+    workspace: &crate::workspace::WorkspaceId,
+    targets: Vec<ObservedTarget>,
+) -> Vec<String> {
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+    }));
+    let opened = executor.execute(
+        workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(opened.status, Status::Succeeded);
+    browser.push(Ok(BrowserOutcome::targets(7, targets)));
+    let listed = executor.execute(
+        workspace,
+        "browser_inspect",
+        json!({}),
+        &CancellationToken::default(),
+    );
+    listed.facts["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["target"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// Whether any command the browser received would put text into a page.
+fn typed_anything(browser: &FakeBrowser) -> bool {
+    browser.calls().iter().any(|command| {
+        matches!(
+            command,
+            BrowserCommand::Fill(_) | BrowserCommand::TypeText(_) | BrowserCommand::TypeFocused(_)
+        )
+    })
+}
+
+/// ADR-0185 item 3: credential input needs the user's word on each call.
+///
+/// Without `user_authorized_credentials`, a fill by target, a grouped fill whose later field is a
+/// credential, and focused typing send nothing, say nothing was typed, name the acknowledgement
+/// as the way forward, and keep the field's name and the value out of the audit. With it, the
+/// value reaches the browser for fill, targeted and focused typing, directly and in a flow, and
+/// stays out of the audit and the result; the next call without it is refused again. Guidance
+/// in a flow under `continue` holds no later step, and the acknowledgement never lifts a policy
+/// refusal or the person's Pause or End.
 #[test]
-fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_entering_audit() {
+fn credential_input_needs_the_users_word_on_each_call() {
+    // Without the acknowledgement nothing is typed, a grouped fill's ordinary field included.
+    for fields in [vec![credential()], vec![ordinary(), credential()]] {
+        let (executor, browser, _, workspace, audit) = fixture();
+        let handles = inspected(&executor, &browser, &workspace, fields.clone());
+        browser.push(Ok(BrowserOutcome::TargetsDescribed {
+            rebound: false,
+            tab_id: 7,
+            targets: fields,
+        }));
+        let values: Vec<_> = handles
+            .iter()
+            .map(|handle| json!({"target":handle,"value":"PRIVATE_CREDENTIAL"}))
+            .collect();
+        let result = executor.execute(
+            &workspace,
+            "browser_fill_form",
+            json!({ "fields": values }),
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Blocked, "{result:?}");
+        assert_eq!(result.effect, Effect::None);
+        assert_eq!(result.facts["values_sent"], false);
+        assert_eq!(result.facts["reason"], "credential_authorization_required");
+        let credential_handle = handles.last().unwrap();
+        assert!(
+            result.summary.contains(credential_handle.as_str()),
+            "the refusal names the credential control's handle: {}",
+            result.summary
+        );
+        assert!(result
+            .next_steps
+            .iter()
+            .any(|step| step.contains("user_authorized_credentials")));
+        assert!(!typed_anything(&browser), "nothing reaches the page");
+        let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        assert!(!recorded.contains("Password"));
+        assert!(!recorded.contains("PRIVATE_CREDENTIAL"));
+    }
+
+    // With it, the value reaches the browser and nowhere else, once.
     for mode in ["fill", "target", "focused"] {
         for composed in [false, true] {
             let (executor, browser, _, workspace, audit) = fixture();
-            browser.push(Ok(BrowserOutcome::TabOpened {
-                tab: tab(7, "https://example.com/"),
-                committed_urls: vec![],
-            }));
-            let opened = executor.execute(
-                &workspace,
-                "browser_navigate",
-                json!({"url":"https://example.com/"}),
-                &CancellationToken::default(),
-            );
-            assert_eq!(opened.status, Status::Succeeded);
-            browser.push(Ok(BrowserOutcome::targets(7, vec![credential()])));
-            let inspected = executor.execute(
-                &workspace,
-                "browser_inspect",
-                json!({}),
-                &CancellationToken::default(),
-            );
-            let target = &inspected.facts["items"][0]["target"];
+            let target = &inspected(&executor, &browser, &workspace, vec![credential()])[0];
             let (tool, args) = match mode {
                 "fill" => (
                     "browser_fill_form",
@@ -109,7 +194,6 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
                 .unwrap()
                 .contains("PRIVATE_CREDENTIAL"));
 
-            // An earlier acknowledgement does not authorize a later credential request.
             browser.push(Ok(BrowserOutcome::TargetsDescribed {
                 rebound: false,
                 tab_id: 7,
@@ -123,27 +207,12 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
             );
             assert_eq!(later.status, Status::Blocked);
             assert_eq!(later.facts["values_sent"], false);
-            assert!(later
-                .next_steps
-                .iter()
-                .any(|step| step.contains("user_authorized_credentials")));
         }
     }
-}
 
-#[test]
-fn credential_guidance_obeys_flow_continue_without_pausing_later_work() {
+    // Guidance inside a flow under `continue` holds no later step.
     let (executor, browser, _, workspace, _) = fixture();
-    browser.push(Ok(BrowserOutcome::TabOpened {
-        tab: tab(7, "https://example.com/"),
-        committed_urls: vec![],
-    }));
-    executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com/"}),
-        &CancellationToken::default(),
-    );
+    inspected(&executor, &browser, &workspace, vec![]);
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
         rebound: false,
         tab_id: 7,
@@ -167,27 +236,13 @@ fn credential_guidance_obeys_flow_continue_without_pausing_later_work() {
     );
     assert_eq!(result.facts["steps"][0]["result"]["status"], "blocked");
     assert_eq!(result.facts["steps"][1]["result"]["status"], "succeeded");
-    assert!(!browser.calls().iter().any(|command| matches!(
-        command,
-        BrowserCommand::TypeFocused(PhysicalTypeFocused { .. })
-    )));
-}
+    assert!(!typed_anything(&browser));
 
-#[test]
-fn credential_acknowledgement_cannot_override_configured_policy_or_human_controls() {
+    // The acknowledgement never lifts a policy refusal or the person's Pause or End.
     for boundary in ["policy", "pause", "end"] {
         let policy = TestPolicy::new();
         let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
-        browser.push(Ok(BrowserOutcome::TabOpened {
-            tab: tab(7, "https://example.com/"),
-            committed_urls: vec![],
-        }));
-        executor.execute(
-            &workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com/"}),
-            &CancellationToken::default(),
-        );
+        inspected(&executor, &browser, &workspace, vec![]);
         match boundary {
             "policy" => policy.set(json!(["read"])),
             "pause" => {
@@ -210,63 +265,6 @@ fn credential_acknowledgement_cannot_override_configured_policy_or_human_control
         );
         assert_eq!(result.status, Status::Blocked, "{boundary}: {result:?}");
         assert_eq!(result.effect, Effect::None);
-        assert_eq!(
-            browser.calls().len(),
-            before,
-            "{boundary}: acknowledgement cannot grant authority"
-        );
+        assert_eq!(browser.calls().len(), before, "{boundary}");
     }
-}
-
-#[test]
-fn an_unauthorized_credential_fill_names_the_field_its_handle_and_the_way_forward() {
-    let (executor, browser, _, workspace, audit) = fixture();
-    browser.push(Ok(BrowserOutcome::TabOpened {
-        tab: tab(7, "https://example.com/"),
-        committed_urls: vec![],
-    }));
-    executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com/"}),
-        &CancellationToken::default(),
-    );
-    browser.push(Ok(BrowserOutcome::targets(7, vec![credential()])));
-    let inspected = executor.execute(
-        &workspace,
-        "browser_inspect",
-        json!({}),
-        &CancellationToken::default(),
-    );
-    let target = inspected.facts["items"][0]["target"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    browser.push(Ok(BrowserOutcome::TargetsDescribed {
-        rebound: false,
-        tab_id: 7,
-        targets: vec![credential()],
-    }));
-
-    let result = executor.execute(
-        &workspace,
-        "browser_fill_form",
-        json!({"fields":[{"target":target,"value":"PRIVATE_CREDENTIAL"}]}),
-        &CancellationToken::default(),
-    );
-
-    assert_eq!(result.status, Status::Blocked);
-    assert_eq!(result.effect, Effect::None);
-    assert_eq!(
-        result.summary,
-        format!("Nothing was typed. The \"Password\" text field ({target}) is credential-class.")
-    );
-    assert_eq!(
-        result.next_steps,
-        vec!["If the user explicitly authorized it, repeat with user_authorized_credentials true; otherwise ask the user to type it."]
-    );
-    assert_eq!(result.facts["values_sent"], false);
-    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
-    assert!(!recorded.contains("Password"));
-    assert!(!recorded.contains("PRIVATE_CREDENTIAL"));
 }

@@ -73,6 +73,8 @@ fn successes_match_their_golden() {
     );
 }
 
+/// The model surface of a find over repeated controls (`find_repeated.json`): each control's
+/// row and position, which the model reads to tell them apart.
 #[test]
 fn a_find_of_repeated_controls_matches_its_golden() {
     let (executor, browser, _, workspace, _) = fixture();
@@ -117,6 +119,8 @@ fn a_find_of_repeated_controls_matches_its_golden() {
     );
 }
 
+/// The model surface of a call that does not match the catalog (`refusal.json`), its decoder
+/// guidance included (d196b226).
 #[test]
 fn a_call_that_does_not_decode_matches_the_refusal_golden() {
     let (executor, _, _, workspace, _) = fixture();
@@ -139,6 +143,8 @@ fn a_call_that_does_not_decode_matches_the_refusal_golden() {
     );
 }
 
+/// The audit line a real navigate writes matches `tests/golden/audit/success.json`, the record
+/// shape the SIEM guide documents and the audit readers parse (5472f3b5).
 #[test]
 fn a_navigate_receipt_matches_the_audit_success_golden() {
     let (executor, browser, _, workspace, audit) = fixture();
