@@ -3262,22 +3262,20 @@ mod tests {
 
     use serde_json::{json, Value};
 
-    use crate::agent::Symbol;
     use crate::install::record::assert_owner_only;
     use crate::scratch::Scratch;
 
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        agent_called, client_ids, command_registration_state, definition, definitions, edit_json,
-        edit_toml, environment_roots, executable_name, expected_json_entry, fix_toml,
-        harness_roots, holds_owned_entry, inspect, inspect_json, inspect_toml, json_entry_args,
-        json_entry_command, json_entry_defaults, jsonc_options, manual_json_setup,
-        mcp_command_line, packaged, remove_stray_temporaries_in, replace_with_backup, AppContainer,
-        Attention, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
-        HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, LauncherPin,
-        NpmLauncher, Packages, PrivateView, RegistrationState, CLINE_SETTINGS, CODEX_HOME_VARIABLE,
-        EDGE_COMMAND_NAME, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
+        agent_called, command_registration_state, definition, definitions, edit_json, edit_toml,
+        environment_roots, executable_name, expected_json_entry, harness_roots, holds_owned_entry,
+        inspect, inspect_json, inspect_toml, json_entry_defaults, packaged,
+        remove_stray_temporaries_in, replace_with_backup, AppContainer, Attention, ForeignCommand,
+        HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
+        HarnessSummary, JsonDialect, LauncherPin, NpmLauncher, Packages, PrivateView,
+        RegistrationState, CODEX_HOME_VARIABLE, EDGE_COMMAND_NAME, MCP_ARGUMENT,
+        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -3323,1428 +3321,6 @@ mod tests {
         names
     }
 
-    #[test]
-    fn a_configuration_write_leaves_no_temporary_when_it_fails() {
-        let directory = temporary("write-fails");
-        // A directory where the configuration should be: the backup copy fails, after the
-        // temporary was written.
-        let path = directory.join("settings.json");
-        fs::create_dir_all(&path).unwrap();
-
-        assert!(replace_with_backup(&path, b"{}").is_err());
-        assert_eq!(names_in(&directory), ["settings.json"]);
-
-        let written = directory.join("other.json");
-        replace_with_backup(&written, b"{}").unwrap();
-        assert_eq!(names_in(&directory), ["other.json", "settings.json"]);
-    }
-
-    #[test]
-    fn an_install_removes_the_temporaries_an_interrupted_write_left_beside_a_configuration() {
-        use std::time::{Duration, SystemTime};
-
-        let directory = temporary("stray-temporaries");
-        let context = context(&directory);
-        let claude = definition(&context, "claude-code").unwrap();
-        let settings = claude.path.parent().unwrap().to_path_buf();
-        fs::create_dir_all(&settings).unwrap();
-        let stray = ".ghostlight-0123456789abcdef0123456789abcdef.tmp";
-        fs::write(settings.join(stray), b"{}").unwrap();
-        fs::write(settings.join("notes.tmp"), b"theirs").unwrap();
-
-        // Just written, it may be a write in flight.
-        assert_eq!(remove_stray_temporaries_in(&settings, SystemTime::now()), 0);
-        assert!(settings.join(stray).is_file());
-
-        let later = SystemTime::now() + Duration::from_secs(3600);
-        assert_eq!(remove_stray_temporaries_in(&settings, later), 1);
-        assert!(!settings.join(stray).exists());
-        assert!(settings.join("notes.tmp").is_file());
-
-        // The registry looks beside each configuration it can change.
-        fs::write(settings.join(stray), b"{}").unwrap();
-        let registry = HarnessRegistry::with_context(context);
-        assert_eq!(registry.remove_stray_temporaries(), 0);
-        assert_eq!(registry.remove_stray_temporaries_at(later), 1);
-        assert!(!settings.join(stray).exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_symlinked_config_is_written_through_to_its_real_target() {
-        use std::os::unix::fs::symlink;
-
-        let directory = temporary("symlink-write-through-unix");
-        let real = directory.join("real-config.json");
-        fs::write(&real, br#"{"old":true}"#).unwrap();
-        let link = directory.join("config.json");
-        symlink(&real, &link).unwrap();
-
-        replace_with_backup(&link, br#"{"new":true}"#).unwrap();
-
-        // replace_with_backup writes through a symlink: the link stays a link to the same file.
-        let metadata = fs::symlink_metadata(&link).unwrap();
-        assert!(metadata.file_type().is_symlink());
-        assert_eq!(fs::read_link(&link).unwrap(), real);
-
-        // The write landed on the real file behind the link.
-        assert_eq!(fs::read_to_string(&real).unwrap(), r#"{"new":true}"#);
-        assert_eq!(fs::read_to_string(&link).unwrap(), r#"{"new":true}"#);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_symlinked_config_is_written_through_to_its_real_target() {
-        use std::os::windows::fs::symlink_file;
-
-        let directory = temporary("symlink-write-through-windows");
-        let real = directory.join("real-config.json");
-        fs::write(&real, br#"{"old":true}"#).unwrap();
-        let link = directory.join("config.json");
-        if symlink_file(&real, &link).is_err() {
-            // No symlink privilege (Developer Mode / an elevated shell) in this environment.
-            // The write-through logic itself is exercised by the equivalent Unix test; skip
-            // rather than fail on an environment limitation this test cannot control.
-            return;
-        }
-
-        replace_with_backup(&link, br#"{"new":true}"#).unwrap();
-
-        let metadata = fs::symlink_metadata(&link).unwrap();
-        assert!(metadata.file_type().is_symlink());
-        assert_eq!(fs::read_to_string(&real).unwrap(), r#"{"new":true}"#);
-        assert_eq!(fs::read_to_string(&link).unwrap(), r#"{"new":true}"#);
-    }
-
-    /// Defect I-D1 (c51204ca) and INST-4: a root variable that is set but empty or relative names
-    /// no directory, so a client's file lands below the home, never in the working directory, and
-    /// the home is the platform's own variable alone (`USERPROFILE` on Windows, `HOME` elsewhere).
-    #[test]
-    fn empty_root_variables_resolve_below_the_home_not_the_working_directory() {
-        let home = if cfg!(windows) {
-            "C:/Users/test"
-        } else {
-            "/home/test"
-        };
-        let lookup = |name: &str| match name {
-            user_dirs::USER_PROFILE_VARIABLE | user_dirs::HOME_VARIABLE => {
-                Some(OsString::from(home))
-            }
-            user_dirs::XDG_CONFIG_HOME_VARIABLE | CODEX_HOME_VARIABLE => Some(OsString::new()),
-            user_dirs::APP_DATA_VARIABLE => Some(OsString::from("Roaming")),
-            _ => None,
-        };
-        let only_home =
-            |name: &str| (name == user_dirs::HOME_VARIABLE).then(|| OsString::from(home));
-        assert_eq!(
-            UserDirs::from_lookup(&only_home, true).home(),
-            Path::new("")
-        );
-        let home = Path::new(home);
-
-        for windows in [false, true] {
-            let dirs = UserDirs::from_lookup(&lookup, windows);
-            let config = if windows {
-                home.join("AppData").join("Roaming")
-            } else {
-                home.join(".config")
-            };
-            assert_eq!(
-                environment_roots(&dirs, &lookup, windows),
-                HarnessRoots {
-                    config: config.clone(),
-                    roaming: config,
-                    codex_config: home.join(".codex").join("config.toml"),
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn platform_roots_honor_effective_linux_and_windows_configuration() {
-        let linux = harness_roots(
-            Path::new("/home/test"),
-            Some(PathBuf::from("/mnt/config")),
-            Some(PathBuf::from("/ignored/appdata")),
-            Some(PathBuf::from("/workbench/codex")),
-            false,
-        );
-        assert_eq!(
-            linux,
-            HarnessRoots {
-                config: PathBuf::from("/mnt/config"),
-                roaming: PathBuf::from("/mnt/config"),
-                codex_config: PathBuf::from("/workbench/codex/config.toml"),
-            }
-        );
-
-        let windows = harness_roots(
-            Path::new("C:/Users/test"),
-            Some(PathBuf::from("C:/ignored/xdg")),
-            Some(PathBuf::from("D:/Profiles/Roaming")),
-            None,
-            true,
-        );
-        assert_eq!(
-            windows,
-            HarnessRoots {
-                config: PathBuf::from("D:/Profiles/Roaming"),
-                roaming: PathBuf::from("D:/Profiles/Roaming"),
-                codex_config: PathBuf::from("C:/Users/test/.codex/config.toml"),
-            }
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn zed_is_detected_by_the_arch_linux_executable_name() {
-        let directory = temporary("zed-zeditor");
-        let binary_directory = directory.join("bin");
-        fs::create_dir_all(&binary_directory).unwrap();
-        fs::write(binary_directory.join("zeditor"), b"test").unwrap();
-        let edge = edge(&directory);
-        let registry = HarnessRegistry::with_context(HarnessContext {
-            home: directory.join("home"),
-            config: directory.join("config"),
-            roaming: directory.join("config"),
-            codex_config: directory.join("codex/config.toml"),
-            claude_config_dir: None,
-            crush_config: None,
-            edge,
-            path_entries: vec![binary_directory],
-            locations: directory.join("locations.json"),
-            windows: false,
-            linux: cfg!(target_os = "linux"),
-            private_view: None,
-            local_app_data: None,
-        });
-
-        let zed = registry
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "zed")
-            .unwrap();
-        assert_eq!(zed.state, HarnessState::Available);
-        assert!(zed.can_install);
-    }
-
-    #[test]
-    fn expanded_roster_is_fixed_and_cline_targets_are_plural() {
-        let directory = temporary("expanded-roster");
-        let context = context(&directory);
-        let rows = definitions(&context);
-        for id in [
-            "copilot-cli",
-            "cline-cli",
-            "kiro",
-            "qwen-code",
-            "junie",
-            "kilo-code",
-            "goose",
-            "continue",
-            "antigravity",
-            "zcode",
-            "devin",
-        ] {
-            assert!(rows.iter().any(|row| row.id == id), "missing {id}");
-        }
-        assert_eq!(
-            rows.iter().filter(|row| row.product_id == "cline").count(),
-            4
-        );
-        let devin = rows.iter().find(|row| row.id == "devin").unwrap();
-        assert_eq!(devin.product_id, "windsurf");
-        assert_eq!(devin.path, context.config.join("devin/mcp_config.json"));
-        assert_eq!(devin.executables, ["devin", "devin-desktop", "surf"]);
-    }
-
-    #[test]
-    fn every_agent_in_the_roster_is_known_by_its_id_its_name_and_its_aliases() {
-        let directory = temporary("agent-names-roster");
-        let rows = definitions(&context(&directory));
-        for row in &rows {
-            assert_eq!(named(row.id).as_deref(), Some(row.name), "{}", row.id);
-            assert_eq!(named(row.name).as_deref(), Some(row.name), "{}", row.id);
-        }
-        for row in ROSTER {
-            for alias in row.aliases {
-                assert_eq!(named(alias).as_deref(), Some(row.name), "{alias}");
-                let others = ROSTER.iter().filter(|other| other.name != row.name);
-                for other in others {
-                    assert!(!other.is_called(alias), "{alias} also calls {}", other.id);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn a_product_id_two_agents_share_names_only_the_agent_whose_id_it_is() {
-        let devin = ROSTER.iter().find(|row| row.id == "devin").unwrap();
-        assert_eq!(devin.product_id, "windsurf");
-        assert_eq!(named("windsurf").as_deref(), Some("Windsurf"));
-        assert_eq!(named("devin").as_deref(), Some("Devin"));
-        assert_eq!(named("Devin").as_deref(), Some("Devin"));
-    }
-
-    #[test]
-    fn every_agent_has_one_catalog_id_on_every_host_it_runs_on() {
-        for row in ROSTER {
-            for other in ROSTER {
-                assert_eq!(
-                    row.agent_id == other.agent_id,
-                    row.name == other.name,
-                    "{} and {}",
-                    row.id,
-                    other.id
-                );
-                if row.agent_id == other.agent_id {
-                    assert_eq!(row.monogram, other.monogram, "{}", row.agent_id);
-                }
-            }
-        }
-        let cline: Vec<&str> = ROSTER
-            .iter()
-            .filter(|row| row.agent_id == "cline")
-            .map(|row| row.id)
-            .collect();
-        assert_eq!(
-            cline,
-            [
-                "cline-cli",
-                "cline-vscode",
-                "cline-cursor",
-                "cline-windsurf"
-            ]
-        );
-    }
-
-    #[test]
-    fn an_agent_runs_inside_only_the_catalog_apps_its_hosts_name() {
-        for row in ROSTER {
-            for host in row.runs_inside {
-                assert!(super::catalog_agent(host).is_some(), "{}: {host}", row.id);
-                assert_ne!(*host, row.agent_id, "{}", row.id);
-            }
-        }
-        assert!(super::runs_inside("claude-code", "claude-desktop"));
-        for editor in ["vscode", "cursor", "windsurf"] {
-            assert!(super::runs_inside("cline", editor), "{editor}");
-        }
-        assert!(!super::runs_inside("cline", "claude-desktop"));
-        assert!(!super::runs_inside("claude-desktop", "claude-code"));
-        assert!(!super::runs_inside("not-an-agent", "claude-desktop"));
-    }
-
-    #[test]
-    fn every_client_id_names_its_agents_hosts_or_its_one_host() {
-        let directory = temporary("client-ids");
-        let summaries = HarnessRegistry::with_context(context(&directory)).summaries();
-        let ids = client_ids();
-        let names = |id: &str| -> Vec<(String, ClientName)> {
-            summaries
-                .iter()
-                .filter_map(|summary| Some((summary.id.clone(), summary.named_by(id)?)))
-                .collect()
-        };
-        assert_eq!(
-            ids.hosts,
-            [
-                "cline-cli",
-                "cline-vscode",
-                "cline-cursor",
-                "cline-windsurf"
-            ]
-        );
-        assert_eq!(ids.all().count(), ids.agents.len() + ids.hosts.len());
-        for agent in &ids.agents {
-            let hosts: Vec<(String, ClientName)> = ROSTER
-                .iter()
-                .filter(|row| row.agent_id == *agent)
-                .map(|row| {
-                    let name = if row.id == *agent {
-                        ClientName::Host
-                    } else {
-                        ClientName::Agent
-                    };
-                    (row.id.to_owned(), name)
-                })
-                .collect();
-            assert_eq!(names(agent), hosts, "{agent}");
-            assert_eq!(names(&agent.to_ascii_uppercase()), hosts, "{agent}");
-            assert_eq!(
-                ids.agents.iter().filter(|other| *other == agent).count(),
-                1,
-                "{agent}"
-            );
-        }
-        // Every harness id still names exactly its own host, whether or not an agent id names it.
-        for row in ROSTER {
-            assert_eq!(
-                names(row.id),
-                [(row.id.to_owned(), ClientName::Host)],
-                "{}",
-                row.id
-            );
-        }
-        assert_eq!(names("cline").len(), 4);
-        assert!(names("Cline (Cursor)").is_empty());
-    }
-
-    #[test]
-    fn an_agent_id_selects_only_the_hosts_found_unless_every_client_is_asked_for() {
-        let directory = temporary("client-ids-detected");
-        let selected = |id: &str, all_clients: bool| -> Vec<String> {
-            HarnessRegistry::with_context(context(&directory))
-                .summaries()
-                .into_iter()
-                .filter(|summary| summary.is_selected_by(id, all_clients))
-                .map(|summary| summary.id)
-                .collect()
-        };
-        assert!(selected("cline", false).is_empty());
-        assert_eq!(selected("cline-vscode", false), ["cline-vscode"]);
-        assert_eq!(selected("zed", false), ["zed"]);
-        let cli = directory.join("home/.cline/data").join(CLINE_SETTINGS);
-        fs::create_dir_all(cli.parent().unwrap()).unwrap();
-        fs::write(&cli, "{}").unwrap();
-        assert_eq!(selected("cline", false), ["cline-cli"]);
-        assert_eq!(
-            selected("cline", true),
-            [
-                "cline-cli",
-                "cline-vscode",
-                "cline-cursor",
-                "cline-windsurf"
-            ]
-        );
-    }
-
-    #[test]
-    fn the_reserved_entries_are_entries_no_row_takes() {
-        use crate::agent::{COMMAND_LINE_ID, EARLIER_ID, UNKNOWN_ID, UNKNOWN_NAME_SEPARATOR};
-        use crate::language::provenance::{COMMAND_LINE_AGENT, EARLIER_SESSION, UNKNOWN_AGENT};
-
-        for row in ROSTER {
-            for id in [row.id, row.agent_id] {
-                assert!(
-                    ![COMMAND_LINE_ID, UNKNOWN_ID, EARLIER_ID].contains(&id),
-                    "{id}"
-                );
-                assert!(!id.contains(UNKNOWN_NAME_SEPARATOR), "{id}");
-            }
-            for reserved in [
-                COMMAND_LINE_ID,
-                UNKNOWN_ID,
-                COMMAND_LINE_AGENT,
-                UNKNOWN_AGENT,
-                EARLIER_ID,
-                EARLIER_SESSION,
-            ] {
-                assert!(!row.is_called(reserved), "{} is called {reserved}", row.id);
-            }
-        }
-    }
-
-    #[test]
-    fn an_agent_is_known_by_the_names_it_reports_in_any_case() {
-        assert_eq!(named("codex-mcp-client").as_deref(), Some("Codex"));
-        assert_eq!(named("claude-code").as_deref(), Some("Claude Code"));
-        assert_eq!(named("CLAUDE-CODE").as_deref(), Some("Claude Code"));
-        assert_eq!(named("  claude code ").as_deref(), Some("Claude Code"));
-        assert_eq!(named("claude-ai").as_deref(), Some("Claude Desktop"));
-        assert_eq!(named("cursor-vscode").as_deref(), Some("Cursor"));
-        assert_eq!(
-            named("Visual Studio Code").as_deref(),
-            Some("Visual Studio Code")
-        );
-        assert_eq!(named("cline").as_deref(), Some("Cline"));
-        assert_eq!(named("Antigravity").as_deref(), Some("Antigravity"));
-        assert_eq!(named("my own agent").as_deref(), None);
-        assert_eq!(named("").as_deref(), None);
-    }
-
-    #[test]
-    fn every_registry_row_has_offline_artwork_and_the_exact_manual_command() {
-        let directory = temporary("roster-artwork-manual");
-        let context = context(&directory);
-        let edge = context.edge.to_string_lossy().into_owned();
-        let serialized_edge = serde_json::to_string(&edge).unwrap();
-        let escaped_edge = serialized_edge
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .unwrap();
-        let registry = HarnessRegistry::with_context(context);
-        for summary in registry.summaries() {
-            let served = crate::agent::image::served(&summary.agent.id, None)
-                .unwrap_or_else(|| panic!("missing packaged artwork for {}", summary.id));
-            assert_eq!(served.media_type, "image/svg+xml", "{}", summary.id);
-            assert_eq!(
-                summary.agent.symbol,
-                Symbol::Icon {
-                    address: format!("agent-icons/{}?v={}", summary.agent.id, served.version),
-                    about: None,
-                },
-                "every row names its agent's one image address: {}",
-                summary.id
-            );
-            assert_eq!(
-                summary.agent.name, summary.name,
-                "every row's agent is its product"
-            );
-            assert_eq!(
-                agent_called(&summary.id).as_ref(),
-                Some(&summary.agent),
-                "every harness row is in the catalog: {}",
-                summary.id
-            );
-            assert_eq!(
-                agent_called(&summary.agent.id).as_ref(),
-                Some(&summary.agent),
-                "every agent id names its agent: {}",
-                summary.id
-            );
-            assert_eq!(summary.connector_command, format!("{edge} mcp"));
-            assert_eq!(
-                summary.copy_only,
-                matches!(summary.id.as_str(), "goose" | "continue"),
-                "only the clients whose files Ghostlight never edits are copy-only: {}",
-                summary.id
-            );
-            assert!(
-                summary.manual_setup.contains(&edge) || summary.manual_setup.contains(escaped_edge),
-                "manual setup for {} omitted the edge",
-                summary.id
-            );
-            assert!(
-                summary.manual_setup.contains("\"mcp\""),
-                "manual setup for {} omitted the mcp argument",
-                summary.id
-            );
-        }
-    }
-
-    #[test]
-    fn every_download_destination_is_closed_and_https() {
-        let directory = temporary("download-destinations");
-        let context = context(&directory);
-        let registry = HarnessRegistry::with_context(context.clone());
-        for summary in registry.summaries() {
-            let row = ROSTER.iter().find(|row| row.id == summary.id).unwrap();
-            assert_eq!(summary.download_url.as_deref(), row.download_url);
-            assert_eq!(summary.can_download, row.download_url.is_some());
-            match row.download_url {
-                Some(url) => {
-                    assert!(url.starts_with("https://"), "{}", row.id);
-                    assert_eq!(registry.download_url(row.id).unwrap(), url);
-                }
-                None => assert!(matches!(
-                    registry.download_url(row.id),
-                    Err(HarnessError::NoDownload(_))
-                )),
-            }
-        }
-        assert!(matches!(
-            registry.download_url("not-a-harness"),
-            Err(HarnessError::UnknownHarness(_))
-        ));
-    }
-
-    #[test]
-    fn harness_locations_are_owner_only() {
-        let directory = temporary("locations-private");
-        let context = context(&directory);
-        let registry = HarnessRegistry::with_context(context.clone());
-        let located = directory.join("portable/kilo.jsonc");
-        fs::create_dir_all(located.parent().unwrap()).unwrap();
-        fs::write(&located, "{}\n").unwrap();
-        registry.locate("kilo-code", &located).unwrap();
-        assert_owner_only(&context.locations);
-        registry.locate("kilo-code", &located).unwrap();
-        assert_owner_only(&context.locations);
-        assert_eq!(
-            names_in(context.locations.parent().unwrap()),
-            [super::layout::HARNESS_LOCATIONS_NAME]
-        );
-    }
-
-    #[test]
-    fn kilo_prefers_current_config_names_and_accepts_a_located_jsonc_file() {
-        let directory = temporary("kilo-current-config");
-        let context = context(&directory);
-        let current = context.config.join("kilo").join("kilo.jsonc");
-        fs::create_dir_all(current.parent().unwrap()).unwrap();
-        fs::write(&current, "{}\n").unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-        let kilo = registry
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "kilo-code")
-            .unwrap();
-        assert_eq!(kilo.config_path, current.to_string_lossy());
-
-        let located = directory.join("portable/kilo.jsonc");
-        fs::create_dir_all(located.parent().unwrap()).unwrap();
-        fs::write(&located, "{}\n").unwrap();
-        let result = registry.locate("kilo-code", &located).unwrap();
-        assert_eq!(result.summary.config_path, located.to_string_lossy());
-    }
-
-    #[test]
-    fn a_host_reads_the_first_of_its_candidates_that_exists_and_otherwise_its_default() {
-        for row in ROSTER.iter().filter(|row| !row.candidates.is_empty()) {
-            let directory = temporary(&format!("candidates-{}", row.id));
-            let context = context(&directory);
-            let default = (row.path)(&context);
-            let file_on = |context: &HarnessContext| {
-                row.copies_on(context, &Packages::none())[0].file.clone()
-            };
-            assert_eq!(file_on(&context), default, "{}", row.id);
-            fs::create_dir_all(default.parent().unwrap()).unwrap();
-            // Each candidate, written after every later one, wins over all of them.
-            for (index, name) in row.candidates.iter().enumerate().rev() {
-                fs::write(default.with_file_name(name), "{}\n").unwrap();
-                assert_eq!(
-                    file_on(&context),
-                    default.with_file_name(row.candidates[index]),
-                    "{}",
-                    row.id
-                );
-            }
-            let definition = definition(&context, row.id).unwrap();
-            for name in row.candidates {
-                assert!(
-                    definition.accepts_config_path(&directory.join(name)),
-                    "{name}"
-                );
-            }
-            assert!(!definition.accepts_config_path(&directory.join("settings.json")));
-        }
-    }
-
-    /// Claude Code reads `.claude.json` in the directory `CLAUDE_CONFIG_DIR` names, else in the
-    /// home (Claude Code 2.1). Ghostlight sets up, finds and removes its entry in that file, and
-    /// never writes the other one.
-    #[test]
-    fn claude_code_is_set_up_and_removed_in_the_file_claude_code_reads() {
-        for named in [false, true] {
-            let directory = temporary(&format!("claude-config-dir-{named}"));
-            let own = directory.join("claude-profile");
-            let context = HarnessContext {
-                claude_config_dir: named.then(|| own.clone()),
-                ..context(&directory)
-            };
-            let (read, unread) = if named {
-                (own.join(".claude.json"), context.home.join(".claude.json"))
-            } else {
-                (context.home.join(".claude.json"), own.join(".claude.json"))
-            };
-            fs::create_dir_all(read.parent().unwrap()).unwrap();
-            fs::write(&read, "{\"theme\": \"dark\"}\n").unwrap();
-            let registry = HarnessRegistry::with_context(context);
-
-            let installed = registry
-                .apply("claude-code", HarnessAction::Install)
-                .unwrap();
-            assert!(installed.changed, "{named}");
-            assert!(has_entry(&read), "{named}");
-            assert!(fs::read_to_string(&read).unwrap().contains("dark"));
-            let found = registry
-                .summaries()
-                .into_iter()
-                .find(|summary| summary.id == "claude-code")
-                .unwrap();
-            assert_eq!(found.state, HarnessState::Installed, "{named}");
-            assert!(found.can_uninstall, "{named}");
-
-            let removed = registry
-                .apply("claude-code", HarnessAction::Uninstall)
-                .unwrap();
-            assert!(removed.changed, "{named}");
-            assert!(!has_entry(&read), "{named}");
-            assert!(!unread.exists(), "{named}");
-        }
-    }
-
-    /// A service started without `CLAUDE_CONFIG_DIR` still finds the directory the person's
-    /// environment names, so the workbench sets up and removes the entry Claude Code reads.
-    #[test]
-    fn claude_code_directory_comes_from_the_process_else_the_person() {
-        use std::ffi::OsString;
-
-        use super::user_dirs::USER_PROFILE_VARIABLE;
-        use super::{claude_config_dir, user_path};
-
-        let lookup = |name: &str| (name == USER_PROFILE_VARIABLE).then(|| r"C:\Users\a".to_owned());
-        let stored = |text: &str, expandable| {
-            Some(user_path::PathValue {
-                text: text.to_owned(),
-                expandable,
-            })
-        };
-
-        assert_eq!(
-            claude_config_dir(
-                Some(OsString::from(r"D:\process")),
-                stored(r"D:\person", false),
-                &lookup
-            ),
-            Some(PathBuf::from(r"D:\process"))
-        );
-        for unset in [None, Some(OsString::new())] {
-            assert_eq!(
-                claude_config_dir(
-                    unset.clone(),
-                    stored(r"%USERPROFILE%\claude", true),
-                    &lookup
-                ),
-                Some(PathBuf::from(r"C:\Users\a\claude"))
-            );
-            assert_eq!(
-                claude_config_dir(
-                    unset.clone(),
-                    stored(r"%USERPROFILE%\claude", false),
-                    &lookup
-                ),
-                Some(PathBuf::from(r"%USERPROFILE%\claude"))
-            );
-            assert_eq!(
-                claude_config_dir(unset.clone(), stored("", true), &lookup),
-                None
-            );
-            assert_eq!(claude_config_dir(unset, None, &lookup), None);
-        }
-    }
-
-    #[test]
-    fn crush_reads_the_file_its_variable_names_from_the_context() {
-        let directory = temporary("crush-variable");
-        let named = directory.join("elsewhere/crush.json");
-        let context = HarnessContext {
-            crush_config: Some(named.clone()),
-            ..context(&directory)
-        };
-        assert_eq!(definition(&context, "crush").unwrap().path, named);
-    }
-
-    #[test]
-    fn locating_a_manual_clients_file_points_to_copy_setup_and_leaves_it_untouched() {
-        let directory = temporary("goose-locate");
-        let context = context(&directory);
-        let registry = HarnessRegistry::with_context(context);
-        let located = directory.join("portable/config.yaml");
-        fs::create_dir_all(located.parent().unwrap()).unwrap();
-        let source = "# keep goose notes\nprovider: local\n";
-        fs::write(&located, source).unwrap();
-        let result = registry.locate("goose", &located).unwrap();
-        assert_eq!(result.summary.config_path, located.to_string_lossy());
-        assert!(result.message.contains("Copy setup"));
-        assert!(!result.message.contains("Set up"));
-        assert_eq!(fs::read_to_string(&located).unwrap(), source);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn json_edits_preserve_the_files_permission_bits() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = temporary("json-mode");
-        let path = directory.join("config.json");
-        let context = context(&directory);
-        fs::write(&path, "{\"theme\":\"dark\"}\n").unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-        assert!(edit_json(&context, &path, JsonDialect::Copilot, true).unwrap());
-        let installed = fs::read(&path).unwrap();
-        assert!(!edit_json(&context, &path, JsonDialect::Copilot, true).unwrap());
-        assert_eq!(fs::read(&path).unwrap(), installed);
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o640
-        );
-        assert!(edit_json(&context, &path, JsonDialect::Copilot, false).unwrap());
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o640
-        );
-    }
-
-    #[test]
-    fn manual_json_setup_uses_the_real_ghostlight_key() {
-        let directory = temporary("manual-json");
-        let edge = edge(&directory);
-        let document = manual_json_setup(&edge, JsonDialect::Copilot).unwrap();
-        let value: Value = serde_json::from_str(&document).unwrap();
-        assert!(value["mcpServers"].get("ghostlight").is_some());
-        assert!(value["mcpServers"].get("SERVER_NAME").is_none());
-        assert_eq!(
-            value["mcpServers"]["ghostlight"]["command"].as_str(),
-            Some(edge.to_string_lossy().as_ref())
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn located_executable_is_persistent_detection_evidence() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = temporary("located-executable");
-        let context = context(&directory);
-        let executable = directory.join("odd-place/custom-qwen");
-        fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        fs::write(&executable, b"test").unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-        let located = registry.locate("qwen-code", &executable).unwrap();
-        assert_eq!(located.summary.state, HarnessState::Available);
-        let rediscovered = HarnessRegistry::with_context(context);
-        let qwen = rediscovered
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "qwen-code")
-            .unwrap();
-        assert_eq!(qwen.state, HarnessState::Available);
-    }
-
-    #[test]
-    fn a_generic_home_directory_is_not_product_detection_evidence() {
-        let directory = temporary("generic-home-detection");
-        let mut context = context(&directory);
-        fs::create_dir_all(&context.home).unwrap();
-        let binaries = directory.join("bin");
-        fs::create_dir_all(&binaries).unwrap();
-        context.path_entries = vec![binaries.clone()];
-
-        let absent = HarnessRegistry::with_context(context.clone())
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "claude-code")
-            .unwrap();
-        assert_eq!(absent.state, HarnessState::NotDetected);
-
-        fs::write(binaries.join("claude"), b"test").unwrap();
-        let detected = HarnessRegistry::with_context(context)
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "claude-code")
-            .unwrap();
-        assert_eq!(detected.state, HarnessState::Available);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_missing_located_executable_is_visible_and_falls_back_safely() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = temporary("stale-located-executable");
-        let context = context(&directory);
-        let executable = directory.join("portable/qwen");
-        fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        fs::write(&executable, b"test").unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-        HarnessRegistry::with_context(context.clone())
-            .locate("qwen-code", &executable)
-            .unwrap();
-        fs::remove_file(executable).unwrap();
-
-        let summary = HarnessRegistry::with_context(context)
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "qwen-code")
-            .unwrap();
-        assert_eq!(summary.state, HarnessState::NotDetected);
-        assert!(summary
-            .detail
-            .contains("previously located path is missing"));
-    }
-
-    #[test]
-    fn a_located_config_requires_the_target_filename_and_valid_shape() {
-        let directory = temporary("located-config-validation");
-        let context = context(&directory);
-        let registry = HarnessRegistry::with_context(context);
-        let wrong_name = directory.join("portable/not-qwen.json");
-        fs::create_dir_all(wrong_name.parent().unwrap()).unwrap();
-        fs::write(&wrong_name, "{}\n").unwrap();
-        assert!(matches!(
-            registry.locate("qwen-code", &wrong_name),
-            Err(HarnessError::LocatedPathInvalid(_))
-        ));
-
-        let malformed = directory.join("portable/settings.json");
-        fs::write(&malformed, "[]\n").unwrap();
-        assert!(matches!(
-            registry.locate("qwen-code", &malformed),
-            Err(HarnessError::Malformed(_))
-        ));
-    }
-
-    #[test]
-    fn cline_targets_install_and_remove_independently() {
-        let directory = temporary("cline-plural");
-        let context = context(&directory);
-        fs::create_dir_all(context.home.join(".cline/data/settings")).unwrap();
-        fs::create_dir_all(
-            context
-                .roaming
-                .join("Code/User/globalStorage/saoudrizwan.claude-dev/settings"),
-        )
-        .unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-        registry.apply("cline-cli", HarnessAction::Install).unwrap();
-        registry
-            .apply("cline-vscode", HarnessAction::Install)
-            .unwrap();
-        registry
-            .apply("cline-cli", HarnessAction::Uninstall)
-            .unwrap();
-        assert_eq!(
-            registry
-                .refresh()
-                .unwrap()
-                .into_iter()
-                .find(|summary| summary.id == "cline-vscode")
-                .unwrap()
-                .state,
-            HarnessState::Installed
-        );
-        let vscode = fs::read_to_string(context.roaming.join(
-            "Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
-        ))
-        .unwrap();
-        assert!(vscode.contains("ghostlight"));
-    }
-
-    #[test]
-    fn a_background_scan_never_overwrites_an_acts_result() {
-        use std::sync::mpsc;
-        use std::thread;
-        use std::time::Duration;
-
-        let directory = temporary("background-scan");
-        let context = context(&directory);
-        fs::create_dir_all(context.home.join(".cline/data/settings")).unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-        let state = |registry: &HarnessRegistry| {
-            registry
-                .summaries()
-                .into_iter()
-                .find(|summary| summary.id == "cline-cli")
-                .unwrap()
-                .state
-        };
-        assert_eq!(state(&registry), HarnessState::Available);
-
-        // An act is under way: it holds the action lock while it writes and scans.
-        let act = super::lock(&registry.inner.action);
-        let (finished, scanned) = mpsc::channel();
-        let background = registry.clone();
-        let scan = thread::spawn(move || {
-            background.refresh().unwrap();
-            finished.send(()).unwrap();
-        });
-        assert!(
-            scanned.recv_timeout(Duration::from_millis(200)).is_err(),
-            "a background scan waits for the act in progress"
-        );
-        super::apply_install(&context, &definition(&context, "cline-cli").unwrap()).unwrap();
-        registry.scan();
-        drop(act);
-
-        scanned.recv().unwrap();
-        scan.join().unwrap();
-        assert_eq!(state(&registry), HarnessState::Installed);
-    }
-
-    #[test]
-    fn devin_setup_does_not_touch_the_historical_windsurf_target() {
-        let directory = temporary("devin-windsurf-continuity");
-        let context = context(&directory);
-        let devin = context.config.join("devin/mcp_config.json");
-        let windsurf = context.home.join(".codeium/windsurf/mcp_config.json");
-        fs::create_dir_all(devin.parent().unwrap()).unwrap();
-        fs::create_dir_all(windsurf.parent().unwrap()).unwrap();
-        fs::write(&windsurf, "{\n  \"mcpServers\": {}\n}\n").unwrap();
-
-        let registry = HarnessRegistry::with_context(context.clone());
-        registry.apply("devin", HarnessAction::Install).unwrap();
-
-        let configured: Value = serde_json::from_str(&fs::read_to_string(&devin).unwrap()).unwrap();
-        assert_eq!(
-            configured["mcpServers"]["ghostlight"]["command"].as_str(),
-            Some(context.edge.to_string_lossy().as_ref())
-        );
-        assert_eq!(
-            fs::read_to_string(&windsurf).unwrap(),
-            "{\n  \"mcpServers\": {}\n}\n"
-        );
-    }
-
-    #[test]
-    fn setup_detected_adds_missing_updates_owned_and_preserves_blocked_targets() {
-        let directory = temporary("setup-detected");
-        let mut context = context(&directory);
-        let binaries = directory.join("bin");
-        fs::create_dir_all(&binaries).unwrap();
-        fs::write(binaries.join("qwen"), b"test").unwrap();
-        fs::write(binaries.join("zcode"), b"test").unwrap();
-        context.path_entries = vec![binaries];
-
-        let codex = context.codex_config.clone();
-        fs::create_dir_all(codex.parent().unwrap()).unwrap();
-        let old_connector = directory.join("old/ghostlight-mcp-connector");
-        fs::write(
-            &codex,
-            format!(
-                "[mcp_servers.ghostlight]\ncommand = {}\nargs = []\n",
-                serde_json::to_string(&old_connector.to_string_lossy()).unwrap()
-            ),
-        )
-        .unwrap();
-
-        let blocked = context
-            .home
-            .join(".cline/data/settings/cline_mcp_settings.json");
-        fs::create_dir_all(blocked.parent().unwrap()).unwrap();
-        fs::write(
-            &blocked,
-            r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#,
-        )
-        .unwrap();
-
-        let registry = HarnessRegistry::with_context(context);
-        let actionable: Vec<_> = registry
-            .summaries()
-            .into_iter()
-            .filter(|summary| {
-                matches!(
-                    summary.state,
-                    HarnessState::Available | HarnessState::Updatable
-                )
-            })
-            .map(|summary| (summary.id, summary.state))
-            .collect();
-        assert_eq!(
-            actionable,
-            vec![
-                ("codex".into(), HarnessState::Updatable),
-                ("zcode".into(), HarnessState::Available),
-                ("qwen-code".into(), HarnessState::Available),
-            ]
-        );
-        let result = registry.setup_detected().unwrap();
-        assert_eq!(result.set_up, 2);
-        assert_eq!(result.updated, 1);
-        assert_eq!(result.needs_attention, 1);
-        assert!(result.failures.is_empty());
-        assert!(result.message.contains("set up 2 and updated 1"));
-
-        let summaries = registry.summaries();
-        for id in ["codex", "qwen-code", "zcode"] {
-            assert_eq!(
-                summaries
-                    .iter()
-                    .find(|summary| summary.id == id)
-                    .unwrap()
-                    .state,
-                HarnessState::Installed,
-                "{id}"
-            );
-        }
-        assert_eq!(
-            summaries
-                .iter()
-                .find(|summary| summary.id == "cline-cli")
-                .unwrap()
-                .state,
-            HarnessState::NeedsAttention
-        );
-        assert_eq!(
-            summaries
-                .iter()
-                .find(|summary| summary.id == "cursor")
-                .unwrap()
-                .state,
-            HarnessState::NotDetected
-        );
-
-        let repeated = registry.setup_detected().unwrap();
-        assert_eq!(repeated.set_up, 0);
-        assert_eq!(repeated.updated, 0);
-        assert!(repeated.message.contains("already ready"));
-        assert_eq!(
-            fs::read_to_string(&blocked).unwrap(),
-            r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#
-        );
-    }
-
-    #[test]
-    fn goose_and_continue_get_copy_setup_and_their_files_are_never_touched() {
-        for (id, relative, source) in [
-            (
-                "goose",
-                "config/goose/config.yaml",
-                "provider: keep\nextensions: {a: 1}\n",
-            ),
-            (
-                "continue",
-                "home/.continue/config.yaml",
-                "name: x\nmcpServers: [broken\n",
-            ),
-        ] {
-            let directory = temporary("manual-clients");
-            let context = context(&directory);
-            let path = directory.join(relative);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(&path, source).unwrap();
-
-            let registry = HarnessRegistry::with_context(context.clone());
-            let summary = registry
-                .summaries()
-                .into_iter()
-                .find(|summary| summary.id == id)
-                .expect("the client stays in the closed roster");
-            assert_eq!(summary.state, HarnessState::Available, "{id}");
-            assert!(!summary.can_install && !summary.can_fix && !summary.can_uninstall);
-            assert!(
-                summary.copy_only,
-                "{id} is connected only by pasting its setup"
-            );
-            assert!(summary.detail.contains("Copy setup"), "{}", summary.detail);
-            assert!(summary
-                .manual_setup
-                .contains(&*context.edge.to_string_lossy().replace('\\', "\\\\")));
-
-            let result = registry.setup_detected().unwrap();
-            assert_eq!(result.set_up, 0);
-            assert_eq!(fs::read_to_string(&path).unwrap(), source);
-            for action in [
-                HarnessAction::Install,
-                HarnessAction::Fix,
-                HarnessAction::Uninstall,
-            ] {
-                assert!(matches!(
-                    registry.apply(id, action),
-                    Err(HarnessError::ManualSetup(_))
-                ));
-                assert_eq!(fs::read_to_string(&path).unwrap(), source);
-            }
-        }
-    }
-
-    #[test]
-    fn goose_and_continue_with_nothing_present_are_not_detected() {
-        let directory = temporary("manual-absent");
-        let registry = HarnessRegistry::with_context(context(&directory));
-        for id in ["goose", "continue"] {
-            let summary = registry
-                .summaries()
-                .into_iter()
-                .find(|summary| summary.id == id)
-                .unwrap();
-            assert_eq!(summary.state, HarnessState::NotDetected, "{id}");
-            assert!(!summary.can_install);
-            assert!(summary.copy_only, "{id}");
-        }
-    }
-
-    #[test]
-    fn legacy_relay_requires_the_exact_agent_signature_and_install_root() {
-        let directory = temporary("legacy-relay");
-        let install_root = directory.join("bin");
-        let current = install_root
-            .join("v1")
-            .join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
-        let legacy = install_root.join("v0").join(if cfg!(windows) {
-            "ghostlight-relay.exe"
-        } else {
-            "ghostlight-relay"
-        });
-        assert_eq!(
-            command_registration_state(
-                legacy.to_string_lossy().as_ref(),
-                Some(&["--role", "agent"]),
-                &current,
-                cfg!(windows),
-            ),
-            RegistrationState::Updatable
-        );
-        assert!(matches!(
-            command_registration_state(
-                legacy.to_string_lossy().as_ref(),
-                Some(&["--role", "browser"]),
-                &current,
-                cfg!(windows),
-            ),
-            RegistrationState::Foreign(Some(_))
-        ));
-        assert!(matches!(
-            command_registration_state(
-                directory
-                    .join("foreign/v0")
-                    .join(legacy.file_name().unwrap())
-                    .to_string_lossy()
-                    .as_ref(),
-                Some(&["--role", "agent"]),
-                &current,
-                cfg!(windows),
-            ),
-            RegistrationState::Foreign(Some(_))
-        ));
-    }
-
-    /// Windows reads `/` as `\` and ignores case, so a 1.x relay entry a client wrote with
-    /// forward slashes is still Ghostlight's own, and Uninstall and Fix find it.
-    #[cfg(windows)]
-    #[test]
-    fn a_legacy_relay_entry_spelled_with_forward_slashes_is_owned() {
-        let directory = temporary("legacy-relay-slashes");
-        let install_root = directory.join("bin");
-        let current = install_root
-            .join("v1")
-            .join(executable_name(EDGE_COMMAND_NAME, true));
-        let legacy = install_root.join("v0").join("ghostlight-relay.exe");
-        let respelled = legacy.to_string_lossy().replace('\\', "/").to_uppercase();
-        assert_eq!(
-            command_registration_state(&respelled, Some(&["--role", "agent"]), &current, true),
-            RegistrationState::Updatable
-        );
-    }
-
-    #[test]
-    fn json_install_is_idempotent_and_preserves_siblings() {
-        let directory = temporary("json");
-        let path = directory.join("mcp.json");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        fs::write(
-            &path,
-            r#"{"other":7,"mcpServers":{"sibling":{"command":"sibling"}}}"#,
-        )
-        .unwrap();
-        assert!(edit_json(&context, &path, JsonDialect::McpServers, true).unwrap());
-        assert!(!edit_json(&context, &path, JsonDialect::McpServers, true).unwrap());
-        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(value["other"], 7);
-        assert_eq!(value["mcpServers"]["sibling"]["command"], "sibling");
-        assert_eq!(
-            inspect_json(
-                &fs::read_to_string(&path).unwrap(),
-                JsonDialect::McpServers,
-                &edge,
-                cfg!(windows)
-            )
-            .unwrap(),
-            RegistrationState::Current
-        );
-        assert!(edit_json(&context, &path, JsonDialect::McpServers, false).unwrap());
-        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(value["mcpServers"].get("ghostlight").is_none());
-    }
-
-    #[test]
-    fn jsonc_install_and_uninstall_preserve_comments_and_trailing_commas() {
-        let directory = temporary("jsonc");
-        let path = directory.join("settings.json");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        let source = "{\n  // keep this thought\n  \"context_servers\": {},\n}\n";
-        fs::write(&path, source).unwrap();
-        assert!(edit_json(&context, &path, JsonDialect::ContextServers, true).unwrap());
-        let installed = fs::read_to_string(&path).unwrap();
-        assert!(installed.contains("// keep this thought"));
-        assert!(installed.contains("\"ghostlight\""));
-        assert_eq!(
-            inspect_json(
-                &installed,
-                JsonDialect::ContextServers,
-                &edge,
-                cfg!(windows)
-            )
-            .unwrap(),
-            RegistrationState::Current
-        );
-        // Pinned against Zed's own current source (crates/settings_content/src/project.rs,
-        // ContextServerCommand): the stdio variant has no `source` field at all, only command,
-        // args, and env. ADR-0071's amendment records the verification.
-        let written: Value = parse_to_serde_value(&installed, &jsonc_options())
-            .unwrap()
-            .unwrap();
-        let entry = &written["context_servers"]["ghostlight"];
-        assert!(entry.get("source").is_none(), "{entry}");
-        assert!(entry["command"].is_string());
-        assert!(entry["args"].is_array());
-        assert!(entry["env"].is_object());
-        assert!(edit_json(&context, &path, JsonDialect::ContextServers, false).unwrap());
-        let removed = fs::read_to_string(&path).unwrap();
-        assert!(removed.contains("// keep this thought"));
-        assert!(!removed.contains("\"ghostlight\""));
-        assert!(removed.contains("\"context_servers\": {},"));
-    }
-
-    #[test]
-    fn zcode_nested_install_and_uninstall_preserve_sibling_servers() {
-        let directory = temporary("zcode");
-        let path = directory.join("config.json");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        let source = "{\n  \"mcp\": {\n    \"servers\": {\n      \"other\": {\"command\": \"keep\"}\n    }\n  }\n}\n";
-        fs::write(&path, source).unwrap();
-        assert!(edit_json(&context, &path, JsonDialect::ZCode, true).unwrap());
-        assert!(!edit_json(&context, &path, JsonDialect::ZCode, true).unwrap());
-        let installed = fs::read_to_string(&path).unwrap();
-        assert!(installed.contains("\"other\""));
-        assert_eq!(
-            inspect_json(&installed, JsonDialect::ZCode, &edge, cfg!(windows)).unwrap(),
-            RegistrationState::Current
-        );
-        // Pinned against ZCode's own written shape, observed live in ~/.zcode/cli/config.json
-        // on 2026-08-27 (ADR-0141): the entry is a plain string command with args and env,
-        // nested under `mcp.servers`, exactly like the McpServers dialect but one level deeper.
-        let written: Value = parse_to_serde_value(&installed, &jsonc_options())
-            .unwrap()
-            .unwrap();
-        let entry = &written["mcp"]["servers"]["ghostlight"];
-        assert!(entry["command"].is_string());
-        assert!(entry["args"].is_array());
-        assert!(entry["env"].is_object());
-        assert!(edit_json(&context, &path, JsonDialect::ZCode, false).unwrap());
-        let removed = fs::read_to_string(&path).unwrap();
-        assert!(removed.contains("\"other\""));
-        assert!(!removed.contains("\"ghostlight\""));
-    }
-
-    #[test]
-    fn zcode_is_detected_by_its_cli_configuration_directory() {
-        let directory = temporary("zcode-detection");
-        let context = context(&directory);
-        let config = context.home.join(".zcode/cli/config.json");
-        fs::create_dir_all(config.parent().unwrap()).unwrap();
-        fs::write(&config, "{}\n").unwrap();
-        let registry = HarnessRegistry::with_context(context);
-        let zcode = registry
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "zcode")
-            .expect("zcode stays in the closed roster");
-        assert_eq!(zcode.state, HarnessState::Available);
-        assert!(zcode.can_install);
-        assert!(
-            !zcode.can_download,
-            "no verified download destination exists"
-        );
-        assert_eq!(zcode.config_path, config.to_string_lossy());
-        assert!(zcode.manual_setup.contains("\"mcp\""));
-        assert!(zcode.manual_setup.contains("\"servers\""));
-    }
-
-    #[test]
-    fn a_hand_registered_orchestrator_command_stays_foreign() {
-        // A hand-written entry that runs the service image, which has no MCP stdio mode, is
-        // foreign evidence (ADR-0141): install and remove never overwrite it; only the
-        // confirmed Fix may.
-        let directory = temporary("zcode-foreign-orchestrator");
-        let path = directory.join("config.json");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        let orchestrator = directory
-            .join(executable_name("ghostlight-service", cfg!(windows)))
-            .to_string_lossy()
-            .replace('\\', "\\\\");
-        let source = format!(
-            "{{\"mcp\":{{\"servers\":{{\"ghostlight\":{{\"command\":\"{orchestrator}\",\"args\":[],\"env\":{{}}}}}}}}}}"
-        );
-        fs::write(&path, &source).unwrap();
-        for install in [true, false] {
-            assert!(matches!(
-                edit_json(&context, &path, JsonDialect::ZCode, install),
-                Err(HarnessError::ForeignEntry)
-            ));
-        }
-        assert_eq!(fs::read_to_string(&path).unwrap(), source);
-        let state = inspect_json(&source, JsonDialect::ZCode, &edge, cfg!(windows)).unwrap();
-        assert!(
-            matches!(state, RegistrationState::Foreign(Some(_))),
-            "{state:?}"
-        );
-    }
-
-    #[test]
-    fn foreign_entries_are_never_overwritten_or_removed() {
-        let directory = temporary("foreign");
-        let path = directory.join("mcp.json");
-        let context = context(&directory);
-        let source = r#"{"mcpServers":{"ghostlight":{"command":"some-other-tool"}}}"#;
-        fs::write(&path, source).unwrap();
-        for install in [true, false] {
-            assert!(matches!(
-                edit_json(&context, &path, JsonDialect::McpServers, install),
-                Err(HarnessError::ForeignEntry)
-            ));
-        }
-        assert_eq!(fs::read_to_string(&path).unwrap(), source);
-    }
-
-    #[test]
-    fn explicit_fix_replaces_only_the_foreign_entry_and_keeps_a_backup() {
-        let directory = temporary("fix-foreign");
-        let context = context(&directory);
-        let path = context
-            .home
-            .join(".cline/data/settings/cline_mcp_settings.json");
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let source = r#"{
-  "keep": true,
-  "mcpServers": {
-    "sibling": {"command": "keep-me"},
-    "ghostlight": {"command": "other-server", "args": ["--port", "9"]}
-  }
-}
-"#;
-        fs::write(&path, source).unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-        let before = registry
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "cline-cli")
-            .expect("Cline CLI stays in the closed roster");
-        assert_eq!(before.state, HarnessState::NeedsAttention);
-        assert!(before.can_fix);
-        assert!(!before.can_install);
-
-        let result = registry.apply("cline-cli", HarnessAction::Fix).unwrap();
-        assert!(result.changed);
-        assert_eq!(result.summary.state, HarnessState::Installed);
-        assert!(!result.summary.can_fix);
-        assert!(result.message.contains("replaced the incorrect entry"));
-
-        let fixed = fs::read_to_string(&path).unwrap();
-        let parsed = parse_to_serde_value(&fixed, &jsonc_options())
-            .unwrap()
-            .unwrap();
-        assert_eq!(parsed["keep"], true);
-        assert_eq!(parsed["mcpServers"]["sibling"]["command"], "keep-me");
-        assert_eq!(
-            inspect_json(
-                &fixed,
-                JsonDialect::McpServers,
-                &context.edge,
-                context.windows
-            )
-            .unwrap(),
-            RegistrationState::Current
-        );
-        assert_eq!(
-            fs::read_to_string(path.with_extension("json.ghostlight-backup")).unwrap(),
-            source
-        );
-
-        let unchanged = fixed.clone();
-        assert!(matches!(
-            registry.apply("cline-cli", HarnessAction::Fix),
-            Err(HarnessError::NotFixable)
-        ));
-        assert_eq!(fs::read_to_string(&path).unwrap(), unchanged);
-    }
-
     /// A registry over `context` whose Cline CLI settings hold `entry` under Ghostlight's key, and
     /// the path of that file.
     fn cline_with_entry(context: &HarnessContext, entry: &Value) -> (HarnessRegistry, PathBuf) {
@@ -4768,200 +3344,6 @@ mod tests {
             .expect("Cline CLI stays in the closed roster")
     }
 
-    #[test]
-    fn an_unpinned_npx_ghostlight_entry_says_npm_chooses_the_version() {
-        let directory = temporary("launcher-unpinned");
-        let context = context(&directory);
-        for entry in [
-            json!({"command": "npx", "args": ["-y", "ghostlight"]}),
-            json!({"command": "npx", "args": ["--yes", "ghostlight@latest", "mcp"]}),
-            json!({"command": "cmd", "args": ["/c", "npx", "-y", "ghostlight"]}),
-            json!({"command": "npx -y ghostlight"}),
-        ] {
-            let (registry, path) = cline_with_entry(&context, &entry);
-            let before = fs::read(&path).unwrap();
-            let summary = cline_summary(&registry);
-            assert_eq!(summary.state, HarnessState::NeedsAttention, "{entry}");
-            assert_eq!(
-                summary.attention,
-                Some(Attention::Launcher(LauncherPin::Unpinned)),
-                "{entry}"
-            );
-            assert!(
-                summary
-                    .detail
-                    .contains("npm chooses the version at each launch"),
-                "{}",
-                summary.detail
-            );
-            assert!(!summary.detail.contains("foreign"), "{}", summary.detail);
-            let evidence = summary.evidence.clone().expect("the launcher is named");
-            assert!(evidence.contains("npm launcher"), "{evidence}");
-            assert!(!evidence.contains("another program"), "{evidence}");
-            assert!(summary.can_fix && !summary.can_install && !summary.can_uninstall);
-            assert!(matches!(
-                registry.apply("cline-cli", HarnessAction::Install),
-                Err(HarnessError::LauncherEntry)
-            ));
-            assert_eq!(fs::read(&path).unwrap(), before);
-        }
-    }
-
-    #[test]
-    fn a_launcher_pinned_to_1x_needs_attention() {
-        let directory = temporary("launcher-pinned-1x");
-        let context = context(&directory);
-        let (registry, path) = cline_with_entry(
-            &context,
-            &json!({"command": "npx", "args": ["-y", "ghostlight@1.3.5"]}),
-        );
-        let before = fs::read(&path).unwrap();
-        let summary = cline_summary(&registry);
-        assert_eq!(summary.state, HarnessState::NeedsAttention);
-        assert_eq!(
-            summary.attention,
-            Some(Attention::Launcher(LauncherPin::Earlier))
-        );
-        assert!(
-            summary.detail.contains("pinned to ghostlight@1.3.5")
-                && summary.detail.contains("before 2.0"),
-            "{}",
-            summary.detail
-        );
-        assert!(summary
-            .evidence
-            .as_deref()
-            .is_some_and(|evidence| evidence.contains("`npx ghostlight@1.3.5`")));
-        for action in [HarnessAction::Install, HarnessAction::Uninstall] {
-            assert!(matches!(
-                registry.apply("cline-cli", action),
-                Err(HarnessError::LauncherEntry)
-            ));
-        }
-        assert_eq!(fs::read(&path).unwrap(), before);
-
-        let fixed = registry.apply("cline-cli", HarnessAction::Fix).unwrap();
-        assert!(fixed.changed);
-        assert_eq!(fixed.summary.state, HarnessState::Installed);
-        assert!(
-            fixed.message.contains("instead of the npm launcher"),
-            "{}",
-            fixed.message
-        );
-    }
-
-    #[test]
-    fn a_launcher_pinned_to_2x_is_never_current() {
-        let directory = temporary("launcher-pinned-2x");
-        let context = context(&directory);
-        let (registry, _) = cline_with_entry(
-            &context,
-            &json!({"command": "npx", "args": ["-y", "ghostlight@2.0.0"]}),
-        );
-        let summary = cline_summary(&registry);
-        assert_eq!(summary.state, HarnessState::NeedsAttention);
-        assert_eq!(
-            summary.attention,
-            Some(Attention::Launcher(LauncherPin::Pinned))
-        );
-        assert!(
-            summary.detail.contains("cannot say it is current"),
-            "{}",
-            summary.detail
-        );
-    }
-
-    #[test]
-    fn only_ghostlights_own_package_through_npx_is_the_launcher() {
-        let launcher = |command: &str, args: &[&str]| NpmLauncher::from_entry(command, Some(args));
-        for (command, args) in [
-            ("npx", &["-y", "ghostlight", "install"][..]),
-            ("npx", &["-y", "@scope/server-x"][..]),
-            ("npx", &["-y", "ghostlight-other"][..]),
-            ("npx", &["-y", "ghostlight@https://example.test/x.tgz"][..]),
-            ("npx", &["--registry", "r", "ghostlight"][..]),
-            ("cmd", &["/k", "npx", "ghostlight"][..]),
-            ("node", &["ghostlight"][..]),
-            ("npx", &[][..]),
-        ] {
-            assert_eq!(launcher(command, args), None, "{command} {args:?}");
-        }
-        assert_eq!(
-            launcher("npx.cmd", &["-y", "ghostlight@^1.2"]),
-            Some(NpmLauncher {
-                pin: LauncherPin::Earlier,
-                package: "ghostlight@^1.2".into(),
-            })
-        );
-        for (spec, pin) in [
-            (None, LauncherPin::Unpinned),
-            (Some(""), LauncherPin::Unpinned),
-            (Some("latest"), LauncherPin::Unpinned),
-            (Some("next"), LauncherPin::Unpinned),
-            (Some("1.3.5"), LauncherPin::Earlier),
-            (Some("~1"), LauncherPin::Earlier),
-            (Some("0.9.0"), LauncherPin::Earlier),
-            (Some("2.0.0"), LauncherPin::Pinned),
-            (Some("2.0.0-rc.1"), LauncherPin::Pinned),
-            (Some("^2"), LauncherPin::Pinned),
-        ] {
-            assert_eq!(LauncherPin::of(spec), pin, "{spec:?}");
-        }
-    }
-
-    #[test]
-    fn a_codex_launcher_entry_is_the_launcher_too() {
-        let directory = temporary("launcher-codex");
-        let context = context(&directory);
-        let source =
-            "[mcp_servers.ghostlight]\ncommand = \"npx\"\nargs = [\"-y\", \"ghostlight@1.3.5\"]\n";
-        assert!(matches!(
-            inspect_toml(source, &context).unwrap(),
-            RegistrationState::Launcher(NpmLauncher {
-                pin: LauncherPin::Earlier,
-                ..
-            })
-        ));
-        let path = directory.join("config.toml");
-        fs::write(&path, source).unwrap();
-        assert!(matches!(
-            edit_toml(&context, &path, true),
-            Err(HarnessError::LauncherEntry)
-        ));
-        assert_eq!(fs::read_to_string(&path).unwrap(), source);
-    }
-
-    #[test]
-    fn explicit_fix_is_lossless_for_the_toml_dialect() {
-        let directory = temporary("fix-foreign-toml");
-        let context = context(&directory);
-
-        let toml = directory.join("config.toml");
-        let toml_source = "title = \"keep\"\n\n[mcp_servers.sibling]\ncommand = \"keep-me\"\n\n[mcp_servers.ghostlight]\ncommand = \"alien\"\nargs = [\"serve\"]\n";
-        fs::write(&toml, toml_source).unwrap();
-        assert!(fix_toml(&context, &toml).unwrap());
-        let fixed_toml = fs::read_to_string(&toml).unwrap();
-        assert!(fixed_toml.contains("title = \"keep\""));
-        assert!(fixed_toml.contains("[mcp_servers.sibling]"));
-        assert_eq!(
-            inspect_toml(&fixed_toml, &context).unwrap(),
-            RegistrationState::Current
-        );
-        assert_eq!(
-            fs::read_to_string(toml.with_extension("toml.ghostlight-backup")).unwrap(),
-            toml_source
-        );
-    }
-
-    #[test]
-    fn fix_has_one_closed_desktop_action_name() {
-        assert_eq!(
-            serde_json::from_value::<HarnessAction>(serde_json::json!("fix")).unwrap(),
-            HarnessAction::Fix
-        );
-        assert!(serde_json::from_value::<HarnessAction>(serde_json::json!("force")).is_err());
-    }
-
     /// A blocked card names what was actually found beside the claim (ADR-0135).
     fn inspected_summary(directory: &Path) -> HarnessSummary {
         inspected_summary_of(directory, "claude-desktop")
@@ -4982,264 +3364,6 @@ mod tests {
             .join("Claude/claude_desktop_config.json");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         path
-    }
-
-    #[test]
-    fn coexisting_hosts_of_one_client_carry_distinct_labels() {
-        let directory = temporary("host-labels");
-        let summaries = HarnessRegistry::with_context(context(&directory))
-            .refresh()
-            .unwrap();
-        let label_of = |id: &str| {
-            summaries
-                .iter()
-                .find(|summary| summary.id == id)
-                .unwrap()
-                .label
-                .clone()
-        };
-        assert_eq!(label_of("cline-cursor"), "Cline (Cursor)");
-        assert_eq!(label_of("cline-cli"), "Cline (CLI)");
-        assert_eq!(label_of("claude-desktop"), "Claude Desktop");
-        assert_eq!(label_of("windsurf"), "Windsurf");
-        assert_eq!(label_of("devin"), "Devin");
-        let mut labels: Vec<_> = summaries.iter().map(|summary| &summary.label).collect();
-        let total = labels.len();
-        labels.sort();
-        labels.dedup();
-        assert_eq!(labels.len(), total);
-    }
-
-    #[test]
-    fn foreign_entries_name_only_the_program_and_its_argument_count() {
-        let directory = temporary("foreign-evidence");
-        let path = claude_desktop_config(&directory);
-        let expected_edge = edge(&directory);
-        let command = if cfg!(windows) {
-            "C:/tools/other\u{202e}-server.exe"
-        } else {
-            "/opt/tools/other\u{202e}-server"
-        };
-        let entry = serde_json::json!({
-            "mcpServers": {
-                "ghostlight": {
-                    "command": command,
-                    "args": ["--token", "sk-test-secret", "launch-it"],
-                }
-            }
-        });
-        fs::write(&path, entry.to_string()).unwrap();
-
-        let summary = inspected_summary(&directory);
-
-        assert_eq!(summary.state, HarnessState::NeedsAttention);
-        assert!(
-            summary.detail.starts_with("A foreign entry holds"),
-            "{}",
-            summary.detail
-        );
-        let evidence = summary.evidence.expect("foreign entries carry evidence");
-        assert!(evidence.contains("other-server"), "{evidence}");
-        assert!(!evidence.contains('\u{202e}'), "{evidence}");
-        assert!(evidence.contains("3 arguments"), "{evidence}");
-        assert!(
-            evidence.contains(&expected_edge.display().to_string()),
-            "{evidence}"
-        );
-        assert!(evidence.contains("changed nothing"), "{evidence}");
-        for hidden in ["sk-test-secret", "--token", "launch-it"] {
-            assert!(!evidence.contains(hidden), "{evidence}");
-        }
-        assert!(!summary.can_install);
-        assert!(summary.can_fix);
-    }
-
-    #[test]
-    fn argument_counts_read_in_plain_words() {
-        let directory = temporary("foreign-count");
-        let path = claude_desktop_config(&directory);
-        edge(&directory);
-        let write = |entry: serde_json::Value| {
-            fs::write(
-                &path,
-                serde_json::json!({ "mcpServers": { "ghostlight": entry } }).to_string(),
-            )
-            .unwrap();
-            inspected_summary(&directory).evidence.expect("evidence")
-        };
-
-        let one = write(serde_json::json!({ "command": "/opt/tools/other", "args": ["a"] }));
-        assert!(one.contains("with 1 argument,"), "{one}");
-        let none = write(serde_json::json!({ "command": "/opt/tools/other" }));
-        assert!(none.contains("with no arguments,"), "{none}");
-
-        let line = write(serde_json::json!({
-            "command": "C:/tools/other-server.exe --token sk-test-secret"
-        }));
-        assert!(line.contains("`other-server.exe`"), "{line}");
-        assert!(line.contains("2 arguments"), "{line}");
-        assert!(
-            !line.contains("--token") && !line.contains("sk-test-secret"),
-            "{line}"
-        );
-    }
-
-    #[test]
-    fn malformed_configurations_name_the_line_and_disclose_nothing_from_the_file() {
-        let directory = temporary("malformed-evidence");
-        let path = claude_desktop_config(&directory);
-        edge(&directory);
-        fs::write(&path, "{\n  \"token\" \"sk-test-secret\"\n}\n").unwrap();
-
-        let summary = inspected_summary(&directory);
-
-        assert_eq!(summary.state, HarnessState::NeedsAttention);
-        assert_eq!(
-            summary.detail,
-            "This configuration could not be parsed at line 2; it was left untouched."
-        );
-        assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
-        assert!(!summary.can_fix);
-        let serialized = serde_json::to_string(&summary).unwrap();
-        assert!(!serialized.contains("sk-test-secret"), "{serialized}");
-
-        let codex = context(&directory).codex_config;
-        fs::create_dir_all(codex.parent().unwrap()).unwrap();
-        fs::write(&codex, "[mcp_servers.ghostlight]\ntoken = sk-test-secret\n").unwrap();
-
-        let summary = inspected_summary_of(&directory, "codex");
-
-        assert_eq!(summary.state, HarnessState::NeedsAttention);
-        assert_eq!(
-            summary.detail,
-            "This configuration could not be parsed at line 2; it was left untouched."
-        );
-        assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
-        let serialized = serde_json::to_string(&summary).unwrap();
-        assert!(!serialized.contains("sk-test-secret"), "{serialized}");
-    }
-
-    #[test]
-    fn a_structural_fault_names_no_line() {
-        let directory = temporary("malformed-structure");
-        let path = claude_desktop_config(&directory);
-        edge(&directory);
-        fs::write(
-            &path, "[]
-",
-        )
-        .unwrap();
-
-        let summary = inspected_summary(&directory);
-
-        assert_eq!(
-            summary.detail,
-            "This configuration could not be parsed; it was left untouched."
-        );
-        assert!(summary.evidence.is_none());
-    }
-
-    #[test]
-    fn a_command_line_command_discloses_only_its_first_word() {
-        let line =
-            ForeignCommand::from_entry("C:/tools/other-server.exe --token sk/test-secret", None)
-                .expect("a program is named");
-        assert_eq!(line.program, "other-server.exe");
-        assert_eq!(line.arguments, 2);
-
-        let npx = ForeignCommand::from_entry("npx -y @scope/server-x --api-key abc", None)
-            .expect("a program is named");
-        assert_eq!(npx.program, "npx");
-        assert_eq!(npx.arguments, 4);
-
-        let both = ForeignCommand::from_entry("npx -y @scope/server-x", Some(&["--port", "9"]))
-            .expect("a program is named");
-        assert_eq!(both.program, "npx");
-        assert_eq!(both.arguments, 4);
-
-        let directory = temporary("foreign-spaced-file");
-        let spaced = directory.join("tools with spaces").join("other-server");
-        fs::create_dir_all(spaced.parent().unwrap()).unwrap();
-        fs::write(&spaced, "").unwrap();
-        let whole = ForeignCommand::from_entry(&spaced.to_string_lossy(), Some(&["serve"]))
-            .expect("a program is named");
-        assert_eq!(whole.program, "other-server");
-        assert_eq!(whole.arguments, 1);
-    }
-
-    #[test]
-    fn unblocked_targets_and_commandless_foreign_entries_stay_bounded() {
-        let directory = temporary("unblocked-evidence");
-        let path = claude_desktop_config(&directory);
-        let expected_edge = edge(&directory);
-        let installed = serde_json::json!({
-            "mcpServers": {
-                "ghostlight": {
-                    "command": expected_edge,
-                    "args": ["mcp"],
-                    "env": {},
-                }
-            }
-        });
-        fs::write(&path, installed.to_string()).unwrap();
-        let summary = inspected_summary(&directory);
-        assert_eq!(summary.state, HarnessState::Installed);
-        assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
-
-        fs::write(&path, r#"{"mcpServers":{"ghostlight":{"env":{}}}}"#).unwrap();
-        let summary = inspected_summary(&directory);
-        assert_eq!(summary.state, HarnessState::NeedsAttention);
-        let evidence = summary.evidence.clone().expect("commandless foreign entry");
-        assert!(evidence.contains("without a usable command"), "{evidence}");
-
-        // With the configuration root gone, nothing about the target remains blocked or
-        // disclosed.
-        fs::remove_dir_all(directory.join("config")).unwrap();
-        let summary = inspected_summary(&directory);
-        assert_eq!(summary.state, HarnessState::NotDetected);
-        assert!(summary.evidence.is_none());
-    }
-
-    #[test]
-    fn every_blocked_dialect_names_the_found_program() {
-        let directory = temporary("dialect-evidence");
-        let context = context(&directory);
-
-        let toml = directory.join("codex.toml");
-        std::fs::write(
-            &toml,
-            "[mcp_servers.ghostlight]\ncommand = \"alien-tool\"\nargs = [\"serve\"]\n",
-        )
-        .unwrap();
-        let toml_source = fs::read_to_string(&toml).unwrap();
-        assert!(matches!(
-            inspect_toml(&toml_source, &context),
-            Ok(RegistrationState::Foreign(Some(ForeignCommand { program, arguments: 1 })))
-                if program == "alien-tool"
-        ));
-    }
-
-    #[test]
-    fn an_owned_entry_naming_the_retired_connector_is_retired_not_installed() {
-        let directory = temporary("retired");
-        let current = edge(&directory);
-        let old = directory
-            .join("old")
-            .join(executable_name(RETIRED_MCP_CONNECTOR_NAME, cfg!(windows)));
-        let source = serde_json::json!({
-            "mcpServers": {
-                "ghostlight": {
-                    "command": old,
-                    "args": [],
-                    "env": {}
-                }
-            }
-        })
-        .to_string();
-        assert_eq!(
-            inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
-            RegistrationState::Retired
-        );
     }
 
     /// Every JSON dialect Ghostlight writes.
@@ -5270,426 +3394,6 @@ mod tests {
         serde_json::to_string_pretty(&file).unwrap()
     }
 
-    #[test]
-    fn the_dry_run_and_the_install_agree_on_a_current_entry() {
-        let directory = temporary("current-agrees");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        // The edge spelled another way, with none of the defaults and a key of the client's own:
-        // what a dry run reads as current, an install leaves byte for byte.
-        let respelled = edge
-            .parent()
-            .unwrap()
-            .join(".")
-            .join(edge.file_name().unwrap());
-        for dialect in JSON_DIALECTS {
-            let mut entry = expected_json_entry(&respelled, dialect);
-            let members = entry.as_object_mut().unwrap();
-            for (key, _) in json_entry_defaults(dialect) {
-                members.remove(key);
-            }
-            members.insert("disabled".into(), json!(true));
-            let source = json_file_holding(dialect, entry);
-            let path = directory.join(format!("{dialect:?}.json"));
-            fs::write(&path, &source).unwrap();
-            assert_eq!(
-                inspect_json(&source, dialect, &edge, context.windows).unwrap(),
-                RegistrationState::Current,
-                "{dialect:?}"
-            );
-            assert!(
-                !edit_json(&context, &path, dialect, true).unwrap(),
-                "{dialect:?}"
-            );
-            assert_eq!(fs::read_to_string(&path).unwrap(), source, "{dialect:?}");
-        }
-        let forwarded = if context.linux {
-            format!("env_vars = {:?}\n", super::CODEX_DESKTOP_ENVIRONMENT)
-        } else {
-            String::new()
-        };
-        let source = format!(
-            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenabled = false\n{forwarded}",
-            respelled.to_string_lossy(),
-            super::MCP_ARGUMENTS
-        );
-        let path = directory.join("config.toml");
-        fs::write(&path, &source).unwrap();
-        assert_eq!(
-            inspect_toml(&source, &context).unwrap(),
-            RegistrationState::Current
-        );
-        assert!(!edit_toml(&context, &path, true).unwrap());
-        assert_eq!(fs::read_to_string(&path).unwrap(), source);
-    }
-
-    #[test]
-    fn a_dialect_that_needs_a_type_is_updatable_without_it_and_the_update_keeps_the_rest() {
-        let directory = temporary("type-owned");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        for dialect in JSON_DIALECTS {
-            let Some(kind) = super::json_entry_type(dialect) else {
-                continue;
-            };
-            let mut entry = expected_json_entry(&edge, dialect);
-            let members = entry.as_object_mut().unwrap();
-            members.remove(super::TYPE_KEY);
-            members.insert("timeout".into(), json!(5000));
-            let source = json_file_holding(dialect, entry);
-            let path = directory.join(format!("{dialect:?}.json"));
-            fs::write(&path, &source).unwrap();
-            assert_eq!(
-                inspect_json(&source, dialect, &edge, context.windows).unwrap(),
-                RegistrationState::Updatable,
-                "{dialect:?}"
-            );
-            assert!(edit_json(&context, &path, dialect, true).unwrap());
-            let written = fs::read_to_string(&path).unwrap();
-            let parsed: Value = serde_json::from_str(&written).unwrap();
-            let entry = super::json_entry(&parsed, dialect).unwrap();
-            assert_eq!(entry[super::TYPE_KEY], kind, "{dialect:?}");
-            assert_eq!(entry["timeout"], 5000, "{dialect:?}");
-            assert_eq!(
-                inspect_json(&written, dialect, &edge, context.windows).unwrap(),
-                RegistrationState::Current,
-                "{dialect:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_edge_with_other_arguments_or_another_path_is_updatable() {
-        let directory = temporary("updatable");
-        let current = edge(&directory);
-        let elsewhere = directory
-            .join("elsewhere")
-            .join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
-        for (command, args) in [
-            (current.clone(), serde_json::json!([])),
-            (current.clone(), serde_json::json!(["serve"])),
-            (elsewhere, serde_json::json!(["mcp"])),
-        ] {
-            let source = serde_json::json!({
-                "mcpServers": {"ghostlight": {"command": command, "args": args, "env": {}}}
-            })
-            .to_string();
-            assert_eq!(
-                inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
-                RegistrationState::Updatable
-            );
-        }
-    }
-
-    #[test]
-    fn every_dialect_starts_the_edge_with_the_mcp_argument() {
-        let directory = temporary("arguments");
-        let current = edge(&directory);
-        for dialect in [
-            JsonDialect::McpServers,
-            JsonDialect::Copilot,
-            JsonDialect::Servers,
-            JsonDialect::ContextServers,
-            JsonDialect::Crush,
-            JsonDialect::OpenCodeV1,
-            JsonDialect::OpenCodeV2,
-            JsonDialect::ZCode,
-        ] {
-            let entry = expected_json_entry(&current, dialect);
-            assert_eq!(
-                json_entry_command(&entry, dialect),
-                Some(current.to_string_lossy().as_ref()),
-                "{dialect:?}"
-            );
-            assert_eq!(
-                json_entry_args(&entry, dialect).as_deref(),
-                Some(&["mcp"][..]),
-                "{dialect:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_command_line_is_the_edge_and_its_argument() {
-        let directory = temporary("copy-command");
-        let registry = HarnessRegistry::with_context(context(&directory));
-        let path = edge(&directory);
-        assert_eq!(
-            registry.summaries()[0].connector_command,
-            format!("{} mcp", path.display())
-        );
-        assert_eq!(
-            mcp_command_line(Path::new("/with space/ghostlight")),
-            "\"/with space/ghostlight\" mcp"
-        );
-    }
-
-    #[test]
-    fn a_hand_written_entry_naming_the_retired_connector_is_named_in_the_summary() {
-        let directory = temporary("hand-written");
-        let mut context = context(&directory);
-        let codex = context.codex_config.clone();
-        fs::create_dir_all(codex.parent().unwrap()).unwrap();
-        fs::write(
-            &codex,
-            "[mcp_servers.ghostlight]\ncommand = \"ghostlight-mcp-connector\"\nargs = []\n",
-        )
-        .unwrap();
-        context.path_entries = Vec::new();
-        let registry = HarnessRegistry::with_context(context);
-        let summary = registry
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "codex")
-            .unwrap();
-        assert_eq!(summary.state, HarnessState::Updatable);
-        assert!(summary.detail.contains("ghostlight-mcp-connector"));
-        assert!(summary.detail.contains("ghostlight mcp"));
-        registry.apply("codex", HarnessAction::Install).unwrap();
-        let rewritten = fs::read_to_string(&codex).unwrap();
-        assert!(!rewritten.contains("ghostlight-mcp-connector"));
-        assert!(rewritten.contains("args = [\"mcp\"]"));
-    }
-
-    #[test]
-    fn codex_toml_edit_preserves_unrelated_comments() {
-        let directory = temporary("toml");
-        let path = directory.join("config.toml");
-        let context = context(&directory);
-        fs::write(&path, "# keep me\nmodel = \"gpt-test\"\n").unwrap();
-        assert!(edit_toml(&context, &path, true).unwrap());
-        assert!(!edit_toml(&context, &path, true).unwrap());
-        let installed = fs::read_to_string(&path).unwrap();
-        assert!(installed.contains("# keep me"));
-        assert_eq!(
-            inspect_toml(&installed, &context).unwrap(),
-            RegistrationState::Current
-        );
-        assert!(edit_toml(&context, &path, false).unwrap());
-        let removed = fs::read_to_string(&path).unwrap();
-        assert!(removed.contains("# keep me"));
-        assert!(!removed.contains("mcp_servers"));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn codex_owned_registration_gains_desktop_forwarding_without_losing_custom_fields() {
-        let directory = temporary("codex-desktop");
-        let path = directory.join("config.toml");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        // The current registration lacking the Linux desktop forwarding: updatable for that
-        // alone, so the edit adds the forwarding and keeps every custom field.
-        let source = format!(
-            "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}, {{ name = \"WAYLAND_DISPLAY\" }}, {{ name = \"CUSTOM_REMOTE\", source = \"remote\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
-            edge.to_string_lossy(),
-            super::MCP_ARGUMENTS
-        );
-        fs::write(&path, &source).unwrap();
-        assert_eq!(
-            inspect_toml(&source, &context).unwrap(),
-            RegistrationState::Updatable
-        );
-        assert!(edit_toml(&context, &path, true).unwrap());
-        let installed = fs::read_to_string(&path).unwrap();
-        let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
-        let entry = &document["mcp_servers"]["ghostlight"];
-        assert_eq!(entry["startup_timeout_sec"].as_integer(), Some(45));
-        assert_eq!(
-            entry["env"]["XAUTHORITY"].as_str(),
-            Some("/explicit/test-authority")
-        );
-        assert_eq!(entry["env_vars"].as_array().unwrap().len(), 7);
-        let original = source.parse::<toml_edit::DocumentMut>().unwrap();
-        for (before, after) in original["mcp_servers"]["ghostlight"]["env_vars"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .zip(entry["env_vars"].as_array().unwrap().iter())
-        {
-            assert_eq!(before.to_string(), after.to_string());
-        }
-        assert_eq!(
-            document["mcp_servers"]["other"]["command"].as_str(),
-            Some("other-server")
-        );
-        assert!(installed.contains("# keep me"));
-        assert!(
-            super::missing_codex_desktop_environment(entry, context.linux)
-                .unwrap()
-                .is_empty()
-        );
-        assert!(!edit_toml(&context, &path, true).unwrap());
-        assert_eq!(fs::read_to_string(&path).unwrap(), installed);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn codex_malformed_environment_is_preserved_and_windows_needs_no_desktop_forwarding() {
-        let directory = temporary("codex-malformed-env");
-        let path = directory.join("config.toml");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        let source = format!(
-            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenv_vars = \"not-an-array\"\n",
-            edge.to_string_lossy(),
-            super::MCP_ARGUMENTS
-        );
-        fs::write(&path, &source).unwrap();
-        assert!(inspect_toml(&source, &context).is_err());
-        assert!(edit_toml(&context, &path, true).is_err());
-        assert_eq!(fs::read_to_string(&path).unwrap(), source);
-        assert_eq!(
-            inspect_toml(
-                &source,
-                &HarnessContext {
-                    windows: true,
-                    linux: false,
-                    ..context
-                }
-            )
-            .unwrap(),
-            RegistrationState::Current
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn codex_malformed_environment_members_are_preserved_before_migration() {
-        let directory = temporary("codex-malformed-env-members");
-        let path = directory.join("config.toml");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        // The edge command with its current arguments is the current registration. The retired
-        // connector command is a retired one. Both are owned, so both refuse malformed members.
-        let arguments = format!("{:?}", super::MCP_ARGUMENTS);
-        for members in [
-            "123",
-            "true",
-            "[]",
-            "{}",
-            "{ name = 123 }",
-            "{ source = \"local\" }",
-            "{ name = \"DISPLAY\", source = 123 }",
-            "{ name = \"DISPLAY\", source = \"bogus\" }",
-            "{ name = \"DISPLAY\", extra = true }",
-            "\"DISPLAY\", \"WAYLAND_DISPLAY\", \"XDG_RUNTIME_DIR\", \"DBUS_SESSION_BUS_ADDRESS\", \"XDG_CURRENT_DESKTOP\", \"XAUTHORITY\", 123",
-        ] {
-            for command in [&edge, &directory.join("old/ghostlight-mcp-connector")] {
-                for source in [
-                    format!(
-                        "# preserve exactly\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {arguments}\nenv_vars = [{members}]\n",
-                        command.to_string_lossy()
-                    ),
-                    format!(
-                        "# preserve exactly\n[mcp_servers]\nghostlight = {{ command = {:?}, args = {arguments}, env_vars = [{members}] }}\n",
-                        command.to_string_lossy()
-                    ),
-                ] {
-                    fs::write(&path, &source).unwrap();
-                    assert!(
-                        inspect_toml(&source, &context).is_err(),
-                        "inspection accepted {source}"
-                    );
-                    assert!(edit_toml(&context, &path, true).is_err());
-                    assert_eq!(fs::read_to_string(&path).unwrap(), source);
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn codex_inline_owned_registration_keeps_custom_fields() {
-        let directory = temporary("codex-inline-env");
-        let path = directory.join("config.toml");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        // The edge command with no arguments is an updatable registration on purpose.
-        fs::write(&path, format!(
-            "[mcp_servers]\nghostlight = {{ command = {:?}, args = [], startup_timeout_sec = 45 }}\n",
-            edge.to_string_lossy()
-        )).unwrap();
-        assert!(edit_toml(&context, &path, true).unwrap());
-        let installed = fs::read_to_string(&path).unwrap();
-        let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
-        assert_eq!(
-            document["mcp_servers"]["ghostlight"]["startup_timeout_sec"].as_integer(),
-            Some(45)
-        );
-        assert_eq!(
-            inspect_toml(&installed, &context).unwrap(),
-            RegistrationState::Current
-        );
-    }
-
-    #[test]
-    fn codex_manual_fragment_matches_automatic_desktop_environment() {
-        let directory = temporary("codex-manual-env");
-        let context = context(&directory);
-        let definition = definitions(&context)
-            .into_iter()
-            .find(|row| row.id == "codex")
-            .unwrap();
-        let manual = super::manual_setup(&context, &definition).unwrap();
-        assert!(edit_toml(&context, &definition.path, true).unwrap());
-        assert_eq!(manual, fs::read_to_string(&definition.path).unwrap());
-    }
-
-    #[test]
-    fn opencode_v1_uses_the_local_command_array_contract() {
-        let directory = temporary("opencode-v1");
-        let path = directory.join("opencode.json");
-        let context = context(&directory);
-        let edge = context.edge.clone();
-        fs::write(&path, r#"{"theme":"ghost","mcp":{}}"#).unwrap();
-
-        assert!(edit_json(&context, &path, JsonDialect::OpenCodeV1, true).unwrap());
-        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(value["theme"], "ghost");
-        assert_eq!(value["mcp"]["ghostlight"]["type"], "local");
-        assert_eq!(
-            value["mcp"]["ghostlight"]["command"][0].as_str(),
-            Some(edge.to_string_lossy().as_ref())
-        );
-        assert_eq!(value["mcp"]["ghostlight"]["enabled"], true);
-        assert_eq!(
-            inspect_json(
-                &fs::read_to_string(&path).unwrap(),
-                JsonDialect::OpenCodeV1,
-                &edge,
-                cfg!(windows)
-            )
-            .unwrap(),
-            RegistrationState::Current
-        );
-    }
-
-    #[test]
-    fn opencode_v2_preserves_the_nested_servers_contract() {
-        let directory = temporary("opencode-v2");
-        let path = directory.join("opencode.json");
-        let context = context(&directory);
-        fs::write(
-            &path,
-            r#"{"mcp":{"servers":{"sibling":{"type":"remote"}}}}"#,
-        )
-        .unwrap();
-
-        assert!(edit_json(&context, &path, JsonDialect::OpenCodeV2, true).unwrap());
-        assert!(!edit_json(&context, &path, JsonDialect::OpenCodeV2, true).unwrap());
-        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(value["mcp"]["servers"]["sibling"]["type"], "remote");
-        assert_eq!(value["mcp"]["servers"]["ghostlight"]["type"], "local");
-        assert!(value["mcp"]["servers"]["ghostlight"]
-            .get("enabled")
-            .is_none());
-        assert!(edit_json(&context, &path, JsonDialect::OpenCodeV2, false).unwrap());
-        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert!(value["mcp"]["servers"].get("ghostlight").is_none());
-        assert_eq!(value["mcp"]["servers"]["sibling"]["type"], "remote");
-    }
-
     /// A context run from inside the container of the app `package`, whose `AppData` is the
     /// directory `config`, with a Claude Desktop configuration present.
     fn inside_container(directory: &Path, package: &str) -> (HarnessContext, PathBuf) {
@@ -5704,77 +3408,6 @@ mod tests {
         fs::create_dir_all(desktop.parent().unwrap()).unwrap();
         fs::write(&desktop, r#"{"mcpServers":{}}"#).unwrap();
         (context, desktop)
-    }
-
-    #[test]
-    fn inside_another_apps_container_an_appdata_client_is_private_and_a_profile_client_is_not() {
-        let directory = temporary("private-view");
-        let (context, desktop) = inside_container(&directory, "OpenAI.Codex");
-        let before = fs::read(&desktop).unwrap();
-        let registry = HarnessRegistry::with_context(context);
-
-        let summaries = registry.summaries();
-        let claude = summaries
-            .iter()
-            .find(|summary| summary.id == "claude-desktop")
-            .unwrap();
-        assert!(claude.private_view);
-        assert_eq!(claude.state, HarnessState::Available);
-        assert!(!claude.can_install && !claude.can_fix && !claude.can_uninstall);
-        assert!(
-            claude.can_locate,
-            "Locate writes only Ghostlight's own state"
-        );
-        let codex = summaries
-            .iter()
-            .find(|summary| summary.id == "codex")
-            .unwrap();
-        assert!(!codex.private_view);
-        assert!(codex.can_install);
-
-        // Every act inspection does not offer is refused, with the sentence that says why.
-        for action in [
-            HarnessAction::Install,
-            HarnessAction::Fix,
-            HarnessAction::Uninstall,
-        ] {
-            let refused = registry.apply("claude-desktop", action).unwrap_err();
-            assert!(matches!(refused, HarnessError::PrivateView(ref app) if app == "OpenAI.Codex"));
-            assert_eq!(refused.to_string(), claude.detail);
-        }
-        assert_eq!(fs::read(&desktop).unwrap(), before);
-        assert!(
-            registry
-                .apply("codex", HarnessAction::Install)
-                .unwrap()
-                .changed
-        );
-        // Setting up everything leaves the private one out rather than failing on it.
-        let everything = registry.setup_detected().unwrap();
-        assert!(everything.failures.is_empty(), "{:?}", everything.failures);
-        assert_eq!(fs::read(&desktop).unwrap(), before);
-    }
-
-    #[test]
-    fn inside_its_own_container_a_packaged_client_is_written_like_any_other() {
-        let directory = temporary("own-container");
-        let (context, desktop) = inside_container(&directory, "Claude");
-        let registry = HarnessRegistry::with_context(context);
-
-        let claude = registry
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "claude-desktop")
-            .unwrap();
-        assert!(!claude.private_view);
-        assert!(
-            registry
-                .apply("claude-desktop", HarnessAction::Install)
-                .unwrap()
-                .changed
-        );
-        let value: Value = serde_json::from_str(&fs::read_to_string(&desktop).unwrap()).unwrap();
-        assert!(value["mcpServers"].get("ghostlight").is_some());
     }
 
     /// The Store Claude Desktop's package family, as the owner's computer has it.
@@ -5840,321 +3473,881 @@ mod tests {
             .is_some()
     }
 
+    /// Protects workbench gates 8 and 10 and arch-1 slices I2 and I4: an entry is Ghostlight's only
+    /// when it starts this edge or a retired Ghostlight program with the exact signature and install
+    /// root, under any spelling Windows allows. The edge with other arguments or another path is
+    /// updatable, an entry naming the retired connector is retired rather than installed, a
+    /// hand-registered service command stays foreign, and every state shown as owned holds an owned
+    /// entry.
     #[test]
-    fn a_fresh_store_install_is_found_by_its_own_folder_and_set_up_there() {
-        let directory = temporary("store-fresh");
-        let context = windows_context(&directory);
-        let plain = plain_desktop(&context);
-
-        // Without the Store edition nothing changes: Claude Desktop is not here and the plain
-        // file is where it would look.
-        let registry = HarnessRegistry::with_context(context.clone());
-        let absent = desktop_summary(&registry);
-        assert_eq!(absent.state, HarnessState::NotDetected);
-        assert_eq!(PathBuf::from(&absent.config_path), plain);
-        assert!(!absent.packaged && absent.other_copy.is_none());
-
-        // The Store edition's own folder holds its other files but no settings file yet.
-        let folder = store_folder(&context);
-        fs::write(folder.join("config.json"), "{}").unwrap();
-        registry.refresh().unwrap();
-        let found = desktop_summary(&registry);
-        let private = folder.join("claude_desktop_config.json");
-        assert_eq!(found.state, HarnessState::Available, "{}", found.detail);
-        assert_eq!(PathBuf::from(&found.config_path), private);
-        assert!(found.packaged);
-        assert!(found.other_copy.is_none());
-
-        let installed = registry
-            .apply("claude-desktop", HarnessAction::Install)
-            .unwrap();
-        assert!(installed.changed);
-        assert_eq!(installed.summary.state, HarnessState::Installed);
-        assert!(has_entry(&private));
-        assert!(!plain.exists(), "the plain path is not written");
-        assert!(!plain.parent().unwrap().exists());
-    }
-
-    #[test]
-    fn the_store_copy_is_set_up_and_a_plain_copy_left_beside_it_is_not_touched() {
-        let directory = temporary("store-plain");
-        let context = windows_context(&directory);
-        let plain = plain_desktop(&context);
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        let left = current_settings(&context);
-        fs::write(&plain, &left).unwrap();
-        let private = store_folder(&context).join("claude_desktop_config.json");
-        fs::write(&private, PERSON_SETTINGS).unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-
-        let summary = desktop_summary(&registry);
-        assert_eq!(PathBuf::from(&summary.config_path), private);
-        assert_eq!(
-            summary.state,
-            HarnessState::Available,
-            "the plain copy's entry is not the one the Store edition reads"
-        );
-        assert!(summary.packaged);
-        assert_eq!(
-            summary.other_copy.as_deref().map(PathBuf::from),
-            Some(plain.clone())
-        );
-
-        assert!(
-            registry
-                .apply("claude-desktop", HarnessAction::Install)
-                .unwrap()
-                .changed
-        );
-        assert!(has_entry(&private));
-        let written = fs::read_to_string(&private).unwrap();
-        assert!(written.starts_with("{\n  // Kept as written.\n  \"theme\": \"dark\",\n"));
-        assert!(written.contains("\"other\": {\"command\": \"other-server\"}"));
-        assert_eq!(
-            fs::read_to_string(&plain).unwrap(),
-            left,
-            "the plain copy is left as it is"
-        );
-    }
-
-    #[test]
-    fn uninstall_removes_ghostlights_entry_from_every_copy_that_holds_it() {
-        let directory = temporary("store-uninstall");
-        let context = windows_context(&directory);
-        let registry = HarnessRegistry::with_context(context.clone());
-        let plain = plain_desktop(&context);
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        fs::write(&plain, PERSON_SETTINGS).unwrap();
-        // An earlier non-Store install set up the plain copy.
-        registry
-            .apply("claude-desktop", HarnessAction::Install)
-            .unwrap();
-        let private = store_folder(&context).join("claude_desktop_config.json");
-        fs::write(&private, PERSON_SETTINGS).unwrap();
-        registry
-            .apply("claude-desktop", HarnessAction::Install)
-            .unwrap();
-        assert!(has_entry(&plain) && has_entry(&private));
-        // A foreign entry in a third copy is never removed.
-        let foreign = packaged::private_root(
-            context.local_app_data.as_deref().unwrap(),
-            "Other.Claude_abc123",
-            packaged::DataRoot::Roaming,
-        )
-        .join("Claude/claude_desktop_config.json");
-        fs::create_dir_all(foreign.parent().unwrap()).unwrap();
-        let foreign_text = r#"{"mcpServers":{"ghostlight":{"command":"node","args":["x.js"]}}}"#;
-        fs::write(&foreign, foreign_text).unwrap();
-        registry.refresh().unwrap();
-        assert_eq!(
-            desktop_summary(&registry).owned_copies,
-            [plain.to_string_lossy()],
-            "only the copy that holds Ghostlight's own entry is named"
-        );
-
-        let removed = registry
-            .apply("claude-desktop", HarnessAction::Uninstall)
-            .unwrap();
-        assert!(removed.changed);
-        assert!(!has_entry(&plain) && !has_entry(&private));
-        for copy in [&plain, &private] {
-            let text = fs::read_to_string(copy).unwrap();
-            assert!(text.contains("// Kept as written."), "{text}");
-            assert!(
-                text.contains("\"other\": {\"command\": \"other-server\"}"),
-                "{text}"
+    fn an_entry_is_ghostlights_only_when_it_starts_this_edge_or_a_retired_ghostlight() {
+        {
+            let directory = temporary("legacy-relay");
+            let install_root = directory.join("bin");
+            let current = install_root
+                .join("v1")
+                .join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
+            let legacy = install_root.join("v0").join(if cfg!(windows) {
+                "ghostlight-relay.exe"
+            } else {
+                "ghostlight-relay"
+            });
+            assert_eq!(
+                command_registration_state(
+                    legacy.to_string_lossy().as_ref(),
+                    Some(&["--role", "agent"]),
+                    &current,
+                    cfg!(windows),
+                ),
+                RegistrationState::Updatable
+            );
+            assert!(matches!(
+                command_registration_state(
+                    legacy.to_string_lossy().as_ref(),
+                    Some(&["--role", "browser"]),
+                    &current,
+                    cfg!(windows),
+                ),
+                RegistrationState::Foreign(Some(_))
+            ));
+            assert!(matches!(
+                command_registration_state(
+                    directory
+                        .join("foreign/v0")
+                        .join(legacy.file_name().unwrap())
+                        .to_string_lossy()
+                        .as_ref(),
+                    Some(&["--role", "agent"]),
+                    &current,
+                    cfg!(windows),
+                ),
+                RegistrationState::Foreign(Some(_))
+            ));
+        }
+        #[cfg(windows)]
+        {
+            let directory = temporary("legacy-relay-slashes");
+            let install_root = directory.join("bin");
+            let current = install_root
+                .join("v1")
+                .join(executable_name(EDGE_COMMAND_NAME, true));
+            let legacy = install_root.join("v0").join("ghostlight-relay.exe");
+            let respelled = legacy.to_string_lossy().replace('\\', "/").to_uppercase();
+            assert_eq!(
+                command_registration_state(&respelled, Some(&["--role", "agent"]), &current, true),
+                RegistrationState::Updatable
             );
         }
-        assert_eq!(fs::read_to_string(&foreign).unwrap(), foreign_text);
+        {
+            // A hand-written entry that runs the service image, which has no MCP stdio mode, is
+            // foreign evidence (ADR-0141): install and remove never overwrite it; only the
+            // confirmed Fix may.
+            let directory = temporary("zcode-foreign-orchestrator");
+            let path = directory.join("config.json");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            let orchestrator = directory
+                .join(executable_name("ghostlight-service", cfg!(windows)))
+                .to_string_lossy()
+                .replace('\\', "\\\\");
+            let source = format!(
+            "{{\"mcp\":{{\"servers\":{{\"ghostlight\":{{\"command\":\"{orchestrator}\",\"args\":[],\"env\":{{}}}}}}}}}}"
+        );
+            fs::write(&path, &source).unwrap();
+            for install in [true, false] {
+                assert!(matches!(
+                    edit_json(&context, &path, JsonDialect::ZCode, install),
+                    Err(HarnessError::ForeignEntry)
+                ));
+            }
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            let state = inspect_json(&source, JsonDialect::ZCode, &edge, cfg!(windows)).unwrap();
+            assert!(
+                matches!(state, RegistrationState::Foreign(Some(_))),
+                "{state:?}"
+            );
+        }
+        {
+            let directory = temporary("retired");
+            let current = edge(&directory);
+            let old = directory
+                .join("old")
+                .join(executable_name(RETIRED_MCP_CONNECTOR_NAME, cfg!(windows)));
+            let source = serde_json::json!({
+                "mcpServers": {
+                    "ghostlight": {
+                        "command": old,
+                        "args": [],
+                        "env": {}
+                    }
+                }
+            })
+            .to_string();
+            assert_eq!(
+                inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
+                RegistrationState::Retired
+            );
+        }
+        {
+            let directory = temporary("updatable");
+            let current = edge(&directory);
+            let elsewhere = directory
+                .join("elsewhere")
+                .join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
+            for (command, args) in [
+                (current.clone(), serde_json::json!([])),
+                (current.clone(), serde_json::json!(["serve"])),
+                (elsewhere, serde_json::json!(["mcp"])),
+            ] {
+                let source = serde_json::json!({
+                    "mcpServers": {"ghostlight": {"command": command, "args": args, "env": {}}}
+                })
+                .to_string();
+                assert_eq!(
+                    inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows))
+                        .unwrap(),
+                    RegistrationState::Updatable
+                );
+            }
+        }
+        {
+            let directory = temporary("owned-states");
+            let context = context(&directory);
+            let claude = definition(&context, "claude-code").unwrap();
+            fs::create_dir_all(claude.path.parent().unwrap()).unwrap();
+            let entry = |command: &Path, arguments: &str| {
+                format!(
+                "{{\"mcpServers\": {{\"{SERVER_NAME}\": {{\"command\": {}, \"args\": [{arguments}]}}}}}}",
+                serde_json::to_string(&command.to_string_lossy()).unwrap()
+            )
+            };
+            let mcp = format!("\"{MCP_ARGUMENT}\"");
+            let older = directory
+                .join("older")
+                .join(context.edge.file_name().unwrap());
+            let retired = directory.join("older").join(RETIRED_MCP_CONNECTOR_NAME);
+            let seeds = [
+                (entry(&context.edge, &mcp), true),
+                (entry(&older, &mcp), true),
+                (entry(&retired, ""), true),
+                (entry(Path::new("alien-agent"), ""), false),
+                ("{\"mcpServers\": {".to_owned(), false),
+                ("{}".to_owned(), false),
+            ];
+            for (text, owned) in seeds {
+                fs::write(&claude.path, &text).unwrap();
+                let state = inspect(&context, &claude).state;
+                assert_eq!(
+                    holds_owned_entry(&context, &claude, &claude.path),
+                    owned,
+                    "{text}"
+                );
+                assert_eq!(state.holds_owned_entry(), owned, "{text}: {state:?}");
+            }
+        }
     }
 
+    /// Protects workbench gate 8: setting up everything adds what is missing and updates what is owned
+    /// on detected agents only, and leaves not-detected, blocked and container-private targets as
+    /// they are.
     #[test]
-    fn a_plain_install_keeps_its_plain_path_beside_another_apps_leftover_copy() {
-        let directory = temporary("store-leftover");
-        let context = windows_context(&directory);
-        let plain = plain_desktop(&context);
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        fs::write(&plain, PERSON_SETTINGS).unwrap();
-        // An install run inside Codex's container once wrote Codex's private view.
-        let leftover = package_folder(&context, "OpenAI.Codex_2p2nqsd0c76g0")
-            .join("claude_desktop_config.json");
-        fs::write(&leftover, current_settings(&context)).unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
+    fn set_up_everything_touches_only_detected_changeable_targets() {
+        {
+            let directory = temporary("setup-detected");
+            let mut context = context(&directory);
+            let binaries = directory.join("bin");
+            fs::create_dir_all(&binaries).unwrap();
+            fs::write(binaries.join("qwen"), b"test").unwrap();
+            fs::write(binaries.join("zcode"), b"test").unwrap();
+            context.path_entries = vec![binaries];
 
-        let summary = desktop_summary(&registry);
-        assert_eq!(PathBuf::from(&summary.config_path), plain);
-        assert!(
-            !summary.packaged,
-            "another app's copy is no Store edition's own"
-        );
-        assert_eq!(summary.state, HarnessState::Available);
-        assert_eq!(
-            summary.other_copy.as_deref().map(PathBuf::from),
-            Some(leftover.clone())
-        );
-        assert!(
-            registry
-                .apply("claude-desktop", HarnessAction::Install)
-                .unwrap()
-                .changed
-        );
-        assert!(has_entry(&plain));
-        assert!(fs::read_to_string(&plain)
-            .unwrap()
-            .contains("\"other\": {\"command\": \"other-server\"}"));
-        assert_eq!(
-            fs::read_to_string(&leftover).unwrap(),
-            current_settings(&context)
-        );
-    }
+            let codex = context.codex_config.clone();
+            fs::create_dir_all(codex.parent().unwrap()).unwrap();
+            let old_connector = directory.join("old/ghostlight-mcp-connector");
+            fs::write(
+                &codex,
+                format!(
+                    "[mcp_servers.ghostlight]\ncommand = {}\nargs = []\n",
+                    serde_json::to_string(&old_connector.to_string_lossy()).unwrap()
+                ),
+            )
+            .unwrap();
 
-    #[test]
-    fn an_agent_absent_from_its_plain_path_is_not_found_in_another_apps_copy() {
-        // As on leo-desktop-02 on 2026-10-20: Visual Studio Code had never been started, so its
-        // plain settings folder did not exist, and an install had written Ghostlight's entry into
-        // the Codex app's private copy of that folder, which Visual Studio Code never reads.
-        let directory = temporary("store-other-only");
-        let context = windows_context(&directory);
-        let plain = context.roaming.join("Code/User/mcp.json");
-        // Spelled as the look spells it: the settings folder as the row names it, then the file.
-        let leftover = packaged::private_root(
-            context.local_app_data.as_deref().unwrap(),
-            "OpenAI.Codex_2p2nqsd0c76g0",
-            packaged::DataRoot::Roaming,
-        )
-        .join("Code/User")
-        .join("mcp.json");
-        fs::create_dir_all(leftover.parent().unwrap()).unwrap();
-        fs::write(
-            &leftover,
-            format!(
-                "{{\"servers\":{{\"ghostlight\":{{\"type\":\"stdio\",\"command\":{},\"args\":[\"mcp\"]}}}}}}",
-                serde_json::to_string(&context.edge.to_string_lossy()).unwrap()
-            ),
-        )
-        .unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-        let editor = || {
-            registry
+            let blocked = context
+                .home
+                .join(".cline/data/settings/cline_mcp_settings.json");
+            fs::create_dir_all(blocked.parent().unwrap()).unwrap();
+            fs::write(
+                &blocked,
+                r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#,
+            )
+            .unwrap();
+
+            let registry = HarnessRegistry::with_context(context);
+            let actionable: Vec<_> = registry
                 .summaries()
                 .into_iter()
-                .find(|summary| summary.id == "vscode")
-                .unwrap()
-        };
+                .filter(|summary| {
+                    matches!(
+                        summary.state,
+                        HarnessState::Available | HarnessState::Updatable
+                    )
+                })
+                .map(|summary| (summary.id, summary.state))
+                .collect();
+            assert_eq!(
+                actionable,
+                vec![
+                    ("codex".into(), HarnessState::Updatable),
+                    ("zcode".into(), HarnessState::Available),
+                    ("qwen-code".into(), HarnessState::Available),
+                ]
+            );
+            let result = registry.setup_detected().unwrap();
+            assert_eq!(result.set_up, 2);
+            assert_eq!(result.updated, 1);
+            assert_eq!(result.needs_attention, 1);
+            assert!(result.failures.is_empty());
+            assert!(result.message.contains("set up 2 and updated 1"));
 
-        let summary = editor();
-        assert_eq!(PathBuf::from(&summary.config_path), plain);
-        assert_eq!(
-            summary.state,
-            HarnessState::NotDetected,
-            "another app's copy is no evidence of the agent: {}",
-            summary.detail
-        );
-        assert_eq!(summary.owned_copies, [leftover.to_string_lossy()]);
+            let summaries = registry.summaries();
+            for id in ["codex", "qwen-code", "zcode"] {
+                assert_eq!(
+                    summaries
+                        .iter()
+                        .find(|summary| summary.id == id)
+                        .unwrap()
+                        .state,
+                    HarnessState::Installed,
+                    "{id}"
+                );
+            }
+            assert_eq!(
+                summaries
+                    .iter()
+                    .find(|summary| summary.id == "cline-cli")
+                    .unwrap()
+                    .state,
+                HarnessState::NeedsAttention
+            );
+            assert_eq!(
+                summaries
+                    .iter()
+                    .find(|summary| summary.id == "cursor")
+                    .unwrap()
+                    .state,
+                HarnessState::NotDetected
+            );
 
-        let removed = registry.apply("vscode", HarnessAction::Uninstall).unwrap();
-        assert!(removed.changed, "{}", removed.message);
-        let left = fs::read_to_string(&leftover).unwrap();
-        assert!(!left.contains(SERVER_NAME), "{left}");
-        assert!(
-            !plain.exists(),
-            "nothing is written where the agent is absent"
-        );
-        assert!(editor().owned_copies.is_empty());
+            let repeated = registry.setup_detected().unwrap();
+            assert_eq!(repeated.set_up, 0);
+            assert_eq!(repeated.updated, 0);
+            assert!(repeated.message.contains("already ready"));
+            assert_eq!(
+                fs::read_to_string(&blocked).unwrap(),
+                r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#
+            );
+        }
+        {
+            let directory = temporary("private-view");
+            let (context, desktop) = inside_container(&directory, "OpenAI.Codex");
+            let before = fs::read(&desktop).unwrap();
+            let registry = HarnessRegistry::with_context(context);
+
+            let summaries = registry.summaries();
+            let claude = summaries
+                .iter()
+                .find(|summary| summary.id == "claude-desktop")
+                .unwrap();
+            assert!(claude.private_view);
+            assert_eq!(claude.state, HarnessState::Available);
+            assert!(!claude.can_install && !claude.can_fix && !claude.can_uninstall);
+            assert!(
+                claude.can_locate,
+                "Locate writes only Ghostlight's own state"
+            );
+            let codex = summaries
+                .iter()
+                .find(|summary| summary.id == "codex")
+                .unwrap();
+            assert!(!codex.private_view);
+            assert!(codex.can_install);
+
+            // Every act inspection does not offer is refused, with the sentence that says why.
+            for action in [
+                HarnessAction::Install,
+                HarnessAction::Fix,
+                HarnessAction::Uninstall,
+            ] {
+                let refused = registry.apply("claude-desktop", action).unwrap_err();
+                assert!(
+                    matches!(refused, HarnessError::PrivateView(ref app) if app == "OpenAI.Codex")
+                );
+                assert_eq!(refused.to_string(), claude.detail);
+            }
+            assert_eq!(fs::read(&desktop).unwrap(), before);
+            assert!(
+                registry
+                    .apply("codex", HarnessAction::Install)
+                    .unwrap()
+                    .changed
+            );
+            // Setting up everything leaves the private one out rather than failing on it.
+            let everything = registry.setup_detected().unwrap();
+            assert!(everything.failures.is_empty(), "{:?}", everything.failures);
+            assert_eq!(fs::read(&desktop).unwrap(), before);
+        }
     }
 
+    /// Protects defects 567cf210 and 218d386f: what a scan reports about a foreign or malformed entry
+    /// names only the program found and its argument count, or the line of a fault, and nothing else
+    /// from the file, so no secret, argument or control character leaves it.
     #[test]
-    fn a_store_folder_without_its_file_shows_the_plain_file_and_that_file_is_set_up() {
-        let directory = temporary("store-merged");
-        let context = windows_context(&directory);
-        let plain = plain_desktop(&context);
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        fs::write(&plain, PERSON_SETTINGS).unwrap();
-        let folder = store_folder(&context);
-        fs::write(folder.join("config.json"), "{}").unwrap();
-        let private = folder.join("claude_desktop_config.json");
-        let registry = HarnessRegistry::with_context(context.clone());
+    fn evidence_names_only_the_found_program_and_nothing_from_the_file() {
+        {
+            let directory = temporary("foreign-evidence");
+            let path = claude_desktop_config(&directory);
+            let expected_edge = edge(&directory);
+            let command = if cfg!(windows) {
+                "C:/tools/other\u{202e}-server.exe"
+            } else {
+                "/opt/tools/other\u{202e}-server"
+            };
+            let entry = serde_json::json!({
+                "mcpServers": {
+                    "ghostlight": {
+                        "command": command,
+                        "args": ["--token", "sk-test-secret", "launch-it"],
+                    }
+                }
+            });
+            fs::write(&path, entry.to_string()).unwrap();
 
-        // While the Store edition has no file of its own, its merged view shows the plain one.
-        let summary = desktop_summary(&registry);
-        assert_eq!(PathBuf::from(&summary.config_path), plain);
-        assert!(!summary.packaged && summary.other_copy.is_none());
-        assert_eq!(summary.state, HarnessState::Available);
-        assert!(
+            let summary = inspected_summary(&directory);
+
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert!(
+                summary.detail.starts_with("A foreign entry holds"),
+                "{}",
+                summary.detail
+            );
+            let evidence = summary.evidence.expect("foreign entries carry evidence");
+            assert!(evidence.contains("other-server"), "{evidence}");
+            assert!(!evidence.contains('\u{202e}'), "{evidence}");
+            assert!(evidence.contains("3 arguments"), "{evidence}");
+            assert!(
+                evidence.contains(&expected_edge.display().to_string()),
+                "{evidence}"
+            );
+            assert!(evidence.contains("changed nothing"), "{evidence}");
+            for hidden in ["sk-test-secret", "--token", "launch-it"] {
+                assert!(!evidence.contains(hidden), "{evidence}");
+            }
+            assert!(!summary.can_install);
+            assert!(summary.can_fix);
+        }
+        {
+            let directory = temporary("foreign-count");
+            let path = claude_desktop_config(&directory);
+            edge(&directory);
+            let write = |entry: serde_json::Value| {
+                fs::write(
+                    &path,
+                    serde_json::json!({ "mcpServers": { "ghostlight": entry } }).to_string(),
+                )
+                .unwrap();
+                inspected_summary(&directory).evidence.expect("evidence")
+            };
+
+            let one = write(serde_json::json!({ "command": "/opt/tools/other", "args": ["a"] }));
+            assert!(one.contains("with 1 argument,"), "{one}");
+            let none = write(serde_json::json!({ "command": "/opt/tools/other" }));
+            assert!(none.contains("with no arguments,"), "{none}");
+
+            let line = write(serde_json::json!({
+                "command": "C:/tools/other-server.exe --token sk-test-secret"
+            }));
+            assert!(line.contains("`other-server.exe`"), "{line}");
+            assert!(line.contains("2 arguments"), "{line}");
+            assert!(
+                !line.contains("--token") && !line.contains("sk-test-secret"),
+                "{line}"
+            );
+        }
+        {
+            let directory = temporary("malformed-evidence");
+            let path = claude_desktop_config(&directory);
+            edge(&directory);
+            fs::write(&path, "{\n  \"token\" \"sk-test-secret\"\n}\n").unwrap();
+
+            let summary = inspected_summary(&directory);
+
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(
+                summary.detail,
+                "This configuration could not be parsed at line 2; it was left untouched."
+            );
+            assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
+            assert!(!summary.can_fix);
+            let serialized = serde_json::to_string(&summary).unwrap();
+            assert!(!serialized.contains("sk-test-secret"), "{serialized}");
+
+            let codex = context(&directory).codex_config;
+            fs::create_dir_all(codex.parent().unwrap()).unwrap();
+            fs::write(&codex, "[mcp_servers.ghostlight]\ntoken = sk-test-secret\n").unwrap();
+
+            let summary = inspected_summary_of(&directory, "codex");
+
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(
+                summary.detail,
+                "This configuration could not be parsed at line 2; it was left untouched."
+            );
+            assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
+            let serialized = serde_json::to_string(&summary).unwrap();
+            assert!(!serialized.contains("sk-test-secret"), "{serialized}");
+        }
+        {
+            let line = ForeignCommand::from_entry(
+                "C:/tools/other-server.exe --token sk/test-secret",
+                None,
+            )
+            .expect("a program is named");
+            assert_eq!(line.program, "other-server.exe");
+            assert_eq!(line.arguments, 2);
+
+            let npx = ForeignCommand::from_entry("npx -y @scope/server-x --api-key abc", None)
+                .expect("a program is named");
+            assert_eq!(npx.program, "npx");
+            assert_eq!(npx.arguments, 4);
+
+            let both = ForeignCommand::from_entry("npx -y @scope/server-x", Some(&["--port", "9"]))
+                .expect("a program is named");
+            assert_eq!(both.program, "npx");
+            assert_eq!(both.arguments, 4);
+
+            let directory = temporary("foreign-spaced-file");
+            let spaced = directory.join("tools with spaces").join("other-server");
+            fs::create_dir_all(spaced.parent().unwrap()).unwrap();
+            fs::write(&spaced, "").unwrap();
+            let whole = ForeignCommand::from_entry(&spaced.to_string_lossy(), Some(&["serve"]))
+                .expect("a program is named");
+            assert_eq!(whole.program, "other-server");
+            assert_eq!(whole.arguments, 1);
+        }
+        {
+            let directory = temporary("unblocked-evidence");
+            let path = claude_desktop_config(&directory);
+            let expected_edge = edge(&directory);
+            let installed = serde_json::json!({
+                "mcpServers": {
+                    "ghostlight": {
+                        "command": expected_edge,
+                        "args": ["mcp"],
+                        "env": {},
+                    }
+                }
+            });
+            fs::write(&path, installed.to_string()).unwrap();
+            let summary = inspected_summary(&directory);
+            assert_eq!(summary.state, HarnessState::Installed);
+            assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
+
+            fs::write(&path, r#"{"mcpServers":{"ghostlight":{"env":{}}}}"#).unwrap();
+            let summary = inspected_summary(&directory);
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            let evidence = summary.evidence.clone().expect("commandless foreign entry");
+            assert!(evidence.contains("without a usable command"), "{evidence}");
+
+            // With the configuration root gone, nothing about the target remains blocked or
+            // disclosed.
+            fs::remove_dir_all(directory.join("config")).unwrap();
+            let summary = inspected_summary(&directory);
+            assert_eq!(summary.state, HarnessState::NotDetected);
+            assert!(summary.evidence.is_none());
+        }
+    }
+
+    /// Protects arch-1 slice I3 and defects 5d589e1d, 4af49885 and f51130d0: an update sets only the
+    /// keys Ghostlight owns and keeps everything else the client wrote, in every dialect: a current
+    /// entry under another spelling is left byte for byte, a dialect that needs a type gains it, and
+    /// Codex keeps its custom, inline and malformed environment members while gaining desktop
+    /// forwarding on Linux. A write never leaves a temporary behind, and an install sweeps the ones an
+    /// interrupted write left.
+    #[test]
+    fn an_update_sets_only_ghostlights_keys_and_keeps_the_clients() {
+        {
+            let directory = temporary("write-fails");
+            // A directory where the configuration should be: the backup copy fails, after the
+            // temporary was written.
+            let path = directory.join("settings.json");
+            fs::create_dir_all(&path).unwrap();
+
+            assert!(replace_with_backup(&path, b"{}").is_err());
+            assert_eq!(names_in(&directory), ["settings.json"]);
+
+            let written = directory.join("other.json");
+            replace_with_backup(&written, b"{}").unwrap();
+            assert_eq!(names_in(&directory), ["other.json", "settings.json"]);
+        }
+        {
+            use std::time::{Duration, SystemTime};
+
+            let directory = temporary("stray-temporaries");
+            let context = context(&directory);
+            let claude = definition(&context, "claude-code").unwrap();
+            let settings = claude.path.parent().unwrap().to_path_buf();
+            fs::create_dir_all(&settings).unwrap();
+            let stray = ".ghostlight-0123456789abcdef0123456789abcdef.tmp";
+            fs::write(settings.join(stray), b"{}").unwrap();
+            fs::write(settings.join("notes.tmp"), b"theirs").unwrap();
+
+            // Just written, it may be a write in flight.
+            assert_eq!(remove_stray_temporaries_in(&settings, SystemTime::now()), 0);
+            assert!(settings.join(stray).is_file());
+
+            let later = SystemTime::now() + Duration::from_secs(3600);
+            assert_eq!(remove_stray_temporaries_in(&settings, later), 1);
+            assert!(!settings.join(stray).exists());
+            assert!(settings.join("notes.tmp").is_file());
+
+            // The registry looks beside each configuration it can change.
+            fs::write(settings.join(stray), b"{}").unwrap();
+            let registry = HarnessRegistry::with_context(context);
+            assert_eq!(registry.remove_stray_temporaries(), 0);
+            assert_eq!(registry.remove_stray_temporaries_at(later), 1);
+            assert!(!settings.join(stray).exists());
+        }
+        {
+            let directory = temporary("current-agrees");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            // The edge spelled another way, with none of the defaults and a key of the client's own:
+            // what a dry run reads as current, an install leaves byte for byte.
+            let respelled = edge
+                .parent()
+                .unwrap()
+                .join(".")
+                .join(edge.file_name().unwrap());
+            for dialect in JSON_DIALECTS {
+                let mut entry = expected_json_entry(&respelled, dialect);
+                let members = entry.as_object_mut().unwrap();
+                for (key, _) in json_entry_defaults(dialect) {
+                    members.remove(key);
+                }
+                members.insert("disabled".into(), json!(true));
+                let source = json_file_holding(dialect, entry);
+                let path = directory.join(format!("{dialect:?}.json"));
+                fs::write(&path, &source).unwrap();
+                assert_eq!(
+                    inspect_json(&source, dialect, &edge, context.windows).unwrap(),
+                    RegistrationState::Current,
+                    "{dialect:?}"
+                );
+                assert!(
+                    !edit_json(&context, &path, dialect, true).unwrap(),
+                    "{dialect:?}"
+                );
+                assert_eq!(fs::read_to_string(&path).unwrap(), source, "{dialect:?}");
+            }
+            let forwarded = if context.linux {
+                format!("env_vars = {:?}\n", super::CODEX_DESKTOP_ENVIRONMENT)
+            } else {
+                String::new()
+            };
+            let source = format!(
+            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenabled = false\n{forwarded}",
+            respelled.to_string_lossy(),
+            super::MCP_ARGUMENTS
+        );
+            let path = directory.join("config.toml");
+            fs::write(&path, &source).unwrap();
+            assert_eq!(
+                inspect_toml(&source, &context).unwrap(),
+                RegistrationState::Current
+            );
+            assert!(!edit_toml(&context, &path, true).unwrap());
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        }
+        {
+            let directory = temporary("type-owned");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            for dialect in JSON_DIALECTS {
+                let Some(kind) = super::json_entry_type(dialect) else {
+                    continue;
+                };
+                let mut entry = expected_json_entry(&edge, dialect);
+                let members = entry.as_object_mut().unwrap();
+                members.remove(super::TYPE_KEY);
+                members.insert("timeout".into(), json!(5000));
+                let source = json_file_holding(dialect, entry);
+                let path = directory.join(format!("{dialect:?}.json"));
+                fs::write(&path, &source).unwrap();
+                assert_eq!(
+                    inspect_json(&source, dialect, &edge, context.windows).unwrap(),
+                    RegistrationState::Updatable,
+                    "{dialect:?}"
+                );
+                assert!(edit_json(&context, &path, dialect, true).unwrap());
+                let written = fs::read_to_string(&path).unwrap();
+                let parsed: Value = serde_json::from_str(&written).unwrap();
+                let entry = super::json_entry(&parsed, dialect).unwrap();
+                assert_eq!(entry[super::TYPE_KEY], kind, "{dialect:?}");
+                assert_eq!(entry["timeout"], 5000, "{dialect:?}");
+                assert_eq!(
+                    inspect_json(&written, dialect, &edge, context.windows).unwrap(),
+                    RegistrationState::Current,
+                    "{dialect:?}"
+                );
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let directory = temporary("codex-desktop");
+            let path = directory.join("config.toml");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            // The current registration lacking the Linux desktop forwarding: updatable for that
+            // alone, so the edit adds the forwarding and keeps every custom field.
+            let source = format!(
+            "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}, {{ name = \"WAYLAND_DISPLAY\" }}, {{ name = \"CUSTOM_REMOTE\", source = \"remote\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
+            edge.to_string_lossy(),
+            super::MCP_ARGUMENTS
+        );
+            fs::write(&path, &source).unwrap();
+            assert_eq!(
+                inspect_toml(&source, &context).unwrap(),
+                RegistrationState::Updatable
+            );
+            assert!(edit_toml(&context, &path, true).unwrap());
+            let installed = fs::read_to_string(&path).unwrap();
+            let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
+            let entry = &document["mcp_servers"]["ghostlight"];
+            assert_eq!(entry["startup_timeout_sec"].as_integer(), Some(45));
+            assert_eq!(
+                entry["env"]["XAUTHORITY"].as_str(),
+                Some("/explicit/test-authority")
+            );
+            assert_eq!(entry["env_vars"].as_array().unwrap().len(), 7);
+            let original = source.parse::<toml_edit::DocumentMut>().unwrap();
+            for (before, after) in original["mcp_servers"]["ghostlight"]["env_vars"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(entry["env_vars"].as_array().unwrap().iter())
+            {
+                assert_eq!(before.to_string(), after.to_string());
+            }
+            assert_eq!(
+                document["mcp_servers"]["other"]["command"].as_str(),
+                Some("other-server")
+            );
+            assert!(installed.contains("# keep me"));
+            assert!(
+                super::missing_codex_desktop_environment(entry, context.linux)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(!edit_toml(&context, &path, true).unwrap());
+            assert_eq!(fs::read_to_string(&path).unwrap(), installed);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let directory = temporary("codex-malformed-env");
+            let path = directory.join("config.toml");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            let source = format!(
+            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenv_vars = \"not-an-array\"\n",
+            edge.to_string_lossy(),
+            super::MCP_ARGUMENTS
+        );
+            fs::write(&path, &source).unwrap();
+            assert!(inspect_toml(&source, &context).is_err());
+            assert!(edit_toml(&context, &path, true).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            assert_eq!(
+                inspect_toml(
+                    &source,
+                    &HarnessContext {
+                        windows: true,
+                        linux: false,
+                        ..context
+                    }
+                )
+                .unwrap(),
+                RegistrationState::Current
+            );
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let directory = temporary("codex-malformed-env-members");
+            let path = directory.join("config.toml");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            // The edge command with its current arguments is the current registration. The retired
+            // connector command is a retired one. Both are owned, so both refuse malformed members.
+            let arguments = format!("{:?}", super::MCP_ARGUMENTS);
+            for members in [
+            "123",
+            "true",
+            "[]",
+            "{}",
+            "{ name = 123 }",
+            "{ source = \"local\" }",
+            "{ name = \"DISPLAY\", source = 123 }",
+            "{ name = \"DISPLAY\", source = \"bogus\" }",
+            "{ name = \"DISPLAY\", extra = true }",
+            "\"DISPLAY\", \"WAYLAND_DISPLAY\", \"XDG_RUNTIME_DIR\", \"DBUS_SESSION_BUS_ADDRESS\", \"XDG_CURRENT_DESKTOP\", \"XAUTHORITY\", 123",
+        ] {
+            for command in [&edge, &directory.join("old/ghostlight-mcp-connector")] {
+                for source in [
+                    format!(
+                        "# preserve exactly\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {arguments}\nenv_vars = [{members}]\n",
+                        command.to_string_lossy()
+                    ),
+                    format!(
+                        "# preserve exactly\n[mcp_servers]\nghostlight = {{ command = {:?}, args = {arguments}, env_vars = [{members}] }}\n",
+                        command.to_string_lossy()
+                    ),
+                ] {
+                    fs::write(&path, &source).unwrap();
+                    assert!(
+                        inspect_toml(&source, &context).is_err(),
+                        "inspection accepted {source}"
+                    );
+                    assert!(edit_toml(&context, &path, true).is_err());
+                    assert_eq!(fs::read_to_string(&path).unwrap(), source);
+                }
+            }
+        }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let directory = temporary("codex-inline-env");
+            let path = directory.join("config.toml");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            // The edge command with no arguments is an updatable registration on purpose.
+            fs::write(&path, format!(
+            "[mcp_servers]\nghostlight = {{ command = {:?}, args = [], startup_timeout_sec = 45 }}\n",
+            edge.to_string_lossy()
+        )).unwrap();
+            assert!(edit_toml(&context, &path, true).unwrap());
+            let installed = fs::read_to_string(&path).unwrap();
+            let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
+            assert_eq!(
+                document["mcp_servers"]["ghostlight"]["startup_timeout_sec"].as_integer(),
+                Some(45)
+            );
+            assert_eq!(
+                inspect_toml(&installed, &context).unwrap(),
+                RegistrationState::Current
+            );
+        }
+    }
+
+    /// Protects arch-1 slice I4 and defects 765736e1 and 41a3f8bf: uninstall removes Ghostlight's entry
+    /// from every copy of an agent's settings that holds one, the plain copy and a stale entry
+    /// included, names each removal in the dry run, and leaves everything else.
+    #[test]
+    fn uninstall_removes_every_owned_entry_from_every_copy_and_nothing_else() {
+        {
+            let directory = temporary("store-uninstall");
+            let context = windows_context(&directory);
+            let registry = HarnessRegistry::with_context(context.clone());
+            let plain = plain_desktop(&context);
+            fs::create_dir_all(plain.parent().unwrap()).unwrap();
+            fs::write(&plain, PERSON_SETTINGS).unwrap();
+            // An earlier non-Store install set up the plain copy.
             registry
                 .apply("claude-desktop", HarnessAction::Install)
-                .unwrap()
-                .changed
-        );
-        assert!(has_entry(&plain));
-        let written = fs::read_to_string(&plain).unwrap();
-        assert!(written.starts_with("{\n  // Kept as written.\n  \"theme\": \"dark\",\n"));
-        assert!(written.contains("\"other\": {\"command\": \"other-server\"}"));
-        assert!(
-            !private.exists(),
-            "no private file hides the person's servers"
-        );
-
-        // The entry the app loads is reported as it is, so nothing is added twice.
-        registry.refresh().unwrap();
-        let summary = desktop_summary(&registry);
-        assert_eq!(summary.state, HarnessState::Installed);
-        assert!(
-            !registry
+                .unwrap();
+            let private = store_folder(&context).join("claude_desktop_config.json");
+            fs::write(&private, PERSON_SETTINGS).unwrap();
+            registry
                 .apply("claude-desktop", HarnessAction::Install)
-                .unwrap()
-                .changed
-        );
-    }
+                .unwrap();
+            assert!(has_entry(&plain) && has_entry(&private));
+            // A foreign entry in a third copy is never removed.
+            let foreign = packaged::private_root(
+                context.local_app_data.as_deref().unwrap(),
+                "Other.Claude_abc123",
+                packaged::DataRoot::Roaming,
+            )
+            .join("Claude/claude_desktop_config.json");
+            fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+            let foreign_text =
+                r#"{"mcpServers":{"ghostlight":{"command":"node","args":["x.js"]}}}"#;
+            fs::write(&foreign, foreign_text).unwrap();
+            registry.refresh().unwrap();
+            assert_eq!(
+                desktop_summary(&registry).owned_copies,
+                [plain.to_string_lossy()],
+                "only the copy that holds Ghostlight's own entry is named"
+            );
 
-    #[test]
-    fn removal_reaches_an_entry_left_only_in_the_plain_copy() {
-        let directory = temporary("store-left-plain");
-        let context = windows_context(&directory);
-        let plain = plain_desktop(&context);
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        fs::write(&plain, current_settings(&context)).unwrap();
-        let private = store_folder(&context).join("claude_desktop_config.json");
-        fs::write(&private, PERSON_SETTINGS).unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
+            let removed = registry
+                .apply("claude-desktop", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed);
+            assert!(!has_entry(&plain) && !has_entry(&private));
+            for copy in [&plain, &private] {
+                let text = fs::read_to_string(copy).unwrap();
+                assert!(text.contains("// Kept as written."), "{text}");
+                assert!(
+                    text.contains("\"other\": {\"command\": \"other-server\"}"),
+                    "{text}"
+                );
+            }
+            assert_eq!(fs::read_to_string(&foreign).unwrap(), foreign_text);
+        }
+        {
+            let directory = temporary("store-left-plain");
+            let context = windows_context(&directory);
+            let plain = plain_desktop(&context);
+            fs::create_dir_all(plain.parent().unwrap()).unwrap();
+            fs::write(&plain, current_settings(&context)).unwrap();
+            let private = store_folder(&context).join("claude_desktop_config.json");
+            fs::write(&private, PERSON_SETTINGS).unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
 
-        let summary = desktop_summary(&registry);
-        assert_eq!(summary.state, HarnessState::Available);
-        assert!(
-            summary.can_uninstall,
-            "the plain copy's entry can be removed"
-        );
-        assert_eq!(summary.owned_copies, [plain.to_string_lossy()]);
-        let selected = crate::cli::setup::select_harnesses(
-            &registry.summaries(),
-            &crate::cli::parse::SetupOptions::default(),
-            false,
-        )
-        .unwrap();
-        assert!(selected
-            .iter()
-            .any(|summary| summary.id == "claude-desktop"));
-
-        let removed = registry
-            .apply("claude-desktop", HarnessAction::Uninstall)
+            let summary = desktop_summary(&registry);
+            assert_eq!(summary.state, HarnessState::Available);
+            assert!(
+                summary.can_uninstall,
+                "the plain copy's entry can be removed"
+            );
+            assert_eq!(summary.owned_copies, [plain.to_string_lossy()]);
+            let selected = crate::cli::setup::select_harnesses(
+                &registry.summaries(),
+                &crate::cli::parse::SetupOptions::default(),
+                false,
+            )
             .unwrap();
-        assert!(removed.changed);
-        assert!(!has_entry(&plain));
-        assert_eq!(fs::read_to_string(&private).unwrap(), PERSON_SETTINGS);
-        assert!(!removed.summary.can_uninstall);
-        assert!(removed.summary.owned_copies.is_empty());
-    }
+            assert!(selected
+                .iter()
+                .any(|summary| summary.id == "claude-desktop"));
 
-    #[test]
-    fn a_whole_uninstall_removes_a_stale_owned_entry_and_names_it() {
-        let directory = temporary("whole-uninstall-stale");
-        let context = context(&directory);
-        let claude = definition(&context, "claude-code").unwrap();
-        fs::create_dir_all(claude.path.parent().unwrap()).unwrap();
-        let older = directory
-            .join("older")
-            .join(context.edge.file_name().unwrap());
-        fs::write(
+            let removed = registry
+                .apply("claude-desktop", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed);
+            assert!(!has_entry(&plain));
+            assert_eq!(fs::read_to_string(&private).unwrap(), PERSON_SETTINGS);
+            assert!(!removed.summary.can_uninstall);
+            assert!(removed.summary.owned_copies.is_empty());
+        }
+        {
+            let directory = temporary("whole-uninstall-stale");
+            let context = context(&directory);
+            let claude = definition(&context, "claude-code").unwrap();
+            fs::create_dir_all(claude.path.parent().unwrap()).unwrap();
+            let older = directory
+                .join("older")
+                .join(context.edge.file_name().unwrap());
+            fs::write(
             &claude.path,
             format!(
                 "{{\"mcpServers\": {{\"{SERVER_NAME}\": {{\"command\": {}, \"args\": [\"{MCP_ARGUMENT}\"]}}}}}}",
@@ -6162,234 +4355,852 @@ mod tests {
             ),
         )
         .unwrap();
-        let registry = HarnessRegistry::with_context(context);
-        let stale = registry
-            .summaries()
-            .into_iter()
-            .find(|summary| summary.id == "claude-code")
-            .unwrap();
-        assert_eq!(stale.state, HarnessState::Updatable);
-        assert!(stale.can_uninstall, "a stale owned entry is one to remove");
-        assert_eq!(
-            crate::language::deployment::client_would_remove(
-                &stale.label,
-                stale.state,
-                stale.attention,
-                &stale.owned_copies
-            ),
-            format!("Would remove Ghostlight from {}.", stale.label)
-        );
-
-        // A whole uninstall, naming no client, selects it and takes the entry out.
-        let selected = crate::cli::setup::select_harnesses(
-            &registry.summaries(),
-            &crate::cli::parse::SetupOptions::default(),
-            false,
-        )
-        .unwrap();
-        assert!(selected.iter().any(|summary| summary.id == "claude-code"));
-        let removed = registry
-            .apply("claude-code", HarnessAction::Uninstall)
-            .unwrap();
-        assert!(removed.changed);
-        assert!(
-            removed
-                .message
-                .starts_with(&format!("Ghostlight was removed from {}.", stale.label)),
-            "{}",
-            removed.message
-        );
-        assert!(!has_entry(&claude.path));
-        assert!(!removed.summary.can_uninstall);
-    }
-
-    #[test]
-    fn every_owned_registration_is_shown_as_a_state_that_holds_an_owned_entry() {
-        let directory = temporary("owned-states");
-        let context = context(&directory);
-        let claude = definition(&context, "claude-code").unwrap();
-        fs::create_dir_all(claude.path.parent().unwrap()).unwrap();
-        let entry = |command: &Path, arguments: &str| {
-            format!(
-                "{{\"mcpServers\": {{\"{SERVER_NAME}\": {{\"command\": {}, \"args\": [{arguments}]}}}}}}",
-                serde_json::to_string(&command.to_string_lossy()).unwrap()
-            )
-        };
-        let mcp = format!("\"{MCP_ARGUMENT}\"");
-        let older = directory
-            .join("older")
-            .join(context.edge.file_name().unwrap());
-        let retired = directory.join("older").join(RETIRED_MCP_CONNECTOR_NAME);
-        let seeds = [
-            (entry(&context.edge, &mcp), true),
-            (entry(&older, &mcp), true),
-            (entry(&retired, ""), true),
-            (entry(Path::new("alien-agent"), ""), false),
-            ("{\"mcpServers\": {".to_owned(), false),
-            ("{}".to_owned(), false),
-        ];
-        for (text, owned) in seeds {
-            fs::write(&claude.path, &text).unwrap();
-            let state = inspect(&context, &claude).state;
+            let registry = HarnessRegistry::with_context(context);
+            let stale = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "claude-code")
+                .unwrap();
+            assert_eq!(stale.state, HarnessState::Updatable);
+            assert!(stale.can_uninstall, "a stale owned entry is one to remove");
             assert_eq!(
-                holds_owned_entry(&context, &claude, &claude.path),
-                owned,
-                "{text}"
+                crate::language::deployment::client_would_remove(
+                    &stale.label,
+                    stale.state,
+                    stale.attention,
+                    &stale.owned_copies
+                ),
+                format!("Would remove Ghostlight from {}.", stale.label)
             );
-            assert_eq!(state.holds_owned_entry(), owned, "{text}: {state:?}");
-        }
-    }
 
-    #[test]
-    fn a_store_copy_that_needs_attention_names_its_cause_and_uninstall_still_cleans_the_plain_copy()
-    {
-        let directory = temporary("store-attention");
-        let context = windows_context(&directory);
-        let plain = plain_desktop(&context);
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        fs::write(&plain, current_settings(&context)).unwrap();
-        let private = store_folder(&context).join("claude_desktop_config.json");
-        let broken = "{\"mcpServers\": {";
-        fs::write(&private, broken).unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-
-        let summary = desktop_summary(&registry);
-        assert_eq!(PathBuf::from(&summary.config_path), private);
-        assert_eq!(summary.state, HarnessState::NeedsAttention);
-        assert_eq!(summary.attention, Some(Attention::Malformed));
-        assert!(summary.can_uninstall);
-        assert_eq!(summary.owned_copies, [plain.to_string_lossy()]);
-
-        let removed = registry
-            .apply("claude-desktop", HarnessAction::Uninstall)
+            // A whole uninstall, naming no client, selects it and takes the entry out.
+            let selected = crate::cli::setup::select_harnesses(
+                &registry.summaries(),
+                &crate::cli::parse::SetupOptions::default(),
+                false,
+            )
             .unwrap();
-        assert!(removed.changed);
-        assert!(!has_entry(&plain));
-        assert_eq!(fs::read_to_string(&private).unwrap(), broken);
-        assert!(removed.summary.owned_copies.is_empty());
-        assert_eq!(removed.summary.attention, Some(Attention::Malformed));
-
-        fs::write(
-            &private,
-            r#"{"mcpServers":{"ghostlight":{"command":"node"}}}"#,
-        )
-        .unwrap();
-        registry.refresh().unwrap();
-        assert_eq!(
-            desktop_summary(&registry).attention,
-            Some(Attention::ForeignEntry)
-        );
-    }
-
-    #[test]
-    fn when_the_store_copy_goes_away_the_next_look_falls_back_to_the_plain_path() {
-        let directory = temporary("store-gone");
-        let context = windows_context(&directory);
-        let folder = store_folder(&context);
-        let registry = HarnessRegistry::with_context(context.clone());
-        assert!(desktop_summary(&registry).packaged);
-
-        fs::remove_dir_all(context.local_app_data.as_deref().unwrap().join("Packages")).unwrap();
-        assert!(!folder.exists());
-        registry.refresh().unwrap();
-        let summary = desktop_summary(&registry);
-        assert!(!summary.packaged);
-        assert_eq!(PathBuf::from(&summary.config_path), plain_desktop(&context));
-        assert_eq!(summary.state, HarnessState::NotDetected);
-    }
-
-    #[test]
-    fn inside_the_store_apps_own_container_its_copy_is_the_file_its_view_shows_and_is_written() {
-        let directory = temporary("store-own-container");
-        let mut context = windows_context(&directory);
-        let local = context.local_app_data.clone().unwrap();
-        context.private_view = Some(PrivateView {
-            container: AppContainer {
-                app: "Claude".into(),
-            },
-            roots: vec![context.roaming.clone(), local.clone()],
-        });
-        let private = store_folder(&context).join("claude_desktop_config.json");
-        fs::write(&private, PERSON_SETTINGS).unwrap();
-        // The container's merged view shows the same file at the plain path.
-        let view = plain_desktop(&context);
-        fs::create_dir_all(view.parent().unwrap()).unwrap();
-        fs::write(&view, PERSON_SETTINGS).unwrap();
-        let registry = HarnessRegistry::with_context(context.clone());
-
-        let summary = desktop_summary(&registry);
-        assert!(
-            summary.other_copy.is_none(),
-            "the view's plain path is the same file, not another copy"
-        );
-        // Inside the container a write to the plain path lands in the package's private copy of
-        // `%APPDATA%`, the same mapping the container probe confirms for `%LOCALAPPDATA%`: the
-        // plain path the view shows and the copy found here are one file.
-        let rest = plain_desktop(&context)
-            .strip_prefix(&context.roaming)
-            .unwrap()
-            .to_path_buf();
-        let redirected =
-            packaged::private_root(&local, STORE_FAMILY, packaged::DataRoot::Roaming).join(rest);
-        assert_eq!(PathBuf::from(&summary.config_path), redirected);
-        assert_eq!(redirected, private);
-        assert!(!summary.private_view);
-        assert!(summary.can_install);
-        assert!(
-            registry
-                .apply("claude-desktop", HarnessAction::Install)
-                .unwrap()
-                .changed
-        );
-        assert!(has_entry(&private));
-        assert_eq!(fs::read_to_string(&view).unwrap(), PERSON_SETTINGS);
-
-        // Inside another app's container the same copy is that app's private view, and is left.
-        context.private_view = Some(PrivateView {
-            container: AppContainer {
-                app: "OpenAI.Codex".into(),
-            },
-            roots: vec![context.roaming.clone(), local],
-        });
-        let other = HarnessRegistry::with_context(context);
-        let summary = desktop_summary(&other);
-        assert!(summary.private_view && !summary.can_uninstall);
-        assert!(matches!(
-            other.apply("claude-desktop", HarnessAction::Uninstall),
-            Err(HarnessError::PrivateView(_))
-        ));
-        assert!(has_entry(&private));
-    }
-
-    #[test]
-    fn the_icon_catalog_names_each_agent_once_and_every_family_is_another_catalog_agent() {
-        let catalog = super::icon_catalog();
-        let ids: Vec<&str> = catalog.iter().map(|agent| agent.agent_id).collect();
-        let mut expected: Vec<&str> = Vec::new();
-        for row in ROSTER {
-            if !expected.contains(&row.agent_id) {
-                expected.push(row.agent_id);
-            }
+            assert!(selected.iter().any(|summary| summary.id == "claude-code"));
+            let removed = registry
+                .apply("claude-code", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed);
+            assert!(
+                removed
+                    .message
+                    .starts_with(&format!("Ghostlight was removed from {}.", stale.label)),
+                "{}",
+                removed.message
+            );
+            assert!(!has_entry(&claude.path));
+            assert!(!removed.summary.can_uninstall);
         }
-        assert_eq!(ids, expected, "one entry per agent, in roster order");
-        for agent in &catalog {
-            if let Some(family) = agent.family {
-                assert_ne!(family, agent.agent_id, "{}", agent.agent_id);
-                let stand_in = catalog
-                    .iter()
-                    .find(|other| other.agent_id == family)
-                    .unwrap_or_else(|| panic!("{} names no catalog agent", agent.agent_id));
-                assert!(
-                    !stand_in.sources.is_empty(),
-                    "{family} stands for {} but has no sources",
-                    agent.agent_id
+        {
+            let directory = temporary("store-attention");
+            let context = windows_context(&directory);
+            let plain = plain_desktop(&context);
+            fs::create_dir_all(plain.parent().unwrap()).unwrap();
+            fs::write(&plain, current_settings(&context)).unwrap();
+            let private = store_folder(&context).join("claude_desktop_config.json");
+            let broken = "{\"mcpServers\": {";
+            fs::write(&private, broken).unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+
+            let summary = desktop_summary(&registry);
+            assert_eq!(PathBuf::from(&summary.config_path), private);
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(summary.attention, Some(Attention::Malformed));
+            assert!(summary.can_uninstall);
+            assert_eq!(summary.owned_copies, [plain.to_string_lossy()]);
+
+            let removed = registry
+                .apply("claude-desktop", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed);
+            assert!(!has_entry(&plain));
+            assert_eq!(fs::read_to_string(&private).unwrap(), broken);
+            assert!(removed.summary.owned_copies.is_empty());
+            assert_eq!(removed.summary.attention, Some(Attention::Malformed));
+
+            fs::write(
+                &private,
+                r#"{"mcpServers":{"ghostlight":{"command":"node"}}}"#,
+            )
+            .unwrap();
+            registry.refresh().unwrap();
+            assert_eq!(
+                desktop_summary(&registry).attention,
+                Some(Attention::ForeignEntry)
+            );
+        }
+    }
+
+    /// Protects workbench gate 10, arch-1 slice I1 and defects c51204ca, 1d220361 and 0a0ef063:
+    /// Ghostlight writes the file each agent reads in the effective environment. Empty or relative
+    /// root variables resolve below the home; XDG, APPDATA, CODEX_HOME, CRUSH_GLOBAL_CONFIG and
+    /// CLAUDE_CONFIG_DIR are honored, the last read from the person's environment when the process
+    /// has none; a host reads the first of its candidates that exists. A located path is validated,
+    /// kept owner-only, persists as detection evidence and is reported when it goes missing.
+    #[test]
+    fn each_agents_file_is_the_one_it_reads_in_the_effective_environment() {
+        {
+            let home = if cfg!(windows) {
+                "C:/Users/test"
+            } else {
+                "/home/test"
+            };
+            let lookup = |name: &str| match name {
+                user_dirs::USER_PROFILE_VARIABLE | user_dirs::HOME_VARIABLE => {
+                    Some(OsString::from(home))
+                }
+                user_dirs::XDG_CONFIG_HOME_VARIABLE | CODEX_HOME_VARIABLE => Some(OsString::new()),
+                user_dirs::APP_DATA_VARIABLE => Some(OsString::from("Roaming")),
+                _ => None,
+            };
+            let only_home =
+                |name: &str| (name == user_dirs::HOME_VARIABLE).then(|| OsString::from(home));
+            assert_eq!(
+                UserDirs::from_lookup(&only_home, true).home(),
+                Path::new("")
+            );
+            let home = Path::new(home);
+
+            for windows in [false, true] {
+                let dirs = UserDirs::from_lookup(&lookup, windows);
+                let config = if windows {
+                    home.join("AppData").join("Roaming")
+                } else {
+                    home.join(".config")
+                };
+                assert_eq!(
+                    environment_roots(&dirs, &lookup, windows),
+                    HarnessRoots {
+                        config: config.clone(),
+                        roaming: config,
+                        codex_config: home.join(".codex").join("config.toml"),
+                    }
                 );
             }
         }
-        let family_of = |id: &str| catalog.iter().find(|agent| agent.agent_id == id).unwrap();
-        assert_eq!(family_of("claude-code").family, Some("claude-desktop"));
-        assert!(family_of("claude-code").sources.is_empty());
-        assert!(!family_of("codex").sources.is_empty());
-        assert!(family_of("cline").sources.is_empty());
+        {
+            let linux = harness_roots(
+                Path::new("/home/test"),
+                Some(PathBuf::from("/mnt/config")),
+                Some(PathBuf::from("/ignored/appdata")),
+                Some(PathBuf::from("/workbench/codex")),
+                false,
+            );
+            assert_eq!(
+                linux,
+                HarnessRoots {
+                    config: PathBuf::from("/mnt/config"),
+                    roaming: PathBuf::from("/mnt/config"),
+                    codex_config: PathBuf::from("/workbench/codex/config.toml"),
+                }
+            );
+
+            let windows = harness_roots(
+                Path::new("C:/Users/test"),
+                Some(PathBuf::from("C:/ignored/xdg")),
+                Some(PathBuf::from("D:/Profiles/Roaming")),
+                None,
+                true,
+            );
+            assert_eq!(
+                windows,
+                HarnessRoots {
+                    config: PathBuf::from("D:/Profiles/Roaming"),
+                    roaming: PathBuf::from("D:/Profiles/Roaming"),
+                    codex_config: PathBuf::from("C:/Users/test/.codex/config.toml"),
+                }
+            );
+        }
+        {
+            let directory = temporary("locations-private");
+            let context = context(&directory);
+            let registry = HarnessRegistry::with_context(context.clone());
+            let located = directory.join("portable/kilo.jsonc");
+            fs::create_dir_all(located.parent().unwrap()).unwrap();
+            fs::write(&located, "{}\n").unwrap();
+            registry.locate("kilo-code", &located).unwrap();
+            assert_owner_only(&context.locations);
+            registry.locate("kilo-code", &located).unwrap();
+            assert_owner_only(&context.locations);
+            assert_eq!(
+                names_in(context.locations.parent().unwrap()),
+                [super::layout::HARNESS_LOCATIONS_NAME]
+            );
+        }
+        {
+            let directory = temporary("kilo-current-config");
+            let context = context(&directory);
+            let current = context.config.join("kilo").join("kilo.jsonc");
+            fs::create_dir_all(current.parent().unwrap()).unwrap();
+            fs::write(&current, "{}\n").unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+            let kilo = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "kilo-code")
+                .unwrap();
+            assert_eq!(kilo.config_path, current.to_string_lossy());
+
+            let located = directory.join("portable/kilo.jsonc");
+            fs::create_dir_all(located.parent().unwrap()).unwrap();
+            fs::write(&located, "{}\n").unwrap();
+            let result = registry.locate("kilo-code", &located).unwrap();
+            assert_eq!(result.summary.config_path, located.to_string_lossy());
+        }
+        {
+            for row in ROSTER.iter().filter(|row| !row.candidates.is_empty()) {
+                let directory = temporary(&format!("candidates-{}", row.id));
+                let context = context(&directory);
+                let default = (row.path)(&context);
+                let file_on = |context: &HarnessContext| {
+                    row.copies_on(context, &Packages::none())[0].file.clone()
+                };
+                assert_eq!(file_on(&context), default, "{}", row.id);
+                fs::create_dir_all(default.parent().unwrap()).unwrap();
+                // Each candidate, written after every later one, wins over all of them.
+                for (index, name) in row.candidates.iter().enumerate().rev() {
+                    fs::write(default.with_file_name(name), "{}\n").unwrap();
+                    assert_eq!(
+                        file_on(&context),
+                        default.with_file_name(row.candidates[index]),
+                        "{}",
+                        row.id
+                    );
+                }
+                let definition = definition(&context, row.id).unwrap();
+                for name in row.candidates {
+                    assert!(
+                        definition.accepts_config_path(&directory.join(name)),
+                        "{name}"
+                    );
+                }
+                assert!(!definition.accepts_config_path(&directory.join("settings.json")));
+            }
+        }
+        {
+            for named in [false, true] {
+                let directory = temporary(&format!("claude-config-dir-{named}"));
+                let own = directory.join("claude-profile");
+                let context = HarnessContext {
+                    claude_config_dir: named.then(|| own.clone()),
+                    ..context(&directory)
+                };
+                let (read, unread) = if named {
+                    (own.join(".claude.json"), context.home.join(".claude.json"))
+                } else {
+                    (context.home.join(".claude.json"), own.join(".claude.json"))
+                };
+                fs::create_dir_all(read.parent().unwrap()).unwrap();
+                fs::write(&read, "{\"theme\": \"dark\"}\n").unwrap();
+                let registry = HarnessRegistry::with_context(context);
+
+                let installed = registry
+                    .apply("claude-code", HarnessAction::Install)
+                    .unwrap();
+                assert!(installed.changed, "{named}");
+                assert!(has_entry(&read), "{named}");
+                assert!(fs::read_to_string(&read).unwrap().contains("dark"));
+                let found = registry
+                    .summaries()
+                    .into_iter()
+                    .find(|summary| summary.id == "claude-code")
+                    .unwrap();
+                assert_eq!(found.state, HarnessState::Installed, "{named}");
+                assert!(found.can_uninstall, "{named}");
+
+                let removed = registry
+                    .apply("claude-code", HarnessAction::Uninstall)
+                    .unwrap();
+                assert!(removed.changed, "{named}");
+                assert!(!has_entry(&read), "{named}");
+                assert!(!unread.exists(), "{named}");
+            }
+        }
+        {
+            use std::ffi::OsString;
+
+            use super::user_dirs::USER_PROFILE_VARIABLE;
+            use super::{claude_config_dir, user_path};
+
+            let lookup =
+                |name: &str| (name == USER_PROFILE_VARIABLE).then(|| r"C:\Users\a".to_owned());
+            let stored = |text: &str, expandable| {
+                Some(user_path::PathValue {
+                    text: text.to_owned(),
+                    expandable,
+                })
+            };
+
+            assert_eq!(
+                claude_config_dir(
+                    Some(OsString::from(r"D:\process")),
+                    stored(r"D:\person", false),
+                    &lookup
+                ),
+                Some(PathBuf::from(r"D:\process"))
+            );
+            for unset in [None, Some(OsString::new())] {
+                assert_eq!(
+                    claude_config_dir(
+                        unset.clone(),
+                        stored(r"%USERPROFILE%\claude", true),
+                        &lookup
+                    ),
+                    Some(PathBuf::from(r"C:\Users\a\claude"))
+                );
+                assert_eq!(
+                    claude_config_dir(
+                        unset.clone(),
+                        stored(r"%USERPROFILE%\claude", false),
+                        &lookup
+                    ),
+                    Some(PathBuf::from(r"%USERPROFILE%\claude"))
+                );
+                assert_eq!(
+                    claude_config_dir(unset.clone(), stored("", true), &lookup),
+                    None
+                );
+                assert_eq!(claude_config_dir(unset, None, &lookup), None);
+            }
+        }
+        {
+            let directory = temporary("crush-variable");
+            let named = directory.join("elsewhere/crush.json");
+            let context = HarnessContext {
+                crush_config: Some(named.clone()),
+                ..context(&directory)
+            };
+            assert_eq!(definition(&context, "crush").unwrap().path, named);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let directory = temporary("located-executable");
+            let context = context(&directory);
+            let executable = directory.join("odd-place/custom-qwen");
+            fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            fs::write(&executable, b"test").unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+            let located = registry.locate("qwen-code", &executable).unwrap();
+            assert_eq!(located.summary.state, HarnessState::Available);
+            let rediscovered = HarnessRegistry::with_context(context);
+            let qwen = rediscovered
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "qwen-code")
+                .unwrap();
+            assert_eq!(qwen.state, HarnessState::Available);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let directory = temporary("stale-located-executable");
+            let context = context(&directory);
+            let executable = directory.join("portable/qwen");
+            fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            fs::write(&executable, b"test").unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+            HarnessRegistry::with_context(context.clone())
+                .locate("qwen-code", &executable)
+                .unwrap();
+            fs::remove_file(executable).unwrap();
+
+            let summary = HarnessRegistry::with_context(context)
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "qwen-code")
+                .unwrap();
+            assert_eq!(summary.state, HarnessState::NotDetected);
+            assert!(summary
+                .detail
+                .contains("previously located path is missing"));
+        }
+        {
+            let directory = temporary("located-config-validation");
+            let context = context(&directory);
+            let registry = HarnessRegistry::with_context(context);
+            let wrong_name = directory.join("portable/not-qwen.json");
+            fs::create_dir_all(wrong_name.parent().unwrap()).unwrap();
+            fs::write(&wrong_name, "{}\n").unwrap();
+            assert!(matches!(
+                registry.locate("qwen-code", &wrong_name),
+                Err(HarnessError::LocatedPathInvalid(_))
+            ));
+
+            let malformed = directory.join("portable/settings.json");
+            fs::write(&malformed, "[]\n").unwrap();
+            assert!(matches!(
+                registry.locate("qwen-code", &malformed),
+                Err(HarnessError::Malformed(_))
+            ));
+        }
+    }
+
+    /// Protects the ADR-0197 container amendments and defects 4fac15a7 and 236485f4: a Store app's own
+    /// copy of its settings is the file its view shows and is written once from inside its container,
+    /// another app's container leaves it, and an agent absent from its plain path is never found in
+    /// another app's copy.
+    #[test]
+    fn inside_a_store_apps_own_container_its_copy_is_written_once_and_another_container_leaves_it()
+    {
+        {
+            let directory = temporary("own-container");
+            let (context, desktop) = inside_container(&directory, "Claude");
+            let registry = HarnessRegistry::with_context(context);
+
+            let claude = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "claude-desktop")
+                .unwrap();
+            assert!(!claude.private_view);
+            assert!(
+                registry
+                    .apply("claude-desktop", HarnessAction::Install)
+                    .unwrap()
+                    .changed
+            );
+            let value: Value =
+                serde_json::from_str(&fs::read_to_string(&desktop).unwrap()).unwrap();
+            assert!(value["mcpServers"].get("ghostlight").is_some());
+        }
+        {
+            // As on leo-desktop-02 on 2026-10-20: Visual Studio Code had never been started, so its
+            // plain settings folder did not exist, and an install had written Ghostlight's entry into
+            // the Codex app's private copy of that folder, which Visual Studio Code never reads.
+            let directory = temporary("store-other-only");
+            let context = windows_context(&directory);
+            let plain = context.roaming.join("Code/User/mcp.json");
+            // Spelled as the look spells it: the settings folder as the row names it, then the file.
+            let leftover = packaged::private_root(
+                context.local_app_data.as_deref().unwrap(),
+                "OpenAI.Codex_2p2nqsd0c76g0",
+                packaged::DataRoot::Roaming,
+            )
+            .join("Code/User")
+            .join("mcp.json");
+            fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+            fs::write(
+            &leftover,
+            format!(
+                "{{\"servers\":{{\"ghostlight\":{{\"type\":\"stdio\",\"command\":{},\"args\":[\"mcp\"]}}}}}}",
+                serde_json::to_string(&context.edge.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+            let editor = || {
+                registry
+                    .summaries()
+                    .into_iter()
+                    .find(|summary| summary.id == "vscode")
+                    .unwrap()
+            };
+
+            let summary = editor();
+            assert_eq!(PathBuf::from(&summary.config_path), plain);
+            assert_eq!(
+                summary.state,
+                HarnessState::NotDetected,
+                "another app's copy is no evidence of the agent: {}",
+                summary.detail
+            );
+            assert_eq!(summary.owned_copies, [leftover.to_string_lossy()]);
+
+            let removed = registry.apply("vscode", HarnessAction::Uninstall).unwrap();
+            assert!(removed.changed, "{}", removed.message);
+            let left = fs::read_to_string(&leftover).unwrap();
+            assert!(!left.contains(SERVER_NAME), "{left}");
+            assert!(
+                !plain.exists(),
+                "nothing is written where the agent is absent"
+            );
+            assert!(editor().owned_copies.is_empty());
+        }
+        {
+            let directory = temporary("store-own-container");
+            let mut context = windows_context(&directory);
+            let local = context.local_app_data.clone().unwrap();
+            context.private_view = Some(PrivateView {
+                container: AppContainer {
+                    app: "Claude".into(),
+                },
+                roots: vec![context.roaming.clone(), local.clone()],
+            });
+            let private = store_folder(&context).join("claude_desktop_config.json");
+            fs::write(&private, PERSON_SETTINGS).unwrap();
+            // The container's merged view shows the same file at the plain path.
+            let view = plain_desktop(&context);
+            fs::create_dir_all(view.parent().unwrap()).unwrap();
+            fs::write(&view, PERSON_SETTINGS).unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+
+            let summary = desktop_summary(&registry);
+            assert!(
+                summary.other_copy.is_none(),
+                "the view's plain path is the same file, not another copy"
+            );
+            // Inside the container a write to the plain path lands in the package's private copy of
+            // `%APPDATA%`, the same mapping the container probe confirms for `%LOCALAPPDATA%`: the
+            // plain path the view shows and the copy found here are one file.
+            let rest = plain_desktop(&context)
+                .strip_prefix(&context.roaming)
+                .unwrap()
+                .to_path_buf();
+            let redirected =
+                packaged::private_root(&local, STORE_FAMILY, packaged::DataRoot::Roaming)
+                    .join(rest);
+            assert_eq!(PathBuf::from(&summary.config_path), redirected);
+            assert_eq!(redirected, private);
+            assert!(!summary.private_view);
+            assert!(summary.can_install);
+            assert!(
+                registry
+                    .apply("claude-desktop", HarnessAction::Install)
+                    .unwrap()
+                    .changed
+            );
+            assert!(has_entry(&private));
+            assert_eq!(fs::read_to_string(&view).unwrap(), PERSON_SETTINGS);
+
+            // Inside another app's container the same copy is that app's private view, and is left.
+            context.private_view = Some(PrivateView {
+                container: AppContainer {
+                    app: "OpenAI.Codex".into(),
+                },
+                roots: vec![context.roaming.clone(), local],
+            });
+            let other = HarnessRegistry::with_context(context);
+            let summary = desktop_summary(&other);
+            assert!(summary.private_view && !summary.can_uninstall);
+            assert!(matches!(
+                other.apply("claude-desktop", HarnessAction::Uninstall),
+                Err(HarnessError::PrivateView(_))
+            ));
+            assert!(has_entry(&private));
+        }
+    }
+
+    /// Protects arch-1 slice I5: an entry that starts Ghostlight's own npm package through npx, in JSON
+    /// or Codex TOML, is the launcher whatever version it pins; it is never current, install and
+    /// uninstall leave it, and only Fix replaces it.
+    #[test]
+    fn the_npm_launcher_entry_is_never_current_and_only_fix_replaces_it() {
+        {
+            let directory = temporary("launcher-unpinned");
+            let context = context(&directory);
+            for entry in [
+                json!({"command": "npx", "args": ["-y", "ghostlight"]}),
+                json!({"command": "npx", "args": ["--yes", "ghostlight@latest", "mcp"]}),
+                json!({"command": "cmd", "args": ["/c", "npx", "-y", "ghostlight"]}),
+                json!({"command": "npx -y ghostlight"}),
+            ] {
+                let (registry, path) = cline_with_entry(&context, &entry);
+                let before = fs::read(&path).unwrap();
+                let summary = cline_summary(&registry);
+                assert_eq!(summary.state, HarnessState::NeedsAttention, "{entry}");
+                assert_eq!(
+                    summary.attention,
+                    Some(Attention::Launcher(LauncherPin::Unpinned)),
+                    "{entry}"
+                );
+                assert!(
+                    summary
+                        .detail
+                        .contains("npm chooses the version at each launch"),
+                    "{}",
+                    summary.detail
+                );
+                assert!(!summary.detail.contains("foreign"), "{}", summary.detail);
+                let evidence = summary.evidence.clone().expect("the launcher is named");
+                assert!(evidence.contains("npm launcher"), "{evidence}");
+                assert!(!evidence.contains("another program"), "{evidence}");
+                assert!(summary.can_fix && !summary.can_install && !summary.can_uninstall);
+                assert!(matches!(
+                    registry.apply("cline-cli", HarnessAction::Install),
+                    Err(HarnessError::LauncherEntry)
+                ));
+                assert_eq!(fs::read(&path).unwrap(), before);
+            }
+        }
+        {
+            let directory = temporary("launcher-pinned-1x");
+            let context = context(&directory);
+            let (registry, path) = cline_with_entry(
+                &context,
+                &json!({"command": "npx", "args": ["-y", "ghostlight@1.3.5"]}),
+            );
+            let before = fs::read(&path).unwrap();
+            let summary = cline_summary(&registry);
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(
+                summary.attention,
+                Some(Attention::Launcher(LauncherPin::Earlier))
+            );
+            assert!(
+                summary.detail.contains("pinned to ghostlight@1.3.5")
+                    && summary.detail.contains("before 2.0"),
+                "{}",
+                summary.detail
+            );
+            assert!(summary
+                .evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.contains("`npx ghostlight@1.3.5`")));
+            for action in [HarnessAction::Install, HarnessAction::Uninstall] {
+                assert!(matches!(
+                    registry.apply("cline-cli", action),
+                    Err(HarnessError::LauncherEntry)
+                ));
+            }
+            assert_eq!(fs::read(&path).unwrap(), before);
+
+            let fixed = registry.apply("cline-cli", HarnessAction::Fix).unwrap();
+            assert!(fixed.changed);
+            assert_eq!(fixed.summary.state, HarnessState::Installed);
+            assert!(
+                fixed.message.contains("instead of the npm launcher"),
+                "{}",
+                fixed.message
+            );
+        }
+        {
+            let directory = temporary("launcher-pinned-2x");
+            let context = context(&directory);
+            let (registry, _) = cline_with_entry(
+                &context,
+                &json!({"command": "npx", "args": ["-y", "ghostlight@2.0.0"]}),
+            );
+            let summary = cline_summary(&registry);
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(
+                summary.attention,
+                Some(Attention::Launcher(LauncherPin::Pinned))
+            );
+            assert!(
+                summary.detail.contains("cannot say it is current"),
+                "{}",
+                summary.detail
+            );
+        }
+        {
+            let launcher =
+                |command: &str, args: &[&str]| NpmLauncher::from_entry(command, Some(args));
+            for (command, args) in [
+                ("npx", &["-y", "ghostlight", "install"][..]),
+                ("npx", &["-y", "@scope/server-x"][..]),
+                ("npx", &["-y", "ghostlight-other"][..]),
+                ("npx", &["-y", "ghostlight@https://example.test/x.tgz"][..]),
+                ("npx", &["--registry", "r", "ghostlight"][..]),
+                ("cmd", &["/k", "npx", "ghostlight"][..]),
+                ("node", &["ghostlight"][..]),
+                ("npx", &[][..]),
+            ] {
+                assert_eq!(launcher(command, args), None, "{command} {args:?}");
+            }
+            assert_eq!(
+                launcher("npx.cmd", &["-y", "ghostlight@^1.2"]),
+                Some(NpmLauncher {
+                    pin: LauncherPin::Earlier,
+                    package: "ghostlight@^1.2".into(),
+                })
+            );
+            for (spec, pin) in [
+                (None, LauncherPin::Unpinned),
+                (Some(""), LauncherPin::Unpinned),
+                (Some("latest"), LauncherPin::Unpinned),
+                (Some("next"), LauncherPin::Unpinned),
+                (Some("1.3.5"), LauncherPin::Earlier),
+                (Some("~1"), LauncherPin::Earlier),
+                (Some("0.9.0"), LauncherPin::Earlier),
+                (Some("2.0.0"), LauncherPin::Pinned),
+                (Some("2.0.0-rc.1"), LauncherPin::Pinned),
+                (Some("^2"), LauncherPin::Pinned),
+            ] {
+                assert_eq!(LauncherPin::of(spec), pin, "{spec:?}");
+            }
+        }
+        {
+            let directory = temporary("launcher-codex");
+            let context = context(&directory);
+            let source =
+            "[mcp_servers.ghostlight]\ncommand = \"npx\"\nargs = [\"-y\", \"ghostlight@1.3.5\"]\n";
+            assert!(matches!(
+                inspect_toml(source, &context).unwrap(),
+                RegistrationState::Launcher(NpmLauncher {
+                    pin: LauncherPin::Earlier,
+                    ..
+                })
+            ));
+            let path = directory.join("config.toml");
+            fs::write(&path, source).unwrap();
+            assert!(matches!(
+                edit_toml(&context, &path, true),
+                Err(HarnessError::LauncherEntry)
+            ));
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        }
+    }
+
+    /// Protects the agent catalog contract and defect d4bdaf9c: every agent is known once by its id,
+    /// name and aliases on every host it runs on, a product id two agents share names only its own
+    /// agent, reserved entries are no row, the apps an agent runs inside and every icon family are
+    /// catalog agents, and coexisting hosts of one client carry distinct labels.
+    #[test]
+    fn the_agent_catalog_names_each_agent_once_and_its_references_resolve() {
+        {
+            let directory = temporary("agent-names-roster");
+            let rows = definitions(&context(&directory));
+            for row in &rows {
+                assert_eq!(named(row.id).as_deref(), Some(row.name), "{}", row.id);
+                assert_eq!(named(row.name).as_deref(), Some(row.name), "{}", row.id);
+            }
+            for row in ROSTER {
+                for alias in row.aliases {
+                    assert_eq!(named(alias).as_deref(), Some(row.name), "{alias}");
+                    let others = ROSTER.iter().filter(|other| other.name != row.name);
+                    for other in others {
+                        assert!(!other.is_called(alias), "{alias} also calls {}", other.id);
+                    }
+                }
+            }
+        }
+        {
+            let devin = ROSTER.iter().find(|row| row.id == "devin").unwrap();
+            assert_eq!(devin.product_id, "windsurf");
+            assert_eq!(named("windsurf").as_deref(), Some("Windsurf"));
+            assert_eq!(named("devin").as_deref(), Some("Devin"));
+            assert_eq!(named("Devin").as_deref(), Some("Devin"));
+        }
+        {
+            for row in ROSTER {
+                for other in ROSTER {
+                    assert_eq!(
+                        row.agent_id == other.agent_id,
+                        row.name == other.name,
+                        "{} and {}",
+                        row.id,
+                        other.id
+                    );
+                    if row.agent_id == other.agent_id {
+                        assert_eq!(row.monogram, other.monogram, "{}", row.agent_id);
+                    }
+                }
+            }
+            let cline: Vec<&str> = ROSTER
+                .iter()
+                .filter(|row| row.agent_id == "cline")
+                .map(|row| row.id)
+                .collect();
+            assert_eq!(
+                cline,
+                [
+                    "cline-cli",
+                    "cline-vscode",
+                    "cline-cursor",
+                    "cline-windsurf"
+                ]
+            );
+        }
+        {
+            for row in ROSTER {
+                for host in row.runs_inside {
+                    assert!(super::catalog_agent(host).is_some(), "{}: {host}", row.id);
+                    assert_ne!(*host, row.agent_id, "{}", row.id);
+                }
+            }
+            assert!(super::runs_inside("claude-code", "claude-desktop"));
+            for editor in ["vscode", "cursor", "windsurf"] {
+                assert!(super::runs_inside("cline", editor), "{editor}");
+            }
+            assert!(!super::runs_inside("cline", "claude-desktop"));
+            assert!(!super::runs_inside("claude-desktop", "claude-code"));
+            assert!(!super::runs_inside("not-an-agent", "claude-desktop"));
+        }
+        {
+            use crate::agent::{COMMAND_LINE_ID, EARLIER_ID, UNKNOWN_ID, UNKNOWN_NAME_SEPARATOR};
+            use crate::language::provenance::{COMMAND_LINE_AGENT, EARLIER_SESSION, UNKNOWN_AGENT};
+
+            for row in ROSTER {
+                for id in [row.id, row.agent_id] {
+                    assert!(
+                        ![COMMAND_LINE_ID, UNKNOWN_ID, EARLIER_ID].contains(&id),
+                        "{id}"
+                    );
+                    assert!(!id.contains(UNKNOWN_NAME_SEPARATOR), "{id}");
+                }
+                for reserved in [
+                    COMMAND_LINE_ID,
+                    UNKNOWN_ID,
+                    COMMAND_LINE_AGENT,
+                    UNKNOWN_AGENT,
+                    EARLIER_ID,
+                    EARLIER_SESSION,
+                ] {
+                    assert!(!row.is_called(reserved), "{} is called {reserved}", row.id);
+                }
+            }
+        }
+        {
+            let directory = temporary("host-labels");
+            let summaries = HarnessRegistry::with_context(context(&directory))
+                .refresh()
+                .unwrap();
+            let label_of = |id: &str| {
+                summaries
+                    .iter()
+                    .find(|summary| summary.id == id)
+                    .unwrap()
+                    .label
+                    .clone()
+            };
+            assert_eq!(label_of("cline-cursor"), "Cline (Cursor)");
+            assert_eq!(label_of("cline-cli"), "Cline (CLI)");
+            assert_eq!(label_of("claude-desktop"), "Claude Desktop");
+            assert_eq!(label_of("windsurf"), "Windsurf");
+            assert_eq!(label_of("devin"), "Devin");
+            let mut labels: Vec<_> = summaries.iter().map(|summary| &summary.label).collect();
+            let total = labels.len();
+            labels.sort();
+            labels.dedup();
+            assert_eq!(labels.len(), total);
+        }
+        {
+            let catalog = super::icon_catalog();
+            let ids: Vec<&str> = catalog.iter().map(|agent| agent.agent_id).collect();
+            let mut expected: Vec<&str> = Vec::new();
+            for row in ROSTER {
+                if !expected.contains(&row.agent_id) {
+                    expected.push(row.agent_id);
+                }
+            }
+            assert_eq!(ids, expected, "one entry per agent, in roster order");
+            for agent in &catalog {
+                if let Some(family) = agent.family {
+                    assert_ne!(family, agent.agent_id, "{}", agent.agent_id);
+                    let stand_in = catalog
+                        .iter()
+                        .find(|other| other.agent_id == family)
+                        .unwrap_or_else(|| panic!("{} names no catalog agent", agent.agent_id));
+                    assert!(
+                        !stand_in.sources.is_empty(),
+                        "{family} stands for {} but has no sources",
+                        agent.agent_id
+                    );
+                }
+            }
+            let family_of = |id: &str| catalog.iter().find(|agent| agent.agent_id == id).unwrap();
+            assert_eq!(family_of("claude-code").family, Some("claude-desktop"));
+            assert!(family_of("claude-code").sources.is_empty());
+            assert!(!family_of("codex").sources.is_empty());
+            assert!(family_of("cline").sources.is_empty());
+        }
     }
 }
