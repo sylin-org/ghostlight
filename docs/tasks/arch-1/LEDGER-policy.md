@@ -180,10 +180,19 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-03 (Alpine), after core-work. A
 slice's specification is its finding in [sweep-2026-10-20/work.md](sweep-2026-10-20/work.md), read
-with its skeptic's corrections. Nothing has landed yet; start with WORK-15.
+with its skeptic's corrections. WORK-15 is under way: its `HostPattern` has landed; `url_host` and
+`layer_denial` are next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | todo |
+| WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | `HostPattern` landed; `url_host` and `layer_denial` todo |
 | WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | todo |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |
+
+WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
+host), parsed once and lowercased. `PolicyLayer::new` parses its never-touch list and each grant's
+host rules when the layer loads and keeps the authored never-touch strings for what the Policy page
+shows. `valid_host_pattern`, `pattern_specificity`, `host_matches` and `pattern_covers` are gone;
+validation, grant evaluation, the never-touch match, the probe set, `permits_any_document` and the
+Policy page's shadow check read the parsed patterns. The manifest's own check that a never-touch
+list holds no `*` stays on the raw text, before parsing. The parse has its own mixed-case test.

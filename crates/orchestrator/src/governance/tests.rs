@@ -1602,7 +1602,9 @@ fn no_probe_matches_an_authored_suffix() {
         patterns
             .iter()
             .copied()
-            .filter(|pattern| host_matches(host, pattern))
+            .filter(|pattern| {
+                HostPattern::parse(pattern).is_some_and(|parsed| parsed.matches(host))
+            })
             .collect()
     };
     assert_eq!(probes.unmatched(), "ghostlight-probe-2");

@@ -8,6 +8,7 @@ pub use crate::audit::{AuditSink, JsonlAuditSink};
 pub mod effective;
 pub mod evidence;
 mod file_state;
+pub mod host_pattern;
 pub mod inspection;
 pub mod managed;
 pub mod manifest;
@@ -32,6 +33,7 @@ use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::PolicyAuthor;
 use crate::language::policy;
 use file_state::FileState;
+use host_pattern::{HostPattern, ParsedHosts};
 use manifest::PolicySetting;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -460,20 +462,34 @@ impl AuthorityTier {
 struct PolicyLayer {
     tier: AuthorityTier,
     manifest: manifest::Manifest,
-    /// The destinations this layer marks never-touch.
+    /// The destinations this layer marks never-touch, as authored, for the boundaries a person is
+    /// shown.
     never_touch: Vec<String>,
+    /// The same list parsed, which matching reads.
+    never_touch_patterns: Vec<HostPattern>,
+    /// Each grant's host rules parsed, in the order of `manifest.grants`.
+    grant_hosts: Vec<ParsedHosts>,
 }
 
 impl PolicyLayer {
-    /// The layer `manifest` authors at `tier`, with the never-touch list its settings hold.
+    /// The layer `manifest` authors at `tier`, with the never-touch list its settings hold and
+    /// every host pattern parsed once.
     fn new(tier: AuthorityTier, manifest: manifest::Manifest) -> Self {
         let never_touch = manifest
             .string_array_setting(PolicySetting::SacredDomains)
             .unwrap_or_default();
+        let never_touch_patterns = host_pattern::parse_all(&never_touch);
+        let grant_hosts = manifest
+            .grants
+            .iter()
+            .map(|grant| ParsedHosts::of(&grant.hosts))
+            .collect();
         Self {
             tier,
             manifest,
             never_touch,
+            never_touch_patterns,
+            grant_hosts,
         }
     }
 }
@@ -594,9 +610,9 @@ impl AuthoritySnapshot {
         let host = url.host_str()?.to_ascii_lowercase();
         self.layers.iter().position(|layer| {
             layer
-                .never_touch
+                .never_touch_patterns
                 .iter()
-                .any(|pattern| host_matches(&host, pattern))
+                .any(|pattern| pattern.matches(&host))
         })
     }
 
@@ -889,8 +905,9 @@ impl AuthoritySnapshot {
         within: &manifest::HostRules,
     ) -> Option<bool> {
         let index = self.layers.iter().position(|layer| layer.tier == tier)?;
+        let within = ParsedHosts::of(within);
         Some(self.probes().hosts().any(|host| {
-            evaluate_host(&host, within) == HostOutcome::Allowed
+            evaluate_host(&host, &within) == HostOutcome::Allowed
                 && match self.probe(requirements, &host) {
                     ProbeAnswer::Admitted => true,
                     ProbeAnswer::Refused(alone) => alone[index],
@@ -905,10 +922,13 @@ impl AuthoritySnapshot {
         ProbeSet::of(
             self.layers
                 .iter()
-                .flat_map(|layer| &layer.manifest.grants)
-                .flat_map(|grant| grant.hosts.allow.iter().chain(&grant.hosts.deny))
-                .chain(self.layers.iter().flat_map(|layer| &layer.never_touch))
-                .map(String::as_str),
+                .flat_map(|layer| &layer.grant_hosts)
+                .flat_map(|hosts| hosts.allow.iter().chain(&hosts.deny))
+                .chain(
+                    self.layers
+                        .iter()
+                        .flat_map(|layer| &layer.never_touch_patterns),
+                ),
         )
     }
 
@@ -1059,18 +1079,19 @@ struct ProbeSet {
 }
 
 impl ProbeSet {
-    fn of<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Self {
+    fn of<'a>(patterns: impl IntoIterator<Item = &'a HostPattern>) -> Self {
         let mut exact = BTreeSet::new();
         let mut suffixes = BTreeSet::new();
         for pattern in patterns {
-            let pattern = pattern.trim().to_ascii_lowercase();
-            if pattern == "*" {
-                continue;
+            match pattern {
+                HostPattern::Any => {}
+                HostPattern::Below(suffix) => {
+                    suffixes.insert(suffix.clone());
+                }
+                HostPattern::Exact(host) => {
+                    exact.insert(host.clone());
+                }
             }
-            match pattern.strip_prefix("*.") {
-                Some(suffix) => suffixes.insert(suffix.to_owned()),
-                None => exact.insert(pattern),
-            };
         }
         let collides = |label: &str| {
             exact.contains(label)
@@ -1153,9 +1174,15 @@ fn decide_resource_less(layer: &PolicyLayer, requirements: CapabilitySet) -> Lay
 
 fn decide_for_host(layer: &PolicyLayer, requirements: CapabilitySet, host: &str) -> LayerOutcome {
     let mut first_denial = None;
-    for (index, grant) in layer.manifest.grants.iter().enumerate() {
+    for (index, (grant, hosts)) in layer
+        .manifest
+        .grants
+        .iter()
+        .zip(&layer.grant_hosts)
+        .enumerate()
+    {
         let grant_index = u16::try_from(index).expect("grant count is bounded");
-        match evaluate_host(host, &grant.hosts) {
+        match evaluate_host(host, hosts) {
             HostOutcome::Allowed => {
                 if requirements.is_subset_of(grant.allowed_set()) {
                     return LayerOutcome {
@@ -1198,16 +1225,16 @@ enum HostOutcome {
     Unmatched,
 }
 
-fn evaluate_host(host: &str, rules: &manifest::HostRules) -> HostOutcome {
+fn evaluate_host(host: &str, rules: &ParsedHosts) -> HostOutcome {
     let allow = rules
         .allow
         .iter()
-        .filter_map(|pattern| pattern_specificity(host, pattern))
+        .filter_map(|pattern| pattern.specificity(host))
         .max();
     let deny = rules
         .deny
         .iter()
-        .filter_map(|pattern| pattern_specificity(host, pattern))
+        .filter_map(|pattern| pattern.specificity(host))
         .max();
     match (allow, deny) {
         (None, None) => HostOutcome::Unmatched,
@@ -1216,21 +1243,6 @@ fn evaluate_host(host: &str, rules: &manifest::HostRules) -> HostOutcome {
         (Some(allow), Some(deny)) if deny >= allow => HostOutcome::Denied,
         (Some(_), Some(_)) => HostOutcome::Allowed,
     }
-}
-
-fn pattern_specificity(host: &str, pattern: &str) -> Option<(u8, usize)> {
-    let pattern = pattern.to_ascii_lowercase();
-    if pattern == host {
-        return Some((3, pattern.len()));
-    }
-    if pattern == "*" {
-        return Some((1, 0));
-    }
-    let suffix = pattern.strip_prefix("*.")?;
-    (host.len() > suffix.len()
-        && host.ends_with(suffix)
-        && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.'))
-    .then_some((2, suffix.len()))
 }
 
 fn denial_bytes(manifest_hash: &str, grant_id: &str, rule: PolicyRule) -> [u8; 4] {
@@ -2248,19 +2260,6 @@ fn hex_prefix(bytes: &[u8], count: usize) -> String {
         write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
     }
     output
-}
-
-fn host_matches(host: &str, pattern: &str) -> bool {
-    let pattern = pattern.trim().to_ascii_lowercase();
-    if pattern == "*" {
-        true
-    } else if let Some(suffix) = pattern.strip_prefix("*.") {
-        host.len() > suffix.len()
-            && host.ends_with(suffix)
-            && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.')
-    } else {
-        host == pattern
-    }
 }
 
 /// Governance configuration failure.

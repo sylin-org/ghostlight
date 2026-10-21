@@ -631,7 +631,7 @@ fn validate_patterns(patterns: &[String], source: &str, path: &str) -> Result<()
     }
     let mut seen = HashSet::new();
     for (index, pattern) in patterns.iter().enumerate() {
-        if !valid_host_pattern(pattern) {
+        if super::host_pattern::HostPattern::parse(pattern).is_none() {
             return field(
                 source,
                 &format!("{path}[{index}]"),
@@ -683,30 +683,6 @@ fn field<T>(source: &str, path: &str, reason: &str) -> Result<T, ManifestError> 
     })
 }
 
-/// Whether one authored grant host pattern has valid bounded syntax.
-#[must_use]
-pub fn valid_host_pattern(pattern: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    let host = pattern.strip_prefix("*.").unwrap_or(pattern);
-    !host.is_empty()
-        && host.len() <= 253
-        && host.is_ascii()
-        && !host.contains(['/', ':', '*'])
-        && !host.starts_with('.')
-        && !host.ends_with('.')
-        && host.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= 63
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        })
-}
-
 fn canonical_hash(value: &Value) -> String {
     let mut canonical = String::new();
     write_canonical(value, &mut canonical);
@@ -751,7 +727,8 @@ fn write_canonical(value: &Value, output: &mut String) {
 mod tests {
     use serde_json::{json, Value};
 
-    use super::{parse, valid_host_pattern, BrowserStartup, ManifestError, PolicySetting};
+    use super::{parse, BrowserStartup, ManifestError, PolicySetting};
+    use crate::governance::host_pattern::HostPattern;
     use crate::intake::session::IntakeChannel;
 
     #[test]
@@ -812,7 +789,7 @@ mod tests {
     #[test]
     fn host_patterns_are_exact_suffix_or_universal() {
         for valid in ["*", "example.com", "*.example.com", "a-b.example"] {
-            assert!(valid_host_pattern(valid), "{valid}");
+            assert!(HostPattern::parse(valid).is_some(), "{valid}");
         }
         for invalid in [
             "",
@@ -822,7 +799,7 @@ mod tests {
             "*.example.com:443",
             ".example.com",
         ] {
-            assert!(!valid_host_pattern(invalid), "{invalid}");
+            assert!(HostPattern::parse(invalid).is_none(), "{invalid}");
         }
     }
 

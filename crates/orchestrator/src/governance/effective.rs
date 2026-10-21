@@ -16,8 +16,8 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use super::{
-    manifest, AuthoritySnapshot, AuthorityTier, Capability, CapabilitySet, ManagedPolicyFreshness,
-    ManagedPolicyPassport,
+    host_pattern, manifest, AuthoritySnapshot, AuthorityTier, Capability, CapabilitySet,
+    ManagedPolicyFreshness, ManagedPolicyPassport,
 };
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::PolicyAuthor;
@@ -643,35 +643,13 @@ fn covers_grant(earlier: &manifest::Grant, later: &manifest::Grant) -> bool {
     if !later.allowed_set().is_subset_of(earlier.allowed_set()) {
         return false;
     }
+    // A suffix wildcard covers the hosts below its suffix only, so `*.example.com` does not cover
+    // the bare `example.com`. Getting that backwards would mark a live rule inert.
+    let broader = host_pattern::parse_all(&earlier.hosts.allow);
     !later.hosts.allow.is_empty()
-        && later.hosts.allow.iter().all(|pattern| {
-            earlier
-                .hosts
-                .allow
-                .iter()
-                .any(|broad| pattern_covers(broad, pattern))
-        })
-}
-
-/// Whether every host matched by `narrow` is also matched by `broad`.
-///
-/// Ghostlight's suffix wildcard covers subdomains only, so `*.example.com` does not cover the bare
-/// `example.com`. Getting that backwards would mark a live rule inert.
-fn pattern_covers(broad: &str, narrow: &str) -> bool {
-    if broad == "*" {
-        return true;
-    }
-    if broad.eq_ignore_ascii_case(narrow) {
-        return true;
-    }
-    let Some(suffix) = broad.strip_prefix("*.") else {
-        return false;
-    };
-    let candidate = narrow.strip_prefix("*.").unwrap_or(narrow);
-    candidate.len() > suffix.len()
-        && candidate
-            .to_ascii_lowercase()
-            .ends_with(&format!(".{}", suffix.to_ascii_lowercase()))
+        && host_pattern::parse_all(&later.hosts.allow)
+            .iter()
+            .all(|narrow| broader.iter().any(|broad| broad.covers(narrow)))
 }
 
 fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
@@ -690,8 +668,8 @@ fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
 #[cfg(test)]
 mod tests {
     use super::{
-        compile, pattern_covers, CapabilityState, ChipTone, Inputs, LayerKind,
-        OrganizationIdentity, PolicyChip, RuleNote, Situation, UserLayerSource,
+        compile, CapabilityState, ChipTone, Inputs, LayerKind, OrganizationIdentity, PolicyChip,
+        RuleNote, Situation, UserLayerSource,
     };
     use std::sync::Arc;
 
@@ -1070,6 +1048,10 @@ mod tests {
 
     #[test]
     fn suffix_wildcards_cover_subdomains_and_never_the_bare_host() {
+        let pattern_covers = |broad: &str, narrow: &str| {
+            let parse = |text| crate::governance::host_pattern::HostPattern::parse(text).unwrap();
+            parse(broad).covers(&parse(narrow))
+        };
         assert!(pattern_covers("*", "anything.test"));
         assert!(pattern_covers("*.example.com", "a.example.com"));
         assert!(pattern_covers("*.example.com", "*.a.example.com"));
