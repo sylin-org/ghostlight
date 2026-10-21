@@ -1,7 +1,9 @@
 //! Binds the relay crate to the shared fixtures under `tests/golden/relay4`.
 //!
 //! These fixtures are the executable form of `docs/design/relay-protocol-4.md`. The service and
-//! every edge read the same files, so these tests are what keeps them saying the same thing.
+//! every edge read the same files, so these tests are what keeps them saying the same thing. They
+//! record revision 4, what a 2.0.0 edge sends and the service still admits. Revision 5 sends the
+//! same frames under its own number; `golden5.rs` holds what it adds.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,11 +16,14 @@ use ghostlight_relay::protocol::{
 };
 use ghostlight_relay::{
     home, BACKOFF_FIRST, BACKOFF_MAX, HOLD_LIMIT, HOLD_LIMIT_BYTES, MAX_FRAME_BYTES,
-    OPENING_DEADLINE, RELAY,
+    OPENING_DEADLINE,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
+
+/// The revision these fixtures record.
+const FIXTURE_REVISION: u16 = 4;
 
 fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -93,7 +98,7 @@ fn tags<T: Serialize>(values: &[T], tag: &str) -> Vec<String> {
 fn edge(program: Program) -> Edge {
     Edge {
         program,
-        revision: 4,
+        revision: FIXTURE_REVISION,
         build: "2.0.0".to_owned(),
     }
 }
@@ -101,7 +106,7 @@ fn edge(program: Program) -> Edge {
 #[test]
 fn opening_fixtures_round_trip() {
     let mcp: Opening = assert_round_trip("opening.mcp.json");
-    assert_eq!(mcp.relay, RELAY);
+    assert_eq!(mcp.relay, FIXTURE_REVISION);
     assert_eq!(mcp.role, Role::Mcp);
     assert_eq!(mcp.edge, edge(Program::Edge));
     assert_eq!(mcp.reason, Some(StartReason::Agent));
@@ -293,7 +298,7 @@ fn tolerance_fixtures_decode() {
 #[test]
 fn constants_equal_the_vocabulary() {
     let vocabulary = fixture("vocabulary.json");
-    assert_eq!(vocabulary["relay"], json!(RELAY));
+    assert_eq!(vocabulary["relay"], json!(FIXTURE_REVISION));
     assert_eq!(vocabulary["frame"]["max_bytes"], json!(MAX_FRAME_BYTES));
     assert_eq!(vocabulary["hold_limit_bytes"], json!(HOLD_LIMIT_BYTES));
     assert_eq!(vocabulary["hold_limit_ms"], json!(HOLD_LIMIT.as_millis()));

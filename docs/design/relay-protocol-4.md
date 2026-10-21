@@ -1,5 +1,11 @@
 # Ghostlight relay protocol 4
 
+Revision 5 (ADR-0199 amendment of 2026-10-20) is this protocol with the wake endpoints of section
+11. Every frame, opening and name below holds for both revisions; only the number in `relay` and
+`edge.revision` differs. The service admits both. Revision 5's vocabulary is
+[`tests/golden/relay5/vocabulary.json`](../../tests/golden/relay5/vocabulary.json), bound by
+`crates/relay/tests/golden5.rs`.
+
 The frozen contract between the service and every program that connects to it: the edge in each
 role, the one-shot command process and, later, the desktop shell. The decisions are
 [ADR-0199](../adr/0199-one-service-thin-shells.md) Decision 5 (this protocol), Decision 8
@@ -38,7 +44,7 @@ pipe        \\.\pipe\ghostlight-S-1-5-21-1004336348-1177238915-682003330-1001-b1
 The Windows pipe rejects remote clients, is created with the first-instance flag and carries a
 DACL for the user only. The Linux directory `<home>/run` is mode 0700 and the socket is mode 0600.
 Starting a service takes `run/service.lock`; the lock, the pipe flag and a probe of the socket
-file make a second service impossible.
+file make a second service impossible. A waiting edge's own wake endpoint is in section 11.
 
 ## 2. Peer checks, both ways
 
@@ -221,7 +227,37 @@ no templates at all (before the first connection) it answers a JSON-RPC internal
 | Largest frame | 8 MiB |
 | Hold limit | An MCP edge holds at most 4 MiB for at most 30 s while the service is away. |
 | Start backoff | First wait 500 ms, doubling to at most 30 s. |
+| Wake deadline | 1 s for a woken edge to close the wake connection (revision 5). |
 
 The goldens' `vocabulary.json` lists every closed word, the endpoint rules with the worked name
 above, the run directory, socket and lock names, and these bounds. A change to any of them is a
 change to the protocol.
+
+## 11. Wake endpoints (revision 5)
+
+Revision 5 adds one mechanism and changes nothing above. An edge that waits for a service
+registers a wake endpoint, and a service that becomes ready wakes every registered edge, so the
+edge looks at once instead of at its next scheduled look. The backoff of section 10 stays: a wake
+only ends the current wait early.
+
+| Platform | Wake endpoint | Registration |
+|---|---|---|
+| Windows | The named pipe `<service pipe name>-wake-<id>` | An empty file `<home>/run/wake/<id>` |
+| Linux and macOS | The Unix socket `<home>/run/wake/<id>` | The socket itself |
+
+- The id is sixteen lowercase hexadecimal digits, random for each registration. A file in
+  `run/wake` whose name is not an id is left alone.
+- An edge registers the first time it finds no service or loses the one it had, before it starts
+  one, and keeps the registration until it exits. An edge that cannot register keeps its scheduled
+  looks alone.
+- A service whose endpoint accepts openings connects to each registered endpoint and waits up to
+  1 s for the edge to close the connection. Nothing is written either way: the connection means
+  only "look now". A registration that nobody serves is removed.
+- The wake endpoint makes the checks of section 2 with the roles swapped: the edge serves it to
+  the same user only, and the service requires an edge of the same user. On Linux `run/wake` is
+  mode 0700 and each socket 0600.
+- A woken browser edge looks with its read-only `control` `readiness` opening and exits when a
+  service answers, as after any loss. A woken MCP edge with no connection opens its `mcp` stream
+  and never starts the service.
+- The service still admits revision 4 edges. It never wakes them, and they keep their scheduled
+  looks.

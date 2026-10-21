@@ -300,6 +300,7 @@ impl McpClient {
 
 #[cfg(test)]
 mod tests {
+    use ghostlight_relay::RELAY;
     use serde_json::json;
 
     use super::mcp_opening;
@@ -311,13 +312,13 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&mcp_opening(Some(session))).unwrap(),
             format!(
-                r#"{{"relay":4,"role":"mcp","edge":{{"program":"service","revision":4,"build":"{build}"}},"channel":"cli","session":{{"kind":"process","name":"bash.exe","pid":7,"started_at":9}}}}"#
+                r#"{{"relay":{RELAY},"role":"mcp","edge":{{"program":"service","revision":{RELAY},"build":"{build}"}},"channel":"cli","session":{{"kind":"process","name":"bash.exe","pid":7,"started_at":9}}}}"#
             )
         );
         assert_eq!(
             serde_json::to_string(&mcp_opening(None)).unwrap(),
             format!(
-                r#"{{"relay":4,"role":"mcp","edge":{{"program":"service","revision":4,"build":"{build}"}},"channel":"cli"}}"#
+                r#"{{"relay":{RELAY},"role":"mcp","edge":{{"program":"service","revision":{RELAY},"build":"{build}"}},"channel":"cli"}}"#
             )
         );
     }

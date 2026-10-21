@@ -45,6 +45,8 @@ pub mod event {
     pub const PROCESS_EXITED: &str = "process_exited";
     pub const IDLE_EXIT: &str = "idle_exit";
     pub const RUNTIME_PUBLISHED: &str = "runtime_published";
+    /// A service that became ready woke the edges waiting for it; the detail counts them.
+    pub const EDGES_WOKEN: &str = "edges_woken";
     pub const PROCESS_STARTED: &str = "process_started";
     pub const SINK_OPENED: &str = "sink_opened";
     pub const SINK_CLOSED: &str = "sink_closed";

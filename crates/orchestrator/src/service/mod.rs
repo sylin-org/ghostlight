@@ -126,6 +126,24 @@ fn published_detail(endpoint: Option<&str>, workbench: Option<&WorkbenchAddress>
     )
 }
 
+/// Wake every edge that waits for a service, from a thread of its own so that publication never
+/// waits on an edge, and record what it woke (ADR-0199 amendment of 2026-10-20).
+fn wake_waiting_edges(home: &Path, diagnostics: &DiagnosticsHub) {
+    let home = home.to_path_buf();
+    let sink = diagnostics.sink();
+    thread::spawn(move || {
+        let wakes = ghostlight_relay::wake::wake_all(&home);
+        if wakes != ghostlight_relay::wake::Wakes::default() {
+            sink.emit(
+                ghostlight_bridge::diagnostics::event::EDGES_WOKEN,
+                ghostlight_bridge::diagnostics::Level::Info,
+                None,
+                &format!("woken={} removed={}", wakes.woken, wakes.removed),
+            );
+        }
+    });
+}
+
 /// Record in diagnostics that this start failed, with the whole chain of `error`: a started
 /// service's own output goes nowhere, so this is the line a person reads.
 fn startup_failed(diagnostics: &DiagnosticsHub, error: &anyhow::Error) {
@@ -525,6 +543,7 @@ impl ServiceHost {
         self.ready.settle();
         self.intake.streams.published();
         self.intake.presence.published();
+        wake_waiting_edges(&self.home, &self.diagnostics);
         let endpoint = Endpoint::for_home(&self.home).map(|endpoint| endpoint.to_string());
         self.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
@@ -3053,6 +3072,23 @@ mod tests {
         held.release.store(true, Ordering::SeqCst);
         eventually(|| !sink.showing.load(Ordering::SeqCst));
         assert_eq!(held.started.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_published_service_wakes_the_edges_that_wait_for_it() {
+        let home = TestHome::new("wakes-waiting-edges");
+        let waiting = ghostlight_relay::wake::Waiting::register(home.path()).unwrap();
+        let (woken, wakes) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            if waiting.next().is_ok() {
+                let _ = woken.send(());
+            }
+        });
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        wakes
+            .recv_timeout(PATIENCE)
+            .expect("the waiting edge was woken");
     }
 
     #[test]

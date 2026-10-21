@@ -1,4 +1,5 @@
-//! The Linux endpoint: a Unix socket in a private run directory under the home.
+//! The Linux endpoint: a Unix socket in a private run directory under the home, and each wake
+//! endpoint a socket in the private wake directory below it.
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -8,17 +9,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use super::{run_directory, socket_path, ConnectError};
+use super::{run_directory, socket_path, wake_directory, ConnectError};
 use crate::os::{current_uid, peer_credentials};
 use crate::private;
 
-/// Mode of the run directory: the owner only.
-const RUN_DIRECTORY_MODE: u32 = 0o700;
+/// Mode of the run and wake directories: the owner only.
+const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
 
 /// Mode of the socket: read and write for the owner only.
 const SOCKET_MODE: u32 = 0o600;
 
-/// The group and other permission bits a trusted run directory has none of.
+/// The group and other permission bits a trusted run or wake directory has none of.
 const GROUP_AND_OTHER_BITS: u32 = 0o077;
 
 /// The permission bits of a mode.
@@ -68,8 +69,20 @@ pub(super) fn accept(listener: &Listener) -> io::Result<(Stream, Option<u32>)> {
 
 /// Create the run directory and bind the socket.
 pub(super) fn bind_first(home: &Path) -> io::Result<Listener> {
-    prepare_run_directory(&run_directory(home))?;
-    let path = socket_path(home);
+    prepare_private_directory(&run_directory(home))?;
+    bind_at(socket_path(home))
+}
+
+/// Create the run and wake directories and bind the socket of the wake endpoint `id`.
+pub(super) fn bind_wake(home: &Path, id: &str) -> io::Result<Listener> {
+    prepare_private_directory(&run_directory(home))?;
+    let wake = wake_directory(home);
+    prepare_private_directory(&wake)?;
+    bind_at(wake.join(id))
+}
+
+/// Bind a socket at `path`, in a directory already made private, and make it the owner's alone.
+fn bind_at(path: PathBuf) -> io::Result<Listener> {
     remove_stale_socket(&path)?;
     let inner = UnixListener::bind(&path)?;
     fs::set_permissions(&path, fs::Permissions::from_mode(SOCKET_MODE))?;
@@ -80,30 +93,36 @@ pub(super) fn bind_first(home: &Path) -> io::Result<Listener> {
     })
 }
 
-/// Make `run` a directory owned by this user and closed to everyone else, creating it if needed.
-fn prepare_run_directory(run: &Path) -> io::Result<()> {
-    match fs::symlink_metadata(run) {
+/// Make `directory` a directory owned by this user and closed to everyone else, creating it if
+/// needed.
+fn prepare_private_directory(directory: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(directory) {
         Ok(metadata) => {
             if !metadata.is_dir() {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
-                    "the run path is not a directory",
+                    "a run path is not a directory",
                 ));
             }
             if metadata.uid() != current_uid() {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
-                    "the run directory belongs to another user",
+                    "a run directory belongs to another user",
                 ));
             }
-            if metadata.mode() & PERMISSION_BITS == RUN_DIRECTORY_MODE {
+            if metadata.mode() & PERMISSION_BITS == PRIVATE_DIRECTORY_MODE {
                 return Ok(());
             }
         }
-        Err(failure) if failure.kind() == io::ErrorKind::NotFound => private::create_dir_all(run)?,
+        Err(failure) if failure.kind() == io::ErrorKind::NotFound => {
+            private::create_dir_all(directory)?;
+        }
         Err(failure) => return Err(failure),
     }
-    fs::set_permissions(run, fs::Permissions::from_mode(RUN_DIRECTORY_MODE))
+    fs::set_permissions(
+        directory,
+        fs::Permissions::from_mode(PRIVATE_DIRECTORY_MODE),
+    )
 }
 
 /// Remove a socket file that nobody listens on.
@@ -126,7 +145,23 @@ fn remove_stale_socket(path: &Path) -> io::Result<()> {
 
 /// Connect to the socket of `home` after checking its run directory.
 pub(super) fn connect(home: &Path, _deadline: Instant) -> Result<Stream, ConnectError> {
-    match fs::symlink_metadata(run_directory(home)) {
+    connect_at(&run_directory(home), &socket_path(home))
+}
+
+/// Connect to the wake endpoint `id` of `home` after checking the wake directory.
+pub(super) fn connect_wake(
+    home: &Path,
+    id: &str,
+    _deadline: Instant,
+) -> Result<Stream, ConnectError> {
+    let wake = wake_directory(home);
+    connect_at(&wake, &wake.join(id))
+}
+
+/// Connect to the socket at `path` after checking that `directory`, which holds it, is this
+/// user's alone.
+fn connect_at(directory: &Path, path: &Path) -> Result<Stream, ConnectError> {
+    match fs::symlink_metadata(directory) {
         Ok(metadata) => {
             let trusted = metadata.is_dir()
                 && metadata.uid() == current_uid()
@@ -140,7 +175,7 @@ pub(super) fn connect(home: &Path, _deadline: Instant) -> Result<Stream, Connect
         }
         Err(failure) => return Err(failure.into()),
     }
-    match UnixStream::connect(socket_path(home)) {
+    match UnixStream::connect(path) {
         Ok(stream) => Ok(Stream(stream)),
         Err(failure) => Err(match failure.kind() {
             io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => ConnectError::NoService,

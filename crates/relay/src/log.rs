@@ -66,6 +66,10 @@ pub enum Event {
     OpeningRefused,
     /// The service connection ended.
     ServiceDisconnected,
+    /// A service that became ready woke the edge ([`crate::wake`]).
+    ServiceReady,
+    /// The edge could not register its wake endpoint, so only its scheduled looks find a service.
+    WakeFailed,
 }
 
 impl Event {
@@ -83,6 +87,8 @@ impl Event {
             Self::ServiceConnected => "service_connected",
             Self::OpeningRefused => "opening_refused",
             Self::ServiceDisconnected => "service_disconnected",
+            Self::ServiceReady => "service_ready",
+            Self::WakeFailed => "wake_failed",
         }
     }
 }

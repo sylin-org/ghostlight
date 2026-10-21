@@ -31,6 +31,11 @@
 //! ([`Event::SessionEnded`]): nothing is started then (ADR-0199 Decision 13). A stream that ends
 //! with no goodbye is a crash and behaves as a lost connection.
 //!
+//! The first time the edge is without a service it registers its wake endpoint
+//! ([`Service::watch`], ADR-0199 amendment of 2026-10-20). When a service that became ready wakes
+//! it, an edge with no connection and no attempt running connects at once and never starts the
+//! service, so an edge left idle by a `quit` comes back too. The schedule stays as it was.
+//!
 //! Everything runs on one loop over [`Event`]s. Threads only read: one for stdin, one per service
 //! connection, and one per connection attempt. Time comes from an injected [`Clock`] so the bounds
 //! can be tested without waiting for them.
@@ -90,6 +95,10 @@ pub trait Service: Send + Sync + 'static {
 
     /// Start the service for `reason` without waiting for it to be ready.
     fn start(&self, reason: StartReason) -> io::Result<()>;
+
+    /// Call `ready` each time a service that became ready wakes this edge, for as long as the
+    /// process runs. Fails when the edge cannot register its wake endpoint.
+    fn watch(&self, ready: Box<dyn Fn() + Send>) -> io::Result<()>;
 }
 
 /// The source of the current time for every bound the edge keeps.
@@ -145,6 +154,8 @@ pub enum Event {
     ParentGone,
     /// The session is ending.
     SessionEnded,
+    /// A service that became ready woke the edge.
+    ServiceReady,
 }
 
 /// Forward one MCP session between `input`, `output` and the service until the input closes, the
@@ -223,6 +234,8 @@ struct Forwarder<W: Write> {
     ever_connected: bool,
     /// Whether a connection attempt is running.
     attempting: bool,
+    /// Whether the edge has asked to be woken, which it does once.
+    watching: bool,
     /// While a service that said `replace` is expected back, until when. Attempts made before
     /// then do not start the service.
     replacing_until: Option<Instant>,
@@ -257,6 +270,7 @@ impl<W: Write> Forwarder<W> {
             generation: 0,
             ever_connected: false,
             attempting: false,
+            watching: false,
             replacing_until: None,
             next_attempt: now,
             backoff: Backoff::new(),
@@ -292,7 +306,7 @@ impl<W: Write> Forwarder<W> {
             && !self.attempting
             && self.wants_service()
         {
-            self.attempt();
+            self.attempt(true);
         }
         Ok(())
     }
@@ -324,6 +338,13 @@ impl<W: Write> Forwarder<W> {
             Event::AttemptFailed => {
                 self.attempting = false;
                 self.next_attempt = self.environment.clock.now() + self.backoff.next_wait();
+                self.watch();
+            }
+            Event::ServiceReady => {
+                (self.environment.log)(LogEvent::ServiceReady, "");
+                if self.link.is_none() && !self.attempting {
+                    self.attempt(false);
+                }
             }
             Event::Frame(generation, frame) => {
                 if self.is_current(generation) {
@@ -334,6 +355,7 @@ impl<W: Write> Forwarder<W> {
                 if self.is_current(generation) {
                     (self.environment.log)(LogEvent::ServiceDisconnected, "");
                     self.disconnect(Again::Listings, None)?;
+                    self.watch();
                 }
             }
             Event::ParentGone => {
@@ -353,11 +375,25 @@ impl<W: Write> Forwarder<W> {
         self.link.is_some() && generation == self.generation
     }
 
-    /// Start one connection attempt on its own thread. A failed attempt starts the service,
-    /// except while a replacement is expected: the installer starts that one.
-    fn attempt(&mut self) {
+    /// Ask to be woken by the next service that becomes ready, once for the life of the edge.
+    fn watch(&mut self) {
+        if std::mem::replace(&mut self.watching, true) {
+            return;
+        }
+        let events = self.events.clone();
+        let ready = Box::new(move || {
+            let _ = events.send(Event::ServiceReady);
+        });
+        if let Err(error) = self.environment.service.watch(ready) {
+            (self.environment.log)(LogEvent::WakeFailed, &error.to_string());
+        }
+    }
+
+    /// Start one connection attempt on its own thread. A failed attempt starts the service when
+    /// `may_start`, except while a replacement is expected: the installer starts that one.
+    fn attempt(&mut self, may_start: bool) {
         self.attempting = true;
-        let starts = !self.replacement_expected();
+        let starts = may_start && !self.replacement_expected();
         let service = Arc::clone(&self.environment.service);
         let events = self.events.clone();
         let log = self.environment.log;
@@ -501,7 +537,9 @@ impl<W: Write> Forwarder<W> {
             } else {
                 without_responses(&held.line, responses).map(|line| HeldLine { line, ..held })
             };
-            return self.disconnect(Again::Listings, undelivered);
+            self.disconnect(Again::Listings, undelivered)?;
+            self.watch();
+            return Ok(());
         }
         if !held.sent_again && sent_again(&held) {
             self.again.push(held);
@@ -550,10 +588,14 @@ impl<W: Write> Forwarder<W> {
         match reason {
             GoodbyeReason::Replace => {
                 self.replacing_until = Some(self.environment.clock.now() + HOLD_LIMIT);
+                self.watch();
                 Ok(Flow::Continue)
             }
             GoodbyeReason::Uninstall | GoodbyeReason::SessionEnd => Ok(Flow::Exit),
-            GoodbyeReason::Quit | GoodbyeReason::Unknown => Ok(Flow::Continue),
+            GoodbyeReason::Quit | GoodbyeReason::Unknown => {
+                self.watch();
+                Ok(Flow::Continue)
+            }
         }
     }
 

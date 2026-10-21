@@ -25,6 +25,10 @@ pub const RELAY_SOCKET_NAME: &str = "relay.sock";
 /// The service's lock file under the run directory, held for as long as one service runs.
 pub const SERVICE_LOCK_NAME: &str = "service.lock";
 
+/// Directory under the run directory where each waiting edge registers its wake endpoint
+/// ([`crate::wake`]).
+pub const WAKE_DIRECTORY_NAME: &str = "wake";
+
 /// Directory holding the installed executables.
 pub const BIN_DIRECTORY_NAME: &str = "bin";
 

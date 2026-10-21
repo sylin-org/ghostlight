@@ -1,12 +1,13 @@
-//! Relay protocol 4: the frozen contracts between the Ghostlight edges, the command line and the
-//! service (ADR-0199 Decisions 3 and 5).
+//! Relay protocol 5: the frozen contracts between the Ghostlight edges, the command line and the
+//! service (ADR-0199 Decisions 3 and 5). Revision 5 is revision 4 with the [`wake`] endpoints
+//! (ADR-0199 amendment of 2026-10-20): its frames and openings are revision 4's.
 //!
 //! This crate is frozen. It holds only what a program must share with the service to stay stable
 //! across service upgrades: length-prefixed framing, the fixed home and its names, the
 //! [`endpoint`] (a named pipe on Windows and a Unix socket on Linux, with the connection type both
 //! ends share), the [`protocol`] vocabulary that runs over it, and the mechanics every edge
-//! repeats: starting the service, watching the parent, writing diagnostics and deciding where an
-//! edge's invocation goes ([`route`]). It authors no
+//! repeats: starting the service, watching the parent, being woken by a ready service, writing
+//! diagnostics and deciding where an edge's invocation goes ([`route`]). It authors no
 //! words and makes no product decisions. The `os` module is the audited platform layer: the only
 //! `unsafe` in the crate, it starts the service with no inherited handles, identifies a process on
 //! Windows, and holds the pipe and peer-user calls the endpoint needs.
@@ -27,10 +28,11 @@ pub mod private;
 pub mod protocol;
 pub mod route;
 pub mod spawn;
+pub mod wake;
 pub mod watchdog;
 
 /// The relay revision spoken by this crate. Carried in every opening.
-pub const RELAY: u16 = 4;
+pub const RELAY: u16 = 5;
 
 /// Largest frame, in bytes, either side reads or writes: 8 MiB.
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;

@@ -17,6 +17,11 @@
 //! also keeps the process id the peer check read ([`Connection::peer_process_id`]). The platform-specific
 //! parts live in [`crate::os`] (Windows pipes, user ids) and the private `windows` and `linux`
 //! files here.
+//!
+//! A waiting edge serves a wake endpoint of its own, which [`crate::wake`] names by an id: on
+//! Windows the service's pipe name with [`WAKE_PIPE_INFIX`] and the id, on Linux a socket named
+//! by the id in `run/wake/`. The service connects to it as a client. Both ends make the same
+//! checks as at the service's endpoint, with the roles of server and client swapped.
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -25,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::home::{RELAY_SOCKET_NAME, RUN_DIRECTORY_NAME};
+use crate::home::{RELAY_SOCKET_NAME, RUN_DIRECTORY_NAME, WAKE_DIRECTORY_NAME};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -39,6 +44,9 @@ use windows as platform;
 
 /// Prefix of every endpoint pipe name on Windows.
 const PIPE_NAME_PREFIX: &str = r"\\.\pipe\ghostlight-";
+
+/// What follows the service's pipe name in a wake endpoint's pipe name, before the id.
+pub const WAKE_PIPE_INFIX: &str = "-wake-";
 
 /// FNV-1a 32-bit offset basis.
 const FNV_OFFSET_BASIS: u32 = 0x811c_9dc5;
@@ -115,6 +123,15 @@ fn pipe_name(user_sid: &str, home: &Path) -> String {
     format!("{PIPE_NAME_PREFIX}{user_sid}-{}", home_hash(home))
 }
 
+/// The pipe name of the wake endpoint `id` for the user `user_sid` and `home`.
+#[cfg_attr(
+    not(windows),
+    expect(dead_code, reason = "only Windows names a wake pipe")
+)]
+fn wake_pipe_name(user_sid: &str, home: &Path, id: &str) -> String {
+    format!("{}{WAKE_PIPE_INFIX}{id}", pipe_name(user_sid, home))
+}
+
 /// The run directory under `home`.
 fn run_directory(home: &Path) -> PathBuf {
     home.join(RUN_DIRECTORY_NAME)
@@ -123,6 +140,12 @@ fn run_directory(home: &Path) -> PathBuf {
 /// The relay socket path under `home`.
 fn socket_path(home: &Path) -> PathBuf {
     run_directory(home).join(RELAY_SOCKET_NAME)
+}
+
+/// The directory under `home` where waiting edges register: `<home>/run/wake`.
+#[must_use]
+pub fn wake_directory(home: &Path) -> PathBuf {
+    run_directory(home).join(WAKE_DIRECTORY_NAME)
 }
 
 /// Why [`connect`] did not return a connection.
@@ -167,6 +190,17 @@ impl Listener {
         })
     }
 
+    /// Bind the wake endpoint `id` of `home`, for an edge that waits for a service.
+    ///
+    /// An endpoint that is already served yields [`io::ErrorKind::AddrInUse`]. On Linux this
+    /// creates the run and wake directories as [`Listener::bind_first`] creates the run
+    /// directory, removes a socket file nobody listens on, binds the socket and makes it 0600.
+    pub fn bind_wake(home: &Path, id: &str) -> io::Result<Self> {
+        Ok(Self {
+            inner: platform::bind_wake(home, id)?,
+        })
+    }
+
     /// Wait for the next peer that passes the same-user check and return its end, which knows
     /// the peer's process id ([`Connection::peer_process_id`]).
     ///
@@ -195,6 +229,18 @@ impl Listener {
 pub fn connect(home: &Path, deadline: Instant) -> Result<Connection, ConnectError> {
     Ok(Connection {
         inner: platform::connect(home, deadline)?,
+        peer_process_id: None,
+    })
+}
+
+/// Connect to the wake endpoint `id` of `home`, waiting at most until `deadline` for a busy one.
+///
+/// The edge that serves it is checked as [`connect`] checks the service: the same user, and on
+/// Linux a wake directory that belongs to this user with no group or other permission.
+/// [`ConnectError::NoService`] means no edge serves the id any more.
+pub fn connect_wake(home: &Path, id: &str, deadline: Instant) -> Result<Connection, ConnectError> {
+    Ok(Connection {
+        inner: platform::connect_wake(home, id, deadline)?,
         peer_process_id: None,
     })
 }

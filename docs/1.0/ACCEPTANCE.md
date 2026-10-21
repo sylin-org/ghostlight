@@ -37,7 +37,11 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 10. The MCP edge process survives a service restart: a call cut off by the restart is answered as
    cut off with the service's own words, and the next request resumes the session by token.
    The browser edge exits when a service accepts again, and the extension reconnects with a fresh
-   hello. Lines held while the service was away are delivered once, and a cut-off call is answered,
+   hello. A waiting edge of relay revision 5 is woken by the next service that becomes ready and
+   looks at once (ADR-0199 amendment of 2026-10-20): after a Quit, an agent's call that starts the
+   service finds the open browser within about a second, with no second browser window and no
+   `browser_startup_manual`. An edge that cannot be woken keeps its backoff
+   (`crates/relay/src/wake/tests.rs` and the wake tests of `crates/edge` and the service). Lines held while the service was away are delivered once, and a cut-off call is answered,
    never resent; a cut-off handshake or catalog listing, which changes nothing, is sent to the
    next service once (`tests/process-journey.mjs`; the rules are in `crates/edge/src/hold.rs` and
    `forward.rs`).
@@ -104,7 +108,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     silent, a connection that ended less than the grace ago, or a service endpoint published less
     than 1.5 seconds ago, while relays from before a restart reconnect, or less than the grace ago
     when the service replaced one that just ended (an update or a recovery) in a home that
-    remembers a browser. A call right after a service start therefore attaches to the
+    remembers a browser. Relays of revision 5 are woken at the publication, so they reconnect
+    inside that window after any start. A call right after a service start therefore attaches to the
     reconnecting browser instead of launching one. A
     browser closed longer ago than the grace earns no wait at all, even if it once reported
     attention, and a start with no relay stops waiting after 1.5 seconds, so browser startup keeps

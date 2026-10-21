@@ -109,8 +109,8 @@ The tree is a Rust workspace with these process/trust concerns:
   completion. Its `src/browser/adapter/` is the service half of each browser adapter: one module
   per browser family (`chromium/`), holding the wire levels the extension can speak and every page
   asset, JavaScript and CSS, that runs in a page.
-- `crates/relay/` -- relay protocol 4: endpoint, framing, start reasons, the session
-  listener and the route an edge invocation takes.
+- `crates/relay/` -- relay protocol 5, revision 4's frames with the wake endpoints: endpoint,
+  framing, start reasons, the wake, the session listener and the route an edge invocation takes.
 - `crates/edge/` -- the edge adapter, the `ghostlight` executable. It is the MCP relay
   (`ghostlight mcp`), the browser relay (a `chrome-extension://` argument) and the front door that
   hands every other command to `ghostlight-service`. It owns protocol lifecycle and generic

@@ -44,6 +44,14 @@ struct FakeState {
     probes: AtomicU32,
     openings: Mutex<Vec<Opening>>,
     browsers: Mutex<Vec<Browser>>,
+    /// How many times the edge asked to be woken.
+    watches: AtomicU32,
+    /// How many times it had asked when it first started the service.
+    watched_at_start: AtomicU32,
+    /// Set to refuse every request to be woken.
+    watch_fails: AtomicBool,
+    /// What the edge asked to have called when a service wakes it.
+    ready: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 
 impl FakeState {
@@ -105,6 +113,13 @@ impl FakeState {
         }
     }
 
+    /// Wake the edge, as a service that became ready does.
+    fn wake(&self) {
+        if let Some(ready) = self.ready.lock().unwrap().as_ref() {
+            ready();
+        }
+    }
+
     fn browser_streams(&self) -> usize {
         self.browsers.lock().unwrap().len()
     }
@@ -153,10 +168,22 @@ impl Service for FakeService {
 
     fn start(&self, reason: StartReason) -> io::Result<()> {
         self.0.reasons.lock().unwrap().push(reason);
-        self.0.starts.fetch_add(1, Ordering::SeqCst);
+        if self.0.starts.fetch_add(1, Ordering::SeqCst) == 0 {
+            let watches = self.0.watches.load(Ordering::SeqCst);
+            self.0.watched_at_start.store(watches, Ordering::SeqCst);
+        }
         if self.0.start_brings_up.load(Ordering::SeqCst) {
             self.0.up.store(true, Ordering::SeqCst);
         }
+        Ok(())
+    }
+
+    fn watch(&self, ready: Box<dyn Fn() + Send>) -> io::Result<()> {
+        self.0.watches.fetch_add(1, Ordering::SeqCst);
+        if self.0.watch_fails.load(Ordering::SeqCst) {
+            return Err(io::Error::other("no wake endpoint"));
+        }
+        *self.0.ready.lock().unwrap() = Some(ready);
         Ok(())
     }
 }
@@ -646,4 +673,78 @@ fn a_service_that_accepts_in_time_is_never_reported_absent() {
     assert!(harness.chrome_receives().is_empty());
     harness.chrome_closes();
     assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
+}
+
+#[test]
+fn the_edge_asks_once_to_be_woken_before_it_starts_the_service() {
+    let mut harness = Harness::start(false, false);
+    harness.chrome_sends(b"hello");
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    assert_eq!(
+        harness.fake.watched_at_start.load(Ordering::SeqCst),
+        1,
+        "a service that starts at once still finds it registered"
+    );
+    harness.fake.bring_up();
+    harness.fake.wake();
+    harness.wait(|| harness.fake.browser_streams() == 1);
+    harness.fake.go_down();
+    harness.wait(|| harness.chrome_receives().len() == 1);
+    harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 1);
+    assert_eq!(
+        harness.fake.watches.load(Ordering::SeqCst),
+        1,
+        "once for the life of the port"
+    );
+    harness.chrome_closes();
+    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
+}
+
+#[test]
+fn a_wake_before_the_first_connection_makes_the_edge_connect_at_once() {
+    let mut harness = Harness::start(false, false);
+    harness.chrome_sends(b"hello");
+    // The scheduled attempts come 0.5 s, 1.5 s and 3.5 s after the first.
+    harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) >= 3);
+    harness.fake.bring_up();
+    let woken = Instant::now();
+    harness.fake.wake();
+    harness.wait(|| harness.fake.browser_streams() == 1);
+    assert!(
+        woken.elapsed() < Duration::from_secs(1),
+        "the edge connected without waiting for its next scheduled attempt"
+    );
+    assert_eq!(harness.fake.received(0), [b"hello".to_vec()]);
+    harness.chrome_closes();
+    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
+}
+
+#[test]
+fn a_wake_after_the_loss_makes_the_edge_look_at_once() {
+    let mut harness = Harness::connected(b"hello");
+    harness.fake.go_down();
+    harness.wait(|| harness.chrome_receives().len() == 1);
+    // The scheduled looks come 0.5 s, 1.5 s and 3.5 s after the loss.
+    harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 2);
+    harness.fake.bring_up();
+    let woken = Instant::now();
+    harness.fake.wake();
+    assert_eq!(harness.finish().unwrap(), Ended::ServiceReturned);
+    assert!(
+        woken.elapsed() < Duration::from_secs(1),
+        "the edge looked without waiting for its next scheduled look"
+    );
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn an_edge_that_cannot_be_woken_still_finds_the_service_by_its_looks() {
+    let mut harness = Harness::connected(b"hello");
+    harness.fake.watch_fails.store(true, Ordering::SeqCst);
+    harness.fake.go_down();
+    harness.wait(|| harness.chrome_receives().len() == 1);
+    harness.wait(|| harness.fake.watches.load(Ordering::SeqCst) == 1);
+    harness.fake.bring_up();
+    assert_eq!(harness.finish().unwrap(), Ended::ServiceReturned);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
 }

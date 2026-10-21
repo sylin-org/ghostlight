@@ -33,9 +33,9 @@ fn a_new_opening_carries_this_revision_and_writes_only_what_is_set() {
     assert_eq!(
         serde_json::to_value(&opening).unwrap(),
         json!({
-            "relay": 4,
+            "relay": 5,
             "role": "browser",
-            "edge": {"program": "edge", "revision": 4, "build": "2.0.0"},
+            "edge": {"program": "edge", "revision": 5, "build": "2.0.0"},
         })
     );
 }

@@ -52,6 +52,10 @@ struct FakeState {
     /// The templates the accepted reply carries.
     templates: Mutex<Option<Templates>>,
     accepted: Mutex<Vec<Accepted>>,
+    /// How many times the edge asked to be woken.
+    watches: AtomicU32,
+    /// What the edge asked to have called when a service wakes it.
+    ready: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 
 impl FakeState {
@@ -65,6 +69,8 @@ impl FakeState {
             attempts: AtomicU32::new(0),
             templates: Mutex::new(Some(golden_templates())),
             accepted: Mutex::new(Vec::new()),
+            watches: AtomicU32::new(0),
+            ready: Mutex::new(None),
         })
     }
 
@@ -93,6 +99,13 @@ impl FakeState {
             received,
             closed,
         });
+    }
+
+    /// Wake the edge, as a service that became ready does.
+    fn wake(&self) {
+        if let Some(ready) = self.ready.lock().unwrap().as_ref() {
+            ready();
+        }
     }
 
     fn connections(&self) -> usize {
@@ -164,6 +177,12 @@ impl Service for FakeService {
         if self.0.start_brings_up.load(Ordering::SeqCst) {
             self.0.up.store(true, Ordering::SeqCst);
         }
+        Ok(())
+    }
+
+    fn watch(&self, ready: Box<dyn Fn() + Send>) -> io::Result<()> {
+        self.0.watches.fetch_add(1, Ordering::SeqCst);
+        *self.0.ready.lock().unwrap() = Some(ready);
         Ok(())
     }
 }
@@ -963,19 +982,57 @@ fn a_line_over_the_frame_bound_is_skipped_up_to_its_newline() {
 
 #[test]
 fn the_edge_sends_the_opening_bytes_it_sent_before() {
+    // Revision 5 sends the bytes revision 4 sent, under its own number.
     let build = env!("CARGO_PKG_VERSION");
     let fresh = serde_json::to_string(&opening(None)).unwrap();
     assert_eq!(
         fresh,
         format!(
-            r#"{{"relay":4,"role":"mcp","edge":{{"program":"edge","revision":4,"build":"{build}"}},"channel":"mcp"}}"#
+            r#"{{"relay":{RELAY},"role":"mcp","edge":{{"program":"edge","revision":{RELAY},"build":"{build}"}},"channel":"mcp"}}"#
         )
     );
     let resumed = serde_json::to_string(&opening(Some("rs1.token".to_owned()))).unwrap();
     assert_eq!(
         resumed,
         format!(
-            r#"{{"relay":4,"role":"mcp","edge":{{"program":"edge","revision":4,"build":"{build}"}},"resume":"rs1.token","channel":"mcp"}}"#
+            r#"{{"relay":{RELAY},"role":"mcp","edge":{{"program":"edge","revision":{RELAY},"build":"{build}"}},"resume":"rs1.token","channel":"mcp"}}"#
         )
+    );
+}
+
+#[test]
+fn a_wake_after_a_quit_connects_the_idle_edge_without_starting_the_service() {
+    let harness = Harness::connected(true);
+    harness.fake.up.store(false, Ordering::SeqCst);
+    say_goodbye(&harness, GoodbyeReason::Quit);
+    harness.advance(Duration::from_secs(60));
+    harness.settle();
+    assert_eq!(
+        harness.fake.connections(),
+        1,
+        "an idle edge waits after a quit"
+    );
+    assert_eq!(harness.fake.watches.load(Ordering::SeqCst), 1);
+    harness.fake.bring_up();
+    harness.fake.wake();
+    harness.wait(|| harness.fake.connections() == 2);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "Quit holds");
+}
+
+#[test]
+fn a_wake_that_finds_no_service_starts_nothing_and_tries_no_more() {
+    let harness = Harness::connected(true);
+    harness.fake.up.store(false, Ordering::SeqCst);
+    say_goodbye(&harness, GoodbyeReason::Quit);
+    let attempts = harness.fake.attempts.load(Ordering::SeqCst);
+    harness.fake.wake();
+    harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) == attempts + 1);
+    harness.advance(Duration::from_secs(60));
+    harness.settle();
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "Quit holds");
+    assert_eq!(
+        harness.fake.attempts.load(Ordering::SeqCst),
+        attempts + 1,
+        "an idle edge does not try again"
     );
 }

@@ -19,6 +19,12 @@
 //! [`Ended::ServiceReturned`] and the process exits, so the extension reconnects with a fresh
 //! hello on a new port.
 //!
+//! The first time the edge has to wait for a service, before the start or after the loss, it
+//! registers its wake endpoint ([`Service::watch`], ADR-0199 amendment of 2026-10-20). A service
+//! that becomes ready wakes it, and the edge looks at once instead of at its next scheduled look.
+//! The schedule stays as it was, so an edge that cannot register, or a wake that never comes,
+//! costs what it always cost.
+//!
 //! A service that ends the stream on purpose says goodbye first (ADR-0199 Decision 10). The
 //! goodbye is not the browser's frame and is never passed on. After `quit` and `replace` the
 //! edge behaves as it does for a lost service. After `uninstall` it returns
@@ -30,6 +36,7 @@
 //! next from the events they send. Correlation ids, command names and payloads are never read
 //! here, so nothing in a frame can reach the diagnostics.
 
+use std::cell::Cell;
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -78,6 +85,10 @@ pub trait Service: Send + Sync + 'static {
 
     /// Start the service for `reason` without waiting for it to be ready.
     fn start(&self, reason: StartReason) -> io::Result<()>;
+
+    /// Call `ready` each time a service that became ready wakes this edge, for as long as the
+    /// process runs. Fails when the edge cannot register its wake endpoint.
+    fn watch(&self, ready: Box<dyn Fn() + Send>) -> io::Result<()>;
 }
 
 /// Where diagnostics go: one closed event and a short, content-free detail.
@@ -113,6 +124,8 @@ pub enum Event {
     ServiceUninstalled,
     /// The session is ending, whether the service said so or this process heard it.
     SessionEnded,
+    /// A service that became ready woke the edge.
+    ServiceReady,
 }
 
 /// Why [`run`] returned. Every one of them is a clean exit.
@@ -166,6 +179,7 @@ pub fn run(
         events,
         inbox,
         started,
+        watching: Cell::new(false),
     }
     .carry(output);
     shared.end();
@@ -263,6 +277,8 @@ enum Waited {
     Hello(Vec<u8>),
     /// The service connection ended.
     Lost,
+    /// A service that became ready woke the edge.
+    Ready,
     /// The port is over.
     Ended(Ended),
 }
@@ -275,6 +291,8 @@ struct Port {
     inbox: Receiver<Event>,
     /// When the edge started, which [`Environment::absent_after`] counts from.
     started: Instant,
+    /// Whether the edge has asked to be woken, which it does once.
+    watching: Cell<bool>,
 }
 
 impl Port {
@@ -294,6 +312,7 @@ impl Port {
             }
             if !started {
                 started = true;
+                self.watch();
                 self.start_service();
             }
             let wait = backoff
@@ -321,6 +340,7 @@ impl Port {
                 }
             }
         }
+        self.watch();
         let mut backoff = Backoff::new();
         loop {
             if let Some(ended) = self.pause(backoff.next_wait())? {
@@ -338,17 +358,22 @@ impl Port {
             match self.wait(None)? {
                 Waited::Hello(hello) => return Ok(Ok(hello)),
                 Waited::Ended(ended) => return Ok(Err(ended)),
-                Waited::Elapsed | Waited::Lost => {}
+                Waited::Elapsed | Waited::Lost | Waited::Ready => {}
             }
         }
     }
 
-    /// Wait out `wait`, returning early only when the port ends.
+    /// Wait out `wait`, returning early when a service wakes the edge, so it looks at once, and
+    /// when the port ends.
     fn pause(&self, wait: Duration) -> io::Result<Option<Ended>> {
         let limit = Instant::now() + wait;
         loop {
             match self.wait(Some(limit))? {
                 Waited::Elapsed => return Ok(None),
+                Waited::Ready => {
+                    (self.environment.log)(LogEvent::ServiceReady, "");
+                    return Ok(None);
+                }
                 Waited::Ended(ended) => return Ok(Some(ended)),
                 Waited::Hello(_) | Waited::Lost => {}
             }
@@ -361,7 +386,7 @@ impl Port {
             match self.wait(None)? {
                 Waited::Lost => return Ok(None),
                 Waited::Ended(ended) => return Ok(Some(ended)),
-                Waited::Elapsed | Waited::Hello(_) => {}
+                Waited::Elapsed | Waited::Hello(_) | Waited::Ready => {}
             }
         }
     }
@@ -385,6 +410,7 @@ impl Port {
         match event {
             Event::Hello(hello) => Ok(Waited::Hello(hello)),
             Event::ServiceLost => Ok(Waited::Lost),
+            Event::ServiceReady => Ok(Waited::Ready),
             Event::ServiceUninstalled => Ok(Waited::Ended(Ended::ServiceUninstalled)),
             Event::SessionEnded => {
                 (self.environment.log)(LogEvent::SessionEnded, "");
@@ -420,6 +446,20 @@ impl Port {
                 log(LogEvent::ConnectFailed, &error.to_string());
                 None
             }
+        }
+    }
+
+    /// Ask to be woken by the next service that becomes ready, once for the life of the port.
+    fn watch(&self) {
+        if self.watching.replace(true) {
+            return;
+        }
+        let events = self.events.clone();
+        let ready = Box::new(move || {
+            let _ = events.send(Event::ServiceReady);
+        });
+        if let Err(error) = self.environment.service.watch(ready) {
+            (self.environment.log)(LogEvent::WakeFailed, &error.to_string());
         }
     }
 

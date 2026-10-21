@@ -21,9 +21,9 @@ crate, `crates/relay`. The edge is one executable that runs as two relays:
 ```text
 MCP client
   -> ghostlight mcp (the edge as the MCP relay)
-  -> relay protocol 4
+  -> relay protocol 5
   -> ghostlight-service
-  -> relay protocol 4
+  -> relay protocol 5
   -> ghostlight chrome-extension://... (the edge as the browser relay)
   -> browser native messaging
   -> the extension, policy-free
@@ -35,8 +35,9 @@ local human
   -> the same orchestrator contexts
 ```
 
-- `crates/relay` is the frozen relay protocol 4: the endpoint, the peer checks, framing, the
-  opening, start reasons, the session listener and the route an edge invocation takes. The browser
+- `crates/relay` is the frozen relay protocol 5, revision 4's frames with the wake endpoints: the
+  endpoint, the peer checks, framing, the opening, start reasons, the wake, the session listener
+  and the route an edge invocation takes. The browser
   adapter component lives in `crates/orchestrator/src/browser/adapter`, because only the service
   reads it: one module per browser family, holding the typed wire vocabulary of each level the
   extension can speak and every page asset that runs in a page.
@@ -206,7 +207,8 @@ A person's Quit (the tray, the workbench, or control `quit` with reason `quit`) 
 `recover` start exits 0 with a diagnostics event before it takes the lock, and again if the
 latch was set while it waited for the lock; any other start deletes it after taking the lock and
 serves. So after Quit a browser restart does not bring
-Ghostlight back; the next agent request, a command that needs it, or a person does. Before it
+Ghostlight back; the next agent request, a command that needs it, or a person does. The service
+they start wakes the edges that waited (below), so a browser left open comes back with it. Before it
 closes its streams the service sends a goodbye on each: `quit`, `replace` (the installer's quit)
 or `uninstall`.
 
@@ -441,8 +443,9 @@ grants no authority. Its channel decides one thing: a policy's channel switch re
 on a channel it turns off (ADR-0202 Decision 22a). Audit lines with
 extra attribution fields still read; the extra fields are ignored.
 
-Every peer reaches the service through one endpoint (relay protocol 4, ADR-0199 Decision 5; the
-contract is [relay-protocol-4](../design/relay-protocol-4.md)): a named pipe on Windows and a Unix
+Every peer reaches the service through one endpoint (relay protocol 5, ADR-0199 Decision 5 and its
+amendment of 2026-10-20; the contract is [relay-protocol-4](../design/relay-protocol-4.md), whose
+section 11 adds revision 5's wake, and the service admits revisions 4 and 5): a named pipe on Windows and a Unix
 socket in `run` on Linux. The relay has no port, token or discovery file; the workbench's one
 loopback port carries no relay peer. The endpoint belongs to the user and the home, only the same
 user can open it, and each end checks the other's user before a payload byte moves. The relay framing, a four-byte little-endian length prefix, is Chromium's, so
@@ -506,7 +509,11 @@ just ended (an update or the shell's recovery) in a home that remembers a browse
 backoff (0.5, 1.5, 3.5 and 7.5 seconds after the loss), and a replacement slower than 1.5 seconds
 would otherwise stop waiting before the look that finds it. A relay that does reconnect registers
 inside its window, and its registration then carries the wait through the page-runtime
-installation.
+installation. A waiting relay of revision 5 is also woken: once its endpoint accepts openings,
+the service wakes every edge registered in `run/wake`, and each looks at once instead of at its
+next scheduled look. So a browser left open returns inside the window after any start, a start on
+demand long after a Quit included. The backoff stays for a wake that never comes and for revision
+4 relays, which are never woken.
 Reported attention is not evidence, because it never lapses. Once no evidence remains, recovery
 runs at once, so a browser closed long ago or a cold start with no relay keeps nearly the whole
 deadline for a launch.

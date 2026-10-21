@@ -15,9 +15,19 @@ fn current_pipe_name(home: &Path) -> io::Result<String> {
     Ok(super::pipe_name(&os::current_user_sid()?, home))
 }
 
+/// The pipe name of the current user's wake endpoint `id` under `home`.
+fn current_wake_pipe_name(home: &Path, id: &str) -> io::Result<String> {
+    Ok(super::wake_pipe_name(&os::current_user_sid()?, home, id))
+}
+
 /// Create the first pipe instance for `home`.
 pub(super) fn bind_first(home: &Path) -> io::Result<Listener> {
     Listener::bind_first(&current_pipe_name(home)?)
+}
+
+/// Create the first pipe instance of the wake endpoint `id` under `home`.
+pub(super) fn bind_wake(home: &Path, id: &str) -> io::Result<Listener> {
+    Listener::bind_first(&current_wake_pipe_name(home, id)?)
 }
 
 /// Accept the next admitted client of `listener`, with its process id.
@@ -28,7 +38,21 @@ pub(super) fn accept(listener: &Listener) -> io::Result<(Stream, Option<u32>)> {
 
 /// Connect to the pipe of `home`.
 pub(super) fn connect(home: &Path, deadline: Instant) -> Result<Stream, ConnectError> {
-    os::connect_pipe(&current_pipe_name(home)?, deadline).map_err(|failure| match failure {
+    connect_named(&current_pipe_name(home)?, deadline)
+}
+
+/// Connect to the wake endpoint `id` under `home`.
+pub(super) fn connect_wake(
+    home: &Path,
+    id: &str,
+    deadline: Instant,
+) -> Result<Stream, ConnectError> {
+    connect_named(&current_wake_pipe_name(home, id)?, deadline)
+}
+
+/// Connect to the pipe `name` and check that its server is this user's.
+fn connect_named(name: &str, deadline: Instant) -> Result<Stream, ConnectError> {
+    os::connect_pipe(name, deadline).map_err(|failure| match failure {
         PipeConnectError::NoService => ConnectError::NoService,
         PipeConnectError::Foreign => ConnectError::ForeignServer,
         PipeConnectError::Closed => ConnectError::Closed,

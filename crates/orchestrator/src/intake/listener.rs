@@ -2,16 +2,16 @@
 //!
 //! Every peer reaches the service through one endpoint: the MCP edge, the browser edge and the
 //! command line alike. The endpoint has already admitted only the same user. Each connection then
-//! opens with one relay protocol 4 opening. This module judges an opening before anything else is
-//! read, and writes the one reply that accepts or refuses it. What an accepted stream carries is
-//! the service's to serve.
+//! opens with one relay opening, of revision 4 or later. This module judges an opening before
+//! anything else is read, and writes the one reply that accepts or refuses it. What an accepted
+//! stream carries is the service's to serve.
 
 use ghostlight_relay::endpoint::Connection;
 use ghostlight_relay::frame::{self, FrameError};
 use ghostlight_relay::protocol::{
     Control, ControlResult, Opening, Program, QuitReason, RefusalCode, Reply, Role,
 };
-use ghostlight_relay::{OPENING_DEADLINE, RELAY};
+use ghostlight_relay::OPENING_DEADLINE;
 use serde::Serialize;
 
 use crate::intake::opening::{read_opening, OpeningError};
@@ -94,10 +94,15 @@ fn is_this_builds_shell(opening: &Opening) -> bool {
     opening.edge.program == Program::Desktop && opening.edge.build == env!("CARGO_PKG_VERSION")
 }
 
+/// The oldest relay revision the service admits: 4, what a 2.0.0 edge speaks. Revision 5 added
+/// only the wake endpoints (ADR-0199 amendment of 2026-10-20), so the edges of a service this one
+/// replaced keep working until they restart.
+const OLDEST_RELAY: u16 = 4;
+
 /// Read the opening of a new connection and judge it.
 ///
-/// The opening must arrive within [`OPENING_DEADLINE`]. Its relay revision must be one this
-/// service speaks (this one and later), its role must be one a 2.0 service serves, and a `control`
+/// The opening must arrive within [`OPENING_DEADLINE`]. Its relay revision must be
+/// [`OLDEST_RELAY`] or later, its role must be one a 2.0 service serves, and a `control`
 /// opening must name an operation, and for `quit` a reason, that the service knows. A `desktop`
 /// opening must come from the shell of this service's own build. A quitting service takes no new
 /// connection.
@@ -111,7 +116,7 @@ pub fn judge(connection: &Connection, quitting: bool) -> Judgement {
             return Judgement::Drop
         }
     };
-    if opening.relay < RELAY {
+    if opening.relay < OLDEST_RELAY {
         return Judgement::Refuse(OpeningRefusal::Unsupported);
     }
     match (opening.role, opening.control) {
@@ -310,8 +315,21 @@ mod tests {
             Judgement::Refuse(OpeningRefusal::Unsupported)
         );
         let mut later = opening(Role::Browser);
-        later["relay"] = 5.into();
+        later["relay"] = (ghostlight_relay::RELAY + 1).into();
         assert!(matches!(judged(&later, false), Judgement::Admit(_)));
+    }
+
+    #[test]
+    fn a_revision_4_edge_and_a_revision_5_edge_are_both_admitted() {
+        for relay in [4, 5] {
+            let mut sent = opening(Role::Browser);
+            sent["relay"] = relay.into();
+            assert!(
+                matches!(judged(&sent, false), Judgement::Admit(_)),
+                "{relay}"
+            );
+        }
+        assert_eq!(ghostlight_relay::RELAY, 5);
     }
 
     #[test]

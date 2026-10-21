@@ -12,8 +12,8 @@ Statuses: `todo`, `landed` (with commits), `blocked` (with the reason).
 
 ## RESUME HERE
 
-S-D1, S-D2 and SERV-7 have landed. S-D2 fixed the update case; the demand start after a Quit is
-open and waits on the owner's choice (Notes). Next: C19c-s.
+S-D1, S-D2, SERV-7 and S-D3 have landed. S-D2 fixed the update case and S-D3 the start on demand
+after a Quit (Notes). Next: C19c-s.
 
 ## Slices
 
@@ -23,7 +23,8 @@ In order. "After" names what a slice waits for.
 | --- | --- | --- | --- | --- |
 | S-D1 | fix(intake): an opening that carries the largest resume token is accepted | - | SERV-1; the opening cap rises above the token cap, with a const assert, so tokens 2.0.0 edges hold pass too | landed (3db83135) |
 | S-D2 | fix(service): a replacement waits for the browsers of the service it replaced | - | BROW-9; the test failed before the fix | landed (9c257daa) |
-| SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | landed (this commit) |
+| SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | landed (0ba38fa7) |
+| S-D3 | fix(relay): a ready service wakes the edges that wait for it | - | BROW-9's open half, the owner's design (ADR-0199 amendment of 2026-10-20); relay revision 5 | landed (this commit) |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
 | BROW-2 | refactor(browser): the dead recovery decisions go | - | BROW-2 | todo |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
@@ -79,3 +80,15 @@ publication, so in about 97% of cases the relay's next look falls outside any wi
 (Decision 13). The ways out: the extension reopens its port on its own schedule while the service
 is absent (package lane), or recovery declines to start a browser whose relay is still alive and
 says it is reconnecting (a new refusal word, and a way to know the relay is alive).
+
+S-D3 settles it the owner's way, on 2026-10-20: event-driven, with a check fallback, and the timing
+left to the coordinator. The browser and the extension still know nothing of the service. A
+waiting edge registers a wake endpoint in `run/wake` (`ghostlight_relay::wake`), the service wakes
+every registered edge once its endpoint accepts openings (`publish_ready`), and a woken edge looks
+at once. The backoff stays, and both sides log the wake (`service_ready`, `edges_woken`). The edge
+changes, so relay revision 5 replaces 4 and the service admits both (`intake/listener.rs`
+`OLDEST_RELAY`). ADR-0203 Decision 13 is amended for this one change. Tests: the wake module's in
+`crates/relay`, the edges' wake tests in `port/tests.rs` and `forward/tests.rs`, `golden5.rs`, the
+listener's revisions test and the service's publication test. The live proof runs on a test
+machine: Quit, wait past 30 s, an agent call, and the browser is back within a second with no
+second window.
