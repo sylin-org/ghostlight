@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The extension no longer refuses text that is within a tool's stated limit but holds emoji or
+  other characters outside the Basic Multilingual Plane. It counted each such character twice, as
+  JavaScript's string length does, while the service counts it once. An agent with a long emoji
+  name got a tab group title too long for the extension, so it could open no tab, and a long
+  `browser_find` name or `browser_diagnose` filter could fail the same way.
 - `browser_history` back and forward go to the previous or next page of the tab's history, even
   when the agent moved between pages with `browser_navigate` alone. They followed the browser's back
   button, which skips a page the person never interacted with, so the call went nowhere and read as

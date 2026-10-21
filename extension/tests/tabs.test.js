@@ -661,3 +661,10 @@ test("a group someone else titled is never retitled", async () => {
   assert.equal(chrome.groupList.find((group) => group.id === 9).title, "Research");
   assert.ok(chrome.groupList.some((group) => group.id !== 9 && group.title === TITLE));
 });
+
+test("a group title's limit counts characters, so an emoji is one", () => {
+  const { tabs } = setup();
+  const titled = (count) => ({ ...goldenArgs("open_tab"), group_title: `${protocol.vocabulary.group_title_prefix}${"\u{1F600}".repeat(count)}` });
+  assert.doesNotThrow(() => tabs.openTab.validate(titled(protocol.GROUP_TITLE_CHARS - 2)));
+  assert.throws(() => tabs.openTab.validate(titled(protocol.GROUP_TITLE_CHARS - 1)), { code: "invalid_request" });
+});

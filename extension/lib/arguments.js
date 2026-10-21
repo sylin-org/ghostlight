@@ -70,9 +70,15 @@
     return value;
   }
 
+  // The characters in `text` as the service counts them: Unicode code points, so an emoji is one
+  // character and not the two UTF-16 code units of its `length`. Every text limit counts these.
+  function characters(text) {
+    return [...text].length;
+  }
+
   /** Requires text of at most `maximum` characters; an empty string passes only with `empty`. */
   function requireText(value, name, maximum, { empty = false } = {}) {
-    if (typeof value !== "string" || (!empty && value.length === 0) || value.length > maximum) {
+    if (typeof value !== "string" || (!empty && value.length === 0) || (value.length > maximum && characters(value) > maximum)) {
       throw invalid(`${name} must be text of at most ${maximum} characters.`);
     }
     return value;

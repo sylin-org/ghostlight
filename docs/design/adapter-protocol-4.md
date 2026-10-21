@@ -599,7 +599,9 @@ Argument bounds checked by the extension (a violation is `invalid_request`, `dis
 - `resize_window`: width 320 to 7680, height 240 to 4320.
 - `diagnostics` `limit`: 1 to 200.
 - `max_nodes`: at most 5000.
-- strings bounded as today: urls 8192, titles 500.
+- strings bounded as today: urls 8192, titles 500, group titles 120 (`group_title_chars`).
+- every text bound counts characters as Unicode code points, as the service's checks do, so an
+  emoji is one character, not the two UTF-16 code units of its JavaScript `length`.
 
 ### 1.6 Failure codes and call answers
 

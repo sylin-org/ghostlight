@@ -11,8 +11,8 @@ Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
 adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15,
-EXT-9, EXT-10, EXT-11, C18, P-D2 and EXT-5 have landed, and so has P-D3, the owner's group title
-(the coordinator, 2026-10-21). Next: EXT-6 (each module exports its own
+EXT-9, EXT-10, EXT-11, C18, P-D2 and EXT-5 have landed, and so have P-D3, the owner's group title,
+and P-D4 (the coordinator, 2026-10-21). Next: EXT-6 (each module exports its own
 handler spec through one `handler()`), then EXT-12, then B-final. B-final regenerates the freeze
 record from the release workflow's candidate zip, not a test-02 package, and stops there: the
 store cancel and resubmission are the owner's call. Parked 2026-10-21 for the night with nothing
@@ -91,7 +91,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18, P-D2, EXT-5 and P-D3 have landed; EXT-6 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18, P-D2, EXT-5, P-D3 and P-D4 have landed; EXT-6 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -110,6 +110,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | EXT-12 | refactor(extension): the native link moves into `lib/link.js` | EXT-5, EXT-7, EXT-10 | EXT-12 | todo |
 | EXT-15 | docs(extension): module docs, and the README lists every file | - | EXT-15; the README is not packaged | landed (this commit) |
 | P-D3 | feat(extension): a group's title is the ghost and the agent's name, and a 2.0.0 group is retitled | - | the owner's request of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `language/provenance.rs` | landed (this commit) |
+| P-D4 | fix(extension): a text limit counts characters, as the service does | - | found while doing P-D3 (Notes); the coordinator | landed (this commit) |
 | B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | todo |
 
 ### Notes (second sweep)
@@ -319,9 +320,16 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   tests run on it and only the legacy tests use the old one. The freeze record is regenerated from a
   local package; B-final takes it from the release workflow's candidate. Owed: the tab strip on the
   four test machines, the Alpine one first, for the emoji font.
-- Found while doing P-D3, not fixed by it: the extension refuses a `group_title` longer than 120
-  UTF-16 code units (`tabs.js`), while the service cuts the agent's name at 80 characters
-  (`provenance.rs`). A claimed name whose kept characters take more than 117 code units, which
-  takes characters outside the Basic Multilingual Plane such as emoji, makes a title the extension
-  refuses, so that agent can open no tab. It predates P-D3, which shortens the prefix from 13 units
-  to 3. The coordinator takes it next.
+- P-D4, found while doing P-D3: `arguments.requireText` counted a text's `length`, in UTF-16 code
+  units, while the service's checks count `chars()`, code points. A character outside the Basic
+  Multilingual Plane, such as an emoji, counts twice in the extension and once in the service, so
+  text the service accepted could be refused as `invalid_request`. The group title showed it: the
+  service cuts the agent's name at 80 characters, and an emoji name of 59 or more made a title over
+  the extension's 120, so that agent could open no tab. `browser_find`'s name and
+  `browser_diagnose`'s match (500 on both sides) and a recording's file name (255) had the same
+  gap. `requireText` now counts code points, and only when the text's `length` is over the limit.
+  The 120 moves into the vocabulary as the top-level `group_title_chars` (a key inside `limits`
+  would change 2.0.0's `limits`, which the compatibility test forbids, as with EXT-5's
+  `chunk_limits`), and `golden.rs` pins that the longest title the service composes fits it.
+  `shared.bounded` still cuts by code units and can leave half an emoji at the end of a cut tab
+  title, which drops the browser connection; P-D5 takes that.

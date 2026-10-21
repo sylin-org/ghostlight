@@ -237,7 +237,9 @@ Now:
   title is the ghost emoji and the agent's name instead of `Ghostlight - `, and the extension
   retitles a group 2.0.0 named rather than opening a second one (ADR-0098 amendment of
   2026-10-21). P-D3 changes three packaged extension files, so the next candidate carries it.
-  Owed: the tab strip on the four test machines, the Alpine one first, for the emoji font.
+  Owed: the tab strip on the four test machines, the Alpine one first, for the emoji font. Found
+  while doing P-D3, P-D4: the extension counts a text limit in characters, as the service does, so
+  text with emoji within a tool's limit is no longer refused.
 - Second sweep state after that night. core-language and adapter are done, and so is the policy
   lane. package: EXT-6, EXT-12 and B-final are next. core-work: W-D4 is next: after a Quit, closing
   a handle the Quit released says "That tab was already closed." while the tab stays open.

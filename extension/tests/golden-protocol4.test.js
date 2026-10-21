@@ -79,6 +79,7 @@ test("protocol.js scalar constants come from the vocabulary", () => {
   assert.equal(protocol.MAX_PAUSE_MS, vocabulary.limits.max_pause_ms);
   assert.equal(protocol.URL_CHARS, vocabulary.limits.url_chars);
   assert.equal(protocol.TITLE_CHARS, vocabulary.limits.title_chars);
+  assert.equal(protocol.GROUP_TITLE_CHARS, vocabulary.group_title_chars);
   assert.equal(protocol.HELLO_TIMEOUT_MS, vocabulary.limits.hello_timeout_ms);
 });
 

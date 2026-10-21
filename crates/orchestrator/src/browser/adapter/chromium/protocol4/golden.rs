@@ -578,6 +578,21 @@ fn the_constants_and_limits_equal_the_vocabulary() {
     assert_eq!(limits["max_unseen"], wire::MAX_UNSEEN);
 }
 
+/// The extension refuses a longer group title, and the agent it names could open no tab.
+#[test]
+fn the_longest_group_title_fits_the_extensions_limit() {
+    let longest = crate::language::provenance::group_title(&crate::agent::Agent::of(
+        Some(&"\u{1F600}".repeat(200)),
+        crate::intake::session::IntakeChannel::Mcp,
+    ));
+    let limit = vocabulary()["group_title_chars"]
+        .as_u64()
+        .and_then(|limit| usize::try_from(limit).ok())
+        .expect("the group title limit");
+    let characters = longest.chars().count();
+    assert!(characters <= limit, "{characters} > {limit}");
+}
+
 /// Every asset error code, through an exhaustive match.
 fn asset_error_codes() -> Vec<String> {
     names!(AssetErrorCode: StaleLocator, NotVisible, Disabled, ReadOnly, NotEditable,

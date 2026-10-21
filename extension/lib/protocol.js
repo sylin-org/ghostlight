@@ -57,6 +57,7 @@
     unknown_dialog_type: "unknown",
     group_title_prefix: "\u{1F47B} ",
     legacy_group_title_prefixes: ["Ghostlight - "],
+    group_title_chars: 120,
     chunk_limits: { chunk_payload_bytes: 524288, transfer_max_bytes: 8388608, transfer_max_chunks: 64 },
     limits: {
       direct_frame_bytes: 786432,
@@ -155,6 +156,7 @@
     MAX_PAUSE_MS: vocabulary.limits.max_pause_ms,
     URL_CHARS: vocabulary.limits.url_chars,
     TITLE_CHARS: vocabulary.limits.title_chars,
+    GROUP_TITLE_CHARS: vocabulary.group_title_chars,
     HELLO_TIMEOUT_MS: vocabulary.limits.hello_timeout_ms
   });
 });

@@ -26,7 +26,6 @@
   const GROUP_COLOR = "blue";
   const NO_GROUP = -1;
   const GROUP_KEY_CHARS = 200;
-  const GROUP_TITLE_CHARS = 120;
   const MESSAGE_CHARS = 500;
   const READY_POLL_MS = 100;
   const HISTORY_SETTLE_MS = 75;
@@ -327,7 +326,7 @@
         if (args.adopt_tab_id === undefined && args.url === undefined) throw invalid("open_tab requires a url unless it adopts a tab.");
         if (args.url !== undefined) requireText(args.url, "url", protocol.URL_CHARS);
         requireText(args.group_key, "group_key", GROUP_KEY_CHARS);
-        requireText(args.group_title, "group_title", GROUP_TITLE_CHARS);
+        requireText(args.group_title, "group_title", protocol.GROUP_TITLE_CHARS);
         if (typeof args.focus_window !== "boolean") throw invalid("focus_window must be true or false.");
         requireInteger(args.ready_timeout_ms, "ready_timeout_ms");
       },
