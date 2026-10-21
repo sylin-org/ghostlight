@@ -35,6 +35,7 @@ use crate::intake::session::IntakeChannel;
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::PolicyAuthor;
 use crate::language::policy;
+use crate::sync::lock;
 use file_state::FileState;
 use host_pattern::{url_host, HostPattern, ParsedHosts};
 use manifest::PolicySetting;
@@ -1281,10 +1282,7 @@ impl RuntimeControls {
     /// A change from the tray, the workbench or an extension intent all end here, so each one
     /// reaches the observer exactly once. A request that leaves the state as it was does not.
     pub fn observe(&self, observer: ControlObserver) {
-        *self
-            .observer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(observer);
+        *lock(&self.observer) = Some(observer);
     }
 
     /// Apply one local human control intent and return the resulting state.
@@ -1320,9 +1318,7 @@ impl RuntimeControls {
     /// The lock is held across a store and its notice, so two changes reach the observer in the
     /// order they were made.
     fn lock_observer(&self) -> std::sync::MutexGuard<'_, Option<ControlObserver>> {
-        self.observer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        lock(&self.observer)
     }
 
     /// Store `next` and tell `observer` when it differs from the state before. The caller holds
@@ -2216,12 +2212,6 @@ fn read_policy(path: &Path, owned: bool) -> Result<manifest::Manifest, Governanc
     }
     manifest::parse(&text, &origin)
         .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn authority_id(layers: &[PolicyLayer], valid: bool) -> String {
