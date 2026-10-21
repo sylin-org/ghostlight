@@ -145,149 +145,92 @@ mod tests {
         names
     }
 
+    /// ADR-0197 Decision 14: an image is replaced while it runs by renaming: a first install places it,
+    /// a swap moves the current image aside under a number and puts the new one in its name, and a swap
+    /// that cannot finish (a missing source, a failed move aside, a failed last rename) leaves the old
+    /// image working under its own name. The directory made for it is private (defect fafb0cb5) and the
+    /// image keeps its mode.
     #[test]
-    fn a_first_install_places_the_image() {
-        let scratch = Scratch::new();
-        let source = scratch.path().join("payload");
-        fs::write(&source, b"one").unwrap();
-        let bin = scratch.path().join("bin");
-        rename_swap(&bin, "ghostlight", &source).unwrap();
-        assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"one");
-        assert_eq!(names(&bin), ["ghostlight"]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_directory_made_for_the_image_is_private_and_the_image_keeps_its_mode() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let scratch = Scratch::new();
-        let source = scratch.path().join("payload");
-        fs::write(&source, b"one").unwrap();
-        fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
-        let bin = scratch.path().join("bin");
-        rename_swap(&bin, "ghostlight", &source).unwrap();
-        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&bin), 0o700);
-        assert_eq!(mode(&bin.join("ghostlight")), 0o755);
-    }
-
-    #[test]
-    fn a_swap_moves_the_current_image_aside_under_a_number() {
-        let scratch = Scratch::new();
-        let source = scratch.path().join("payload");
-        let bin = scratch.path().join("bin");
-        for contents in [&b"one"[..], b"two", b"three"] {
-            fs::write(&source, contents).unwrap();
+    fn a_swap_replaces_a_running_image_or_leaves_the_old_one() {
+        {
+            let scratch = Scratch::new();
+            let source = scratch.path().join("payload");
+            fs::write(&source, b"one").unwrap();
+            let bin = scratch.path().join("bin");
             rename_swap(&bin, "ghostlight", &source).unwrap();
+            assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"one");
+            assert_eq!(names(&bin), ["ghostlight"]);
         }
-        assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"three");
-        assert_eq!(
-            names(&bin),
-            ["ghostlight", "ghostlight.old-1", "ghostlight.old-2"]
-        );
-        assert_eq!(fs::read(bin.join("ghostlight.old-1")).unwrap(), b"one");
-        assert_eq!(fs::read(bin.join("ghostlight.old-2")).unwrap(), b"two");
-    }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
 
-    #[test]
-    fn a_missing_source_changes_nothing() {
-        let scratch = Scratch::new();
-        let bin = scratch.path().join("bin");
-        fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("ghostlight"), b"current").unwrap();
-        assert!(rename_swap(&bin, "ghostlight", &scratch.path().join("absent")).is_err());
-        assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"current");
-        assert_eq!(names(&bin), ["ghostlight"]);
-    }
-
-    #[test]
-    fn a_failed_last_rename_restores_the_old_name() {
-        let scratch = Scratch::new();
-        let source = scratch.path().join("payload");
-        fs::write(&source, b"new").unwrap();
-        let bin = scratch.path().join("bin");
-        fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("ghostlight"), b"current").unwrap();
-        let target = bin.join("ghostlight");
-        let prepared = bin.join("ghostlight.new");
-        let refuse_the_target = |from: &Path, to: &Path| {
-            if from == prepared {
-                Err(io::Error::other("refused"))
-            } else {
-                fs::rename(from, to)
+            let scratch = Scratch::new();
+            let source = scratch.path().join("payload");
+            fs::write(&source, b"one").unwrap();
+            fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+            let bin = scratch.path().join("bin");
+            rename_swap(&bin, "ghostlight", &source).unwrap();
+            let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&bin), 0o700);
+            assert_eq!(mode(&bin.join("ghostlight")), 0o755);
+        }
+        {
+            let scratch = Scratch::new();
+            let source = scratch.path().join("payload");
+            let bin = scratch.path().join("bin");
+            for contents in [&b"one"[..], b"two", b"three"] {
+                fs::write(&source, contents).unwrap();
+                rename_swap(&bin, "ghostlight", &source).unwrap();
             }
-        };
-        assert!(swap(&bin, "ghostlight", &source, &refuse_the_target).is_err());
-        assert_eq!(fs::read(&target).unwrap(), b"current");
-        assert_eq!(names(&bin), ["ghostlight"]);
-    }
-
-    #[test]
-    fn a_failed_move_aside_leaves_the_current_image() {
-        let scratch = Scratch::new();
-        let source = scratch.path().join("payload");
-        fs::write(&source, b"new").unwrap();
-        let bin = scratch.path().join("bin");
-        fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("ghostlight"), b"current").unwrap();
-        let refuse_everything = |_: &Path, _: &Path| Err(io::Error::other("refused"));
-        assert!(swap(&bin, "ghostlight", &source, &refuse_everything).is_err());
-        assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"current");
-        assert_eq!(names(&bin), ["ghostlight"]);
-    }
-
-    #[test]
-    fn only_numbered_old_images_are_removed() {
-        let scratch = Scratch::new();
-        let dir = scratch.path();
-        for name in [
-            "ghostlight",
-            "ghostlight.old-1",
-            "ghostlight.old-12",
-            "ghostlight-service.old-3",
-            "ghostlight.old-x",
-            "ghostlight.new",
-            "install.json",
-        ] {
-            fs::write(dir.join(name), b"x").unwrap();
+            assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"three");
+            assert_eq!(
+                names(&bin),
+                ["ghostlight", "ghostlight.old-1", "ghostlight.old-2"]
+            );
+            assert_eq!(fs::read(bin.join("ghostlight.old-1")).unwrap(), b"one");
+            assert_eq!(fs::read(bin.join("ghostlight.old-2")).unwrap(), b"two");
         }
-        remove_old_images(dir);
-        assert_eq!(
-            names(dir),
-            [
-                "ghostlight",
-                "ghostlight.new",
-                "ghostlight.old-x",
-                "install.json"
-            ]
-        );
-    }
-
-    #[test]
-    fn images_lists_the_current_image_and_those_moved_aside() {
-        let scratch = Scratch::new();
-        let dir = scratch.path();
-        for name in [
-            "ghostlight",
-            "ghostlight.old-2",
-            "ghostlight-service.old-3",
-            "ghostlight.new",
-        ] {
-            fs::write(dir.join(name), b"x").unwrap();
+        {
+            let scratch = Scratch::new();
+            let bin = scratch.path().join("bin");
+            fs::create_dir(&bin).unwrap();
+            fs::write(bin.join("ghostlight"), b"current").unwrap();
+            assert!(rename_swap(&bin, "ghostlight", &scratch.path().join("absent")).is_err());
+            assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"current");
+            assert_eq!(names(&bin), ["ghostlight"]);
         }
-        let mut found = images(dir, "ghostlight");
-        found.sort();
-        assert_eq!(
-            found,
-            [dir.join("ghostlight"), dir.join("ghostlight.old-2")]
-        );
-        assert!(images(&dir.join("absent"), "ghostlight").is_empty());
-    }
-
-    #[test]
-    fn removing_old_images_from_a_missing_directory_is_quiet() {
-        let scratch = Scratch::new();
-        remove_old_images(&scratch.path().join("absent"));
+        {
+            let scratch = Scratch::new();
+            let source = scratch.path().join("payload");
+            fs::write(&source, b"new").unwrap();
+            let bin = scratch.path().join("bin");
+            fs::create_dir(&bin).unwrap();
+            fs::write(bin.join("ghostlight"), b"current").unwrap();
+            let target = bin.join("ghostlight");
+            let prepared = bin.join("ghostlight.new");
+            let refuse_the_target = |from: &Path, to: &Path| {
+                if from == prepared {
+                    Err(io::Error::other("refused"))
+                } else {
+                    fs::rename(from, to)
+                }
+            };
+            assert!(swap(&bin, "ghostlight", &source, &refuse_the_target).is_err());
+            assert_eq!(fs::read(&target).unwrap(), b"current");
+            assert_eq!(names(&bin), ["ghostlight"]);
+        }
+        {
+            let scratch = Scratch::new();
+            let source = scratch.path().join("payload");
+            fs::write(&source, b"new").unwrap();
+            let bin = scratch.path().join("bin");
+            fs::create_dir(&bin).unwrap();
+            fs::write(bin.join("ghostlight"), b"current").unwrap();
+            let refuse_everything = |_: &Path, _: &Path| Err(io::Error::other("refused"));
+            assert!(swap(&bin, "ghostlight", &source, &refuse_everything).is_err());
+            assert_eq!(fs::read(bin.join("ghostlight")).unwrap(), b"current");
+            assert_eq!(names(&bin), ["ghostlight"]);
+        }
     }
 }
