@@ -1,5 +1,5 @@
 //! The person's controls at the application boundary: Pause and End stop the next effect and
-//! never rewrite a sent one, and policy refusals never hold a session.
+//! never rewrite a sent one.
 
 use super::*;
 
@@ -23,80 +23,6 @@ impl WorkbenchPresentationPort for Notices {
         self.0.lock().unwrap().push(notice);
         Ok(())
     }
-}
-
-#[test]
-fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() {
-    let policy = TestPolicy::new();
-    fs::write(
-        &policy.0,
-        serde_json::to_vec(&json!({
-            "schema":4,"name":"test authority","version":"1",
-            "grants":[{"id":"permitted-site","hosts":{"allow":["example.com"]},"allowed":["read"]}]
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let (executor, browser, workspaces, one, audit) = fixture_with_governance(policy.facade());
-    let two = workspaces.admit("Independent session".into(), IntakeChannel::Mcp);
-    let refused = json!({"on_error":"continue","steps":[
-        {"id":"one","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
-        {"id":"two","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
-        {"id":"three","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
-        {"id":"four","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
-        {"id":"five","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
-        {"id":"six","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}}
-    ]});
-    let result = executor.execute(&one, "browser_flow", refused, &CancellationToken::default());
-    assert_eq!(result.status, Status::Blocked);
-    assert!(result.facts["steps"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|step| step["status"] == "blocked"));
-    assert!(browser.calls().is_empty());
-    for _ in 0..6 {
-        let blocked = executor.execute(
-            &one,
-            "browser_navigate",
-            json!({"url":"https://denied.example/"}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(blocked.status, Status::Blocked);
-        assert_eq!(blocked.effect, Effect::None);
-    }
-    assert_eq!(
-        executor.governance.runtime_state(),
-        RuntimeControlState::Active
-    );
-    // The existing policy permits navigation. No policy change or resume is needed after refusals.
-    for workspace in [&one, &two] {
-        browser.push(Ok(BrowserOutcome::TabOpened {
-            tab: tab(
-                if workspace == &one { 7 } else { 8 },
-                "https://example.com/",
-            ),
-            committed_urls: vec!["https://example.com/".into()],
-        }));
-        let allowed = executor.execute(
-            workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com/"}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(allowed.status, Status::Succeeded, "{allowed:?}");
-    }
-    assert_eq!(browser.calls().len(), 2);
-    assert_eq!(
-        audit
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|record| record.step.is_some())
-            .count(),
-        6
-    );
 }
 
 // The hook changes controls after an actual preparation receipt or at the final port boundary.
@@ -148,40 +74,6 @@ impl BrowserPort for ControlledBrowser {
     }
 }
 
-#[test]
-fn an_authorization_publishes_no_control_state_and_a_hold_publishes_exactly_one() {
-    let (executor, browser, _, workspace, _) = fixture();
-    executor.governance.relay_runtime_state(browser.clone());
-    browser.push(Ok(BrowserOutcome::TabOpened {
-        tab: tab(7, "https://example.com/"),
-        committed_urls: vec!["https://example.com/".into()],
-    }));
-    for _ in 0..3 {
-        executor.execute(
-            &workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com"}),
-            &CancellationToken::default(),
-        );
-    }
-    assert!(
-        browser.control_states().is_empty(),
-        "authorizing work tells no adapter anything"
-    );
-
-    executor
-        .governance
-        .apply_runtime_intent(RuntimeControlIntent::Hold);
-    executor
-        .governance
-        .apply_runtime_intent(RuntimeControlIntent::Hold);
-    assert_eq!(
-        browser.control_states(),
-        [crate::browser::adapter::RuntimeControlState::Held],
-        "one change reaches the adapters once, however often it is asked for"
-    );
-}
-
 /// A typing target the fake browser describes for every row below.
 fn message_box() -> ObservedTarget {
     ObservedTarget {
@@ -230,8 +122,9 @@ fn directive(intent: RuntimeControlIntent) -> &'static str {
 /// ACCEPTANCE Governance 12 and ADR-0185 items 4 and 5: the person's Pause or End stops the next
 /// effect wherever it lands, and never rewrites an effect already sent.
 ///
-/// - Before the call: every request is refused with no effect, each audited, and no guardrail
-///   notice pops up per queued request; `policy_explain` still answers and changes no control.
+/// - Before the call: the change reaches the adapters once, however often it is asked for; every
+///   request is refused with no effect, each audited, and no guardrail notice pops up per queued
+///   request; `policy_explain` still answers and changes no control.
 /// - After preparation, directly and in a flow: the input is never sent, the result leads with the
 ///   directive, and a flow's later step reads `not_run`.
 /// - Before a postcondition: the applied action stays applied in the result and the audit, with
@@ -244,7 +137,14 @@ fn a_persons_control_stops_the_next_effect_and_never_rewrites_a_sent_one() {
         let (executor, browser, _, workspace, audit) = fixture();
         let notices = Arc::new(Notices::default());
         executor.workbench.attach_presentation(notices.clone());
+        executor.governance.relay_runtime_state(browser.clone());
         executor.governance.apply_runtime_intent(intent);
+        executor.governance.apply_runtime_intent(intent);
+        assert_eq!(
+            browser.control_states(),
+            [executor.governance.runtime_state()],
+            "one change reaches the adapters once, however often it is asked for"
+        );
         for _ in 0..3 {
             let result = executor.execute(
                 &workspace,

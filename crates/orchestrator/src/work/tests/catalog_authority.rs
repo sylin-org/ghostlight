@@ -1,4 +1,5 @@
-//! Every advertised authority variant must admit ordinary work with its stated capabilities.
+//! Every advertised authority variant admits ordinary work with exactly its stated capabilities,
+//! and a recording save checks its sources and its destination apart.
 
 use super::*;
 use crate::governance::CapabilitySet;
@@ -17,6 +18,10 @@ struct Case {
     replies: Vec<BrowserOutcome>,
 }
 
+/// The row every listed control sits in, which only the model may read.
+const ROW: &str = "PRIVATE_ROW";
+
+/// An ordinary control in the second of two repeated rows.
 fn field(locator: &str, role: &str) -> ObservedTarget {
     ObservedTarget {
         locator: locator.into(),
@@ -24,6 +29,8 @@ fn field(locator: &str, role: &str) -> ObservedTarget {
         name: "Ordinary control".into(),
         state: vec![],
         credential_class: false,
+        context: Some(ROW.into()),
+        nth: Some(2),
         ..Default::default()
     }
 }
@@ -556,6 +563,8 @@ fn established(
         &CancellationToken::default(),
     );
     assert_eq!(inspected.status, Status::Succeeded);
+    assert_eq!(inspected.facts["items"][0]["context"], ROW);
+    assert_eq!(inspected.facts["items"][0]["nth"], 2);
     (
         opened.facts["tab"].clone(),
         inspected.facts["items"][0]["target"].clone(),
@@ -563,8 +572,52 @@ fn established(
     )
 }
 
+/// What the audit and the history keep of `audit`: neither may hold a caller's step label, a
+/// browser payload, or a control's row.
+fn assert_kept_clean(audit: &MemoryAudit, label: &str) {
+    let records = audit.0.lock().unwrap();
+    let history: Vec<_> = records
+        .iter()
+        .cloned()
+        .map(crate::workbench::HistoryItem::from)
+        .collect();
+    for kept in [
+        serde_json::to_string(&*records).unwrap(),
+        serde_json::to_string(&history).unwrap(),
+    ] {
+        assert!(!kept.contains("PRIVATE_"), "{label}: {kept}");
+        assert!(
+            !kept.contains("\"context\"") && !kept.contains("\"nth\""),
+            "{label}"
+        );
+    }
+}
+
+/// ACCEPTANCE Governance 3, 10 and 13, ADR-0185 items 1-2, ADR-0156 items 1-2 and C10b: every
+/// catalog variant is admitted by exactly its RAWX set, directly and as a flow step.
+///
+/// The directory advertises what each variant is proven to need. With no policy every variant
+/// runs. Under configured policy, a variant missing any one capability is refused before any
+/// browser command, with the whole requirement and the configured layer in its refused check and
+/// no caller restriction named; the refusals neither hold the session nor tell any adapter about
+/// control state, and the same call then runs once its exact grant is published. An admitted
+/// call writes its own record, classified as the catalog says, admitted first against that set
+/// with the grant that allowed it, and a single-stage variant checks nothing else. Neither the
+/// audit nor the history ever keeps a caller's label, a browser payload or a control's row,
+/// which the model does read.
 #[test]
-fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage() {
+fn every_catalog_variant_is_admitted_by_exactly_its_rawx_set() {
+    // These variants check a later stage after their admission, under that stage's own
+    // requirement: an action's landing on the pages it committed asks for Action alone, and a
+    // recording placed on a page asks for Read on its sources and Write on its destination.
+    const STAGED: &[(&str, Option<&str>)] = &[
+        ("browser_click", Some("selector")),
+        ("browser_click", Some("expect")),
+        ("browser_type_text", Some("selector")),
+        ("browser_type_text", Some("expect")),
+        ("browser_press_key", Some("expect")),
+        ("browser_record", Some("save_target")),
+    ];
     let templates = cases(&json!("target_1"), &json!("target_2"), &json!("tab_1"));
     let expected: BTreeSet<_> = DIRECTORY
         .iter()
@@ -600,107 +653,163 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
             case.variant
         );
     }
+
     let mut failures = Vec::new();
     for (index, template) in templates.iter().enumerate() {
-        let exact = if template.required.is_empty() {
-            vec!["execute"]
-        } else {
-            template.required.to_vec()
-        };
-        let restrictions = std::iter::once(None)
-            .chain(std::iter::once(Some(exact)))
-            .chain(template.required.iter().map(|missing| {
-                Some(
-                    RAWX.into_iter()
-                        .filter(|candidate| candidate != missing)
-                        .collect(),
-                )
-            }));
-        for (restriction_index, restriction) in restrictions.enumerate() {
-            for composed in [false, true] {
-                if composed && matches!(template.tool, "browser_flow") {
-                    continue;
-                }
-                let policy = TestPolicy::new();
-                let (executor, browser, _, workspace, audit) =
-                    fixture_with_governance(policy.facade());
-                let (tab_handle, target, button) = established(&executor, &browser, &workspace);
-                let case = cases(&target, &button, &tab_handle).swap_remove(index);
-                if case.tool == "browser_record" && case.variant != Some("start") {
-                    holding_recording(&executor, &workspace);
-                }
-                let permitted = restriction_index < 2;
-                for reply in case.replies.clone() {
-                    browser.push(Ok(reply));
-                }
-                let before = browser.calls().len();
+        for composed in [false, true] {
+            if composed && matches!(template.tool, "browser_flow") {
+                continue;
+            }
+            let label = format!(
+                "{} {:?} composed={composed}",
+                template.tool, template.variant
+            );
+            let invoke = |executor: &ApplicationExecutor,
+                          workspace: &crate::workspace::WorkspaceId,
+                          case: &Case| {
                 let arguments = if composed {
                     json!({"steps":[{"id":"PRIVATE_STEP_LABEL","tool":case.tool,"arguments":case.arguments}]})
                 } else {
-                    case.arguments
+                    case.arguments.clone()
                 };
-                if let Some(restriction) = &restriction {
-                    policy.set(json!(restriction));
-                }
-                let result = executor.execute(
-                    &workspace,
+                executor.execute(
+                    workspace,
                     if composed { "browser_flow" } else { case.tool },
                     arguments,
                     &CancellationToken::default(),
-                );
-                let label = format!(
-                    "{} {:?} restriction={restriction:?} composed={composed}",
-                    case.tool, case.variant
-                );
-                if result.status
-                    != if permitted {
-                        Status::Succeeded
-                    } else {
-                        Status::Blocked
-                    }
-                {
+                )
+            };
+
+            // With no policy, the variant runs.
+            let (executor, browser, _, workspace, audit) = fixture();
+            let (tab_handle, target, button) = established(&executor, &browser, &workspace);
+            let case = cases(&target, &button, &tab_handle).swap_remove(index);
+            if case.tool == "browser_record" && case.variant != Some("start") {
+                holding_recording(&executor, &workspace);
+            }
+            for reply in case.replies.clone() {
+                browser.push(Ok(reply));
+            }
+            let result = invoke(&executor, &workspace, &case);
+            if result.status != Status::Succeeded {
+                failures.push(format!("{label}, no policy: {result:?}"));
+                continue;
+            }
+            assert_kept_clean(&audit, &label);
+
+            // Under configured policy: refused without each capability, then admitted by its set.
+            let policy = TestPolicy::new();
+            let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
+            executor.governance.relay_runtime_state(browser.clone());
+            let (tab_handle, target, button) = established(&executor, &browser, &workspace);
+            let case = cases(&target, &button, &tab_handle).swap_remove(index);
+            if case.tool == "browser_record" && case.variant != Some("start") {
+                holding_recording(&executor, &workspace);
+            }
+            for reply in case.replies.clone() {
+                browser.push(Ok(reply));
+            }
+            let before = browser.calls().len();
+            for missing in case.required {
+                policy.set(json!(RAWX
+                    .into_iter()
+                    .filter(|candidate| candidate != missing)
+                    .collect::<Vec<_>>()));
+                let result = invoke(&executor, &workspace, &case);
+                let label = format!("{label}, missing {missing}");
+                if result.status != Status::Blocked {
                     failures.push(format!("{label}: {result:?}"));
                     continue;
                 }
-                let commands = browser.calls();
-                if permitted {
-                    assert_eq!(
-                        commands.len() - before,
-                        case.replies.len(),
-                        "{label}: all physical work is acknowledged exactly once"
-                    );
+                assert_eq!(result.effect, Effect::None, "{label}");
+                assert_eq!(browser.calls().len(), before, "{label}: no browser work");
+                let facts = if composed {
+                    &result.facts["steps"][0]["result"]["facts"]
                 } else {
-                    assert_eq!(result.effect, Effect::None, "{label}");
-                    assert!(commands[before..].is_empty(), "{label}: denied work must not extract, edit, stop capture, or export: {:?}", &commands[before..]);
-                    let checks: Vec<_> = audit
-                        .0
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .flat_map(|record| record.permissions.checks.clone())
-                        .filter(|check| !check.allowed)
-                        .collect();
-                    assert!(
-                        checks.iter().any(|check| check
-                            .requirements
-                            .iter()
-                            .map(|cap| cap.as_str())
-                            .collect::<BTreeSet<_>>()
-                            == case.required.iter().copied().collect::<BTreeSet<_>>()),
-                        "{label}: retain every required capability"
-                    );
-                    assert!(
-                        checks.iter().all(|check| !check.layers.is_empty()),
-                        "{label}: configured policy owns the denial"
-                    );
-                }
+                    &result.facts
+                };
+                assert!(facts.get("restriction").is_none(), "{label}");
+                let refused: Vec<_> = audit
+                    .0
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|record| record.invocation == result.invocation)
+                    .flat_map(|record| record.permissions.checks.clone())
+                    .filter(|check| !check.allowed)
+                    .collect();
                 assert!(
-                    !serde_json::to_string(&*audit.0.lock().unwrap())
-                        .unwrap()
-                        .contains("PRIVATE_"),
-                    "{label}: browser payloads and caller labels cannot enter audit"
+                    refused.iter().any(|check| check
+                        .requirements
+                        .iter()
+                        .map(|cap| cap.as_str())
+                        .collect::<BTreeSet<_>>()
+                        == case.required.iter().copied().collect::<BTreeSet<_>>()),
+                    "{label}: the refused check keeps the whole requirement: {refused:?}"
+                );
+                assert!(
+                    refused.iter().all(|check| !check.layers.is_empty()),
+                    "{label}: configured policy owns the refusal"
+                );
+                assert_eq!(
+                    executor.governance.runtime_state(),
+                    RuntimeControlState::Active,
+                    "{label}: a refusal holds nothing"
                 );
             }
+            policy.set(json!(if case.required.is_empty() {
+                vec!["execute"]
+            } else {
+                case.required.to_vec()
+            }));
+            let result = invoke(&executor, &workspace, &case);
+            if result.status != Status::Succeeded {
+                failures.push(format!("{label}, exact grant: {result:?}"));
+                continue;
+            }
+            assert_eq!(
+                browser.calls().len() - before,
+                case.replies.len(),
+                "{label}: all physical work is acknowledged exactly once"
+            );
+            assert!(browser.control_states().is_empty(), "{label}");
+            if case.tool != "browser_flow" {
+                let classified = crate::language::capability_map::requirements(
+                    &crate::language::decode(case.tool, case.arguments.clone()).unwrap(),
+                );
+                let records = audit.0.lock().unwrap();
+                let record = records
+                    .iter()
+                    .find(|record| {
+                        record.invocation == result.invocation && record.tool == case.tool
+                    })
+                    .unwrap_or_else(|| panic!("{label}: the call writes its own record"));
+                assert_eq!(record.capabilities, classified, "{label}");
+                let checks: Vec<_> = record
+                    .permissions
+                    .checks
+                    .iter()
+                    .map(|check| check.requirements)
+                    .collect();
+                let single_stage = !STAGED.contains(&(case.tool, case.variant));
+                if checks.first() != Some(&classified)
+                    || (single_stage && checks.iter().any(|checked| *checked != classified))
+                {
+                    failures.push(format!(
+                        "{label}: classified {classified:?}, checked {checks:?}"
+                    ));
+                }
+                assert!(
+                    case.required.is_empty()
+                        || record.permissions.checks.iter().any(|check| check.allowed
+                            && check
+                                .layers
+                                .iter()
+                                .any(|layer| layer.grants.iter().any(|grant| grant == "test"))),
+                    "{label}: the grant that allowed it is kept"
+                );
+            }
+            assert_kept_clean(&audit, &label);
         }
     }
     assert!(
@@ -711,189 +820,12 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
     );
 }
 
+/// ADR-0158 item 4 and C10b: a recording save needs Read on every page it recorded and Write on
+/// the page it is placed on, each checked on its own host. A refused save stops the capture but
+/// exports nothing, and its record holds one refused check, the deciding one, with the configured
+/// layer, the reason the result gives, and no source host, since a source may be embedded.
 #[test]
-fn independent_configured_grants_admit_every_catalog_variant_and_its_flow_child() {
-    let templates = cases(&json!("target_1"), &json!("target_2"), &json!("tab_1"));
-    let mut failures = Vec::new();
-    for (index, template) in templates.iter().enumerate() {
-        for composed in [false, true] {
-            if composed && matches!(template.tool, "browser_flow") {
-                continue;
-            }
-            let (mut executor, browser, _, workspace, audit) = fixture();
-            let (tab_handle, target, button) = established(&executor, &browser, &workspace);
-            let case = cases(&target, &button, &tab_handle).swap_remove(index);
-            if case.tool == "browser_record" && case.variant != Some("start") {
-                holding_recording(&executor, &workspace);
-            }
-            let policy = temporary_policy("catalog-independent-authority");
-            let grants = if case.required.is_empty() {
-                json!([])
-            } else {
-                json!([{"id":"required","hosts":{"allow":["*"]},"allowed":case.required}])
-            };
-            fs::write(
-                &policy,
-                serde_json::to_vec(&json!({
-                    "schema":4,"name":"Exact ordinary permission","version":"1",
-                    "grants":grants
-                }))
-                .unwrap(),
-            )
-            .unwrap();
-            // Establish ordinary handles, then authorize the requested work with only its
-            // independent grants. Discovery in an earlier call does not grant this call Read.
-            executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()));
-            for reply in case.replies.clone() {
-                browser.push(Ok(reply));
-            }
-            let before = browser.calls().len();
-            let arguments = if composed {
-                json!({"steps":[{"id":"PRIVATE_STEP_LABEL","tool":case.tool,"arguments":case.arguments}]})
-            } else {
-                case.arguments
-            };
-            let result = executor.execute(
-                &workspace,
-                if composed { "browser_flow" } else { case.tool },
-                arguments,
-                &CancellationToken::default(),
-            );
-            drop(policy);
-            let label = format!(
-                "{} {:?} with {:?} composed={composed}",
-                case.tool, case.variant, case.required
-            );
-            if result.status != Status::Succeeded {
-                failures.push(format!("{label}: {result:?}"));
-                continue;
-            }
-            assert_eq!(
-                browser.calls().len() - before,
-                case.replies.len(),
-                "{label}"
-            );
-            let records = audit.0.lock().unwrap();
-            let receipts = records
-                .iter()
-                .filter(|record| record.invocation == result.invocation);
-            assert!(receipts.clone().all(|record| record.allowed), "{label}");
-            assert!(
-                receipts
-                    .flat_map(|record| &record.permissions.checks)
-                    .any(|check| check.allowed
-                        && check
-                            .layers
-                            .iter()
-                            .any(|layer| layer.grants.iter().any(|grant| grant == "required")))
-                    || case.required.is_empty(),
-                "{label}: retain actual positive grant evidence"
-            );
-            assert!(
-                !serde_json::to_string(&*records)
-                    .unwrap()
-                    .contains("PRIVATE_"),
-                "{label}"
-            );
-        }
-    }
-    assert!(
-        failures.is_empty(),
-        "{} configured authority regressions:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
-}
-
-#[test]
-fn observation_variants_reject_missing_configured_capabilities_before_browser_effects() {
-    let templates = cases(&json!("target_1"), &json!("target_2"), &json!("tab_1"));
-    for (index, template) in templates
-        .iter()
-        .enumerate()
-        .filter(|(_, case)| matches!(case.variant, Some("selector" | "expect")))
-    {
-        for missing in template.required {
-            for composed in [false, true] {
-                let (mut executor, browser, _, workspace, audit) = fixture();
-                let (tab_handle, target, button) = established(&executor, &browser, &workspace);
-                let case = cases(&target, &button, &tab_handle).swap_remove(index);
-                if case.tool == "browser_record" && case.variant != Some("start") {
-                    holding_recording(&executor, &workspace);
-                }
-                let permitted: Vec<_> = case
-                    .required
-                    .iter()
-                    .copied()
-                    .filter(|capability| capability != missing)
-                    .collect();
-                let policy = temporary_policy("observation-missing-authority");
-                fs::write(
-                    &policy,
-                    serde_json::to_vec(&json!({
-                        "schema":4,"name":"Incomplete named work","version":"1",
-                        "grants":[{"id":"partial","hosts":{"allow":["*"]},"allowed":permitted}]
-                    }))
-                    .unwrap(),
-                )
-                .unwrap();
-                executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()));
-                for reply in case.replies {
-                    browser.push(Ok(reply));
-                }
-                let before = browser.calls().len();
-                let invocation = if composed {
-                    json!({"steps":[{"id":"PRIVATE_STEP_LABEL","tool":case.tool,"arguments":case.arguments}]})
-                } else {
-                    case.arguments
-                };
-                let result = executor.execute(
-                    &workspace,
-                    if composed { "browser_flow" } else { case.tool },
-                    invocation,
-                    &CancellationToken::default(),
-                );
-                drop(policy);
-                let label = format!(
-                    "{} {:?}, missing {missing}, composed={composed}",
-                    case.tool, case.variant
-                );
-                assert_eq!(result.status, Status::Blocked, "{label}: {result:?}");
-                assert_eq!(result.effect, Effect::None, "{label}");
-                assert_eq!(
-                    browser.calls().len(),
-                    before,
-                    "{label}: admit the whole request before lookup or effect"
-                );
-                let facts = if composed {
-                    &result.facts["steps"][0]["result"]["facts"]
-                } else {
-                    &result.facts
-                };
-                assert!(
-                    facts.get("restriction").is_none(),
-                    "{label}: configured grant failure is not a caller restriction"
-                );
-                let records = audit.0.lock().unwrap();
-                assert!(
-                    records
-                        .iter()
-                        .any(|record| record.invocation == result.invocation && !record.allowed),
-                    "{label}: retain denied authority evidence"
-                );
-                assert!(
-                    !serde_json::to_string(&*records)
-                        .unwrap()
-                        .contains("PRIVATE_"),
-                    "{label}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn recording_attachment_checks_read_sources_and_write_destination_independently() {
+fn a_recording_save_needs_read_on_its_sources_and_write_on_its_destination() {
     for (source_read, destination_write) in [(true, true), (false, true), (true, false)] {
         for composed in [false, true] {
             let (mut executor, browser, _, workspace, audit) = fixture();
@@ -913,13 +845,10 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                 .find(|case| case.variant == Some("save_target"))
                 .unwrap();
             for reply in &mut case.replies {
-                match reply {
-                    BrowserOutcome::RecordingStopped { summary, .. }
-                    | BrowserOutcome::RecordingExported { summary, .. } => {
-                        summary.source_urls =
-                            vec!["https://source.example/PRIVATE_SOURCE_PATH".into()];
-                    }
-                    _ => {}
+                if let BrowserOutcome::RecordingStopped { summary, .. }
+                | BrowserOutcome::RecordingExported { summary, .. } = reply
+                {
+                    summary.source_urls = vec!["https://source.example/PRIVATE_SOURCE_PATH".into()];
                 }
             }
             for reply in case.replies {
@@ -943,8 +872,19 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                 &CancellationToken::default(),
             );
             drop(policy);
+            let label = format!(
+                "source_read={source_read} destination_write={destination_write} composed={composed}"
+            );
             let permitted = source_read && destination_write;
-            assert_eq!(result.status, if permitted { Status::Succeeded } else { Status::Blocked }, "source_read={source_read} destination_write={destination_write} composed={composed}: {result:?}");
+            assert_eq!(
+                result.status,
+                if permitted {
+                    Status::Succeeded
+                } else {
+                    Status::Blocked
+                },
+                "{label}: {result:?}"
+            );
             let commands = browser.calls();
             if permitted {
                 assert_eq!(commands.len() - before, 3);
@@ -961,158 +901,46 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                 assert_eq!(
                     commands.len() - before,
                     1,
-                    "no target preflight or export after a source/destination refusal"
+                    "{label}: no target preflight or export after a refusal"
                 );
                 assert!(matches!(
                     commands.last().unwrap(),
                     BrowserCommand::StopRecording { .. }
                 ));
                 assert_eq!(result.effect, Effect::None);
+                let records = audit.0.lock().unwrap();
+                let refused: Vec<_> = records
+                    .iter()
+                    .filter(|record| record.tool == "browser_record")
+                    .flat_map(|record| record.permissions.checks.iter())
+                    .filter(|check| !check.allowed)
+                    .collect();
+                assert_eq!(refused.len(), 1, "{label}: {refused:?}");
+                let deciding = refused[0];
+                assert_eq!(
+                    deciding.requirements,
+                    if source_read {
+                        CapabilitySet::WRITE
+                    } else {
+                        CapabilitySet::READ
+                    },
+                    "{label}"
+                );
+                assert!(!deciding.layers.is_empty(), "{label}");
+                if !composed {
+                    assert_eq!(deciding.reason.as_str(), result.facts["reason"], "{label}");
+                }
+                if !source_read {
+                    assert_eq!(deciding.host, None, "{label}: a source may be embedded");
+                }
+                assert!(
+                    !serde_json::to_string(&*records)
+                        .unwrap()
+                        .contains("source.example"),
+                    "{label}"
+                );
             }
-            assert!(!serde_json::to_string(&*audit.0.lock().unwrap())
-                .unwrap()
-                .contains("PRIVATE_"));
+            assert_kept_clean(&audit, &label);
         }
     }
-}
-
-#[test]
-fn every_single_stage_tool_is_admitted_against_its_classified_requirements() {
-    // These variants check a later stage after their admission, under that stage's own
-    // requirement: an action's landing on the pages it committed asks for Action alone, and a
-    // recording placed on a page asks for Read on its sources and Write on its destination.
-    const STAGED: &[(&str, Option<&str>)] = &[
-        ("browser_click", Some("selector")),
-        ("browser_click", Some("expect")),
-        ("browser_type_text", Some("selector")),
-        ("browser_type_text", Some("expect")),
-        ("browser_press_key", Some("expect")),
-        ("browser_record", Some("save_target")),
-    ];
-    let templates = cases(&json!("target_1"), &json!("target_2"), &json!("tab_1"));
-    let mut failures = Vec::new();
-    for (index, template) in templates.iter().enumerate() {
-        if template.tool == "browser_flow" {
-            continue;
-        }
-        for composed in [false, true] {
-            let (executor, browser, _, workspace, audit) = fixture();
-            let (tab_handle, target, button) = established(&executor, &browser, &workspace);
-            let case = cases(&target, &button, &tab_handle).swap_remove(index);
-            if case.tool == "browser_record" && case.variant != Some("start") {
-                holding_recording(&executor, &workspace);
-            }
-            let classified = crate::language::capability_map::requirements(
-                &crate::language::decode(case.tool, case.arguments.clone()).unwrap(),
-            );
-            for reply in case.replies {
-                browser.push(Ok(reply));
-            }
-            let arguments = if composed {
-                json!({"steps":[{"id":"step","tool":case.tool,"arguments":case.arguments}]})
-            } else {
-                case.arguments
-            };
-            let result = executor.execute(
-                &workspace,
-                if composed { "browser_flow" } else { case.tool },
-                arguments,
-                &CancellationToken::default(),
-            );
-            let label = format!("{} {:?} composed={composed}", case.tool, case.variant);
-            assert_eq!(result.status, Status::Succeeded, "{label}: {result:?}");
-            let records = audit.0.lock().unwrap();
-            let record = records
-                .iter()
-                .find(|record| record.invocation == result.invocation && record.tool == case.tool)
-                .unwrap_or_else(|| panic!("{label}: the call writes its own record"));
-            assert_eq!(record.capabilities, classified, "{label}");
-            let checks: Vec<_> = record
-                .permissions
-                .checks
-                .iter()
-                .map(|check| check.requirements)
-                .collect();
-            let admitted = checks.first() == Some(&classified);
-            let single_stage = !STAGED.contains(&(case.tool, case.variant));
-            if !admitted || (single_stage && checks.iter().any(|checked| *checked != classified)) {
-                failures.push(format!(
-                    "{label}: classified {classified:?}, checked {checks:?}"
-                ));
-            }
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
-
-#[test]
-fn a_refused_recording_save_records_its_deciding_check() {
-    let (mut executor, browser, _, workspace, audit) = fixture();
-    let (tab_handle, target, button) = established(&executor, &browser, &workspace);
-    holding_recording(&executor, &workspace);
-    let policy = temporary_policy("recording-refused-source");
-    fs::write(
-        &policy,
-        serde_json::to_vec(&json!({
-            "schema":4,"name":"Only the recorded page","version":"1","grants":[
-                {"id":"page","hosts":{"allow":["example.com"]},"allowed":["read"]}
-            ]
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()));
-    let mut case = cases(&target, &button, &tab_handle)
-        .into_iter()
-        .find(|case| case.variant == Some("save_client"))
-        .unwrap();
-    for reply in &mut case.replies {
-        if let BrowserOutcome::RecordingStopped { summary, .. }
-        | BrowserOutcome::RecordingExported { summary, .. } = reply
-        {
-            summary.source_urls = vec![
-                PAGE.into(),
-                "https://embedded.example/PRIVATE_SOURCE_PATH".into(),
-            ];
-        }
-    }
-    for reply in case.replies {
-        browser.push(Ok(reply));
-    }
-    let result = executor.execute(
-        &workspace,
-        "browser_record",
-        case.arguments,
-        &CancellationToken::default(),
-    );
-    drop(policy);
-    assert_eq!(result.status, Status::Blocked, "{result:?}");
-    let records = audit.0.lock().unwrap();
-    let record = records
-        .iter()
-        .find(|record| record.invocation == result.invocation)
-        .unwrap();
-    let refused: Vec<_> = record
-        .permissions
-        .checks
-        .iter()
-        .filter(|check| !check.allowed)
-        .collect();
-    assert_eq!(refused.len(), 1, "{:?}", record.permissions.checks);
-    let deciding = refused[0];
-    assert_eq!(deciding.requirements, CapabilitySet::READ);
-    assert_eq!(deciding.reason.as_str(), result.facts["reason"]);
-    assert!(
-        !deciding.layers.is_empty(),
-        "configured policy owns the denial"
-    );
-    assert_eq!(deciding.host, None, "a source may be embedded");
-    assert!(record
-        .permissions
-        .checks
-        .iter()
-        .any(|check| check.allowed && check.requirements == CapabilitySet::READ));
-    assert!(!serde_json::to_string(&*records)
-        .unwrap()
-        .contains("embedded.example"));
 }

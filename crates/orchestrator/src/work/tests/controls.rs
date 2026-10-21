@@ -1,6 +1,5 @@
 //! What a listed control may carry: a credential-class control carries nothing but its masked
-//! value (ADR-0198 decision 7), and a repeated control's row reaches the model and never the audit
-//! or history.
+//! value (ADR-0198 decision 7).
 
 use super::*;
 
@@ -89,72 +88,5 @@ fn a_credential_class_control_shows_only_its_marker_whatever_the_adapter_sent() 
             !text.contains("hunter2") && !text.contains("PRIVATE_"),
             "{text}"
         );
-    }
-}
-
-/// A menu button of a list row, as the page reports it when the name repeats.
-fn row_button(locator: &str, context: &str, nth: Option<u32>) -> ObservedTarget {
-    ObservedTarget {
-        locator: format!("0:doc_top:{locator}"),
-        role: "button".into(),
-        name: "More options".into(),
-        state: vec!["collapsed".into()],
-        context: Some(context.into()),
-        nth,
-        ..Default::default()
-    }
-}
-
-#[test]
-fn repeated_controls_show_their_row_in_the_result_and_never_in_audit_or_history() {
-    for (tool, arguments, key) in [
-        ("browser_inspect", json!({}), "items"),
-        ("browser_find", json!({"text":"More options"}), "matches"),
-    ] {
-        let (executor, browser, _, workspace, audit) = fixture();
-        open_page(&executor, &browser, &workspace);
-        browser.push(Ok(BrowserOutcome::targets(
-            7,
-            vec![
-                row_button("a1", "Alpha", Some(1)),
-                row_button("a2", "Alpha", Some(2)),
-                row_button("b1", "Beta", None),
-            ],
-        )));
-
-        let result = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
-
-        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-        let places: Vec<_> = result.facts[key]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|item| (item["context"].clone(), item["nth"].clone()))
-            .collect();
-        assert_eq!(
-            places,
-            [
-                (json!("Alpha"), json!(1)),
-                (json!("Alpha"), json!(2)),
-                (json!("Beta"), json!(null))
-            ],
-            "{tool}"
-        );
-        let records = audit.0.lock().unwrap();
-        let history: Vec<_> = records
-            .iter()
-            .cloned()
-            .map(crate::workbench::HistoryItem::from)
-            .collect();
-        for kept in [
-            serde_json::to_string(&*records).unwrap(),
-            serde_json::to_string(&history).unwrap(),
-        ] {
-            assert!(!kept.contains("Alpha") && !kept.contains("Beta"), "{tool}");
-            assert!(
-                !kept.contains("\"context\"") && !kept.contains("\"nth\""),
-                "{tool}"
-            );
-        }
     }
 }

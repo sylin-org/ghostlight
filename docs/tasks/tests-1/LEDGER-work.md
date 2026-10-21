@@ -18,7 +18,7 @@ added there in the commit that deletes it. `governance/` moved to the language l
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 373 | 55 | 331 |
+| `work/` and `workspace/` | 373 | 55 | 324 |
 | `governance/` | 136 | 40 | moved to the language lane (2026-10-21) |
 
 ## Slices
@@ -34,7 +34,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | W3 | credentials: `tests/credentials.rs`'s four tests are one, with a new grouped-fill row; `item.rs`'s three masking tests fold into `tests/controls.rs`'s executor-level masking test; the golden and provenance tests say what they protect | 355 | 349 | promise 2 (ADR-0185 3; Executor 7 masking), contract 5 goldens and 1 promise (Connection reporting 3, 5) kept as they were | landed (d40f1247) |
 | W4 | `tests/controls.rs`: five tests that restated pass-through keys, a key list, a literal next step and a summary go, with their helpers; the masking test stays and the repeated-row test waits for the RAWX test | 349 | 344 | promise 1 (Executor 7); 1 left to fold | landed (c2f4b188) |
 | W5 | `tests/control.rs`: five control tests are one, over the moment Pause or End lands; a cancellation unit, a workbench start-time check, a retired-argument decode test (the language lane's) and an explain deadline test (Executor 3, kept in execution.rs) go; two tests wait for the RAWX test | 344 | 336 | promise 1 (Gov 12, ADR-0185 4-5); 2 left to fold | landed (7cddce52) |
-| W6 | `tests/configured_authority.rs`: the selector-fill credential row and the credential-like upload row join the credentials test; the typing-authority, unsent-form and retired-host tests go (the RAWX test, Exec 1 decode); the b9c2da60 landing test stays until `tests/tabs.rs`'s held-tab test takes it | 336 | 331 | contract C10c; 1 left to fold | landed |
+| W6 | `tests/configured_authority.rs`: the selector-fill credential row and the credential-like upload row join the credentials test; the typing-authority, unsent-form and retired-host tests go (the RAWX test, Exec 1 decode); the b9c2da60 landing test stays until `tests/tabs.rs`'s held-tab test takes it | 336 | 331 | contract C10c; 1 left to fold | landed (cf0913cb) |
+| W7 | `tests/catalog_authority.rs`: four variant tests are one RAWX test, now also refusing then admitting each call in one session (control.rs's refusal test) with every listed control in a repeated row that never reaches audit or history (controls.rs's row test); two recording-save tests are one; control.rs's publication test is a row of the person's-control test | 331 | 324 | promise 2 (Gov 3, 10, 13; ADR-0158 4) | landed |
 
 ## Notes
 
