@@ -72,8 +72,20 @@ pub const LAST_BROWSER_RECORD_NAME: &str = "last-browser.json";
 /// with a manifest beside each copy.
 pub const ICONS_DIRECTORY_NAME: &str = "icons";
 
+/// The record under the state directory of where each MCP client's configuration was found.
+pub const HARNESS_LOCATIONS_NAME: &str = "harness-locations.json";
+
 /// Directory of the user's policy.
 pub const POLICY_DIRECTORY_NAME: &str = "policy";
+
+/// The user policy the workbench authors, under the policy directory.
+pub const USER_POLICY_NAME: &str = "user-policy.json";
+
+/// The verified managed-policy cache, under the policy directory.
+pub const MANAGED_POLICY_BUNDLE_NAME: &str = "managed-policy.bundle";
+
+/// The managed-policy status sidecar, under the policy directory.
+pub const MANAGED_STATUS_NAME: &str = "managed-status.json";
 
 /// Directory of native-host manifests the installer writes.
 pub const MANIFESTS_DIRECTORY_NAME: &str = "manifests";
@@ -231,10 +243,35 @@ impl Layout {
         self.state().join(ICONS_DIRECTORY_NAME)
     }
 
+    /// The record of where each MCP client's configuration was found:
+    /// `home/state/harness-locations.json`.
+    #[must_use]
+    pub fn harness_locations(&self) -> PathBuf {
+        self.state().join(HARNESS_LOCATIONS_NAME)
+    }
+
     /// The user policy directory: `home/policy`.
     #[must_use]
     pub fn policy(&self) -> PathBuf {
         self.home.join(POLICY_DIRECTORY_NAME)
+    }
+
+    /// The user policy the workbench authors: `home/policy/user-policy.json`.
+    #[must_use]
+    pub fn user_policy(&self) -> PathBuf {
+        self.policy().join(USER_POLICY_NAME)
+    }
+
+    /// The verified managed-policy cache: `home/policy/managed-policy.bundle`.
+    #[must_use]
+    pub fn managed_policy_bundle(&self) -> PathBuf {
+        self.policy().join(MANAGED_POLICY_BUNDLE_NAME)
+    }
+
+    /// The managed-policy status sidecar: `home/policy/managed-status.json`.
+    #[must_use]
+    pub fn managed_status(&self) -> PathBuf {
+        self.policy().join(MANAGED_STATUS_NAME)
     }
 
     /// The native-host manifest directory: `home/manifests`.

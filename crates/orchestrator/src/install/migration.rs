@@ -89,20 +89,21 @@ pub(super) const LEGACY_DEPLOY_LOCK_NAME: &str = "deploy.lock";
 /// The audit log, in the 1.x state directory and again in `home/state`.
 pub(super) const AUDIT_FILE_NAME: &str = "audit.jsonl";
 
-/// The user policy file, in the 1.x policy directory and again in `home/policy`.
+/// The user policy file in the 1.x policy directory. 2.0 names its own copy in the layout.
 pub(super) const USER_POLICY_FILE_NAME: &str = "user-policy.json";
 
-/// The verified managed-policy cache, in the 1.x policy directory and again in `home/policy`.
+/// The verified managed-policy cache in the 1.x policy directory. 2.0 names its own in the layout.
 const MANAGED_CACHE_FILE_NAME: &str = "managed-policy.bundle";
 
-/// The managed-policy status file, in the 1.x policy directory and again in `home/policy`.
+/// The managed-policy status file in the 1.x policy directory. 2.0 names its own in the layout.
 const MANAGED_STATUS_FILE_NAME: &str = "managed-status.json";
 
 /// The 1.x extension walkthrough marker, in the 1.x policy directory. 2.0 records setup in
 /// `state/setup.json` instead, so the migration deletes the marker.
 const HANDOFF_MARKER_NAME: &str = "extension-handoff-v1";
 
-/// The MCP client location file, in the 1.x configuration directory and again in `home/state`.
+/// The MCP client location file in the 1.x configuration directory. 2.0 names its own in the
+/// layout.
 pub(super) const HARNESS_LOCATIONS_NAME: &str = "harness-locations.json";
 
 /// Directory below the 1.x configuration root that held the client location file.
@@ -756,38 +757,42 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
     let policy_sources = legacy.policy_sources();
     let state_sources = legacy.state_sources(home);
     let location_sources = [legacy.roots.harness_locations_directory()];
+    // Each 1.x file by its 1.x name, and the file 2.0 reads it as, which the home's layout names.
     let placements: [(&str, &[PathBuf], PathBuf); 4] = [
         (
             USER_POLICY_FILE_NAME,
             policy_sources.as_slice(),
-            layout.policy(),
+            layout.user_policy(),
         ),
         (
             MANAGED_CACHE_FILE_NAME,
             policy_sources.as_slice(),
-            layout.policy(),
+            layout.managed_policy_bundle(),
         ),
         (
             MANAGED_STATUS_FILE_NAME,
             policy_sources.as_slice(),
-            layout.policy(),
+            layout.managed_status(),
         ),
         (
             HARNESS_LOCATIONS_NAME,
             location_sources.as_slice(),
-            layout.state(),
+            layout.harness_locations(),
         ),
     ];
     for (name, sources, destination) in placements {
         if let Some(directory) = holding(sources, name) {
-            if same_location(directory, &destination) {
+            if destination
+                .parent()
+                .is_some_and(|parent| same_location(directory, parent))
+            {
                 // The file already sits where 2.0 keeps it: 1.x recorded the 2.0 directory.
                 continue;
             }
             note_virtualized(&mut virtualized, directory);
             plan.moves.push(Move {
                 from: directory.join(name),
-                to: destination.join(name),
+                to: destination,
             });
         }
     }

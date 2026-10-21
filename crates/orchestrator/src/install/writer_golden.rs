@@ -23,11 +23,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::container::AppContainer;
-use super::layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
+use super::layout::{EDGE_COMMAND_NAME, HARNESS_LOCATIONS_NAME, RETIRED_MCP_CONNECTOR_NAME};
 use super::{
     definition, executable_name, harness_roots, AgentRow, ConfigDialect, HarnessAction,
     HarnessContext, HarnessRegistry, HarnessState, HarnessSummary, JsonDialect, PrivateView,
-    HARNESS_LOCATIONS_FILE, ROSTER,
+    ROSTER,
 };
 use crate::language::self_check::golden::{check_golden_with, repository_path};
 use crate::scratch::Scratch;
@@ -427,7 +427,7 @@ impl Run {
             locations: PathBuf::from(spelled(
                 &root,
                 separator,
-                &["state", HARNESS_LOCATIONS_FILE],
+                &["state", HARNESS_LOCATIONS_NAME],
             )),
             windows,
             linux: computer == Computer::Linux,

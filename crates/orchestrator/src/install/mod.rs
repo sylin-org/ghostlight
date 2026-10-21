@@ -76,8 +76,6 @@ const RETIRED_ENTRY: words::RetiredEntry<'static> = words::RetiredEntry {
 const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
 /// The package name of the Codex desktop app.
 const CODEX_PACKAGE: &str = "OpenAI.Codex";
-/// File in the state directory recording where each MCP client's configuration was found.
-const HARNESS_LOCATIONS_FILE: &str = "harness-locations.json";
 /// The age past which a replace's temporary file beside a configuration is no write in flight
 /// but one an interrupted write left behind. A write takes milliseconds.
 const STRAY_TEMPORARY_AGE: Duration = Duration::from_secs(60);
@@ -409,7 +407,7 @@ fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessConte
         crush_config: None,
         edge: edge.to_path_buf(),
         path_entries: Vec::new(),
-        locations: state.join(HARNESS_LOCATIONS_FILE),
+        locations: state.join(layout::HARNESS_LOCATIONS_NAME),
         windows: false,
         linux: cfg!(target_os = "linux"),
         local_app_data: None,
@@ -767,10 +765,10 @@ impl HarnessContext {
         let path_entries = env::var_os("PATH")
             .map(|path| env::split_paths(&path).collect())
             .unwrap_or_default();
-        let locations = layout
-            .map(|layout| layout.state())
-            .unwrap_or_default()
-            .join(HARNESS_LOCATIONS_FILE);
+        let locations = layout.map_or_else(
+            |_| PathBuf::from(layout::HARNESS_LOCATIONS_NAME),
+            |layout| layout.harness_locations(),
+        );
         let local_app_data = windows.then(|| {
             user_dirs::directory(LOCAL_APP_DATA_VARIABLE)
                 .unwrap_or_else(|| home.join("AppData/Local"))
@@ -3277,8 +3275,8 @@ mod tests {
         Attention, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
         HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, LauncherPin,
         NpmLauncher, Packages, PrivateView, RegistrationState, APP_DATA_VARIABLE, CLINE_SETTINGS,
-        CODEX_HOME_VARIABLE, EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE, MCP_ARGUMENT,
-        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME, XDG_CONFIG_HOME_VARIABLE,
+        CODEX_HOME_VARIABLE, EDGE_COMMAND_NAME, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME, ROSTER,
+        SERVER_NAME, XDG_CONFIG_HOME_VARIABLE,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -3853,7 +3851,7 @@ mod tests {
         assert_owner_only(&context.locations);
         assert_eq!(
             names_in(context.locations.parent().unwrap()),
-            [HARNESS_LOCATIONS_FILE]
+            [super::layout::HARNESS_LOCATIONS_NAME]
         );
     }
 

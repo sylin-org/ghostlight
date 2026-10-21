@@ -405,7 +405,7 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
 | I-D1 | fix(install): an empty `XDG_CONFIG_HOME`, `APPDATA` or `CODEX_HOME` counts as unset | - | INST-4's defect | landed (this commit); see Notes, second sweep |
 | I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | landed (this commit); see Notes, second sweep |
 | I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | landed (this commit); see Notes, second sweep |
-| INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | todo |
+| INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | landed (this commit); see Notes, second sweep |
 | INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | todo |
 | INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | todo |
 | INST-9 | refactor(install): the install's sentences move to `language/deployment.rs` | - | INST-9; some reach the agent, so model-visible text stays byte-equal | todo |
@@ -419,7 +419,7 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
 | INST-11 | refactor(install): one process-stopping engine with both failure rules | - | INST-11 as corrected; the image match stays per caller | todo |
 | INST-2 | refactor(install): the harness feature moves to `install/harness/` | INST-14 | INST-2 as corrected; `install::writer_golden` and `install::agent_list` keep their paths | todo |
 | INST-3 | refactor(install): one glossary for identifiers | INST-2 | INST-3 as corrected; machine words stay | todo |
-| SERV-6c | refactor(cli): the CLI reads the service's vocabulary as types | - | SERV-6's CLI half | todo |
+| SERV-6c | refactor(cli): the CLI reads the service's vocabulary as types | - | SERV-6's CLI half | moved: test-01 took SERV-6 whole (15b38451) |
 | SERV-13 | refactor(cli): install and uninstall run as two flows that collect, then print | - | SERV-13 as corrected; the printed order stays | todo |
 | SERV-11c | refactor(cli): one name per meaning in `cli/` | SERV-13 | SERV-11's CLI half | todo |
 | EXT-2 | refactor(win-peer): the user's SID comes from relay | - | EXT-2 | todo |
@@ -452,3 +452,14 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
   else of `call` moves: SERV-4's `cli/call.rs`, the one parse in `main` and the `launch_mode`
   table are SERV-6c, SERV-13 and SERV-11c. The test's non-UTF-8 argument is `cfg(unix)` on Linux,
   which only CI compiles from here.
+- INST-1: `layout.rs` now names `harness-locations.json`, `user-policy.json`,
+  `managed-policy.bundle` and `managed-status.json`, with `Layout::harness_locations`,
+  `user_policy`, `managed_policy_bundle` and `managed_status`. Their 2.0 readers (install's
+  harness context, `governance/paths.rs` and `governance/managed/mod.rs`, cross-lane under
+  test-03's hold) and the migration's destinations use them; install's own
+  `HARNESS_LOCATIONS_FILE`, governance's `USER_POLICY_FILE` and the now unused
+  `policy_directory()` are deleted. As the skeptic corrected, the migration keeps its own 1.x
+  source names, and `audit.jsonl` stays two facts (the service's log and the 1.x archive). Every
+  persisted byte is unchanged; the writer goldens pass untouched.
+- SERV-6c: test-01 took SERV-6 whole as a cross-lane slice (15b38451), so this lane has nothing
+  left of it.

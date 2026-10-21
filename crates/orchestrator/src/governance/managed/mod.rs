@@ -22,6 +22,7 @@ use super::{
     manifest, ManagedPolicyContact, ManagedPolicyFreshness, ManagedPolicyPassport,
     ManagedPolicySource,
 };
+use crate::install::layout::Layout;
 use crate::install::record::atomic_replace;
 
 const DEFAULT_POLL_SECONDS: u64 = 900;
@@ -45,23 +46,23 @@ impl ManagedPaths {
         #[cfg(target_os = "linux")]
         let bootstrap = PathBuf::from("/etc/ghostlight/managed.json");
 
-        let policy = super::paths::policy_directory();
+        let layout = Layout::current().ok();
 
         Self {
             bootstrap,
-            cache: policy
-                .as_ref()
-                .map(|path| path.join("managed-policy.bundle")),
-            status: policy.map(|path| path.join("managed-status.json")),
+            cache: layout.as_ref().map(Layout::managed_policy_bundle),
+            status: layout.as_ref().map(Layout::managed_status),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn under(path: &Path) -> Self {
+        use crate::install::layout::{MANAGED_POLICY_BUNDLE_NAME, MANAGED_STATUS_NAME};
+
         Self {
             bootstrap: path.join("managed.json"),
-            cache: Some(path.join("managed-policy.bundle")),
-            status: Some(path.join("managed-status.json")),
+            cache: Some(path.join(MANAGED_POLICY_BUNDLE_NAME)),
+            status: Some(path.join(MANAGED_STATUS_NAME)),
         }
     }
 
