@@ -418,80 +418,79 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
+    /// Defect 664d0573: the entry rule reads one installed location however it is spelled. A
+    /// service named in another case, with forward slashes, a verbatim prefix (a UNC one becomes
+    /// its plain form) or a trailing separator is the installed one and is never forwarded to; a
+    /// path through `..` or a linked home names the same executable; and a path that cannot be
+    /// resolved is kept as it is.
     #[test]
-    fn windows_paths_compare_without_regard_to_spelling() {
-        let shouted = PathBuf::from(ROOT.to_uppercase())
-            .join("BIN")
-            .join("GHOSTLIGHT-SERVICE");
-        let slashed = PathBuf::from(format!(
-            "{}/bin/ghostlight-service",
-            ROOT.replace('\\', "/")
-        ));
-        let verbatim = PathBuf::from(format!("\\\\?\\{ROOT}\\bin\\ghostlight-service"));
-        let trailing = PathBuf::from(format!("{ROOT}\\bin\\ghostlight-service\\"));
-        for spelling in [&shouted, &slashed, &verbatim, &trailing] {
-            assert_eq!(
-                decide(spelling, Role::Serve, &facts(Standing::Same)),
-                Entry::Run,
-                "{spelling:?}"
-            );
-        }
-        check(
-            "a service named in another spelling is never forwarded to",
-            &path("bin/ghostlight-service"),
-            Role::Launch,
-            Facts {
-                installed_service: shouted,
-                ..facts(Standing::Same)
-            },
-            Entry::Run,
-        );
-    }
-
-    #[test]
-    fn verbatim_prefixes_are_stripped_from_resolved_windows_paths() {
-        assert_eq!(strip_verbatim("\\\\?\\C:\\ghost\\bin"), "C:\\ghost\\bin");
+    fn the_entry_rule_reads_one_location_whatever_its_spelling_or_link() {
+        assert_eq!(strip_verbatim(r"\\?\C:\ghost\bin"), r"C:\ghost\bin");
         assert_eq!(
-            strip_verbatim("\\\\?\\UNC\\server\\share\\bin"),
-            "\\\\server\\share\\bin"
+            strip_verbatim(r"\\?\UNC\server\share\bin"),
+            r"\\server\share\bin"
         );
-        assert_eq!(strip_verbatim("C:\\ghost\\bin"), "C:\\ghost\\bin");
-    }
 
-    #[test]
-    fn a_canonical_path_resolves_dots_and_keeps_an_unresolvable_path() {
         let scratch = Scratch::new();
-        let bin = scratch.path().join("bin");
-        fs::create_dir(&bin).unwrap();
-        let image = bin.join("ghostlight");
+        let real = scratch.path().join("real");
+        fs::create_dir_all(real.join("bin")).unwrap();
+        let image = real.join("bin").join("ghostlight-service");
         fs::write(&image, b"x").unwrap();
-        let roundabout = bin.join("..").join("bin").join("ghostlight");
+        let roundabout = real
+            .join("bin")
+            .join("..")
+            .join("bin")
+            .join("ghostlight-service");
         assert_eq!(canonical_path(&roundabout), canonical_path(&image));
         assert!(!canonical_path(&image)
             .to_string_lossy()
             .starts_with(VERBATIM_PREFIX));
-        let absent = bin.join("absent");
+        let absent = real.join("bin").join("absent");
         assert_eq!(canonical_path(&absent), absent);
-    }
 
-    #[cfg(unix)]
-    #[test]
-    fn a_symlinked_home_names_the_same_executable() {
-        let scratch = Scratch::new();
-        let real = scratch.path().join("real");
-        fs::create_dir_all(real.join("bin")).unwrap();
-        fs::write(real.join("bin").join("ghostlight-service"), b"x").unwrap();
-        let link = scratch.path().join("link");
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-        let running = canonical_path(&real.join("bin").join("ghostlight-service"));
-        let facts = Facts {
-            installed_service: canonical_path(&link.join("bin").join("ghostlight-service")),
-            installed_edge: canonical_path(&link.join("bin").join("ghostlight")),
-            development_channel: false,
-            standing: Standing::Same,
-        };
-        assert_eq!(decide(&running, Role::Serve, &facts), Entry::Run);
-        assert_eq!(decide(&running, Role::Launch, &facts), Entry::Run);
+        #[cfg(unix)]
+        {
+            let link = scratch.path().join("link");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            let running = canonical_path(&image);
+            let facts = Facts {
+                installed_service: canonical_path(&link.join("bin").join("ghostlight-service")),
+                installed_edge: canonical_path(&link.join("bin").join("ghostlight")),
+                development_channel: false,
+                standing: Standing::Same,
+            };
+            assert_eq!(decide(&running, Role::Serve, &facts), Entry::Run);
+            assert_eq!(decide(&running, Role::Launch, &facts), Entry::Run);
+        }
+
+        #[cfg(windows)]
+        {
+            let shouted = PathBuf::from(ROOT.to_uppercase())
+                .join("BIN")
+                .join("GHOSTLIGHT-SERVICE");
+            let slashed = PathBuf::from(format!(
+                "{}/bin/ghostlight-service",
+                ROOT.replace('\\', "/")
+            ));
+            let verbatim = PathBuf::from(format!(r"\\?\{ROOT}\bin\ghostlight-service"));
+            let trailing = PathBuf::from(format!(r"{ROOT}\bin\ghostlight-service\"));
+            for spelling in [&shouted, &slashed, &verbatim, &trailing] {
+                assert_eq!(
+                    decide(spelling, Role::Serve, &facts(Standing::Same)),
+                    Entry::Run,
+                    "{spelling:?}"
+                );
+            }
+            check(
+                "a service named in another spelling is never forwarded to",
+                &path("bin/ghostlight-service"),
+                Role::Launch,
+                Facts {
+                    installed_service: shouted,
+                    ..facts(Standing::Same)
+                },
+                Entry::Run,
+            );
+        }
     }
 }
