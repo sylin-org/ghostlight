@@ -25,7 +25,7 @@
   const BUTTON_NONE = "none";
   const BUTTON_LEFT = "left";
   const STOP = Object.freeze({ DIALOG: "dialog", CANCELLED: "cancelled" });
-  const FAILURE = Object.freeze({ INVALID_REQUEST: "invalid_request", TIMEOUT: "timeout" });
+  const FAILURE = protocol.RECEIPT_FAILURE;
   // How long a held drag move waits for interception data, and the grace for late data at the end.
   const INTERCEPT_STEP_MS = 10;
   const INTERCEPT_GRACE_MS = 100;
@@ -71,7 +71,7 @@
       }
       if (step.step === STEP.INSERT_TEXT) return cdp(rootTarget(tabId), CDP.INPUT_INSERT_TEXT, { text: step.text });
       if (step.step === STEP.PAUSE) return sleep(Math.min(protocol.MAX_PAUSE_MS, step.ms));
-      return Promise.reject(sessions.failure(FAILURE.INVALID_REQUEST, `Unknown input step: ${step.step}`));
+      return Promise.reject(protocol.failure(FAILURE.INVALID_REQUEST, `Unknown input step: ${step.step}`));
     }
 
     // One drag's interception watch. Data that arrives between waits is kept for the next wait.
@@ -199,7 +199,7 @@
         try {
           for (const step of args.steps) {
             if (isCancelled(correlation)) return { ...outcome, stopped: { reason: STOP.CANCELLED } };
-            if (now() >= deadline) throw sessions.failure(FAILURE.TIMEOUT, `Input did not finish in ${args.timeout_ms} ms.`);
+            if (now() >= deadline) throw protocol.failure(FAILURE.TIMEOUT, `Input did not finish in ${args.timeout_ms} ms.`);
             fx.dispatched = true;
             const sent = step.step === STEP.DRAG
               ? drag(args.tab_id, step).then((result) => { outcome.native_drag ||= result.native; })

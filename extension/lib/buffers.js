@@ -60,14 +60,10 @@
     DISCARDED: "discarded",
     NOT_FOUND: "not_found"
   });
-  const STOP_REASON = Object.freeze({
-    EXPLICIT: "explicit",
-    DOCUMENT_BOUNDARY: "document_boundary",
-    BROWSER_DETACHED: "browser_detached"
-  });
+  const STOP_REASON = protocol.RECORDING_STOP_REASON;
   const RECORDING_STATE = "recording";
   const FRAME_KIND = Object.freeze({ SEED: "seed", SCREENCAST: "screencast", FINAL: "final" });
-  const FAILURE = Object.freeze({ DOCUMENT_CHANGED: "document_changed" });
+  const FAILURE = protocol.RECEIPT_FAILURE;
   const ENCODER_DOCUMENT = "offscreen.html";
   const ENCODER_REASON = "BLOBS";
   const ENCODER_JUSTIFICATION = "Decode recording frames and encode one animated GIF away from the service worker.";

@@ -58,24 +58,13 @@ const FUNCTION_CLOSE: &str = "\n  }\n";
 /// The extension, from the orchestrator crate. Its packaged files are read, never edited, so
 /// these pins hold the frozen package to the service without changing it.
 const EXTENSION: &str = "../../extension";
-/// The extension modules that name the recording stop reasons they send in a table.
-const STOP_REASON_TABLES: [&str; 2] = ["worker.js", "lib/buffers.js"];
-/// Where each of those modules opens its table of stop reasons.
-const STOP_REASONS_OPEN: &str = "const STOP_REASON = Object.freeze({";
-/// The extension module that also names stop reasons as literals.
+/// The extension module that names stop reasons as literals: the offscreen document loads it
+/// without `protocol.js`, so it cannot take them from there.
 const RECORDING_JS: &str = "lib/recording.js";
 /// What precedes each stop-reason literal in `recording.js`.
 const STOP_REASON_LITERALS: [&str; 3] = ["freeze(state, \"", "reason === \"", "reason = \""];
-/// The extension module that names the runtime states it reports.
-const WORKER_JS: &str = "worker.js";
-/// Where `worker.js` opens its table of runtime states.
-const RUNTIME_OPEN: &str = "const RUNTIME = Object.freeze({";
-/// The extension module that reports a lost service to the page.
-const EXTENSION_WORLD_JS: &str = "lib/world.js";
-/// How that module names the runtime fact of a lost service.
-const DISCONNECTED_OPEN: &str = "const RUNTIME_DISCONNECTED = \"";
-/// The extension module that reassembles chunked commands.
-const CHUNKS_JS: &str = "lib/chunks.js";
+/// The receipt fixture of a dialog status with no dialog open, which names the unknown type.
+const NO_DIALOG_RECEIPT: &str = "receipts/dialog.ok_absent.json";
 /// The file name suffix of every fixture.
 const JSON_SUFFIX: &str = ".json";
 /// The case-name prefix of a receipt fixture that carries an outcome.
@@ -694,71 +683,55 @@ fn extension(relative: &str) -> String {
 
 #[test]
 fn every_stop_reason_the_extension_sends_is_one_the_service_decodes() {
-    let mut sent = BTreeSet::new();
-    for module in STOP_REASON_TABLES {
-        let named = quoted_between(&extension(module), STOP_REASONS_OPEN, TABLE_CLOSE);
-        assert!(!named.is_empty(), "{module} names its stop reasons");
-        sent.extend(named);
-    }
+    let unknown = name(&RecordingStopReason::Unknown);
+    let mut known = set(
+        names!(RecordingStopReason: DocumentBoundary, Explicit, HardTimeout, MemoryLimit,
+        BrowserDetached, RuntimeHeld, ServiceDisconnected, FrameTooLarge, Unknown),
+    );
+    known.remove(&unknown);
+    let listed = listed(&vocabulary(), "recording_stop_reasons");
+    assert_eq!(listed, known, "vocabulary.recording_stop_reasons");
     let recording = extension(RECORDING_JS);
+    let mut literals = BTreeSet::new();
     for marker in STOP_REASON_LITERALS {
-        sent.extend(quoted_after(&recording, marker));
+        literals.extend(quoted_after(&recording, marker));
     }
-    for reason in &sent {
-        let decoded: RecordingStopReason = decode(reason, &Value::String(reason.clone()));
-        assert_ne!(decoded, RecordingStopReason::Unknown, "{reason}");
-    }
+    assert!(!literals.is_empty(), "recording.js names its stop reasons");
+    assert!(
+        literals.is_subset(&known),
+        "{literals:?} is not within {known:?}"
+    );
 }
 
 #[test]
 fn the_runtime_states_the_extension_reports_are_the_services_and_disconnected() {
-    let disconnected = quoted_after(&extension(EXTENSION_WORLD_JS), DISCONNECTED_OPEN);
-    assert_eq!(disconnected.len(), 1, "{disconnected:?}");
-    let mut reported = set(names!(RuntimeControlState: Active, Held, Ended));
-    reported.extend(disconnected.iter().cloned());
-    assert_eq!(
-        quoted_between(&extension(WORKER_JS), RUNTIME_OPEN, TABLE_CLOSE),
-        reported
-    );
+    let vocabulary = vocabulary();
+    let states = listed(&vocabulary, "runtime_states");
+    let controlled = set(names!(RuntimeControlState: Active, Held, Ended));
+    assert_eq!(controlled, listed(&vocabulary, "control_states"));
+    let lost: BTreeSet<String> = states.difference(&controlled).cloned().collect();
+    assert!(controlled.is_subset(&states), "{states:?}");
+    assert_eq!(lost.len(), 1, "one state beyond the service's: {lost:?}");
     let read = quoted_between(PRESENTATION_JS, RUNTIME_READ_OPEN, FUNCTION_CLOSE);
     assert!(
-        read.is_superset(&disconnected) && read.is_subset(&reported),
+        read.is_superset(&lost) && read.is_subset(&states),
         "{read:?}"
     );
 }
 
-/// The value of a numeric constant an extension module declares as a product of integers.
-fn js_constant(source: &str, name: &str) -> u64 {
-    let marker = format!("const {name} = ");
-    let start = source.find(&marker).unwrap_or_else(|| panic!("no {name}")) + marker.len();
-    let end = start + source[start..].find(';').expect("the declaration ends");
-    source[start..end]
-        .split('*')
-        .map(|factor| {
-            factor
-                .trim()
-                .replace('_', "")
-                .parse::<u64>()
-                .unwrap_or_else(|error| panic!("{name}: {error}"))
-        })
-        .product()
+#[test]
+fn the_extensions_chunk_limits_equal_the_services() {
+    let limits = &vocabulary()["chunk_limits"];
+    assert_eq!(limits["chunk_payload_bytes"], wire::CHUNK_PAYLOAD_BYTES);
+    assert_eq!(limits["transfer_max_bytes"], wire::TRANSFER_MAX_BYTES);
+    assert_eq!(limits["transfer_max_chunks"], wire::TRANSFER_MAX_CHUNKS);
 }
 
 #[test]
-fn the_extensions_chunk_limits_equal_the_services() {
-    let chunks = extension(CHUNKS_JS);
-    let limit = |value: usize| u64::try_from(value).expect("a limit");
+fn the_unknown_dialog_type_is_the_one_the_receipts_carry() {
     assert_eq!(
-        js_constant(&chunks, "DEFAULT_MAX_CHUNK_BYTES"),
-        limit(wire::CHUNK_PAYLOAD_BYTES)
-    );
-    assert_eq!(
-        js_constant(&chunks, "DEFAULT_MAX_BYTES"),
-        limit(wire::TRANSFER_MAX_BYTES)
-    );
-    assert_eq!(
-        js_constant(&chunks, "DEFAULT_MAX_CHUNKS"),
-        u64::from(wire::TRANSFER_MAX_CHUNKS)
+        vocabulary()["unknown_dialog_type"],
+        read(NO_DIALOG_RECEIPT)["ok"]["dialog_type"]
     );
 }
 

@@ -106,7 +106,7 @@ test("a validator that fails without a code is still invalid_request, and one th
   const handler = (validate) => ({ validate, run: async () => ({}), addresses: () => true, tabOf: (args) => args.tab_id });
   const parts = rig({ tabHandlers: {
     focusTab: handler(() => { throw new TypeError("Cannot read properties of null"); }),
-    setZoom: handler(() => { throw sessions.failure("tab_missing", "Named by the validator."); })
+    setZoom: handler(() => { throw protocol.failure("tab_missing", "Named by the validator."); })
   } });
   await parts.primitives.run("a", request("focus_tab", focus));
   await parts.primitives.run("b", request("set_zoom", focus));
@@ -136,7 +136,7 @@ test("an unknown primitive is unsupported with nothing dispatched, and so is a n
 test("every request gets exactly one receipt: success, failure, invalid, unsupported and cancelled alike", async () => {
   const stubs = new Map([
     ["focus_tab", async (_args, fx) => { fx.dispatched = true; return { tab_id: TAB, active: true, window_focused: true }; }],
-    ["set_zoom", async () => { throw sessions.failure("tab_missing", "No tab with id: 12."); }]
+    ["set_zoom", async () => { throw protocol.failure("tab_missing", "No tab with id: 12."); }]
   ]);
   const parts = rig({ stubs });
   await parts.primitives.run("a", request("focus_tab", focus));
@@ -210,7 +210,7 @@ test("a failure after dispatch keeps its facts: the commits and the tab", async 
     fx.watch(TAB);
     fx.dispatched = true;
     parts.primitives.committed(TAB, "https://example.com/");
-    throw sessions.failure("timeout", "The tab did not become ready in 8000 ms.");
+    throw protocol.failure("timeout", "The tab did not become ready in 8000 ms.");
   }]]) });
   await parts.primitives.run("n", request("navigate", { tab_id: TAB, to: { to: "url", url: "https://example.com/" }, discard_beforeunload: false, ready_timeout_ms: 8000 }));
   const [frame] = parts.frames;
@@ -405,7 +405,7 @@ test("a rejected chunk transfer is answered with an invalid_request receipt", ()
 
 test("a thrown error becomes a receipt failure through a closed table", () => {
   const code = (error) => Primitives.failureCode(error);
-  for (const known of protocol.vocabulary.receipt_failures) assert.equal(code(sessions.failure(known, "x")), known);
+  for (const known of protocol.vocabulary.receipt_failures) assert.equal(code(protocol.failure(known, "x")), known);
   assert.equal(code(new Error("No tab with id: 99.")), "tab_missing");
   assert.equal(code(new Error("No tab with given id 99.")), "tab_missing");
   assert.equal(code(new Error("Cannot attach to this target.")), "debugger_unavailable");
@@ -417,7 +417,7 @@ test("a thrown error becomes a receipt failure through a closed table", () => {
   assert.equal(code(new Error("{\"code\":-32602,\"message\":\"Invalid parameters\"}")), "browser_refused");
   assert.equal(code(new Error("{\"code\":-32001,\"message\":\"Session with given id not found.\"}")), "session_lost");
   assert.equal(code(Object.assign(new Error("odd"), { code: -32000 })), "browser_refused");
-  assert.equal(code(sessions.failure("frame_missing", "x")), "other", "a call failure is not a receipt code");
+  assert.equal(code(protocol.failure("frame_missing", "x")), "other", "a call failure is not a receipt code");
   assert.equal(code(new Error("boom")), "other");
   assert.equal(code("plain text"), "other");
   assert.equal(code(undefined), "other");
@@ -457,7 +457,7 @@ test("the dispatcher frames any handler outcome and its effect facts in the gold
       if (watched !== undefined) fx.watch(watched);
       for (const url of receipt.committed_urls) parts.primitives.committed(watched, url);
       fx.dispatched = receipt.dispatched;
-      if ("failure" in receipt) throw sessions.failure(receipt.failure, receipt.message);
+      if ("failure" in receipt) throw protocol.failure(receipt.failure, receipt.message);
       return receipt.ok;
     }]]);
     const parts = rig({ stubs, tabs });

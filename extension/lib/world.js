@@ -40,23 +40,11 @@
   });
 
 
-  const CALL = Object.freeze({
-    DOCUMENT_CHANGED: "document_changed",
-    FRAME_MISSING: "frame_missing",
-    OWNER_MISSING: "owner_missing",
-    DIALOG_OPEN: sessions.DIALOG_OPEN,
-    TIMEOUT: "timeout",
-    CANCELLED: "cancelled",
-    SESSION_LOST: "session_lost",
-    PAGE_EXCEPTION: "page_exception",
-    UNSERIALIZABLE: "unserializable",
-    OTHER: "other"
-  });
+  const CALL = protocol.CALL_FAILURE;
 
   const ANSWER = Object.freeze({ RETURNED: "returned", FAILED: "failed", SKIPPED: "skipped" });
   const MODE = Object.freeze({ SEQUENCE: "sequence", PARALLEL: "parallel", RACE: "race" });
   const SKIPPED = Object.freeze({ status: ANSWER.SKIPPED });
-  const RUNTIME_DISCONNECTED = "disconnected";
 
   // The closed mapping from CDP error text to a call failure. `started` says whether the page may
   // have run the message; `dropHandle` says the cached world handle is dead.
@@ -89,7 +77,7 @@
   /**
    * Maps an error raised while calling a world to `{ code, started, dropHandle }` through the closed
    * CALL_ERRORS table. A call failure keeps its own code and start. A coded failure from
-   * `sessions.failure` (such as the `dialog_open` a frame check throws) keeps its code when that
+   * `protocol.failure` (such as the `dialog_open` a frame check throws) keeps its code when that
    * code is also a call failure, and counts as started like any failure that does not say;
    * anything else is `other`, started.
    */
@@ -307,7 +295,7 @@
         preferences: { effects: preferences.effects !== false, captions: preferences.captions !== false },
         managed: Boolean(local.managed?.(tabId)),
         recording: Boolean(local.recording?.(tabId)),
-        runtime: local.runtime?.() ?? RUNTIME_DISCONNECTED,
+        runtime: local.runtime?.() ?? protocol.RUNTIME_STATE.DISCONNECTED,
         hidden: (hiddenHolds.get(tabId) ?? 0) > 0
       };
     }
@@ -357,7 +345,7 @@
 
     async function attemptCall(tabId, call, ctx) {
       if (!assets) return failed(CALL.OTHER, false, "No page assets have been received.");
-      if (lifecycle.currentDialog(tabId)) return failed(CALL.DIALOG_OPEN, false, sessions.DIALOG_OPEN_MESSAGE);
+      if (lifecycle.currentDialog(tabId)) return failed(CALL.DIALOG_OPEN, false, protocol.DIALOG_OPEN_MESSAGE);
       let reinstalled = false;
       for (;;) {
         let handle;
@@ -482,7 +470,7 @@
           answers = await race(args.tab_id, args.calls, contexts);
         }
         fx.dispatched = answers.some(started);
-        if (isCancelled(correlation)) throw sessions.failure(CALL.CANCELLED, "The request was cancelled.");
+        if (isCancelled(correlation)) throw protocol.failure(CALL.CANCELLED, "The request was cancelled.");
         if (args.settle_ms) await sleep(args.settle_ms);
         return { answers };
       } finally {
@@ -580,7 +568,7 @@
      */
     async function devicePixelRatio(tabId) {
       const handle = await topHandle(tabId);
-      if (!handle) throw sessions.failure(CALL.SESSION_LOST, "The debugger is not attached to this tab.");
+      if (!handle) throw protocol.failure(CALL.SESSION_LOST, "The debugger is not attached to this tab.");
       const reply = await callShim(handle, SHIMS.DPR, []);
       return reply?.result?.value;
     }

@@ -2,14 +2,14 @@
 (function installGhostlightCapture(root, factory) {
   const node = typeof module !== "undefined" && module.exports;
   const api = factory(node
-    ? { sessions: require("./sessions.js"), args: require("./arguments.js") }
-    : { sessions: root.GhostlightSessions, args: root.GhostlightArguments });
+    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), args: require("./arguments.js") }
+    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, args: root.GhostlightArguments });
   root.GhostlightCapture = api;
   if (node) module.exports = api;
 })(globalThis, function createGhostlightCaptureApi(deps) {
   "use strict";
 
-  const { sessions, args: check } = deps;
+  const { protocol, sessions, args: check } = deps;
   const { CDP } = sessions;
   const { invalid, isObject, requireTabId, requireInteger } = check;
 
@@ -22,10 +22,7 @@
   // module decides nothing about what to capture.
 
   const CLIP = Object.freeze({ VIEWPORT: "viewport", FULL_PAGE: "full_page", VIEWPORT_RECT: "viewport_rect", PAGE_RECT: "page_rect" });
-  const FAILURE = Object.freeze({
-    CAPTURE_TOO_LARGE: "capture_too_large",
-    OTHER: "other"
-  });
+  const FAILURE = protocol.RECEIPT_FAILURE;
   const MIME_JPEG = "image/jpeg";
   const FORMAT_JPEG = "jpeg";
   const MAX_QUALITY = 100;
@@ -130,7 +127,7 @@
       const metrics = await cdp(rootTarget(tabId), CDP.PAGE_GET_LAYOUT_METRICS);
       const visual = metrics?.cssVisualViewport || metrics?.visualViewport;
       const content = metrics?.cssContentSize || metrics?.contentSize;
-      if (!visual || !content) throw sessions.failure(FAILURE.OTHER, "The browser did not report the page layout.");
+      if (!visual || !content) throw protocol.failure(FAILURE.OTHER, "The browser did not report the page layout.");
       const view = {
         visual_page_x: visual.pageX ?? 0,
         visual_page_y: visual.pageY ?? 0,
@@ -207,7 +204,7 @@
                 break;
               }
             }
-            if (!shot) throw sessions.failure(FAILURE.CAPTURE_TOO_LARGE, "No quality in the budget fits the size limit.");
+            if (!shot) throw protocol.failure(FAILURE.CAPTURE_TOO_LARGE, "No quality in the budget fits the size limit.");
             const size = await measure(shot.data, clip, scale);
             return {
               mime_type: MIME_JPEG,

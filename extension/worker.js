@@ -32,43 +32,19 @@ const ENGINE_BRAND = "Chromium";
 const CONTROLLED_KEY = "ghostlight.controlled";
 // The epoch of the service that granted the custody in CONTROLLED_KEY, kept beside it.
 const SERVICE_EPOCH_KEY = "ghostlight.service_epoch";
-const UNKNOWN_DIALOG = "unknown";
 
 // How the first connection of this worker ended, as far as the welcome page cares.
 const FIRST_CONNECTION = Object.freeze({ ACCEPTED: "accepted", HOST_ABSENT: "host_absent", OTHER: "other" });
 
 const CONTROL = Object.freeze({ MANAGED: "managed", RELEASED: "released" });
-const RUNTIME = Object.freeze({ ACTIVE: "active", HELD: "held", ENDED: "ended", DISCONNECTED: "disconnected" });
-const STOP_REASON = Object.freeze({
-  RUNTIME_HELD: "runtime_held",
-  BROWSER_DETACHED: "browser_detached",
-  SERVICE_DISCONNECTED: "service_disconnected"
-});
-const RECEIPT_FAILURE = Object.freeze({ INVALID_REQUEST: "invalid_request" });
-const FRAME = Object.freeze({
-  HELLO: "hello",
-  HELLO_ACCEPTED: "hello_accepted",
-  REQUEST: "request",
-  COMMAND_CHUNK: "command_chunk",
-  CANCEL: "cancel",
-  NOTICE: "notice",
-  CONTROL_STATE: "control_state",
-  HEARTBEAT: "heartbeat",
-  ERROR: "error",
-  BACKEND_UNAVAILABLE: "backend_unavailable"
-});
+const RUNTIME = protocol.RUNTIME_STATE;
+const STOP_REASON = protocol.RECORDING_STOP_REASON;
+const RECEIPT_FAILURE = protocol.RECEIPT_FAILURE;
+const FRAME = protocol.FRAME;
 // The field of a backend_unavailable frame by which the browser relay says no service is there at all.
 const BACKEND_SERVICE_FIELD = "service";
 const BACKEND_SERVICE_ABSENT = "absent";
-const EVENT = Object.freeze({
-  DOCUMENT_COMMITTED: "document_committed",
-  READINESS_CHANGED: "readiness_changed",
-  DIALOG_CHANGED: "dialog_changed",
-  TAB_CLOSED: "tab_closed",
-  ATTENDED: "attended",
-  RUNTIME_CONTROL_REQUESTED: "runtime_control_requested",
-  SHOW_REQUESTED: "show_requested"
-});
+const EVENT = protocol.EVENT;
 const MESSAGE = globalThis.GhostlightMessages.PAGE;
 const DEBUGGER_EVENT = Object.freeze({
   DIALOG_OPENING: "Page.javascriptDialogOpening",
@@ -799,7 +775,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   const tabId = source.tabId;
   if (!tabId) return;
   if (method === DEBUGGER_EVENT.DIALOG_OPENING) {
-    const type = params.type || UNKNOWN_DIALOG;
+    const type = params.type || protocol.UNKNOWN_DIALOG_TYPE;
     const sessionId = source.sessionId ?? null;
     lifecycle.openDialog(tabId, { type, message: params.message, defaultPrompt: params.defaultPrompt, url: params.url, sessionId });
     sendControlledEvent({ event: EVENT.DIALOG_CHANGED, tab_id: tabId, present: true, dialog_type: type });
@@ -808,7 +784,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   }
   if (method === DEBUGGER_EVENT.DIALOG_CLOSED) {
     lifecycle.closeDialog(tabId).catch(() => {});
-    sendControlledEvent({ event: EVENT.DIALOG_CHANGED, tab_id: tabId, present: false, dialog_type: UNKNOWN_DIALOG });
+    sendControlledEvent({ event: EVENT.DIALOG_CHANGED, tab_id: tabId, present: false, dialog_type: protocol.UNKNOWN_DIALOG_TYPE });
     return;
   }
   if (method === DEBUGGER_EVENT.DRAG_INTERCEPTED) {

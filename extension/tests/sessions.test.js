@@ -121,7 +121,7 @@ test("the allowlist is the closed protocol 4 list and refusal is a known receipt
     assert.equal(sessions.CDP_ALLOW.includes(method), false, method);
   }
   assert.ok(sessions.CDP_ALLOW.every((method) => /^[A-Z][A-Za-z]+\.[a-z][A-Za-z]+$/.test(method)));
-  assert.equal(protocol.isKnown("receipt_failures", sessions.failure("browser_refused", "x").code), true);
+  assert.equal(protocol.isKnown("receipt_failures", protocol.failure("browser_refused", "x").code), true);
 });
 
 test("attaching never sends Runtime.enable and only enableDomain does", async () => {

@@ -40,21 +40,10 @@
   // remembered for a minute and checked when the request starts. The dialog and accessibility
   // snapshot primitives are small enough to live here.
 
-  const CODE = Object.freeze({
-    UNSUPPORTED: "unsupported",
-    INVALID_REQUEST: "invalid_request",
-    TAB_MISSING: "tab_missing",
-    DEBUGGER_UNAVAILABLE: "debugger_unavailable",
-    DOCUMENT_CHANGED: "document_changed",
-    CANCELLED: "cancelled",
-    BROWSER_REFUSED: "browser_refused",
-    SESSION_LOST: "session_lost",
-    OTHER: "other"
-  });
+  const CODE = protocol.RECEIPT_FAILURE;
   const CANCEL_TTL_MS = 60_000;
   const MESSAGE_CHARS = 500;
   const DIALOG_SETTLE_MS = 50;
-  const DIALOG_UNKNOWN = "unknown";
   const DIALOG_PROMPT = "prompt";
   const NO_DIALOG = /No dialog is showing/;
   const AX_ROLE_CHARS = 100;
@@ -309,7 +298,7 @@
       }
       return {
         present: Boolean(dialog),
-        dialog_type: dialog?.type ?? DIALOG_UNKNOWN,
+        dialog_type: dialog?.type ?? protocol.UNKNOWN_DIALOG_TYPE,
         message: dialog ? shared.bounded(dialog.message, MESSAGE_CHARS) : undefined,
         // A prompt also says what its field holds: the text accept answers with.
         default_prompt: dialog?.type === DIALOG_PROMPT ? shared.bounded(dialog.defaultPrompt, MESSAGE_CHARS) : undefined,
@@ -336,13 +325,13 @@
         const target = dialog?.sessionId ? { tabId, sessionId: dialog.sessionId } : { tabId };
         await cdp(target, CDP.PAGE_HANDLE_JAVASCRIPT_DIALOG, { accept: request.op.accept, promptText: promptText(request.op, dialog) });
         await lifecycle.closeDialog(tabId);
-        return { present: true, dialog_type: dialog?.type ?? DIALOG_UNKNOWN, handled: true, accepted: request.op.accept, ...dialogUrl(dialog) };
+        return { present: true, dialog_type: dialog?.type ?? protocol.UNKNOWN_DIALOG_TYPE, handled: true, accepted: request.op.accept, ...dialogUrl(dialog) };
       } catch (error) {
         if (!NO_DIALOG.test(String(error?.message))) throw error;
         // The dialog was already gone: nothing was handled, so nothing was dispatched.
         fx.dispatched = false;
         await lifecycle.closeDialog(tabId);
-        return { present: false, dialog_type: DIALOG_UNKNOWN, handled: false, accepted: false };
+        return { present: false, dialog_type: protocol.UNKNOWN_DIALOG_TYPE, handled: false, accepted: false };
       }
       });
     }
@@ -375,7 +364,7 @@
           inventory.checkGuard(request.guard, snap);
           const owner = snap.owner.get(request.frame.frame_id);
           if (!owner || owner.loaderId !== request.frame.loader_id) {
-            throw sessions.failure(CODE.DOCUMENT_CHANGED, "The frame changed since it was read.");
+            throw protocol.failure(CODE.DOCUMENT_CHANGED, "The frame changed since it was read.");
           }
           const raw = request.query
             ? await cdp(owner.session, CDP.ACCESSIBILITY_QUERY_AX_TREE, {
@@ -388,7 +377,7 @@
               depth: request.max_depth ?? undefined
             });
           if (await inventory.currentLoader(owner.session, request.frame.frame_id) !== request.frame.loader_id) {
-            throw sessions.failure(CODE.DOCUMENT_CHANGED, "The frame changed while it was read.");
+            throw protocol.failure(CODE.DOCUMENT_CHANGED, "The frame changed while it was read.");
           }
           const nodes = (raw.nodes ?? []).filter((candidate) => !candidate.ignored);
           return { nodes: nodes.slice(0, request.max_nodes).map(axFact), truncated: nodes.length > request.max_nodes };
@@ -425,7 +414,7 @@
 
     function reply(correlation, receipt) {
       if (inflight.get(correlation)?.dropped) return;
-      send({ kind: "receipt", correlation, ...receipt });
+      send({ kind: protocol.FRAME.RECEIPT, correlation, ...receipt });
     }
 
     function validated(spec, request) {
@@ -439,7 +428,7 @@
 
     // A request the service cancelled ends before its effect, however long it waited for its turn.
     function refuseCancelled(correlation) {
-      if (cancellations.isCancelled(correlation)) throw sessions.failure(CODE.CANCELLED, "The request was cancelled.");
+      if (cancellations.isCancelled(correlation)) throw protocol.failure(CODE.CANCELLED, "The request was cancelled.");
     }
 
     async function execute(correlation, spec, request) {

@@ -20,8 +20,7 @@
 
   const TOP_FRAME_ID = 0;
   const ACTIVE_LIFECYCLE = "active";
-  const DOCUMENT_CHANGED = "document_changed";
-  const SESSION_LOST = "session_lost";
+  const { DOCUMENT_CHANGED, SESSION_LOST } = protocol.RECEIPT_FAILURE;
   const CHANGED_MESSAGE = "The page changed since it was read.";
 
   function walk(tree, visit) {
@@ -73,12 +72,12 @@
     if (!guard) return;
     for (const document of guard.documents ?? []) {
       const now = snap.owner.get(document.frame_id);
-      if (!now || now.loaderId !== document.loader_id) throw sessions.failure(DOCUMENT_CHANGED, CHANGED_MESSAGE);
+      if (!now || now.loaderId !== document.loader_id) throw protocol.failure(DOCUMENT_CHANGED, CHANGED_MESSAGE);
       const same = guard.exact ? now.fact.url === document.url : origin(now.fact.url) === origin(document.url);
-      if (!same) throw sessions.failure(DOCUMENT_CHANGED, CHANGED_MESSAGE);
+      if (!same) throw protocol.failure(DOCUMENT_CHANGED, CHANGED_MESSAGE);
     }
     if (guard.exact && (!snap.complete || snap.owner.size !== (guard.documents ?? []).length || snap.unseen.length !== (guard.unseen ?? 0))) {
-      throw sessions.failure(DOCUMENT_CHANGED, CHANGED_MESSAGE);
+      throw protocol.failure(DOCUMENT_CHANGED, CHANGED_MESSAGE);
     }
   }
 
@@ -97,7 +96,7 @@
     function rootOf(tabId) {
       lifecycle.requireNoDialog(tabId);
       const session = lifecycle.rootSession(tabId);
-      if (!session) throw sessions.failure(SESSION_LOST, "The debugger is not attached to this tab.");
+      if (!session) throw protocol.failure(SESSION_LOST, "The debugger is not attached to this tab.");
       return session;
     }
 

@@ -51,6 +51,11 @@
     recording_destinations: ["download", "client", "page"],
     readiness: ["loading", "complete", "unknown"],
     control_states: ["active", "held", "ended"],
+    runtime_states: ["active", "held", "ended", "disconnected"],
+    recording_stop_reasons: ["document_boundary", "explicit", "hard_timeout", "memory_limit", "browser_detached", "runtime_held",
+      "service_disconnected", "frame_too_large"],
+    unknown_dialog_type: "unknown",
+    chunk_limits: { chunk_payload_bytes: 524288, transfer_max_bytes: 8388608, transfer_max_chunks: 64 },
     limits: {
       direct_frame_bytes: 786432,
       max_world_calls: 256,
@@ -74,9 +79,47 @@
     return members.includes(value);
   }
 
+  // A closed list as a frozen map from each word's upper-snake name to the word, so a module writes
+  // protocol.RECEIPT_FAILURE.TAB_MISSING instead of spelling the word again.
+  function named(list) {
+    return Object.freeze(Object.fromEntries(list.map((word) => [word.toUpperCase(), word])));
+  }
+
+  const RECEIPT_FAILURE = named(vocabulary.receipt_failures);
+  const DIALOG_OPEN_MESSAGE = "A JavaScript dialog blocks the page.";
+
+  /**
+   * Builds a coded failure: an Error whose `code` is a protocol 4 receipt or call failure code.
+   * Callers throw or reject with it so the worker can report the code unchanged.
+   */
+  function failure(code, message) {
+    return Object.assign(new Error(message), { code });
+  }
+
+  /**
+   * The failure for work that needs a renderer a JavaScript dialog is blocking: the receipt code
+   * `dialog_open` with its one message. Anything that would wait on the page throws it at once.
+   */
+  function dialogOpen() {
+    return failure(RECEIPT_FAILURE.DIALOG_OPEN, DIALOG_OPEN_MESSAGE);
+  }
+
   return Object.freeze({
     vocabulary,
     isKnown,
+    failure,
+    dialogOpen,
+    DIALOG_OPEN_MESSAGE,
+    FRAME: named(Object.values(vocabulary.frame_kinds).flat()),
+    EVENT: named(vocabulary.events),
+    RECEIPT_FAILURE,
+    CALL_FAILURE: named(vocabulary.call_failures),
+    RUNTIME_STATE: named(vocabulary.runtime_states),
+    RECORDING_STOP_REASON: named(vocabulary.recording_stop_reasons),
+    UNKNOWN_DIALOG_TYPE: vocabulary.unknown_dialog_type,
+    CHUNK_PAYLOAD_BYTES: vocabulary.chunk_limits.chunk_payload_bytes,
+    TRANSFER_MAX_BYTES: vocabulary.chunk_limits.transfer_max_bytes,
+    TRANSFER_MAX_CHUNKS: vocabulary.chunk_limits.transfer_max_chunks,
     PROTOCOL: vocabulary.protocol,
     WORLD_NAME: vocabulary.world_name,
     NATIVE_HOST_NAME: vocabulary.native_host_name,

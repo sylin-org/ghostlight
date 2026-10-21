@@ -1,17 +1,20 @@
 // Ghostlight -- the reassembly of chunked service commands of adapter protocol 4: bounded in
 // count, size and time, and verified by SHA-256 before the command it carries runs.
 (function installGhostlightCommandChunks(root, factory) {
-  const api = factory();
+  const node = typeof module !== "undefined" && module.exports;
+  const api = factory(node ? { protocol: require("./protocol.js") } : { protocol: root.GhostlightProtocol });
   root.GhostlightCommandChunks = api;
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
-})(globalThis, function createGhostlightCommandChunksApi() {
+  if (node) module.exports = api;
+})(globalThis, function createGhostlightCommandChunksApi(deps) {
   "use strict";
 
+  const { protocol } = deps;
+
   const DEFAULT_MAX_ACTIVE = 2;
-  const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
+  const DEFAULT_MAX_BYTES = protocol.TRANSFER_MAX_BYTES;
   const DEFAULT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
-  const DEFAULT_MAX_CHUNKS = 64;
-  const DEFAULT_MAX_CHUNK_BYTES = 512 * 1024;
+  const DEFAULT_MAX_CHUNKS = protocol.TRANSFER_MAX_CHUNKS;
+  const DEFAULT_MAX_CHUNK_BYTES = protocol.CHUNK_PAYLOAD_BYTES;
   const DEFAULT_MAX_COMPLETED = 256;
   const DEFAULT_TTL_MS = 15_000;
   const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;

@@ -1,10 +1,13 @@
 // Ghostlight -- the debugger sessions of adapter protocol 4, the only path to CDP.
 (function installGhostlightSessions(root, factory) {
-  const api = factory();
+  const node = typeof module !== "undefined" && module.exports;
+  const api = factory(node ? { protocol: require("./protocol.js") } : { protocol: root.GhostlightProtocol });
   root.GhostlightSessions = api;
-  if (typeof module !== "undefined" && module.exports) module.exports = api;
-})(globalThis, function createGhostlightSessionsApi() {
+  if (node) module.exports = api;
+})(globalThis, function createGhostlightSessionsApi(deps) {
   "use strict";
+
+  const { protocol } = deps;
 
   // Debugger sessions for adapter protocol 4. This module owns every chrome.debugger attachment:
   // shared attach leases per tab, retained (controlled) tabs, focus emulation, the open JavaScript
@@ -12,8 +15,6 @@
   // script registration identifiers recorded against each. It is the only path to CDP: every
   // internal call goes through cdp(), which refuses any method outside CDP_ALLOW. It knows nothing
   // about page code. The installer the worker supplies registers that code in each session.
-
-  const CODE_BROWSER_REFUSED = "browser_refused";
 
   // Every CDP method the adapter may send. Runtime.enable is listed because enableDomain
   // (opt-in diagnostics) sends it; attaching a session never does.
@@ -65,25 +66,6 @@
   const EVENT_ATTACHED = "Target.attachedToTarget";
   const EVENT_DETACHED = "Target.detachedFromTarget";
   const TARGET_IFRAME = "iframe";
-  const DIALOG_UNKNOWN = "unknown";
-  const DIALOG_OPEN = "dialog_open";
-  const DIALOG_OPEN_MESSAGE = "A JavaScript dialog blocks the page.";
-
-  /**
-   * Builds a coded failure: an Error whose `code` is a protocol 4 receipt failure code.
-   * Callers throw or reject with it so the worker can report the code unchanged.
-   */
-  function failure(code, message) {
-    return Object.assign(new Error(message), { code });
-  }
-
-  /**
-   * The failure for work that needs a renderer a JavaScript dialog is blocking: the receipt code
-   * `dialog_open` with its one message. Anything that would wait on the page throws it at once.
-   */
-  function dialogOpen() {
-    return failure(DIALOG_OPEN, DIALOG_OPEN_MESSAGE);
-  }
 
   const iframeAutoAttach = Object.freeze({
     autoAttach: true,
@@ -121,7 +103,7 @@
      */
     function cdp(target, method, params) {
       if (!allowed.has(method)) {
-        return Promise.reject(failure(CODE_BROWSER_REFUSED, `CDP method ${method} is not allowed`));
+        return Promise.reject(protocol.failure(protocol.RECEIPT_FAILURE.BROWSER_REFUSED, `CDP method ${method} is not allowed`));
       }
       return debuggerApi.sendCommand(target, method, params);
     }
@@ -201,7 +183,7 @@
 
     /** Throws `dialog_open` when a JavaScript dialog blocks the tab's renderer. */
     function requireNoDialog(tabId) {
-      if (tabs.get(tabId)?.dialog) throw dialogOpen();
+      if (tabs.get(tabId)?.dialog) throw protocol.dialogOpen();
     }
 
     // Forgets everything that belonged to one debugger attachment. Registrations and child
@@ -438,7 +420,7 @@
      */
     function openDialog(tabId, { type, message = "", defaultPrompt = "", url = "", sessionId = null } = {}) {
       const state = tabState(tabId);
-      state.dialog = { type: type || DIALOG_UNKNOWN, message, defaultPrompt, url, sessionId };
+      state.dialog = { type: type || protocol.UNKNOWN_DIALOG_TYPE, message, defaultPrompt, url, sessionId };
       for (const wake of state.dialogWaiters) wake(state.dialog.type);
     }
 
@@ -624,5 +606,5 @@
     });
   }
 
-  return Object.freeze({ create, CDP, CDP_ALLOW, SESSION_LOST_TEXT, failure, dialogOpen, DIALOG_OPEN, DIALOG_OPEN_MESSAGE });
+  return Object.freeze({ create, CDP, CDP_ALLOW, SESSION_LOST_TEXT });
 });

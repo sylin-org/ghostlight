@@ -2,14 +2,14 @@
 (function installGhostlightArguments(root, factory) {
   const node = typeof module !== "undefined" && module.exports;
   const api = factory(node
-    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), shared: require("./shared.js") }
-    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, shared: root.GhostlightShared });
+    ? { protocol: require("./protocol.js"), shared: require("./shared.js") }
+    : { protocol: root.GhostlightProtocol, shared: root.GhostlightShared });
   root.GhostlightArguments = api;
   if (node) module.exports = api;
 })(globalThis, function createGhostlightArgumentsApi(deps) {
   "use strict";
 
-  const { protocol, sessions, shared } = deps;
+  const { protocol, shared } = deps;
 
   // Every primitive checks its arguments before it touches the browser, and a violation is an
   // `invalid_request` that names what is wrong. These are the checks that more than one primitive
@@ -18,15 +18,14 @@
   // They read only the fields the protocol names. What a world message means is the service's
   // business, so a message is checked for its shape and never for its kind.
 
-  const INVALID_REQUEST = "invalid_request";
-  const TAB_MISSING = "tab_missing";
+  const { INVALID_REQUEST, TAB_MISSING } = protocol.RECEIPT_FAILURE;
   const ID_CHARS = 128;
   // The longest message a receipt carries.
   const MESSAGE_CHARS = 500;
 
   /** Builds the `invalid_request` failure every check throws. */
   function invalid(message) {
-    return sessions.failure(INVALID_REQUEST, message);
+    return protocol.failure(INVALID_REQUEST, message);
   }
 
   /** True for a plain object: not null, not an array. */
@@ -133,7 +132,7 @@
     try {
       return await tabsApi.get(tabId);
     } catch (error) {
-      throw sessions.failure(TAB_MISSING, shared.bounded(error?.message ?? `No tab with id: ${tabId}.`, MESSAGE_CHARS));
+      throw protocol.failure(TAB_MISSING, shared.bounded(error?.message ?? `No tab with id: ${tabId}.`, MESSAGE_CHARS));
     }
   }
 

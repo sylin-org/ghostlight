@@ -35,14 +35,7 @@
   const STATUS_COMPLETE = "complete";
   const BEFORE_UNLOAD = "beforeunload";
   const TARGET = Object.freeze({ URL: "url", BACK: "back", FORWARD: "forward", RELOAD: "reload" });
-  const FAILURE = Object.freeze({
-    TIMEOUT: "timeout",
-    CANCELLED: "cancelled",
-    LOCAL_INTERLOCK: "local_interlock",
-    BROWSER_REFUSED: "browser_refused",
-    NO_HISTORY_ENTRY: "no_history_entry",
-    OTHER: "other"
-  });
+  const FAILURE = protocol.RECEIPT_FAILURE;
   // What back and forward say when the tab's history has no entry that way. Advisory, as every
   // receipt message is: the service words the refusal itself.
   const NO_ENTRY_MESSAGE = Object.freeze({
@@ -108,7 +101,7 @@
 
     // A request the service cancelled ends before its next effect.
     function refuseCancelled(correlation) {
-      if (isCancelled(correlation)) throw sessions.failure(FAILURE.CANCELLED, "The request was cancelled.");
+      if (isCancelled(correlation)) throw protocol.failure(FAILURE.CANCELLED, "The request was cancelled.");
     }
 
     // Group changes run one at a time, so two opens for one key never create two groups. A request
@@ -205,7 +198,7 @@
     }
 
     function requireCreated(tab) {
-      if (tab?.id === undefined) throw sessions.failure(FAILURE.OTHER, "Ghostlight could not observe the tab created by Chromium.");
+      if (tab?.id === undefined) throw protocol.failure(FAILURE.OTHER, "Ghostlight could not observe the tab created by Chromium.");
       return tab;
     }
 
@@ -276,7 +269,7 @@
         const tab = await requireTab(tabId);
         if (tab.status === STATUS_COMPLETE) return tab;
         if (tab.status !== STATUS_LOADING && (tab.url || tab.pendingUrl)) return tab;
-        if (now() >= deadline) throw sessions.failure(FAILURE.TIMEOUT, `The tab did not become ready in ${timeoutMs} ms.`);
+        if (now() >= deadline) throw protocol.failure(FAILURE.TIMEOUT, `The tab did not become ready in ${timeoutMs} ms.`);
         await sleep(READY_POLL_MS);
       }
     }
@@ -361,7 +354,7 @@
         const entry = Array.isArray(history?.entries) && Number.isSafeInteger(history.currentIndex)
           ? history.entries[history.currentIndex + step]
           : undefined;
-        if (!Number.isSafeInteger(entry?.id)) throw sessions.failure(FAILURE.NO_HISTORY_ENTRY, NO_ENTRY_MESSAGE[direction]);
+        if (!Number.isSafeInteger(entry?.id)) throw protocol.failure(FAILURE.NO_HISTORY_ENTRY, NO_ENTRY_MESSAGE[direction]);
         fx.dispatched = true;
         await lifecycle.cdp({ tabId }, CDP.PAGE_NAVIGATE_TO_HISTORY_ENTRY, { entryId: entry.id });
       });
@@ -450,7 +443,7 @@
             await controlled.release(args.tab_id);
             await leaveOwnGroup(args.tab_id);
           }
-          throw sessions.failure(FAILURE.LOCAL_INTERLOCK, INTERLOCK_MESSAGE);
+          throw protocol.failure(FAILURE.LOCAL_INTERLOCK, INTERLOCK_MESSAGE);
         }
         await requireTab(args.tab_id);
         fx.dispatched = true;
@@ -474,7 +467,7 @@
         try {
           await chromeApi.tabs.setZoom(args.tab_id, args.zoom);
         } catch (error) {
-          throw sessions.failure(FAILURE.BROWSER_REFUSED, shared.bounded(error?.message ?? "The browser refused the zoom level.", MESSAGE_CHARS));
+          throw protocol.failure(FAILURE.BROWSER_REFUSED, shared.bounded(error?.message ?? "The browser refused the zoom level.", MESSAGE_CHARS));
         }
         return { tab_id: args.tab_id, zoom: await chromeApi.tabs.getZoom(args.tab_id) };
       }

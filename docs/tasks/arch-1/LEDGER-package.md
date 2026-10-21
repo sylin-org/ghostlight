@@ -10,7 +10,12 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18 and P-D2 have landed; EXT-5 is next.
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15,
+EXT-9, EXT-10, EXT-11, C18, P-D2 and EXT-5 have landed. Next: EXT-6 (each module exports its own
+handler spec through one `handler()`), then EXT-12, then B-final. B-final regenerates the freeze
+record from the release workflow's candidate zip, not a test-02 package, and stops there: the
+store cancel and resubmission are the owner's call. Parked 2026-10-21 for the night with nothing
+open: no patch, no stash, the tree clean.
 
 ## Slices
 
@@ -85,14 +90,14 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18 and P-D2 have landed; EXT-5 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18, P-D2 and EXT-5 have landed; EXT-6 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | P-D1 | fix(extension): a dialog that opens during world setup reads `dialog_open` | - | EXT-9 as corrected | landed (this commit) |
 | C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | - | ADR-0203 C18, moved from core-service; SURF-4's label half; EXT-5's pins | landed (this commit) |
 | P-D2 | fix(extension): a command the service cancelled while it waited never runs late | - | the coordinator, from leo-desktop-02's 2.0.0 stall | landed (this commit) |
-| EXT-5 | refactor(extension): `protocol.js` names its words and owns `failure`, and the vocabulary gains the missing words under new keys | C18 | EXT-5 as corrected | todo |
+| EXT-5 | refactor(extension): `protocol.js` names its words and owns `failure`, and the vocabulary gains the missing words under new keys | C18 | EXT-5 as corrected | landed (this commit) |
 | EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | todo |
 | EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | landed (this commit) |
 | EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | landed (this commit) |
@@ -280,3 +285,24 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   dispatches nothing". "a cancel during the ready wait ends it with cancelled and dispatched stays
   true" now cancels once the tab exists, the moment it names. The freeze record is regenerated
   (a test-02 package line, like the others before B-final).
+- EXT-5: `protocol.js` derives a frozen name map from each closed list it needs (`FRAME`,
+  `EVENT`, `RECEIPT_FAILURE`, `CALL_FAILURE`, `RUNTIME_STATE`, `RECORDING_STOP_REASON`) and owns
+  `failure`, `dialogOpen` and `DIALOG_OPEN_MESSAGE`, which leave `sessions.js` with no shim.
+  `sessions.js` and `chunks.js` take `protocol` as a dependency, as do `capture.js` and
+  `evaluate.js`; `arguments.js` no longer needs `sessions.js`. The copies the finding counted
+  become references: the failure tables of `arguments`, `buffers`, `capture`, `evaluate`, `input`,
+  `inventory`, `primitives`, `tabs` and `world`, the worker's frame, event, runtime-state,
+  stop-reason and failure tables, `buffers.js`'s stop reasons, `primitives.js`'s receipt kind,
+  `world.js`'s `disconnected`, the three `"unknown"` dialog types and `chunks.js`'s three
+  defaults. `vocabulary.json` gains four keys and changes none: `runtime_states`,
+  `recording_stop_reasons` (the service's closed set, `frame_too_large` included),
+  `unknown_dialog_type` and `chunk_limits`. `vocabulary-2.0.0.json` is untouched. In `golden.rs`
+  C18's three readings of the worker, `world.js` and `chunks.js` now read the vocabulary, and a
+  fifth pin, `the_unknown_dialog_type_is_the_one_the_receipts_carry`, joins them. Not taken:
+  `shared.js` and `recording.js` keep their few protocol words (shared's frame kinds and
+  readiness words, recording's three stop reasons), because the options, setup and popup pages and
+  the offscreen document load them without `protocol.js`. `recording.js`'s literals stay pinned by
+  reading in `every_stop_reason_the_extension_sends_is_one_the_service_decodes`. The other local
+  tables (steps, clips, ops, destinations) are outside the finding. The cancelled sentence keeps
+  its three copies; a receipt-text table is a later slice. Later, additive (P-D2's note): a request
+  deadline field. The freeze record is regenerated (a test-02 package line).

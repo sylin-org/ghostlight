@@ -11,7 +11,10 @@ Notes).
 
 The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7,
 BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52, D52(c), BROW-12a and BROW-3a have landed; the
-second sweep's adapter slices are done.
+second sweep's adapter slices are done. test-03 holds browser/adapter/work.rs,
+protocol4/{mod.rs, link.rs, link/tests.rs, connection.rs, translate/records.rs,
+translate/tests.rs, translate/tests/points.rs} for C16 until it reports the slice landed. Parked
+2026-10-21 for the night with nothing open.
 
 ## Slices
 

@@ -5,11 +5,13 @@
     ? {
       args: require("./arguments.js"),
       parser: require("../vendor/acorn.js"),
+      protocol: require("./protocol.js"),
       sessions: require("./sessions.js")
     }
     : {
       args: root.GhostlightArguments,
       parser: root.acorn,
+      protocol: root.GhostlightProtocol,
       sessions: root.GhostlightSessions
     });
   root.GhostlightEvaluate = api;
@@ -17,7 +19,7 @@
 })(globalThis, function createGhostlightEvaluateApi(deps) {
   "use strict";
 
-  const { args: check, parser, sessions } = deps;
+  const { args: check, parser, protocol, sessions } = deps;
   const { CDP } = sessions;
 
   // The `evaluate_main` primitive runs a script in the main world of the top frame, where the page's
@@ -30,7 +32,7 @@
   // answers `timeout`. Terminating stops a running script; it cannot stop an awaited promise, so
   // the receipt is `timeout` with the effect marked dispatched either way.
 
-  const FAILURE = Object.freeze({ TIMEOUT: "timeout" });
+  const FAILURE = protocol.RECEIPT_FAILURE;
   const UNPARSED_FAILURE = "page script failed";
   const FUNCTION_NODES = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
   const PARSE_OPTIONS = Object.freeze({ ecmaVersion: "latest", allowAwaitOutsideFunction: true });
@@ -116,7 +118,7 @@
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         onTimeout();
-        reject(sessions.failure(FAILURE.TIMEOUT, `The script did not finish in ${timeoutMs} ms.`));
+        reject(protocol.failure(FAILURE.TIMEOUT, `The script did not finish in ${timeoutMs} ms.`));
       }, timeoutMs);
       work.then(
         (value) => { clearTimeout(timer); resolve(value); },
