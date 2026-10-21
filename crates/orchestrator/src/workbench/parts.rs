@@ -1078,6 +1078,3 @@ fn write_sorted(value: &Value, out: &mut String) {
         scalar => out.push_str(&scalar.to_string()),
     }
 }
-
-#[cfg(test)]
-mod tests;

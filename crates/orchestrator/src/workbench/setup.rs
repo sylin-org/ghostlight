@@ -505,7 +505,7 @@ pub(super) mod test_support {
 
     use super::{
         BrowserIdentity, BrowserInstanceSummary, BrowserProfiles, NativeHostReport, SessionSummary,
-        SetupMachine, SetupView,
+        SetupMachine,
     };
     use crate::install::container::AppContainer;
     use crate::install::{HarnessState, HarnessSummary};
@@ -519,7 +519,6 @@ pub(super) mod test_support {
         profiles: Mutex<Vec<BrowserProfiles>>,
         reads: AtomicUsize,
         ending: AtomicBool,
-        refuses: AtomicBool,
         started: Mutex<Vec<Started>>,
     }
 
@@ -570,11 +569,6 @@ pub(super) mod test_support {
         /// Say whether the session is ending from now on.
         pub fn end_the_session(&self, ending: bool) {
             self.ending.store(ending, Ordering::SeqCst);
-        }
-
-        /// Make every start the computer is asked for fail from now on.
-        pub fn refuse_to_start(&self) {
-            self.refuses.store(true, Ordering::SeqCst);
         }
 
         /// Every start the computer was asked for, in order. It started nothing.
@@ -628,9 +622,6 @@ pub(super) mod test_support {
         }
 
         fn start(&self, program: &Path, arguments: &[String]) -> io::Result<()> {
-            if self.refuses.load(Ordering::SeqCst) {
-                return Err(io::Error::other("the fake computer starts nothing"));
-            }
             self.started
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -695,14 +686,6 @@ pub(super) mod test_support {
             tab_count: 0,
         }
     }
-
-    /// The row with `id`, which the view must have.
-    pub fn row<'a>(view: &'a SetupView, id: &str) -> &'a crate::language::setup::Row {
-        view.rows
-            .iter()
-            .find(|row| row.id == id)
-            .unwrap_or_else(|| panic!("no row {id} in {:?}", view.rows))
-    }
 }
 
 #[cfg(test)]
@@ -710,13 +693,13 @@ mod tests {
     use std::fs;
     use std::sync::atomic::AtomicUsize;
 
-    use super::test_support::{connected, harness, row, session, Computer, Started};
+    use super::test_support::{connected, harness, session, Computer, Started};
     use super::*;
     use crate::governance::{CapabilitySet, Decision};
     use crate::install::browser_profiles::{ExtensionProfile, ProfileScan};
     use crate::language::history::{CompositionKind, StepReceipt};
     use crate::language::outcome::Outcome;
-    use crate::language::setup::{RowTone, SetupAction, Stage};
+    use crate::language::setup::{Stage, WORD_CONNECTED};
     use crate::scratch::Scratch;
 
     fn request(status: &str) -> AuditRecord {
@@ -747,43 +730,27 @@ mod tests {
         (SetupProgress::load(&path), path)
     }
 
-    #[test]
-    fn a_qualifying_record_writes_its_timestamp_once() {
-        let scratch = Scratch::new();
-        let (progress, path) = progress(&scratch);
-        assert!(!progress.is_complete());
-        assert!(progress.observe(&succeeded()));
-        assert!(progress.is_complete());
-        assert_eq!(
-            setup_state::read(&path),
-            Some(SetupRecord {
-                first_request_ms: 1234
-            })
-        );
-        let mut later = succeeded();
-        later.timestamp_ms = 9999;
-        assert!(!progress.observe(&later));
-        assert_eq!(setup_state::read(&path).unwrap().first_request_ms, 1234);
+    /// A callback that counts how often it ran, and the count.
+    fn counting() -> (Arc<AtomicUsize>, impl Fn() + Send + Sync + 'static) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        (calls, move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+        })
     }
 
+    /// Protects desktop gate 24 and ADR-0200 Decisions 10 and 13: only a top-level, allowed,
+    /// succeeded MCP request that reached a browser completes setup (a `ghostlight call` does
+    /// not); it writes `state/setup.json` once, with that request's time, remembers which
+    /// workspace finished it, and the window's callback fires once, never again in this run or a
+    /// later one, whose start finds setup complete and rewrites nothing.
     #[test]
-    fn the_run_remembers_which_workspace_finished_setup() {
-        let scratch = Scratch::new();
-        let (progress, _) = progress(&scratch);
-        assert_eq!(progress.finished(), None);
-        progress.observe(&succeeded());
-        assert_eq!(
-            progress.finished(),
-            Some(Finished {
-                workspace: "workspace_1".into()
-            })
-        );
-    }
-
-    #[test]
-    fn records_that_are_not_an_agent_reaching_a_browser_write_nothing() {
+    fn only_the_first_agent_request_answered_in_a_browser_completes_setup() {
         let scratch = Scratch::new();
         let (progress, path) = progress(&scratch);
+        let (calls, callback) = counting();
+        progress.on_complete(callback);
+
         let mut child = succeeded();
         child.step = Some(StepReceipt {
             parent: CompositionKind::Flow,
@@ -810,92 +777,134 @@ mod tests {
             request(&Status::Cancelled.stored_name()),
             request(&Status::Unknown.stored_name()),
         ] {
-            assert!(!progress.observe(&record));
+            assert!(!progress.observe(&record), "{record:?}");
         }
         assert!(!progress.is_complete());
         assert!(!path.exists());
         assert_eq!(progress.finished(), None);
-    }
-
-    #[test]
-    fn an_existing_record_means_complete_and_is_not_rewritten() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("setup.json");
-        fs::write(&path, b"junk").unwrap();
-        let progress = SetupProgress::load(&path);
-        assert!(progress.is_complete());
-        assert!(!progress.observe(&succeeded()));
-        assert_eq!(fs::read(&path).unwrap(), b"junk");
-        assert_eq!(progress.finished(), None);
-    }
-
-    #[test]
-    fn a_failed_write_still_completes_this_run() {
-        let scratch = Scratch::new();
-        // The parent of the record is a file, so the record cannot be written.
-        fs::write(scratch.path().join("state"), b"not a directory").unwrap();
-        let progress = SetupProgress::load(&scratch.path().join("state").join("setup.json"));
-        assert!(!progress.is_complete());
-        assert!(progress.observe(&succeeded()));
-        assert!(progress.is_complete());
-        assert!(progress.finished().is_some());
-    }
-
-    #[test]
-    fn the_callback_fires_exactly_once() {
-        let scratch = Scratch::new();
-        let (progress, _) = progress(&scratch);
-        let calls = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&calls);
-        progress.on_complete(move || {
-            counted.fetch_add(1, Ordering::SeqCst);
-        });
-        assert!(progress.observe(&succeeded()));
-        assert!(!progress.observe(&succeeded()));
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn a_callback_attached_after_completion_never_fires() {
-        let scratch = Scratch::new();
-        let (progress, _) = progress(&scratch);
-        assert!(progress.observe(&succeeded()));
-        let calls = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&calls);
-        progress.on_complete(move || {
-            counted.fetch_add(1, Ordering::SeqCst);
-        });
-        assert!(!progress.observe(&succeeded()));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-    }
 
-    #[test]
-    fn the_projection_completes_setup_on_a_settled_request_and_works_without_it() {
-        use crate::language::audit_health::Storage;
-        use crate::workbench::WorkbenchProjection;
-
-        let bare = WorkbenchProjection::default();
-        bare.record(&succeeded(), Storage::Saved);
-
-        let scratch = Scratch::new();
-        let (progress, path) = progress(&scratch);
-        let projection = WorkbenchProjection::default();
-        projection.attach_setup(Arc::clone(&progress));
-        let mut child = succeeded();
-        child.step = Some(StepReceipt {
-            parent: CompositionKind::Flow,
-            position: 0,
-            total: 1,
-            preparation_failed: false,
-        });
-        projection.record(&child, Storage::Saved);
-        assert!(!progress.is_complete());
-        projection.record(&succeeded(), Storage::Saved);
+        let first = succeeded();
+        assert!(progress.observe(&first));
         assert!(progress.is_complete());
-        assert!(path.is_file());
+        assert_eq!(
+            setup_state::read(&path),
+            Some(SetupRecord {
+                first_request_ms: first.timestamp_ms
+            })
+        );
+        assert_eq!(
+            progress.finished(),
+            Some(Finished {
+                workspace: first.workspace.clone()
+            })
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let mut later = succeeded();
+        later.timestamp_ms = first.timestamp_ms + 1;
+        assert!(!progress.observe(&later));
+        assert_eq!(
+            setup_state::read(&path).unwrap().first_request_ms,
+            first.timestamp_ms
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "no second celebration");
+
+        let written = fs::read(&path).unwrap();
+        let next = SetupProgress::load(&path);
+        let (next_calls, next_callback) = counting();
+        next.on_complete(next_callback);
+        assert!(next.is_complete(), "the next start finds setup complete");
+        assert_eq!(next.finished(), None);
+        assert!(!next.observe(&succeeded()));
+        assert_eq!(next_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(fs::read(&path).unwrap(), written);
     }
 
-    // The setup part: the facts read and the view composed from them.
+    fn chrome_with_the_extension(profiles: usize) -> BrowserProfiles {
+        BrowserProfiles {
+            browser: BrowserIdentity {
+                id: "chrome",
+                name: "Google Chrome",
+                short: "Chrome",
+            },
+            scan: ProfileScan {
+                profiles,
+                with_extension: vec![ExtensionProfile {
+                    directory: "Profile 1".into(),
+                    name: Some("Work".into()),
+                }],
+            },
+        }
+    }
+
+    /// Protects desktop gate 23 and ADR-0200 Decision 8: each supported browser is read as
+    /// installed or not, connected by the family name it reports, and holding the extension in
+    /// the profile the scan found; an unknown connected browser still counts, once; and an app
+    /// container's private view is said.
+    #[test]
+    fn the_browser_step_reads_each_browser_as_this_computer_shows_it() {
+        let fact = |here: &BrowsersHere, id: &str| -> BrowserFact {
+            here.facts
+                .iter()
+                .find(|fact| fact.id == id)
+                .cloned()
+                .unwrap_or_else(|| panic!("no {id} fact"))
+        };
+        let others = |here: &BrowsersHere| -> Vec<BrowserFact> {
+            here.facts
+                .iter()
+                .filter(|fact| fact.id == OTHER_BROWSER_ID)
+                .cloned()
+                .collect()
+        };
+
+        let computer = Computer::default();
+        computer.install("chrome");
+        let here = browsers_here(&computer, &[]);
+        let chrome = fact(&here, "chrome");
+        assert_eq!(chrome.form, BrowserForm::Native);
+        assert!(!chrome.connected);
+        assert_eq!(chrome.extension, None);
+        assert_eq!(fact(&here, "edge").form, BrowserForm::Missing);
+        assert!(!here.private_view);
+
+        let scanned = chrome_with_the_extension(2);
+        computer.find_profiles(vec![scanned.clone()]);
+        let here = browsers_here(&computer, &[]);
+        let holding = &scanned.scan.with_extension[0];
+        assert_eq!(
+            fact(&here, "chrome").extension,
+            Some(ProfileFact {
+                directory: holding.directory.clone(),
+                name: holding.name.clone(),
+                profiles: scanned.scan.profiles,
+            })
+        );
+
+        for family in ["Google Chrome", "chrome"] {
+            let here = browsers_here(&computer, &[connected(family)]);
+            assert!(fact(&here, "chrome").connected, "{family}");
+            assert!(others(&here).is_empty(), "{family}");
+        }
+
+        let vivaldi = "Vivaldi";
+        let here = browsers_here(&computer, &[connected(vivaldi), connected(vivaldi)]);
+        assert_eq!(
+            others(&here),
+            [BrowserFact {
+                id: OTHER_BROWSER_ID.into(),
+                name: vivaldi.into(),
+                short: OTHER_BROWSER_SHORT.into(),
+                form: BrowserForm::Native,
+                connected: true,
+                extension: None,
+            }]
+        );
+
+        computer.run_inside_an_app_container();
+        assert!(browsers_here(&computer, &[]).private_view);
+    }
 
     /// A setup that has not completed, over `computer`, with the given look.
     fn incomplete(
@@ -916,423 +925,155 @@ mod tests {
         })
     }
 
-    fn chrome_with_the_extension(profiles: usize) -> BrowserProfiles {
-        BrowserProfiles {
-            browser: BrowserIdentity {
-                id: "chrome",
-                name: "Google Chrome",
-                short: "Chrome",
-            },
-            scan: ProfileScan {
-                profiles,
-                with_extension: vec![ExtensionProfile {
-                    directory: "Profile 1".into(),
-                    name: Some("Work".into()),
-                }],
-            },
-        }
-    }
-
+    /// Reproduces 80c6f54a and c360f6c0 (ADR-0200 amendment of 2026-10-17): the agent step lists
+    /// the agents found, in roster order, and a row reads Connected only while a live session of
+    /// its agent is there with that row's entry in place, or, for a copy-only agent, while its
+    /// session is live; one Cline session marks only the Cline host that has the entry, and a
+    /// Codex session matches the Codex row. With no agent found, the roster's command is the
+    /// action.
     #[test]
-    fn no_browser_and_a_native_chrome_without_the_extension_asks_to_add_it() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        let view = incomplete(&computer, &[], &[], &[]);
-        assert_eq!(view.stage, Stage::Browser);
-        let chrome = row(&view, "chrome");
-        assert_eq!(chrome.detail, "Not added");
-        assert!(matches!(
-            chrome.action.as_ref().map(|action| &action.action),
-            Some(SetupAction::AddInBrowser { browser }) if browser == "chrome"
-        ));
-    }
+    fn an_agent_row_reads_connected_only_while_that_agent_is_in_use() {
+        use crate::install::HarnessState::{
+            Available, Installed, NeedsAttention, NotDetected, Updatable,
+        };
 
-    #[test]
-    fn a_chrome_that_holds_the_extension_is_opened_not_added() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        computer.find_profiles(vec![chrome_with_the_extension(2)]);
-        let view = incomplete(&computer, &[], &[], &[]);
-        assert_eq!(view.stage, Stage::Browser);
-        assert!(matches!(
-            row(&view, "chrome").action.as_ref().map(|action| &action.action),
-            Some(SetupAction::OpenBrowser { browser, profile })
-                if browser == "chrome" && profile.as_deref() == Some("Profile 1")
-        ));
-    }
-
-    #[test]
-    fn a_connected_chrome_moves_setup_to_the_agent_step() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        let view = incomplete(&computer, &[connected("Google Chrome")], &[], &[]);
-        assert_eq!(view.stage, Stage::Agent);
-        assert_eq!(connected_line(&view), "Chrome is connected.");
-    }
-
-    fn connected_line(view: &SetupView) -> String {
-        view.connected_line
-            .clone()
-            .expect("a connected browser is named")
-    }
-
-    #[test]
-    fn a_browser_none_of_the_families_still_completes_the_step_as_chromium() {
-        let computer = Computer::default();
-        let view = incomplete(&computer, &[connected("Vivaldi")], &[], &[]);
-        assert_eq!(view.stage, Stage::Agent);
-        assert_eq!(connected_line(&view), "Chromium is connected.");
-    }
-
-    #[test]
-    fn an_installed_client_nobody_has_seen_says_to_restart_it_and_a_session_turns_it_connected() {
-        let computer = Computer::default();
-        let roster = [harness(
-            "claude-code",
-            "Claude Code",
-            HarnessState::Installed,
-        )];
-        let browsers = [connected("Chrome")];
-        let unseen = incomplete(&computer, &browsers, &[], &roster);
-        assert_eq!(unseen.stage, Stage::Agent);
-        let waiting = row(&unseen, "claude-code");
-        assert_eq!(waiting.detail, "Restart Claude Code to finish.");
-        assert_eq!(waiting.tone, RowTone::Attention);
-
-        let seen = incomplete(
-            &computer,
-            &browsers,
-            &[session("workspace_1", "CLAUDE-CODE")],
-            &roster,
-        );
-        let connected_row = row(&seen, "claude-code");
-        assert_eq!(connected_row.detail, "Connected");
-        assert_eq!(connected_row.tone, RowTone::Done);
-        let by_label = incomplete(
-            &computer,
-            &browsers,
-            &[session("workspace_1", "claude code")],
-            &roster,
-        );
-        assert_eq!(row(&by_label, "claude-code").detail, "Connected");
-    }
-
-    #[test]
-    fn a_codex_session_turns_the_codex_row_connected() {
-        let computer = Computer::default();
-        let roster = [harness("codex", "Codex", HarnessState::Installed)];
-        let view = incomplete(
-            &computer,
-            &[connected("Chrome")],
-            &[session("workspace_1", "codex-mcp-client")],
-            &roster,
-        );
-        let codex = row(&view, "codex");
-        assert_eq!(codex.detail, "Connected");
-        assert_eq!(codex.tone, RowTone::Done);
-    }
-
-    /// A client the roster says Ghostlight can write, in `state`.
-    fn writable(id: &str, label: &str, state: HarnessState) -> HarnessSummary {
-        HarnessSummary {
-            can_install: true,
-            ..harness(id, label, state)
-        }
-    }
-
-    /// A host of Cline, the one agent of the four Cline hosts.
-    fn cline(id: &str, label: &str, state: HarnessState) -> HarnessSummary {
-        HarnessSummary {
+        let cline = |id: &str, state| HarnessSummary {
             agent: crate::agent::Agent::listed(
                 "cline",
                 "Cline",
                 crate::agent::image::Monogram::FIXTURE,
             ),
-            ..harness(id, label, state)
-        }
-    }
-
-    #[test]
-    fn a_client_that_is_not_here_is_no_row_and_the_others_keep_their_states() {
-        let computer = Computer::default();
-        let roster = [
-            harness("goose", "Goose", HarnessState::NotDetected),
-            writable("cursor", "Cursor", HarnessState::Available),
-            writable("zed", "Zed", HarnessState::Updatable),
-            harness("codex", "Codex", HarnessState::NeedsAttention),
-        ];
-        let view = incomplete(&computer, &[connected("Chrome")], &[], &roster);
-        let ids: Vec<&str> = view.rows.iter().map(|row| row.id.as_str()).collect();
-        assert_eq!(ids, ["cursor", "zed", "codex"]);
-        let cursor = row(&view, "cursor");
-        assert_eq!(cursor.detail, "Found");
-        assert!(matches!(
-            cursor
-                .action
-                .as_ref()
-                .map(|action| (&action.action, action.label.as_str())),
-            Some((SetupAction::ConnectAgent { .. }, "Connect"))
-        ));
-        let zed = row(&view, "zed");
-        assert_eq!(zed.detail, "Needs an update");
-        assert!(matches!(
-            zed.action
-                .as_ref()
-                .map(|action| (&action.action, action.label.as_str())),
-            Some((SetupAction::ConnectAgent { .. }, "Update"))
-        ));
-        assert!(matches!(
-            row(&view, "codex")
-                .action
-                .as_ref()
-                .map(|action| &action.action),
-            Some(SetupAction::ReviewAgent { .. })
-        ));
-    }
-
-    #[test]
-    fn connect_and_update_are_offered_only_where_the_roster_can_install() {
-        let computer = Computer::default();
-        let roster = [
-            harness("cursor", "Cursor", HarnessState::Available),
-            harness("zed", "Zed", HarnessState::Updatable),
-        ];
-        let view = incomplete(&computer, &[connected("Chrome")], &[], &roster);
-        assert!(row(&view, "cursor").action.is_none());
-        assert!(row(&view, "zed").action.is_none());
-    }
-
-    #[test]
-    fn a_copy_only_client_offers_copy_setup_and_never_connect() {
-        let computer = Computer::default();
-        let goose = HarnessSummary {
-            copy_only: true,
-            ..harness("goose", "goose", HarnessState::Available)
+            ..harness(id, id, state)
         };
-        let view = incomplete(
-            &computer,
-            &[connected("Chrome")],
-            &[],
-            std::slice::from_ref(&goose),
-        );
-        let by_hand = row(&view, "goose");
-        assert_eq!(by_hand.detail, "Found, set up by hand");
-        assert!(matches!(
-            by_hand.action.as_ref().map(|action| &action.action),
-            Some(SetupAction::CopySetup { agent }) if agent == "goose"
-        ));
-
-        let in_use = incomplete(
-            &computer,
-            &[connected("Chrome")],
-            &[session("workspace_1", "goose")],
-            &[goose],
-        );
-        assert_eq!(row(&in_use, "goose").detail, "Connected");
-    }
-
-    #[test]
-    fn one_session_of_an_agent_marks_only_its_hosts_that_have_the_entry() {
-        let computer = Computer::default();
         let roster = [
-            cline("cline-cli", "Cline (CLI)", HarnessState::Installed),
-            cline(
-                "cline-vscode",
-                "Cline (Visual Studio Code)",
-                HarnessState::Available,
-            ),
-            cline("cline-cursor", "Cline (Cursor)", HarnessState::Updatable),
-            cline(
-                "cline-windsurf",
-                "Cline (Windsurf)",
-                HarnessState::NeedsAttention,
-            ),
+            harness("zed", "Zed", NotDetected),
+            cline("cline-cli", Installed),
+            cline("cline-vscode", Available),
+            cline("cline-cursor", Updatable),
+            cline("cline-windsurf", NeedsAttention),
+            harness("claude-code", "Claude Code", Installed),
+            harness("codex", "Codex", Installed),
+            HarnessSummary {
+                copy_only: true,
+                ..harness("goose", "goose", Available)
+            },
         ];
-        let view = incomplete(
-            &computer,
-            &[connected("Chrome")],
-            &[session("workspace_1", "cline")],
-            &roster,
-        );
-        let details: Vec<(&str, &str)> = view
-            .rows
-            .iter()
-            .map(|row| (row.id.as_str(), row.detail.as_str()))
-            .collect();
-        assert_eq!(
-            details,
-            [
-                ("cline-cli", "Connected"),
-                ("cline-vscode", "Found"),
-                ("cline-cursor", "Needs an update"),
-                ("cline-windsurf", "Needs attention"),
-            ]
-        );
-    }
-
-    #[test]
-    fn no_client_at_all_gives_the_command_to_paste() {
+        let sessions = [
+            session("workspace_1", "cline"),
+            session("workspace_2", "CLAUDE-CODE"),
+            session("workspace_3", "codex-mcp-client"),
+            session("workspace_4", "goose"),
+        ];
         let computer = Computer::default();
-        let roster = [harness("goose", "Goose", HarnessState::NotDetected)];
-        let view = incomplete(&computer, &[connected("Chrome")], &[], &roster);
+        let browsers = [connected("Chrome")];
+        let connected_rows = |view: &SetupView| -> Vec<String> {
+            view.rows
+                .iter()
+                .filter(|row| row.detail == WORD_CONNECTED)
+                .map(|row| row.id.clone())
+                .collect()
+        };
+
+        let in_use = incomplete(&computer, &browsers, &sessions, &roster);
+        assert_eq!(in_use.stage, Stage::Agent);
+        assert_eq!(
+            in_use
+                .rows
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            roster
+                .iter()
+                .filter(|harness| harness.state != NotDetected)
+                .map(|harness| harness.id.as_str())
+                .collect::<Vec<_>>(),
+            "an agent that is not here is no row"
+        );
+        assert_eq!(
+            connected_rows(&in_use),
+            ["cline-cli", "claude-code", "codex", "goose"]
+        );
+
+        let unseen = incomplete(&computer, &browsers, &[], &roster);
+        assert!(
+            connected_rows(&unseen).is_empty(),
+            "an entry nobody has used yet is not Connected"
+        );
+
+        let nothing_found = [harness("zed", "Zed", NotDetected)];
+        let view = incomplete(&computer, &browsers, &[], &nothing_found);
         assert!(view.rows.is_empty());
-        assert_eq!(view.code.expect("the command panel").text, "ghostlight mcp");
+        assert_eq!(
+            view.code.expect("the command panel").text,
+            nothing_found[0].connector_command
+        );
     }
 
+    /// Protects desktop gate 23 and ARCHITECTURE (setup facts are read only while setup is
+    /// incomplete): the native-host report and the profile scan are read on every look of an
+    /// incomplete setup, and a setup finished in this run, in an earlier run, or not tracked at all
+    /// reads nothing from this computer.
     #[test]
-    fn an_app_container_must_finish_on_the_computer_itself() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        computer.run_inside_an_app_container();
-        let view = incomplete(&computer, &[connected("Chrome")], &[], &[]);
-        assert_eq!(view.stage, Stage::Computer);
-    }
-
-    #[test]
-    fn the_package_form_decides_how_a_browser_is_installed() {
-        let never = || -> bool { panic!("an inspected package form is not looked up") };
-        assert_eq!(
-            form_of(Some(BrowserPackage::Native), never),
-            BrowserForm::Native
-        );
-        assert_eq!(
-            form_of(Some(BrowserPackage::Snap), never),
-            BrowserForm::Snap
-        );
-        assert_eq!(
-            form_of(Some(BrowserPackage::Flatpak), never),
-            BrowserForm::Flatpak
-        );
-        assert_eq!(
-            form_of(Some(BrowserPackage::MultipleSandboxes), never),
-            BrowserForm::SnapAndFlatpak
-        );
-        assert_eq!(
-            form_of(Some(BrowserPackage::NotDetected), never),
-            BrowserForm::Missing
-        );
-        for unchecked in [Some(BrowserPackage::NotChecked), None] {
-            assert_eq!(form_of(unchecked, || true), BrowserForm::Native);
-            assert_eq!(form_of(unchecked, || false), BrowserForm::Missing);
-        }
-    }
-
-    #[test]
-    fn a_record_from_this_run_is_done_and_names_the_agent_that_made_it() {
-        let scratch = Scratch::new();
-        let (progress, _) = progress(&scratch);
-        assert!(progress.observe(&succeeded()));
-        let computer = Computer::default();
-        let roster = [harness(
-            "claude-code",
-            "Claude Code",
-            HarnessState::Installed,
-        )];
-        let sessions = [session("workspace_1", "claude-code")];
-        let finished = progress.finished().expect("this run finished setup");
-        let name = agent_name(&finished, &sessions, &roster);
-        assert_eq!(name.as_deref(), Some("Claude Code"));
-        let view = setup_view(&SetupInputs {
-            progress: Some(&progress),
-            sessions: &sessions,
-            browsers: &[connected("Chrome")],
-            harnesses: &roster,
-            machine: &computer,
-            agent_name: name.as_deref(),
-        });
-        assert_eq!(view.stage, Stage::Done);
-        assert_eq!(view.headline.lead, "Claude Code just used your browser. ");
-        assert_eq!(computer.reads(), 0, "a complete setup reads nothing");
-    }
-
-    #[test]
-    fn an_agent_nobody_knows_by_that_label_is_not_named() {
-        let finished = Finished {
-            workspace: "workspace_1".into(),
+    fn a_complete_setup_reads_nothing_from_this_computer() {
+        let look = |progress: Option<&SetupProgress>, computer: &Computer| {
+            setup_view(&SetupInputs {
+                progress,
+                sessions: &[session("workspace_1", "claude-code")],
+                browsers: &[connected("Chrome")],
+                harnesses: &[harness(
+                    "claude-code",
+                    "Claude Code",
+                    HarnessState::Installed,
+                )],
+                machine: computer,
+                agent_name: None,
+            })
+            .stage
         };
-        let roster = [harness(
-            "claude-code",
-            "Claude Code",
-            HarnessState::Installed,
-        )];
-        assert_eq!(
-            agent_name(&finished, &[session("workspace_1", "my-script")], &roster),
-            None
-        );
-        assert_eq!(
-            agent_name(&finished, &[session("workspace_2", "claude-code")], &roster),
-            None,
-            "the finishing session is gone"
-        );
-        let mut two_hosts = [
-            harness("cline-cursor", "Cline (Cursor)", HarnessState::Available),
-            harness("cline-cli", "Cline (CLI)", HarnessState::Available),
-        ];
-        for host in &mut two_hosts {
-            host.product_id = "cline".into();
-            host.name = "Cline".into();
-            host.agent = crate::agent::Agent::listed(
-                "cline",
-                "Cline",
-                crate::agent::image::Monogram::FIXTURE,
+        let computer = || {
+            let computer = Computer::default();
+            computer.install("chrome");
+            computer
+        };
+
+        let scratch = Scratch::new();
+        let (unfinished, _) = progress(&scratch);
+        let reading = computer();
+        for _ in 0..2 {
+            let before = reading.reads();
+            let stage = look(Some(&unfinished), &reading);
+            assert!(!matches!(stage, Stage::Done | Stage::Retired), "{stage:?}");
+            assert!(
+                reading.reads() > before,
+                "an incomplete setup reads each look"
             );
         }
-        assert_eq!(
-            agent_name(&finished, &[session("workspace_1", "Cline")], &two_hosts).as_deref(),
-            Some("Cline"),
-            "a product shared by two hosts is named by the product"
-        );
-    }
 
-    #[test]
-    fn a_record_from_an_earlier_run_is_retired_and_nothing_is_read() {
         let scratch = Scratch::new();
-        let path = scratch.path().join("setup.json");
+        let (finished, _) = progress(&scratch);
+        assert!(finished.observe(&succeeded()));
+        let earlier = Scratch::new();
+        let path = earlier.path().join("setup.json");
         fs::write(&path, br#"{"first_request_ms":1}"#).unwrap();
-        let progress = SetupProgress::load(&path);
-        let computer = Computer::default();
-        computer.install("chrome");
-        let view = setup_view(&SetupInputs {
-            progress: Some(&progress),
-            sessions: &[session("workspace_1", "claude-code")],
-            browsers: &[connected("Chrome")],
-            harnesses: &[harness(
-                "claude-code",
-                "Claude Code",
-                HarnessState::Installed,
-            )],
-            machine: &computer,
-            agent_name: None,
-        });
-        assert_eq!(view.stage, Stage::Retired);
-        assert_eq!(computer.reads(), 0, "neither the report nor the scan ran");
+        let earlier = SetupProgress::load(&path);
+        for (label, progress, stage) in [
+            ("finished in this run", Some(&*finished), Stage::Done),
+            (
+                "finished in an earlier run",
+                Some(&*earlier),
+                Stage::Retired,
+            ),
+            ("not tracked", None, Stage::Retired),
+        ] {
+            let quiet = computer();
+            assert_eq!(look(progress, &quiet), stage, "{label}");
+            assert_eq!(
+                quiet.reads(),
+                0,
+                "{label}: neither the report nor the scan ran"
+            );
+        }
     }
-
-    #[test]
-    fn a_service_that_tracks_no_setup_shows_the_retired_view_and_reads_nothing() {
-        let computer = Computer::default();
-        let view = setup_view(&SetupInputs {
-            progress: None,
-            sessions: &[],
-            browsers: &[],
-            harnesses: &[],
-            machine: &computer,
-            agent_name: None,
-        });
-        assert_eq!(view.stage, Stage::Retired);
-        assert_eq!(computer.reads(), 0);
-    }
-
-    #[test]
-    fn an_incomplete_setup_reads_the_report_and_the_scan_each_time() {
-        let computer = Computer::default();
-        incomplete(&computer, &[], &[], &[]);
-        assert_eq!(computer.reads(), 2);
-        incomplete(&computer, &[], &[], &[]);
-        assert_eq!(computer.reads(), 4);
-    }
-
-    // The steps that start a browser.
 
     fn add(browser: &str) -> SetupAction {
         SetupAction::AddInBrowser {
@@ -1347,95 +1088,56 @@ mod tests {
         }
     }
 
-    fn refused(result: Result<(), WorkbenchError>) {
-        assert_eq!(result, Err(WorkbenchError::SetupStepNotOffered));
-    }
-
+    /// Protects desktop gates 23 and 1, and ARCHITECTURE (`POST /api/setup/act`): Add starts the
+    /// named installed browser at the store listing and Open starts it in a profile the scan
+    /// returns now; any other browser, profile or step is refused and starts nothing, so a request
+    /// cannot make the service start another program or pass another argument. Once the session is
+    /// ending, even a step the computer offers starts nothing, and that refusal comes before the
+    /// step is checked.
     #[test]
-    fn adding_in_chrome_starts_chrome_on_the_listing_and_nothing_else() {
+    fn a_setup_step_starts_only_what_this_computer_offers_now_and_nothing_once_the_session_ends() {
         let computer = Computer::default();
-        computer.install("chrome");
-        perform(&computer, &add("chrome")).unwrap();
-        assert_eq!(
-            computer.started(),
-            [Started {
-                program: Computer::executable_of("chrome"),
-                arguments: vec![STORE_LISTING_URL.to_owned()],
-            }]
-        );
-    }
-
-    #[test]
-    fn adding_starts_the_browser_the_row_names() {
-        let computer = Computer::default();
-        for id in ["chrome", "edge", "brave"] {
+        for id in ["chrome", "brave", "edge"] {
             computer.install(id);
         }
-        perform(&computer, &add("brave")).unwrap();
-        perform(&computer, &add("edge")).unwrap();
-        let started = computer.started();
-        assert_eq!(started.len(), 2);
-        assert_eq!(started[0].program, Computer::executable_of("brave"));
-        assert_eq!(started[1].program, Computer::executable_of("edge"));
-        for launch in &started {
-            assert_eq!(launch.arguments, [STORE_LISTING_URL]);
-        }
-    }
-
-    #[test]
-    fn opening_names_the_scanned_profile_as_the_only_argument() {
-        let computer = Computer::default();
-        computer.install("chrome");
         computer.find_profiles(vec![chrome_with_the_extension(2)]);
-        perform(&computer, &open("chrome", Some("Profile 1"))).unwrap();
-        perform(&computer, &open("chrome", None)).unwrap();
-        let started = computer.started();
-        assert_eq!(started[0].program, Computer::executable_of("chrome"));
-        assert_eq!(started[0].arguments, ["--profile-directory=Profile 1"]);
-        assert!(started[1].arguments.is_empty());
-    }
-
-    #[test]
-    fn a_profile_the_scan_did_not_return_is_refused_and_nothing_starts() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        computer.install("edge");
-        computer.find_profiles(vec![chrome_with_the_extension(2)]);
-        for action in [
+        let at_the_listing = |id: &str| Started {
+            program: Computer::executable_of(id),
+            arguments: vec![STORE_LISTING_URL.to_owned()],
+        };
+        let offered = [
+            (add("chrome"), at_the_listing("chrome")),
+            (add("brave"), at_the_listing("brave")),
+            (
+                open("chrome", Some("Profile 1")),
+                Started {
+                    program: Computer::executable_of("chrome"),
+                    arguments: vec![format!("{PROFILE_DIRECTORY_OPTION}Profile 1")],
+                },
+            ),
+            (
+                open("chrome", None),
+                Started {
+                    program: Computer::executable_of("chrome"),
+                    arguments: Vec::new(),
+                },
+            ),
+        ];
+        let not_offered = [
+            // A profile the scan did not return, or one of another browser.
             open("chrome", Some("Profile 2")),
             open("chrome", Some("")),
             open("chrome", Some("Profile 1 --incognito")),
             open("chrome", Some("../Profile 1")),
-            // A profile of another browser is not one of this browser's.
             open("edge", Some("Profile 1")),
-        ] {
-            refused(perform(&computer, &action));
-        }
-        assert_eq!(computer.started(), []);
-    }
-
-    #[test]
-    fn a_browser_that_is_unknown_or_not_installed_is_refused_and_nothing_starts() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        for action in [
+            // A browser that is not installed, or not in the table.
+            add("chromium"),
+            open("chromium", None),
             add("netscape"),
             add("other"),
-            add("edge"),
             add(""),
-            open("brave", None),
             open("../chrome", None),
-        ] {
-            refused(perform(&computer, &action));
-        }
-        assert_eq!(computer.started(), []);
-    }
-
-    #[test]
-    fn a_step_that_is_not_a_browser_start_is_refused() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        for action in [
+            // A step that is not a browser start.
             SetupAction::GetChrome,
             SetupAction::ConnectAgent {
                 agent: "cursor".into(),
@@ -1446,43 +1148,32 @@ mod tests {
             SetupAction::CopySetup {
                 agent: "goose".into(),
             },
-        ] {
-            refused(perform(&computer, &action));
+        ];
+        for (action, _) in &offered {
+            assert_eq!(perform(&computer, action), Ok(()), "{action:?}");
         }
-        assert_eq!(computer.started(), []);
-    }
-
-    #[test]
-    fn nothing_starts_while_the_session_is_ending() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        computer.find_profiles(vec![chrome_with_the_extension(2)]);
-        computer.end_the_session(true);
-        for action in [
-            add("chrome"),
-            open("chrome", Some("Profile 1")),
-            open("chrome", None),
-            add("netscape"),
-        ] {
+        for action in &not_offered {
             assert_eq!(
-                perform(&computer, &action),
-                Err(WorkbenchError::SetupSessionEnding)
+                perform(&computer, action),
+                Err(WorkbenchError::SetupStepNotOffered),
+                "{action:?}"
             );
         }
-        assert_eq!(computer.started(), []);
-        computer.end_the_session(false);
-        perform(&computer, &add("chrome")).unwrap();
-        assert_eq!(computer.started().len(), 1);
-    }
+        let started: Vec<Started> = offered.iter().map(|(_, start)| start.clone()).collect();
+        assert_eq!(computer.started(), started);
 
-    #[test]
-    fn a_computer_that_will_not_start_the_browser_says_so() {
-        let computer = Computer::default();
-        computer.install("chrome");
-        computer.refuse_to_start();
+        computer.end_the_session(true);
+        for action in offered.iter().map(|(action, _)| action).chain(&not_offered) {
+            assert_eq!(
+                perform(&computer, action),
+                Err(WorkbenchError::SetupSessionEnding),
+                "{action:?}"
+            );
+        }
         assert_eq!(
-            perform(&computer, &add("chrome")),
-            Err(WorkbenchError::SetupBrowserNotStarted)
+            computer.started(),
+            started,
+            "nothing started once the session ended"
         );
     }
 }
