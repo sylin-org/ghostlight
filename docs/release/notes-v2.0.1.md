@@ -34,8 +34,29 @@ on Windows, `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` on Linux, or
   started, the install wrote Ghostlight's entry into the Codex app's private copy of VS Code's
   settings, which VS Code never reads, and called VS Code connected.
 
+- **One huge answer no longer drops every agent's browser.** A read, inspect or find across a page
+  with many frames could pass the relay's 8 MiB bound and close the browser connection for every
+  agent. The service now returns what fits, marked truncated with what it left out (extension
+  2.0.1 also refuses to send such an answer, with a next step).
+- **The missing extension.** A browser started without Ghostlight in Browser, or with it turned off,
+  says so and how to add or turn it on.
+- **Emoji in page text and tab titles.** Text is cut by characters and never inside an emoji, and
+  a cut that left half an emoji no longer drops the browser connection.
+- **Agents after a quit, and agents that end their process tree.** An agent waiting after a quit
+  connects as soon as the service is back, and an agent that ends its process tree no longer
+  takes the service with it.
+- **Strict clients and older clients.** A JSON-RPC batch is answered as one array, and a client
+  older than MCP 2025-06-18 gets the result's JSON in a cut-off or expired answer too. A misspelled
+  key inside a nested object is refused instead of ignored.
+- **`ghostlight call`** from an agent joins one session named for that agent.
+- **Organization policy.** Publishing refuses an `http://` source before it writes anything, a
+  long non-ASCII organization name no longer locks a machine out, and the same publication in
+  another line ending no longer reads as stale.
+
 ### Changed
 
+- **Tab groups** (extension 2.0.1) are named with a ghost emoji and the agent's name, so the agent's name comes
+  first in the tab strip. A group an earlier version named is renamed in place.
 - **A prompt's field** (extension 2.0.1). `browser_dialog` status says what a prompt's field
   holds, and that accept answers with it, as OK does, so an agent can accept a prompt without
   asking. The text is never audited.
@@ -51,12 +72,15 @@ on Windows, `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` on Linux, or
 
 ### Security
 
+- A host written with a trailing dot (`bank.example.`) no longer steps around a never-touch
+  entry or a deny rule.
 - TLS certificate checks take rustls-webpki 0.103.16 and webpki-roots 1.0.10, for RUSTSEC-2026-0382
   and RUSTSEC-2026-0381 (a distrusted root). The organization-policy fetch moves to ureq 3, which
   uses those roots directly, so no advisory is ignored.
 
 ### Compatibility
 
-The service, the edge and the extension speak the same protocols as 2.0.0: relay protocol 4 and
-adapter protocol 4. A 2.0.0 service and a 2.0.1 extension work together, and so do a 2.0.1 service
-and a 2.0.0 extension. The full list of changes is in the [CHANGELOG](../../CHANGELOG.md).
+The 2.0.1 edge speaks relay protocol 5, which is protocol 4 with the wake; the 2.0.1 service admits
+both, so an agent still running a 2.0.0 edge keeps working. The extension speaks adapter protocol 4,
+with two words added that an older reader ignores. A 2.0.0 service and a 2.0.1 extension work
+together, and so do a 2.0.1 service and a 2.0.0 extension. The full list of changes is in the [CHANGELOG](../../CHANGELOG.md).

@@ -68,8 +68,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when its dialog closes, and the dialog can still be read and answered meanwhile. With the 2.0.0
   extension, answering or cancelling the open dialog ends the stall.
 
+- One answer from the browser over 8 MiB no longer ends Ghostlight's connection to the browser
+  for every agent. A read, inspect or find across many frames could pass the relay's bound. The
+  service now sizes such a call by its worst case and returns what fits, marked truncated with
+  counts of what it left out. The extension refuses to send any answer over the bound and says
+  so, with a next step, and the browser edge drops an oversized message by its length instead of
+  closing the connection, which also protects the 2.0.0 extension.
+- Page text is cut by characters, as the service counts them, and never inside an emoji, so a read
+  or a name with emoji is not cut short or reported truncated early.
+- A browser started without the Ghostlight extension, or with it turned off, now says so, with the
+  step to add or turn it on, instead of "The Ghostlight adapter did not connect in time".
+- An agent waiting after a quit connects as soon as a service is ready again, instead of at its
+  next scheduled look (relay revision 5, the wake).
+- An agent that ends its whole process tree no longer takes the service with it: a start
+  relaunches itself, so the service is never a living child of its starter.
+- An update waits for the browsers of the service it replaced, and an opening that carries the
+  largest resume token is accepted.
+- A JSON-RPC batch is answered as one array with its tool results in it, so a strict client gets
+  every answer, and a client older than MCP 2025-06-18 gets the result's JSON in the text of a
+  cut-off or expired answer too.
+- A field a nested object does not advertise, such as a misspelled selector key, is refused
+  instead of silently dropped.
+- `ghostlight call` from an agent joins one session named for that agent's app, instead of a new
+  session per call.
+- Closing a tab handle this service no longer holds says so, instead of saying the tab is gone, and
+  a session whose browser left for good moves to the browser the agent names.
+- The Ghostlight window always finds room among the workbench's connections, however many idle
+  peers hold them, and a refused HEAD request carries no body.
+- Organization policy: publishing refuses an `http://` source before it writes anything, an
+  organization name is bounded in bytes as the signed copy is, and the same publication armored or
+  with CRLF line endings no longer reads as stale.
 ### Security
 
+- A host written with a trailing dot (`bank.example.`) is matched as the host itself, so it no
+  longer steps around a never-touch entry or a deny rule while the browser loads the same site.
 - TLS certificate checks take rustls-webpki 0.103.16 and webpki-roots 1.0.10, for RUSTSEC-2026-0382
   and RUSTSEC-2026-0381 (a distrusted root). The organization-policy fetch moves to ureq 3, which
   uses those roots directly, so no advisory is ignored.
