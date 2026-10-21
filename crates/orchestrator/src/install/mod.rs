@@ -239,8 +239,7 @@ impl HarnessRegistry {
         let eligible: Vec<HarnessDefinition> = definitions(&self.inner.context)
             .into_iter()
             .filter(|definition| {
-                !matches!(definition.dialect, ConfigDialect::Manual(_))
-                    && self.inner.context.private_to(definition).is_none()
+                definition.is_writable_from(&self.inner.context)
                     && matches!(
                         states.get(definition.id),
                         Some(HarnessState::Available | HarnessState::Updatable)
@@ -301,10 +300,7 @@ impl HarnessRegistry {
         let context = &self.inner.context;
         let mut directories: Vec<PathBuf> = definitions(context)
             .into_iter()
-            .filter(|definition| {
-                !matches!(definition.dialect, ConfigDialect::Manual(_))
-                    && context.private_to(definition).is_none()
-            })
+            .filter(|definition| definition.is_writable_from(context))
             .map(|definition| {
                 CONFIGURATION_WRITE
                     .target(&definition.path)
@@ -891,6 +887,12 @@ struct HarnessDefinition {
 }
 
 impl HarnessDefinition {
+    /// Whether an act may write this client's file from here: Ghostlight writes it, and it is not
+    /// private to the app container this process runs in.
+    fn is_writable_from(&self, context: &HarnessContext) -> bool {
+        !matches!(self.dialect, ConfigDialect::Manual(_)) && context.private_to(self).is_none()
+    }
+
     /// Whether `path` is the private copy of the agent's settings kept by its own Store app, on
     /// Windows (`windows`) or another system.
     fn packaged(&self, windows: bool) -> bool {
@@ -933,6 +935,77 @@ enum ConfigDialect {
 enum ManualDialect {
     Goose,
     Continue,
+}
+
+/// How Ghostlight reads and writes one client's file once its dialect is resolved: JSON in one of
+/// its dialects, or Codex's TOML. OpenCode resolves to the JSON form its file holds.
+#[derive(Clone, Copy)]
+enum Format {
+    Json(JsonDialect),
+    Codex,
+}
+
+impl ConfigDialect {
+    /// The format of a client's file, or the manual dialect of a client whose file Ghostlight
+    /// never reads or writes. Only OpenCode reads `source`, its file's text, so each copy an act
+    /// edits resolves its own form.
+    fn format(
+        self,
+        context: &HarnessContext,
+        source: impl FnOnce() -> Result<String, HarnessError>,
+    ) -> Result<Result<Format, ManualDialect>, HarnessError> {
+        Ok(match self {
+            Self::Json(dialect) => Ok(Format::Json(dialect)),
+            Self::CodexToml => Ok(Format::Codex),
+            Self::OpenCode => Ok(Format::Json(opencode_dialect(context, &source()?)?)),
+            Self::Manual(dialect) => Err(dialect),
+        })
+    }
+}
+
+impl Format {
+    /// The state of Ghostlight's entry in the file at `path`, which exists.
+    fn inspect(
+        self,
+        context: &HarnessContext,
+        path: &Path,
+    ) -> Result<RegistrationState, HarnessError> {
+        let source = fs::read_to_string(path).map_err(HarnessError::Read)?;
+        match self {
+            Self::Json(dialect) => inspect_json(&source, dialect, &context.edge, context.windows),
+            Self::Codex => inspect_toml(&source, context),
+        }
+    }
+
+    /// Make the edit `intent` to Ghostlight's entry in the file at `path`. Whether it changed.
+    fn edit(
+        self,
+        context: &HarnessContext,
+        path: &Path,
+        intent: RegistrationEdit,
+    ) -> Result<bool, HarnessError> {
+        match self {
+            Self::Json(dialect) => edit_json_with(context, path, dialect, intent),
+            Self::Codex => edit_toml_with(context, path, intent),
+        }
+    }
+
+    /// The setup a person pastes into a file of this format.
+    fn manual_setup(self, context: &HarnessContext) -> Result<String, HarnessError> {
+        match self {
+            Self::Codex => {
+                let mut entry = Item::Table(Table::new());
+                entry["command"] = value(context.edge.to_string_lossy().into_owned());
+                entry["args"] = value(mcp_arguments_array());
+                forward_codex_desktop_environment(&mut entry, context.linux)?;
+                let mut document = DocumentMut::new();
+                document["mcp_servers"] = Item::Table(Table::new());
+                document["mcp_servers"][SERVER_NAME] = entry;
+                Ok(document.to_string())
+            }
+            Self::Json(dialect) => manual_json_setup(&context.edge, dialect),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2133,22 +2206,13 @@ fn registration_state_at(
     definition: &HarnessDefinition,
     path: &Path,
 ) -> Result<RegistrationState, HarnessError> {
-    if !path.exists() || matches!(definition.dialect, ConfigDialect::Manual(_)) {
+    if !path.exists() {
         return Ok(RegistrationState::Missing);
     }
-    let source = fs::read_to_string(path).map_err(HarnessError::Read)?;
-    match definition.dialect {
-        ConfigDialect::CodexToml => inspect_toml(&source, context),
-        ConfigDialect::Manual(_) => Ok(RegistrationState::Missing),
-        ConfigDialect::Json(dialect) => {
-            inspect_json(&source, dialect, &context.edge, context.windows)
-        }
-        ConfigDialect::OpenCode => inspect_json(
-            &source,
-            opencode_dialect(context, &source)?,
-            &context.edge,
-            context.windows,
-        ),
+    let read = || fs::read_to_string(path).map_err(HarnessError::Read);
+    match definition.dialect.format(context, read)? {
+        Ok(format) => format.inspect(context, path),
+        Err(_) => Ok(RegistrationState::Missing),
     }
 }
 
@@ -2318,16 +2382,12 @@ fn apply_install(
     if !context.edge.is_file() {
         return Err(HarnessError::EdgeMissing);
     }
-    let changed = match definition.dialect {
-        ConfigDialect::CodexToml => edit_toml(context, &definition.path, true)?,
-        ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => edit_json(context, &definition.path, dialect, true)?,
-        ConfigDialect::OpenCode => {
-            let source = read_or_empty(&definition.path)?;
-            let dialect = opencode_dialect(context, &source)?;
-            edit_json(context, &definition.path, dialect, true)?
-        }
-    };
+    let changed = edit_at(
+        context,
+        definition,
+        &definition.path,
+        RegistrationEdit::Install,
+    )?;
     let summary = inspect(context, definition);
     Ok(HarnessActionResult {
         changed,
@@ -2402,15 +2462,21 @@ fn uninstall_at(
     definition: &HarnessDefinition,
     path: &Path,
 ) -> Result<bool, HarnessError> {
-    match definition.dialect {
-        ConfigDialect::CodexToml => edit_toml(context, path, false),
-        ConfigDialect::Manual(_) => Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => edit_json(context, path, dialect, false),
-        ConfigDialect::OpenCode => {
-            let source = read_or_empty(path)?;
-            let dialect = opencode_dialect(context, &source)?;
-            edit_json(context, path, dialect, false)
-        }
+    edit_at(context, definition, path, RegistrationEdit::Uninstall)
+}
+
+/// Make the edit `intent` to Ghostlight's entry in the file at `path`, read as the configuration
+/// of `definition`. Whether the file changed. A client whose file Ghostlight never writes is
+/// refused with its manual setup.
+fn edit_at(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+    path: &Path,
+    intent: RegistrationEdit,
+) -> Result<bool, HarnessError> {
+    match definition.dialect.format(context, || read_or_empty(path))? {
+        Ok(format) => format.edit(context, path, intent),
+        Err(_) => Err(manual_refusal(definition)),
     }
 }
 
@@ -2426,16 +2492,7 @@ fn apply_fix(
         registration_state(context, definition),
         Ok(RegistrationState::Launcher(_))
     );
-    let changed = match definition.dialect {
-        ConfigDialect::CodexToml => fix_toml(context, &definition.path)?,
-        ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => fix_json(context, &definition.path, dialect)?,
-        ConfigDialect::OpenCode => {
-            let source = read_or_empty(&definition.path)?;
-            let dialect = opencode_dialect(context, &source)?;
-            fix_json(context, &definition.path, dialect)?
-        }
-    };
+    let changed = edit_at(context, definition, &definition.path, RegistrationEdit::Fix)?;
     let summary = inspect(context, definition);
     Ok(HarnessActionResult {
         changed,
@@ -2475,32 +2532,6 @@ impl RegistrationEdit {
     const fn replaces_foreign(self) -> bool {
         matches!(self, Self::Fix)
     }
-}
-
-fn edit_json(
-    context: &HarnessContext,
-    path: &Path,
-    dialect: JsonDialect,
-    install: bool,
-) -> Result<bool, HarnessError> {
-    edit_json_with(
-        context,
-        path,
-        dialect,
-        if install {
-            RegistrationEdit::Install
-        } else {
-            RegistrationEdit::Uninstall
-        },
-    )
-}
-
-fn fix_json(
-    context: &HarnessContext,
-    path: &Path,
-    dialect: JsonDialect,
-) -> Result<bool, HarnessError> {
-    edit_json_with(context, path, dialect, RegistrationEdit::Fix)
 }
 
 /// Make the edit `intent` to Ghostlight's entry in the JSON file at `path`, written in `dialect`,
@@ -2563,22 +2594,6 @@ fn edit_json_with(
     let rendered = root.to_string();
     replace_with_backup(path, rendered.as_bytes())?;
     Ok(true)
-}
-
-fn edit_toml(context: &HarnessContext, path: &Path, install: bool) -> Result<bool, HarnessError> {
-    edit_toml_with(
-        context,
-        path,
-        if install {
-            RegistrationEdit::Install
-        } else {
-            RegistrationEdit::Uninstall
-        },
-    )
-}
-
-fn fix_toml(context: &HarnessContext, path: &Path) -> Result<bool, HarnessError> {
-    edit_toml_with(context, path, RegistrationEdit::Fix)
 }
 
 /// Make the edit `intent` to Ghostlight's entry in the Codex TOML file at `path`, for the edge and
@@ -2888,23 +2903,12 @@ fn manual_setup(
     context: &HarnessContext,
     definition: &HarnessDefinition,
 ) -> Result<String, HarnessError> {
-    match definition.dialect {
-        ConfigDialect::CodexToml => {
-            let mut entry = Item::Table(Table::new());
-            entry["command"] = value(context.edge.to_string_lossy().into_owned());
-            entry["args"] = value(mcp_arguments_array());
-            forward_codex_desktop_environment(&mut entry, context.linux)?;
-            let mut document = DocumentMut::new();
-            document["mcp_servers"] = Item::Table(Table::new());
-            document["mcp_servers"][SERVER_NAME] = entry;
-            Ok(document.to_string())
-        }
-        ConfigDialect::Json(dialect) => manual_json_setup(&context.edge, dialect),
-        ConfigDialect::Manual(dialect) => Ok(manual_yaml_setup(&context.edge, dialect)),
-        ConfigDialect::OpenCode => {
-            let source = read_or_empty(&definition.path)?;
-            manual_json_setup(&context.edge, opencode_dialect(context, &source)?)
-        }
+    match definition
+        .dialect
+        .format(context, || read_or_empty(&definition.path))?
+    {
+        Ok(format) => format.manual_setup(context),
+        Err(dialect) => Ok(manual_yaml_setup(&context.edge, dialect)),
     }
 }
 
@@ -3117,14 +3121,16 @@ fn write_location_overrides(
 }
 
 fn validate_located_config(path: &Path, dialect: ConfigDialect) -> Result<(), HarnessError> {
-    if matches!(dialect, ConfigDialect::Manual(_)) {
-        return Ok(());
-    }
+    let toml = match dialect {
+        ConfigDialect::Manual(_) => return Ok(()),
+        ConfigDialect::CodexToml => true,
+        ConfigDialect::Json(_) | ConfigDialect::OpenCode => false,
+    };
     let source = fs::read_to_string(path).map_err(HarnessError::Read)?;
-    match dialect {
-        ConfigDialect::CodexToml => parse_toml(&source).map(|_| ()),
-        ConfigDialect::Json(_) | ConfigDialect::OpenCode => parse_jsonc(&source).map(|_| ()),
-        ConfigDialect::Manual(_) => Ok(()),
+    if toml {
+        parse_toml(&source).map(|_| ())
+    } else {
+        parse_jsonc(&source).map(|_| ())
     }
 }
 
@@ -3292,12 +3298,12 @@ mod tests {
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        agent_called, command_registration_state, definition, definitions, edit_json, edit_toml,
-        environment_roots, executable_name, expected_json_entry, harness_roots, holds_owned_entry,
-        inspect, inspect_json, inspect_toml, json_entry_defaults, packaged,
-        remove_stray_temporaries_in, replace_with_backup, AppContainer, Attention, ForeignCommand,
-        HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
-        HarnessSummary, JsonDialect, LauncherPin, NpmLauncher, Packages, PrivateView,
+        agent_called, command_registration_state, definition, definitions, environment_roots,
+        executable_name, expected_json_entry, harness_roots, holds_owned_entry, inspect,
+        inspect_json, inspect_toml, json_entry_defaults, packaged, remove_stray_temporaries_in,
+        replace_with_backup, AppContainer, Attention, ForeignCommand, Format, HarnessAction,
+        HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
+        JsonDialect, LauncherPin, NpmLauncher, Packages, PrivateView, RegistrationEdit,
         RegistrationState, CODEX_HOME_VARIABLE, EDGE_COMMAND_NAME, MCP_ARGUMENT,
         RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
@@ -3583,7 +3589,15 @@ mod tests {
             fs::write(&path, &source).unwrap();
             for install in [true, false] {
                 assert!(matches!(
-                    edit_json(&context, &path, JsonDialect::ZCode, install),
+                    Format::Json(JsonDialect::ZCode).edit(
+                        &context,
+                        &path,
+                        if install {
+                            RegistrationEdit::Install
+                        } else {
+                            RegistrationEdit::Uninstall
+                        }
+                    ),
                     Err(HarnessError::ForeignEntry)
                 ));
             }
@@ -4072,7 +4086,9 @@ mod tests {
                     "{dialect:?}"
                 );
                 assert!(
-                    !edit_json(&context, &path, dialect, true).unwrap(),
+                    !Format::Json(dialect)
+                        .edit(&context, &path, RegistrationEdit::Install)
+                        .unwrap(),
                     "{dialect:?}"
                 );
                 assert_eq!(fs::read_to_string(&path).unwrap(), source, "{dialect:?}");
@@ -4093,7 +4109,9 @@ mod tests {
                 inspect_toml(&source, &context).unwrap(),
                 RegistrationState::Current
             );
-            assert!(!edit_toml(&context, &path, true).unwrap());
+            assert!(!Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .unwrap());
             assert_eq!(fs::read_to_string(&path).unwrap(), source);
         }
         {
@@ -4116,7 +4134,9 @@ mod tests {
                     RegistrationState::Updatable,
                     "{dialect:?}"
                 );
-                assert!(edit_json(&context, &path, dialect, true).unwrap());
+                assert!(Format::Json(dialect)
+                    .edit(&context, &path, RegistrationEdit::Install)
+                    .unwrap());
                 let written = fs::read_to_string(&path).unwrap();
                 let parsed: Value = serde_json::from_str(&written).unwrap();
                 let entry = super::json_entry(&parsed, dialect).unwrap();
@@ -4147,7 +4167,9 @@ mod tests {
                 inspect_toml(&source, &context).unwrap(),
                 RegistrationState::Updatable
             );
-            assert!(edit_toml(&context, &path, true).unwrap());
+            assert!(Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .unwrap());
             let installed = fs::read_to_string(&path).unwrap();
             let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
             let entry = &document["mcp_servers"]["ghostlight"];
@@ -4176,7 +4198,9 @@ mod tests {
                     .unwrap()
                     .is_empty()
             );
-            assert!(!edit_toml(&context, &path, true).unwrap());
+            assert!(!Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .unwrap());
             assert_eq!(fs::read_to_string(&path).unwrap(), installed);
         }
         #[cfg(target_os = "linux")]
@@ -4192,7 +4216,9 @@ mod tests {
         );
             fs::write(&path, &source).unwrap();
             assert!(inspect_toml(&source, &context).is_err());
-            assert!(edit_toml(&context, &path, true).is_err());
+            assert!(Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .is_err());
             assert_eq!(fs::read_to_string(&path).unwrap(), source);
             assert_eq!(
                 inspect_toml(
@@ -4244,7 +4270,7 @@ mod tests {
                         inspect_toml(&source, &context).is_err(),
                         "inspection accepted {source}"
                     );
-                    assert!(edit_toml(&context, &path, true).is_err());
+                    assert!(Format::Codex.edit(&context, &path, RegistrationEdit::Install).is_err());
                     assert_eq!(fs::read_to_string(&path).unwrap(), source);
                 }
             }
@@ -4261,7 +4287,9 @@ mod tests {
             "[mcp_servers]\nghostlight = {{ command = {:?}, args = [], startup_timeout_sec = 45 }}\n",
             edge.to_string_lossy()
         )).unwrap();
-            assert!(edit_toml(&context, &path, true).unwrap());
+            assert!(Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .unwrap());
             let installed = fs::read_to_string(&path).unwrap();
             let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
             assert_eq!(
@@ -5066,7 +5094,7 @@ mod tests {
             let path = directory.join("config.toml");
             fs::write(&path, source).unwrap();
             assert!(matches!(
-                edit_toml(&context, &path, true),
+                Format::Codex.edit(&context, &path, RegistrationEdit::Install),
                 Err(HarnessError::LauncherEntry)
             ));
             assert_eq!(fs::read_to_string(&path).unwrap(), source);
