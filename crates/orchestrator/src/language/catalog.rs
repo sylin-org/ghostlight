@@ -665,7 +665,7 @@ fn scroll_schema() -> Value {
                     ("y", coordinate()),
                     ("ticks", integer(1, 10, None, "")),
                 ],
-                vec!["direction", "view", "x", "y", "ticks"],
+                vec!["view", "x", "y", "ticks"],
             ),
         ],
         vec![

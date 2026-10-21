@@ -1106,22 +1106,30 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_click,
         )?)),
-        "browser_scroll" => Ok(Operation::ScrollPage(parse(
-            input,
-            &[
-                "visual_settle",
-                "tab",
-                "target",
-                "direction",
-                "amount",
-                "view",
-                "x",
-                "y",
-                "ticks",
-                "timeout_ms",
-            ],
-            validate_scroll,
-        )?)),
+        "browser_scroll" => {
+            let mut scroll: ScrollPage = parse(
+                input,
+                &[
+                    "visual_settle",
+                    "tab",
+                    "target",
+                    "direction",
+                    "amount",
+                    "view",
+                    "x",
+                    "y",
+                    "ticks",
+                    "timeout_ms",
+                ],
+                validate_scroll,
+            )?;
+            if scroll.wheel() {
+                scroll
+                    .direction
+                    .get_or_insert_with(|| SCROLL_DIRECTION_DEFAULT.into());
+            }
+            Ok(Operation::ScrollPage(scroll))
+        }
         "browser_hover" => Ok(Operation::Hover(parse(
             input,
             &[
@@ -1951,18 +1959,24 @@ fn validate_location(
     }
 }
 
-/// The direction a page scroll takes when the call gives none: the catalog advertises it and the
-/// executor applies it.
+/// The direction a scroll takes when the call gives none: the catalog advertises it, the decoder
+/// applies it to a wheel scroll and the executor to a page scroll.
 pub(crate) const SCROLL_DIRECTION_DEFAULT: &str = "down";
 
 /// The amount a page scroll takes when the call gives none: the catalog advertises it and the
 /// executor applies it.
 pub(crate) const SCROLL_AMOUNT_DEFAULT: &str = "medium";
 
+impl ScrollPage {
+    /// Whether the call scrolls the wheel at a view point rather than the page or a target.
+    fn wheel(&self) -> bool {
+        self.view.is_some() || self.x.is_some() || self.y.is_some() || self.ticks.is_some()
+    }
+}
+
 fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
-    let wheel =
-        value.view.is_some() || value.x.is_some() || value.y.is_some() || value.ticks.is_some();
+    let wheel = value.wheel();
     if let Some(target) = &value.target {
         if wheel {
             return Err(LanguageError::Invalid(
@@ -1986,11 +2000,20 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
             ));
         }
     } else if wheel {
-        let direction = value
-            .direction
-            .as_deref()
-            .ok_or_else(|| LanguageError::Invalid("wheel scrolling requires direction".into()))?;
-        validate_choice(direction, &["up", "down"], "direction")?;
+        if let Some(direction) = &value.direction {
+            validate_choice(direction, &["up", "down"], "direction")?;
+        }
+        // Ticks set how far a wheel scrolls. The advertised amount default is what a
+        // defaults-filling client sends beside them; any other amount asks for a page scroll.
+        if let Some(amount) = &value.amount {
+            validate_choice(amount, &["small", "medium", "large", "page"], "amount")?;
+            if amount != SCROLL_AMOUNT_DEFAULT {
+                return Err(LanguageError::Invalid(
+                    "amount cannot be combined with a view point: ticks set how far a wheel scrolls"
+                        .into(),
+                ));
+            }
+        }
         validate_handle(
             value
                 .view
@@ -2586,7 +2609,8 @@ mod tests {
     use super::{
         catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy, CATALOG_TOOL_COUNT,
         DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
-        EXPECTED_TOOL_NAMES, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, SERVER_INSTRUCTIONS,
+        EXPECTED_TOOL_NAMES, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, SCROLL_AMOUNT_DEFAULT,
+        SCROLL_DIRECTION_DEFAULT, SERVER_INSTRUCTIONS,
     };
 
     /// Collect every `role` enum the catalog advertises, wherever a selector sits in a schema.
@@ -3112,6 +3136,36 @@ mod tests {
             json!({"target":"target_x","paths":["relative.txt"]})
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_wheel_scroll_takes_the_advertised_direction_and_checks_its_amount() {
+        let wheel = json!({"view":"view_x","x":10,"y":20,"ticks":2});
+        let Operation::ScrollPage(scroll) = decode("browser_scroll", wheel.clone()).unwrap() else {
+            panic!("wrong operation")
+        };
+        assert_eq!(scroll.direction.as_deref(), Some(SCROLL_DIRECTION_DEFAULT));
+        let with = |field: &str, value: &str| {
+            let mut call = wheel.clone();
+            call[field] = json!(value);
+            decode("browser_scroll", call)
+        };
+        let Operation::ScrollPage(scroll) = with("direction", "up").unwrap() else {
+            panic!("wrong operation")
+        };
+        assert_eq!(scroll.direction.as_deref(), Some("up"));
+        assert!(with("direction", "left").is_err());
+        // The advertised amount default is what a defaults-filling client sends beside ticks.
+        assert!(with("amount", SCROLL_AMOUNT_DEFAULT).is_ok());
+        for amount in ["page", "small", "huge", ""] {
+            assert!(with("amount", amount).is_err(), "{amount}");
+        }
+        let Operation::ScrollPage(step) =
+            decode_flow_step("browser_scroll", wheel, Some("tab_x")).unwrap()
+        else {
+            panic!("wrong operation")
+        };
+        assert_eq!(step.direction.as_deref(), Some(SCROLL_DIRECTION_DEFAULT));
     }
 
     #[test]
