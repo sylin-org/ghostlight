@@ -338,12 +338,18 @@ Refusals say what is true, and their next steps suggest only what the caller can
   | --- | --- | --- | --- |
   | Connected but not answering | `browser_not_answering` | `The browser this session works in stopped answering. Nothing was sent.` | `Check that the browser window is open and responsive, then repeat the call.` |
   | Not connected, no other browser is | `browser_disconnected` | `The browser this session works in is not connected. Nothing was sent.` | `Ask the user to reopen that browser, then repeat the call.` |
-  | Not connected, a different browser is | `browser_wrong_profile` | `This session works in a browser that is not connected; a different browser is.` | `Ask the user to reopen the browser profile this session started in, then repeat the call.` |
+  | Not connected, a different browser is | `browser_wrong_profile` | `This session works in a browser that is not connected; a different browser is.` | `Ask the user to reopen the browser profile this session started in, then repeat the call.` and `To work in a connected browser instead, call browser_tabs with action list, then browser_navigate with new_tab true and that browser.` |
   | Connection busy with other work | `browser_busy` | `The browser connection was busy, so nothing was sent.` | `Repeat the call.` |
   | Bridge contract failure | `browser_contract_failed` | `Ghostlight and the browser extension do not agree on this request.` | `Ask the user to update Ghostlight in Browser (to update now, open chrome://extensions, turn on Developer mode and click Update), then repeat the call.` |
 
   None of these says "disconnected" for a browser that is still attached, and none tells the
-  model to reconnect an adapter it cannot reach (ADR-0196 Decision 12). The contract summary
+  model to reconnect an adapter it cannot reach (ADR-0196 Decision 12). A session whose browser is
+  not connected moves when the agent names a connected one with `browser_navigate`, `new_tab`
+  true and `browser`: it leaves its browser, every tab it held there reads as no longer open, and
+  the new tab binds the named browser. It never moves by itself, not even to the only browser
+  connected, because that can be another profile of the person's while their own restarts, and
+  finishing the work there is a different act from the one asked for (ADR-0084 Decision 4; arch-1
+  W-D5). While the session's browser is connected, naming another stays `browser_pinned`. The contract summary
   does not say whether anything was sent. A receipt in the wrong shape arrives after the
   browser already received the request.
 - A deadline before dispatch suggests a longer `timeout_ms` only when the call's own value is
