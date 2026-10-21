@@ -478,7 +478,7 @@ pub enum Outcome {
     /// A semantic selector matched zero or several visible controls. `more` says the page held
     /// more matches than the listing kept, so `matched` is a lower bound.
     SelectorUnresolved { matched: usize, more: bool },
-    /// One governed flow or sequence finished with an explicit progress account.
+    /// One governed flow finished with an explicit progress account.
     CompositionRan(super::composition::CompositionProgress),
     /// Confirmed children while the parent is still active.
     CompositionProgress { completed: usize, total: usize },
@@ -1063,7 +1063,7 @@ impl Outcome {
         }
     }
 
-    /// Render zero or one safe contextual recovery actions for this outcome.
+    /// Render at most two safe contextual recovery actions for this outcome.
     #[must_use]
     pub fn next_steps(&self) -> Vec<String> {
         match self {
@@ -2075,7 +2075,7 @@ impl Refusal {
         .into()
     }
 
-    /// Render zero or one safe contextual recovery actions for this refusal.
+    /// Render at most two safe contextual recovery actions for this refusal.
     #[must_use]
     pub fn next_steps(&self) -> Vec<String> {
         match self {

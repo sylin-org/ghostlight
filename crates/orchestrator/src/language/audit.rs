@@ -62,7 +62,7 @@ impl AuditProjection {
         &self.summary
     }
 
-    /// Read the payload-free composition account, when this is a flow or sequence.
+    /// Read the payload-free composition account, when this is a flow.
     #[must_use]
     pub fn composition(&self) -> Option<CompositionProgress> {
         self.composition

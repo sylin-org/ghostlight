@@ -30,14 +30,14 @@ In order. "After" names what a slice waits for.
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed (5c65614a) |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | landed (test f54e2469, block 512ad4d1) |
-| LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | landed |
+| LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | landed (01cc55e6) |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | todo |
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
 | LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
 | LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | todo |
 | LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | todo |
 | LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | todo |
-| LANG-11 | docs(language): the item docs match the code | - | LANG-11 | todo |
+| LANG-11 | docs(language): the item docs match the code | - | LANG-11 | landed |
 | LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | todo |
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | todo |
 
@@ -147,3 +147,8 @@ In order. "After" names what a slice waits for.
   `WORKSPACE_SUFFIX_CHARS`. A test pins the extension's `browser_` and `diag_` spellings. The
   length bound stays `bounds::HANDLE_CHARS`. Left to their lanes: the five mint sites in
   `workspace/mod.rs` (core-work) and `BROWSER_ID_PREFIX` in `browser/mod.rs` (core-service).
+- LANG-11: `Outcome::next_steps` and `Refusal::next_steps` say at most two steps, and the
+  composition docs in `outcome.rs` and `language/audit.rs` say flow, not "flow or sequence".
+  `WorkspaceReason::next_steps` does return one step at most, so its doc stays. The third
+  comment, `setup.rs:10`'s "four stages", is in the surface lane's `language/setup.rs`; it was
+  handed to leo-desktop-02.
