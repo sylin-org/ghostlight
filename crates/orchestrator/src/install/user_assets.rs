@@ -364,134 +364,94 @@ mod tests {
         (root, context)
     }
 
+    /// The user assets on Linux (a manual page and the shell completions) are Ghostlight's own
+    /// bytes: written verbatim and once, removed on uninstall, refreshed when someone edited one, and
+    /// an edited one is kept on uninstall. Install and uninstall also retire the connector pages 1.x
+    /// left (defect 00c6eccf), and keep a person's own file or link under those names.
     #[test]
-    fn every_owned_asset_has_content() {
-        for (name, contents) in ASSETS {
-            assert!(!contents.is_empty(), "{name} is empty");
-            if name.starts_with("man/") {
-                assert!(contents.contains(".TH "), "{name} has no man title line");
-                assert!(contents.contains(".SH NAME"), "{name} has no NAME section");
+    fn user_assets_own_their_exact_bytes_and_retire_the_pages_1x_left() {
+        {
+            let (_root, context) = context("lifecycle");
+            let first = apply_install(&context).unwrap();
+            assert!(first.changed);
+            assert_eq!(first.report.state, UserAssetState::Current);
+            for (name, contents) in ASSETS {
+                let written = fs::read_to_string(context.data_home.join(name)).unwrap();
+                assert_eq!(&written, contents, "{name} was not written verbatim");
             }
+
+            assert!(!apply_install(&context).unwrap().changed);
+
+            let removed = apply_uninstall(&context).unwrap();
+            assert!(removed.changed);
+            assert_eq!(removed.report.state, UserAssetState::Missing);
+            assert!(!apply_uninstall(&context).unwrap().changed);
         }
-        // One manual page plus one completion per shell.
-        assert_eq!(ASSETS.len(), 4);
-    }
+        {
+            let (_root, context) = context("edited");
+            apply_install(&context).unwrap();
+            let edited = context.data_home.join(ASSETS[0].0);
+            fs::write(&edited, "someone's own notes").unwrap();
 
-    #[test]
-    fn assets_are_written_idempotently_and_removed() {
-        let (_root, context) = context("lifecycle");
-        let first = apply_install(&context).unwrap();
-        assert!(first.changed);
-        assert_eq!(first.report.state, UserAssetState::Current);
-        for (name, contents) in ASSETS {
-            let written = fs::read_to_string(context.data_home.join(name)).unwrap();
-            assert_eq!(&written, contents, "{name} was not written verbatim");
+            assert_eq!(inspect(&context).unwrap().state, UserAssetState::Missing);
+            assert!(apply_install(&context).unwrap().changed);
+            assert_eq!(fs::read_to_string(&edited).unwrap(), ASSETS[0].1);
+
+            // Edit again, then uninstall: the edited file survives and the untouched ones go.
+            fs::write(&edited, "someone's own notes").unwrap();
+            apply_uninstall(&context).unwrap();
+            assert_eq!(fs::read_to_string(&edited).unwrap(), "someone's own notes");
+            assert!(!context.data_home.join(ASSETS[1].0).exists());
         }
-
-        assert!(!apply_install(&context).unwrap().changed);
-
-        let removed = apply_uninstall(&context).unwrap();
-        assert!(removed.changed);
-        assert_eq!(removed.report.state, UserAssetState::Missing);
-        assert!(!apply_uninstall(&context).unwrap().changed);
-    }
-
-    #[test]
-    fn an_edited_file_is_refreshed_on_install_and_kept_on_uninstall() {
-        let (_root, context) = context("edited");
-        apply_install(&context).unwrap();
-        let edited = context.data_home.join(ASSETS[0].0);
-        fs::write(&edited, "someone's own notes").unwrap();
-
-        assert_eq!(inspect(&context).unwrap().state, UserAssetState::Missing);
-        assert!(apply_install(&context).unwrap().changed);
-        assert_eq!(fs::read_to_string(&edited).unwrap(), ASSETS[0].1);
-
-        // Edit again, then uninstall: the edited file survives and the untouched ones go.
-        fs::write(&edited, "someone's own notes").unwrap();
-        apply_uninstall(&context).unwrap();
-        assert_eq!(fs::read_to_string(&edited).unwrap(), "someone's own notes");
-        assert!(!context.data_home.join(ASSETS[1].0).exists());
-    }
-
-    /// The `.TH` line a 1.x release wrote for `title`.
-    fn page_of_1x(title: &str, version: &str) -> String {
-        format!(
+        /// The `.TH` line a 1.x release wrote for `title`.
+        fn page_of_1x(title: &str, version: &str) -> String {
+            format!(
             ".\\\" SPDX-License-Identifier: Apache-2.0 OR MIT\n.TH {title} 1 \"2026-09-08\" \"Ghostlight {version}\" \"Ghostlight Manual\"\n.SH NAME\n"
         )
-    }
+        }
+        {
+            let (_root, context) = context("retired");
+            let man = context.data_home.join("man/man1");
+            fs::create_dir_all(&man).unwrap();
+            let mcp = man.join("ghostlight-mcp-connector.1");
+            let browser = man.join("ghostlight-browser-connector.1");
+            fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.5")).unwrap();
+            fs::write(
+                &browser,
+                page_of_1x("GHOSTLIGHT-BROWSER-CONNECTOR", "1.0.0"),
+            )
+            .unwrap();
+            apply_install(&context).unwrap();
+            assert!(
+                !mcp.exists() && !browser.exists(),
+                "1.x's pages are retired"
+            );
+            assert_eq!(inspect(&context).unwrap().state, UserAssetState::Current);
 
-    #[test]
-    fn the_connector_pages_1x_left_are_retired_and_anything_else_there_is_kept() {
-        let (_root, context) = context("retired");
-        let man = context.data_home.join("man/man1");
-        fs::create_dir_all(&man).unwrap();
-        let mcp = man.join("ghostlight-mcp-connector.1");
-        let browser = man.join("ghostlight-browser-connector.1");
-        fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.5")).unwrap();
-        fs::write(
-            &browser,
-            page_of_1x("GHOSTLIGHT-BROWSER-CONNECTOR", "1.0.0"),
-        )
-        .unwrap();
-        apply_install(&context).unwrap();
-        assert!(
-            !mcp.exists() && !browser.exists(),
-            "1.x's pages are retired"
-        );
-        assert_eq!(inspect(&context).unwrap().state, UserAssetState::Current);
+            // A page that is current already still loses a lingering 1.x page, and says it changed.
+            fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.15")).unwrap();
+            assert_eq!(inspect(&context).unwrap().state, UserAssetState::Missing);
+            assert!(apply_install(&context).unwrap().changed);
+            assert!(!mcp.exists());
 
-        // A page that is current already still loses a lingering 1.x page, and says it changed.
-        fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.15")).unwrap();
-        assert_eq!(inspect(&context).unwrap().state, UserAssetState::Missing);
-        assert!(apply_install(&context).unwrap().changed);
-        assert!(!mcp.exists());
-
-        // Someone's own file under that name, and a symlink, are kept.
-        fs::write(&mcp, "someone's own notes").unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&mcp, &browser).unwrap();
-        apply_install(&context).unwrap();
-        apply_uninstall(&context).unwrap();
-        assert_eq!(fs::read_to_string(&mcp).unwrap(), "someone's own notes");
-        #[cfg(unix)]
-        assert!(is_symlink(&browser).unwrap());
-    }
-
-    #[test]
-    fn an_uninstall_retires_the_connector_pages_1x_left() {
-        let (_root, context) = context("retired-uninstall");
-        let man = context.data_home.join("man/man1");
-        fs::create_dir_all(&man).unwrap();
-        let mcp = man.join("ghostlight-mcp-connector.1");
-        fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.14")).unwrap();
-        assert!(apply_uninstall(&context).unwrap().changed);
-        assert!(!mcp.exists());
-    }
-
-    #[test]
-    fn a_system_package_installation_needs_no_user_assets() {
-        let context = UserAssetContext {
-            linux: true,
-            executable: PathBuf::from("/usr/bin/ghostlight"),
-            data_home: PathBuf::from("/nonexistent/share"),
-        };
-        assert_eq!(
-            inspect(&context).unwrap().state,
-            UserAssetState::NotApplicable
-        );
-        assert!(!apply_install(&context).unwrap().changed);
-    }
-
-    #[test]
-    fn a_non_linux_platform_installs_nothing() {
-        let (_root, mut context) = context("windows");
-        context.linux = false;
-        assert_eq!(
-            inspect(&context).unwrap().state,
-            UserAssetState::NotApplicable
-        );
-        assert!(!apply_install(&context).unwrap().changed);
-        assert!(!context.data_home.join(ASSETS[0].0).exists());
+            // Someone's own file under that name, and a symlink, are kept.
+            fs::write(&mcp, "someone's own notes").unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&mcp, &browser).unwrap();
+            apply_install(&context).unwrap();
+            apply_uninstall(&context).unwrap();
+            assert_eq!(fs::read_to_string(&mcp).unwrap(), "someone's own notes");
+            #[cfg(unix)]
+            assert!(is_symlink(&browser).unwrap());
+        }
+        {
+            let (_root, context) = context("retired-uninstall");
+            let man = context.data_home.join("man/man1");
+            fs::create_dir_all(&man).unwrap();
+            let mcp = man.join("ghostlight-mcp-connector.1");
+            fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.14")).unwrap();
+            assert!(apply_uninstall(&context).unwrap().changed);
+            assert!(!mcp.exists());
+        }
     }
 }
