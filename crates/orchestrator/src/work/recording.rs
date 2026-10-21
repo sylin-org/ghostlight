@@ -55,14 +55,7 @@ impl ApplicationExecutor {
                 // and discard_recording for the same gate.
                 let decision = self.authorize(context, context.requirements, None);
                 if !decision.allowed {
-                    return self.blocked(
-                        context,
-                        decision,
-                        None,
-                        Effect::None,
-                        true,
-                        json!({"reason":decision.reason.as_str()}),
-                    );
+                    return self.blocked(context, decision, None, Effect::None, true, json!({}));
                 }
                 match self.dispatch(context, BrowserCommand::StatusRecording) {
                     Ok(BrowserOutcome::RecordingStatus { summary }) => {
@@ -96,7 +89,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         match self.dispatch(
@@ -145,14 +138,7 @@ impl ApplicationExecutor {
         // underneath it.
         let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                None,
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
+            return self.blocked(context, decision, None, Effect::None, true, json!({}));
         }
         match self.dispatch(context, BrowserCommand::StopRecording) {
             Ok(BrowserOutcome::RecordingStopped { summary, changed }) => self.succeeded(
@@ -207,14 +193,7 @@ impl ApplicationExecutor {
         // Recheck their actual hosts below once the browser returns the source inventory.
         let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                None,
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
+            return self.blocked(context, decision, None, Effect::None, true, json!({}));
         }
         let stopped = match self.ensure_recording_stopped(context) {
             Ok(summary) => summary,
@@ -321,7 +300,7 @@ impl ApplicationExecutor {
                 Some(stopped.tab_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             )));
         }
         let decision = Decision::permitted();
@@ -340,7 +319,7 @@ impl ApplicationExecutor {
                     Some(selected.physical_id),
                     Effect::None,
                     true,
-                    json!({"reason":decision.reason.as_str()}),
+                    json!({}),
                 )));
             }
             let rebound = match self.dispatch(
@@ -470,14 +449,7 @@ impl ApplicationExecutor {
         // runtime pause gate.
         let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                None,
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
+            return self.blocked(context, decision, None, Effect::None, true, json!({}));
         }
         match self.dispatch(context, BrowserCommand::DiscardRecording) {
             Ok(BrowserOutcome::RecordingDiscarded { released_bytes }) => self.succeeded(
@@ -529,10 +501,8 @@ impl ApplicationExecutor {
         outcome: BrowserOutcome,
     ) -> Terminal {
         let (refusal, facts) = match outcome {
-            BrowserOutcome::RecordingHeld => (Refusal::RecordingHeld, json!({"reason":"held"})),
-            BrowserOutcome::RecordingNotFound => {
-                (Refusal::RecordingUnavailable, json!({"reason":"not_found"}))
-            }
+            BrowserOutcome::RecordingHeld => (Refusal::RecordingHeld, json!({})),
+            BrowserOutcome::RecordingNotFound => (Refusal::RecordingUnavailable, json!({})),
             _ => return self.protocol_failure(context, Decision::permitted(), None),
         };
         self.failed(context, Decision::permitted(), None, refusal, facts)
@@ -555,7 +525,7 @@ impl ApplicationExecutor {
             } else {
                 Refusal::RecordingExportFailed
             },
-            json!({"reason":bounded(reason, 160)}),
+            json!({"detail":bounded(reason, 160)}),
         )
     }
 }

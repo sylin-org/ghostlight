@@ -12,8 +12,8 @@ use crate::language::{HistoryDirection, ReusePolicy};
 use crate::workspace::{Opener, SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
-    browser_reason, observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect,
-    InvocationContext, InvocationResult, Readiness, Status, Terminal,
+    observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect, InvocationContext,
+    InvocationResult, Readiness, Status, Terminal,
 };
 
 /// How the governed tab came to exist, which the receipt reports truthfully (ADR-0137).
@@ -36,14 +36,7 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                None,
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
+            return self.blocked(context, decision, None, Effect::None, true, json!({}));
         }
         // Listing is a current read of real state: the tabs come from the live browser through
         // a dispatching query, and only this workspace's bound tabs are named -- the person's
@@ -139,7 +132,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         match self.dispatch(
@@ -188,7 +181,7 @@ impl ApplicationExecutor {
                 None,
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
                 Some(url),
             );
         }
@@ -338,7 +331,7 @@ impl ApplicationExecutor {
                     Some(controlled.physical_id),
                     Effect::None,
                     true,
-                    json!({"reason":landing.reason.as_str(),"compensated":true}),
+                    json!({"compensated":true}),
                     Some(&controlled.url),
                 ),
                 // The refused page stays open, so the tab is held on it: its close then undoes
@@ -352,7 +345,7 @@ impl ApplicationExecutor {
                         Some(controlled.physical_id),
                         Effect::Applied,
                         false,
-                        json!({"tab":controlled.handle.as_str(),"reason":landing.reason.as_str(),"compensated":false,"retained":true,"held":true}),
+                        json!({"tab":controlled.handle.as_str(),"compensated":false,"retained":true,"held":true}),
                         Some(&tab.url),
                     )
                 }
@@ -363,7 +356,7 @@ impl ApplicationExecutor {
                     Refusal::LandingDeniedUnknown {
                         code: landing.reason,
                     },
-                    json!({"reason":landing.reason.as_str(),"compensated":false}),
+                    json!({"compensated":false}),
                 ),
             };
         }
@@ -410,7 +403,7 @@ impl ApplicationExecutor {
                 None,
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
                 Some(url),
             );
         }
@@ -437,7 +430,7 @@ impl ApplicationExecutor {
                         None,
                         Effect::None,
                         true,
-                        json!({"reason":decision.reason.as_str()}),
+                        json!({}),
                         Some(url),
                     );
                 }
@@ -555,7 +548,7 @@ impl ApplicationExecutor {
                 },
             );
             // The browser looked and sent nothing, so the refusal can say which way was empty.
-            if let Err(error @ BrowserError::NoHistoryEntry) = &outcome {
+            if let Err(BrowserError::NoHistoryEntry) = &outcome {
                 return self.failed(
                     context,
                     decision,
@@ -563,7 +556,7 @@ impl ApplicationExecutor {
                     Refusal::NoHistoryEntry {
                         forward: direction == HistoryDirection::Forward,
                     },
-                    json!({"reason": browser_reason(error)}),
+                    json!({}),
                 );
             }
             self.complete_navigation(
@@ -696,7 +689,7 @@ impl ApplicationExecutor {
                         None,
                         Effect::None,
                         true,
-                        json!({"tab":requested,"reason":decision.reason.as_str()}),
+                        json!({"tab":requested}),
                     );
                 }
                 return Terminal {
@@ -728,7 +721,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"tab":selected.handle.as_str(),"reason":decision.reason.as_str()}),
+                json!({"tab":selected.handle.as_str()}),
                 page,
             );
         }

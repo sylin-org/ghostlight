@@ -317,6 +317,9 @@ fn a_save_the_page_did_not_take_keeps_the_recording_and_names_a_file_input() {
         "The page did not take the replay at that target, so nothing was attached; the recording is kept."
     );
     assert!(result.next_steps[0].contains("file input"), "{result:?}");
+    // The closed code is the reason; the page's own words stay in the detail.
+    assert_eq!(result.facts["reason"], "recording_not_attached");
+    assert_eq!(result.facts["detail"], "the page did not accept the replay");
 }
 
 /// A page-target save run twice: once when describing the target followed its handle and once

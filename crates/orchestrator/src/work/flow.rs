@@ -25,14 +25,7 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let decision = self.authorize(context, context.requirements, None);
         if !decision.allowed {
-            return self.blocked(
-                context,
-                decision,
-                None,
-                Effect::None,
-                true,
-                json!({"reason":decision.reason.as_str()}),
-            );
+            return self.blocked(context, decision, None, Effect::None, true, json!({}));
         }
         let total = value.steps.len();
         let mut envelopes: HashMap<String, Value> = HashMap::new();

@@ -8,8 +8,10 @@ entry in [ADR-0203](../../adr/0203-one-owner-for-each-fact.md)'s Rebuild plan. S
 
 ## RESUME HERE
 
-W-D2, W-D3, C19c, C10c and WORK-12 have landed, with WORK-2b's workspace half and WORK-7's
-lease half. W-D1 moved to core-language (L-D5); D52(c) went to test-02. Next: C16. A slice's hash is
+W-D2, W-D3, C19c, C10c, C12b-2 and WORK-12 have landed, with WORK-2b's workspace half and
+WORK-7's lease half. W-D1 moved to core-language (L-D5); D52(c) went to test-02. Next: C16,
+whose cross-lane holds are granted (test-02's five adapter files, test-04's `workbench/tests.rs`,
+the coordinator's `browser/mod.rs` and `service/mod.rs`). A slice's hash is
 filled in by the next slice's commit, since a rebase before the push changes it.
 
 ## Slices
@@ -22,9 +24,9 @@ In order. "After" names what a slice waits for.
 | W-D2 | fix(work): a flow step whose tab close the policy refuses shows the kept-tab notice | - | WORK-8's notice half | landed (ecf30a64) |
 | W-D3 | fix(work): a selector wait gives the readiness fact the other waits give | - | WORK-13; a deliberate model-visible change | landed (f6d9fdc3) |
 | C19c | refactor(work): the completion path's leftovers go | - | ADR-0203 C19c, moved from core; WORK-7's `CompletionGate`; the service half is core-service's | landed (244875d3) |
-| C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | landed |
+| C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | landed (616bfffa) |
 | C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | todo |
-| C12b-2 | refactor(work): the typed refusal builds its result (the work half) | C12b-1 | ADR-0203 C12b; WORK-4, WORK-2 and WORK-3's refusal sites | todo |
+| C12b-2 | refactor(work): the typed refusal builds its result (the work half) | C12b-1 | ADR-0203 C12b; WORK-4, WORK-2 and WORK-3's refusal sites | landed |
 | WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | todo |
 | WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | todo |
 | WORK-10 | refactor(work): timings and limits are named | - | WORK-10 | todo |
@@ -99,3 +101,21 @@ publishes an edit between the frame's start and the explanation; read from the f
 explanation named the newer policy. `catalog_for` drops `browser_screenshot` while the snapshot
 refuses screenshots (Decision 7.1); the catalog golden is unchanged, since screenshots are on by
 default.
+
+C12b-2, Decision 5.1's work half: `Terminal::refused` builds every refusal's result, with a
+`Shape` (status, effect, readiness, repeat-safety) beside the typed `Refusal`, and writes
+`refusal.reason()` as the `reason` fact. `blocked_at`, `failed`, `unknown`, `workspace_refusal`,
+the unconfirmed action, `browser_failure`'s hand-built terminals, the routing refusals (which keep
+their `for_gesture` audit), `page_refused`, the channel, capacity, start-deadline, cancellation,
+credential and reverted-field refusals go through it, and the decode error keeps its decoder
+guidance as its step. The 66 call-site literals, `browser_reason` and `unconfirmed_reason` are
+gone. A temporary check, run over the whole suite before the literals went, found one written code
+that differed from `reason()`; the unreached sites were read one by one. Model-visible on purpose,
+pinned by tests, in no result golden: the credential refusal now carries
+`credential_authorization_required`, an answer with no dialog open `no_dialog_visible`, and a
+recording save the page did not take, or could not make, carries `recording_not_attached` or
+`recording_export_failed`, with the browser's text in `detail`. An error that reaches
+`browser_failure`'s last arm unhandled reports `browser_contract_failed`, the code of the contract
+sentence it already showed. The unreachable selector let-else is an `expect`. Left for later rows:
+the inline-ceiling recheck and the 7,000,000 cap (WORK-1), and the recovered and already-closed
+tabs (Decision 4.5, WORK-3).

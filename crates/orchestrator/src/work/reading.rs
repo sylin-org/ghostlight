@@ -384,7 +384,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         match self.dispatch(context, command) {
@@ -402,7 +402,7 @@ impl ApplicationExecutor {
                         decision,
                         Some(tab_id),
                         Refusal::CaptureTooLarge,
-                        json!({"reason":"screenshot_too_large"}),
+                        json!({}),
                     );
                 }
                 let view = match lease.register_view(&selected, viewport, width, height) {

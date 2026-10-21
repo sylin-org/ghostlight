@@ -54,7 +54,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         let (command, facts, clicked) = match location {
@@ -267,7 +267,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         match self.dispatch(
@@ -445,7 +445,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         let hovered_role = match &location {
@@ -581,7 +581,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         if let Some(locator) = &dragged_source {

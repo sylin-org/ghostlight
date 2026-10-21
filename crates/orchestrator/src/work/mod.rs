@@ -58,8 +58,8 @@ use crate::language::{
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
         CheckFailure, ExtensionAdvice, FileProblem, Observed, Outcome, Refusal, StaleHelp,
-        TargetRole, WorkspaceReason, BROWSER_PINNED_FACT, CANDIDATE_TABS_FACT, HANDLE_TAB_FACT,
-        IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
+        TargetRole, WorkspaceReason, CANDIDATE_TABS_FACT, HANDLE_TAB_FACT, IMAGE_SIZE_FACT,
+        OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
     },
     page_refusal::{PageGesture, PageRefusal},
     Operation, Record, RecordAction, TakeScreenshot,
@@ -350,25 +350,21 @@ impl ApplicationExecutor {
             Err(error) => {
                 let snapshot = self.governance.snapshot();
                 let decision = Decision::refused(ReasonCode::InvalidRequest);
-                let refusal = Refusal::InvalidRequest;
-                let summary = refusal.summary();
-                let result = InvocationResult::new(
+                let mut terminal = Terminal::refused(
                     &invocation,
-                    Status::Failed,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    json!({"reason":"invalid_input","detail":error.to_string()}),
-                    vec![error.guidance()],
-                );
-                let terminal = Terminal {
-                    result,
+                    Shape {
+                        status: Status::Failed,
+                        effect: Effect::None,
+                        readiness: Readiness::NotApplicable,
+                        repeat_safe: true,
+                    },
+                    &Refusal::InvalidRequest,
+                    json!({"detail":error.to_string()}),
                     decision,
-                    physical_id: None,
-                    observed: Observed::default(),
-                    audit: refusal.audit(),
-                };
+                    None,
+                );
+                // The decoder knows how this call missed the catalog, so its guidance is the step.
+                terminal.result.next_steps = vec![error.guidance()];
                 return self.finish(
                     terminal,
                     // A request that never decoded asked for nothing and learned nothing.
@@ -402,23 +398,19 @@ impl ApplicationExecutor {
         let frame = Frame::of(operation);
         let context = InvocationContext::of(prepared, operation, &publication, &frame);
         let mut terminal = if capacity_refused {
-            let refusal = Refusal::Capacity;
-            Terminal {
-                result: InvocationResult::new(
-                    &invocation,
-                    Status::Failed,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &refusal.summary(),
-                    json!({"reason":"capacity"}),
-                    refusal.next_steps(),
-                ),
-                decision: Decision::permitted(),
-                physical_id: None,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            }
+            Terminal::refused(
+                &invocation,
+                Shape {
+                    status: Status::Failed,
+                    effect: Effect::None,
+                    readiness: Readiness::NotApplicable,
+                    repeat_safe: true,
+                },
+                &Refusal::Capacity,
+                json!({}),
+                Decision::permitted(),
+                None,
+            )
         } else if let Admission::Cancelled(by) = admission {
             cancelled_before_start(&invocation, by)
         } else if let Some(terminal) = self.channel_preflight(&context) {
@@ -450,24 +442,19 @@ impl ApplicationExecutor {
         } else if let Some(by) = cancellation.cause() {
             cancelled_before_start(&invocation, by)
         } else if Instant::now() >= deadline {
-            let refusal = Refusal::DeadlineBeforeStart;
-            let summary = refusal.summary();
-            Terminal {
-                result: InvocationResult::new(
-                    &invocation,
-                    Status::Failed,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    json!({"reason":"deadline"}),
-                    refusal.next_steps(),
-                ),
-                decision: Decision::permitted(),
-                physical_id: None,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            }
+            Terminal::refused(
+                &invocation,
+                Shape {
+                    status: Status::Failed,
+                    effect: Effect::None,
+                    readiness: Readiness::NotApplicable,
+                    repeat_safe: true,
+                },
+                &Refusal::DeadlineBeforeStart,
+                json!({}),
+                Decision::permitted(),
+                None,
+            )
         } else {
             self.workspace_failure(&context, WorkspaceError::UnknownWorkspace)
         };
@@ -587,24 +574,19 @@ impl ApplicationExecutor {
         selected: &SelectedTab,
         control: ControlRef,
     ) -> Terminal {
-        let refusal = Refusal::CredentialAuthorization { control };
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Blocked,
-                Effect::None,
-                readiness(selected.readiness),
-                false,
-                &summary,
-                json!({"tab":selected.handle.as_str(),"user_authorization_required":true,"values_sent":false}),
-                refusal.next_steps(),
-            ),
+        Terminal::refused(
+            context.invocation,
+            Shape {
+                status: Status::Blocked,
+                effect: Effect::None,
+                readiness: readiness(selected.readiness),
+                repeat_safe: false,
+            },
+            &Refusal::CredentialAuthorization { control },
+            json!({"tab":selected.handle.as_str(),"user_authorization_required":true,"values_sent":false}),
             decision,
-            physical_id: Some(selected.physical_id),
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+            Some(selected.physical_id),
+        )
     }
 
     #[expect(
@@ -726,7 +708,7 @@ impl ApplicationExecutor {
             Some(tab.physical_id),
             effect,
             false,
-            json!({"tab":tab.handle.as_str(),"reason":landing.reason.as_str(),"held":true}),
+            json!({"tab":tab.handle.as_str(),"held":true}),
             Some(&url),
         )
     }
@@ -755,7 +737,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason": decision.reason.as_str()}),
+                json!({}),
             );
         }
         f(&selected, decision)
@@ -788,7 +770,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason": decision.reason.as_str()}),
+                json!({}),
             );
         }
         f(&selected, locator, role, decision)
@@ -1027,30 +1009,20 @@ impl ApplicationExecutor {
             cause,
             code: decision.reason,
         };
-        let mut facts = applied.result.facts;
-        if let Value::Object(object) = &mut facts {
-            object.insert(
-                "reason".into(),
-                json!(unconfirmed_reason(cause, decision.reason)),
-            );
-        }
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                unconfirmed_status(cause),
-                Effect::Applied,
-                applied.result.readiness,
-                false,
-                &summary,
-                with_denial_facts(decision, facts),
-                refusal.next_steps(),
-            ),
+        let facts = applied.result.facts;
+        Terminal::refused(
+            context.invocation,
+            Shape {
+                status: unconfirmed_status(cause),
+                effect: Effect::Applied,
+                readiness: applied.result.readiness,
+                repeat_safe: false,
+            },
+            &refusal,
+            with_denial_facts(decision, facts),
             decision,
-            physical_id: applied.physical_id,
-            observed: refusal.observed(),
-            audit: refusal.audit(),
-        }
+            applied.physical_id,
+        )
     }
 
     /// Resolve one typed semantic selector through a single adapter query.
@@ -1076,7 +1048,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             )));
         }
         match self.dispatch(
@@ -1201,23 +1173,19 @@ impl ApplicationExecutor {
             None,
             decision,
         ));
-        let refusal = Refusal::ChannelOff { channel, author };
-        Some(Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Blocked,
-                Effect::None,
-                Readiness::NotApplicable,
-                true,
-                &refusal.summary(),
-                with_denial_facts(decision, json!({"reason": decision.reason.as_str()})),
-                refusal.next_steps(),
-            ),
+        Some(Terminal::refused(
+            context.invocation,
+            Shape {
+                status: Status::Blocked,
+                effect: Effect::None,
+                readiness: Readiness::NotApplicable,
+                repeat_safe: true,
+            },
+            &Refusal::ChannelOff { channel, author },
+            with_denial_facts(decision, json!({})),
             decision,
-            physical_id: None,
-            observed: refusal.observed(),
-            audit: refusal.audit(),
-        })
+            None,
+        ))
     }
 
     fn audit_preflight(&self, context: &InvocationContext<'_>) -> Option<Terminal> {
@@ -1234,14 +1202,7 @@ impl ApplicationExecutor {
             None,
             decision,
         ));
-        Some(self.blocked(
-            context,
-            decision,
-            None,
-            Effect::None,
-            true,
-            json!({"reason": decision.reason.as_str()}),
-        ))
+        Some(self.blocked(context, decision, None, Effect::None, true, json!({})))
     }
 
     fn admit_dispatch(&self, context: &InvocationContext<'_>) -> Result<(), BrowserError> {
@@ -1773,7 +1734,6 @@ impl ApplicationExecutor {
         facts: Value,
         blocked_url: Option<&str>,
     ) -> Terminal {
-        let facts = with_denial_facts(decision, facts);
         let refusal = Refusal::AuthorityBlocked {
             code: decision.reason,
             host: blocked_url.and_then(observed_host),
@@ -1781,24 +1741,19 @@ impl ApplicationExecutor {
                 .filter(|_| decision.reason == ReasonCode::OwnWorkbench)
                 .and_then(observed_origin),
         };
-        let observed = refusal.observed();
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Blocked,
+        Terminal::refused(
+            context.invocation,
+            Shape {
+                status: Status::Blocked,
                 effect,
-                Readiness::Unknown,
+                readiness: Readiness::Unknown,
                 repeat_safe,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
+            },
+            &refusal,
+            with_denial_facts(decision, facts),
             decision,
             physical_id,
-            observed,
-            audit: refusal.audit(),
-        }
+        )
     }
 
     /// Report a denial with no host in play.
@@ -1830,23 +1785,19 @@ impl ApplicationExecutor {
         refusal: Refusal,
         facts: Value,
     ) -> Terminal {
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Failed,
-                Effect::None,
-                Readiness::Unknown,
-                true,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
+        Terminal::refused(
+            context.invocation,
+            Shape {
+                status: Status::Failed,
+                effect: Effect::None,
+                readiness: Readiness::Unknown,
+                repeat_safe: true,
+            },
+            &refusal,
+            facts,
             decision,
             physical_id,
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+        )
     }
 
     fn unknown(
@@ -1857,23 +1808,19 @@ impl ApplicationExecutor {
         refusal: Refusal,
         facts: Value,
     ) -> Terminal {
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Unknown,
-                Effect::Unknown,
-                Readiness::Unknown,
-                false,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
+        Terminal::refused(
+            context.invocation,
+            Shape {
+                status: Status::Unknown,
+                effect: Effect::Unknown,
+                readiness: Readiness::Unknown,
+                repeat_safe: false,
+            },
+            &refusal,
+            facts,
             decision,
             physical_id,
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+        )
     }
 
     /// The page found a handle's control gone or unknown, which a stale handle says the same way
@@ -1904,28 +1851,22 @@ impl ApplicationExecutor {
         physical_id: Option<u64>,
         refusal: PageRefusal,
     ) -> Terminal {
-        let facts = json!({"reason": refusal.as_str()});
-        let refusal = Refusal::PageRefused {
-            refusal,
-            gesture: context.gesture,
-        };
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Failed,
-                Effect::None,
-                Readiness::NotApplicable,
-                true,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
+        Terminal::refused(
+            context.invocation,
+            Shape {
+                status: Status::Failed,
+                effect: Effect::None,
+                readiness: Readiness::NotApplicable,
+                repeat_safe: true,
+            },
+            &Refusal::PageRefused {
+                refusal,
+                gesture: context.gesture,
+            },
+            json!({}),
             decision,
             physical_id,
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+        )
     }
 
     fn protocol_failure(
@@ -1939,7 +1880,7 @@ impl ApplicationExecutor {
             decision,
             physical_id,
             Refusal::IncompatibleReceipt,
-            json!({"reason":"incompatible_browser_receipt"}),
+            json!({}),
         )
     }
 
@@ -1957,7 +1898,7 @@ impl ApplicationExecutor {
                 physical_id,
                 Effect::None,
                 false,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         if error == BrowserError::StaleView {
@@ -1972,7 +1913,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id,
                 Refusal::DialogOpen,
-                json!({"reason":"dialog_open"}),
+                json!({}),
             );
         }
         if error == BrowserError::TabNotShowing {
@@ -1981,7 +1922,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id,
                 Refusal::TabNotShowing,
-                json!({"reason": browser_reason(&error)}),
+                json!({}),
             );
         }
         if error == BrowserError::DocumentUnavailable {
@@ -1990,7 +1931,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id,
                 Refusal::DocumentUnavailable,
-                json!({"reason":"document_unavailable"}),
+                json!({}),
             );
         }
         if let BrowserError::RuntimeControl(reason) = error {
@@ -2000,28 +1941,23 @@ impl ApplicationExecutor {
                 physical_id,
                 Effect::None,
                 false,
-                json!({"reason":reason.as_str()}),
+                json!({}),
             );
         }
         if matches!(&error, BrowserError::LocalInterlock(_)) {
-            let refusal = Refusal::LocalInterlock;
-            let summary = refusal.summary();
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    Status::Blocked,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    json!({"reason":"browser_local_interlock"}),
-                    refusal.next_steps(),
-                ),
+            return Terminal::refused(
+                context.invocation,
+                Shape {
+                    status: Status::Blocked,
+                    effect: Effect::None,
+                    readiness: Readiness::NotApplicable,
+                    repeat_safe: true,
+                },
+                &Refusal::LocalInterlock,
+                json!({}),
                 decision,
                 physical_id,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            };
+            );
         }
         // Routing refusals are decisive and physical-effect-free: nothing was dispatched, because
         // nothing could be dispatched anywhere in particular. They name the browsers the caller
@@ -2033,23 +1969,21 @@ impl ApplicationExecutor {
             return self.page_refused(context, decision, physical_id, refusal);
         }
         if let Some((refusal, facts)) = routing_refusal(&error, || self.extension_advice()) {
-            let summary = refusal.summary();
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    Status::Failed,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    facts,
-                    refusal.next_steps(),
-                ),
+            let mut terminal = Terminal::refused(
+                context.invocation,
+                Shape {
+                    status: Status::Failed,
+                    effect: Effect::None,
+                    readiness: Readiness::NotApplicable,
+                    repeat_safe: true,
+                },
+                &refusal,
+                facts,
                 decision,
                 physical_id,
-                observed: Observed::default(),
-                audit: refusal.audit().for_gesture(context.gesture),
-            };
+            );
+            terminal.audit = terminal.audit.for_gesture(context.gesture);
+            return terminal;
         }
         if error.effect_unknown() {
             // Every after-dispatch class is an honest unknown: name its phase so the caller
@@ -2058,29 +1992,25 @@ impl ApplicationExecutor {
             let (refusal, facts) = match &error {
                 BrowserError::EffectUnknown(detail) => (
                     Refusal::EffectUnknown,
-                    json!({"reason":"browser_effect_unknown","detail":detail,"phase":"adapter_reported"}),
+                    json!({"detail":detail,"phase":"adapter_reported"}),
                 ),
                 BrowserError::DeadlineAfterDispatch => (
                     Refusal::DeadlineExpired {
                         before_dispatch: false,
                         timeout_adjustable: context.deadline_adjustable,
                     },
-                    json!({"reason":"deadline","phase":"after_dispatch"}),
+                    json!({"phase":"after_dispatch"}),
                 ),
-                BrowserError::DisconnectedAfterDispatch => (
-                    Refusal::ConnectionLost,
-                    json!({"reason":"browser_effect_unknown","phase":"after_dispatch"}),
-                ),
+                BrowserError::DisconnectedAfterDispatch => {
+                    (Refusal::ConnectionLost, json!({"phase":"after_dispatch"}))
+                }
                 BrowserError::CancelledAfterDispatch => (
                     Refusal::CancelledAfterDispatch {
                         by: context.cancellation.cause(),
                     },
-                    json!({"reason":"browser_effect_unknown","phase":"after_dispatch"}),
+                    json!({"phase":"after_dispatch"}),
                 ),
-                _ => (
-                    Refusal::EffectUnknown,
-                    json!({"reason":"browser_effect_unknown","phase":"unknown"}),
-                ),
+                _ => (Refusal::EffectUnknown, json!({"phase":"unknown"})),
             };
             return self.unknown(context, decision, physical_id, refusal, facts);
         }
@@ -2093,7 +2023,7 @@ impl ApplicationExecutor {
                     before_dispatch: true,
                     timeout_adjustable: context.deadline_adjustable,
                 },
-                json!({"reason":"deadline","phase":"before_dispatch"}),
+                json!({"phase":"before_dispatch"}),
             );
         }
         if matches!(error, BrowserError::Unsupported { .. }) {
@@ -2102,7 +2032,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id,
                 Refusal::BrowserAdapterOutdated,
-                json!({"reason":browser_reason(&error)}),
+                json!({}),
             );
         }
         // Each case says which fact stopped the call. Every availability reason and the
@@ -2130,23 +2060,19 @@ impl ApplicationExecutor {
             // that arrived in the wrong shape after dispatch. Every other class returned above.
             _ => (Status::Failed, Refusal::BrowserContract),
         };
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
+        Terminal::refused(
+            context.invocation,
+            Shape {
                 status,
-                Effect::None,
-                Readiness::Unknown,
-                true,
-                &summary,
-                json!({"reason":browser_reason(&error)}),
-                refusal.next_steps(),
-            ),
+                effect: Effect::None,
+                readiness: Readiness::Unknown,
+                repeat_safe: true,
+            },
+            &refusal,
+            json!({}),
             decision,
             physical_id,
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+        )
     }
 
     fn workspace_failure(
@@ -2191,8 +2117,8 @@ impl ApplicationExecutor {
             WorkspaceError::Held(hold) => Some(self.held_decision(context, hold)),
             _ => None,
         };
-        let (mut refusal, fact) = language::outcome::workspace_refusal(error);
-        let mut facts = json!({"reason":fact});
+        let (mut refusal, _) = language::outcome::workspace_refusal(error);
+        let mut facts = json!({});
         if let Some(denial) = held {
             facts = with_denial_facts(denial, facts);
         }
@@ -2233,7 +2159,6 @@ impl ApplicationExecutor {
                 facts[REPLACEMENT_FACT] = Value::String(target.clone());
             }
         }
-        let summary = refusal.summary();
         let status = if held.is_some() {
             Status::Blocked
         } else {
@@ -2244,22 +2169,19 @@ impl ApplicationExecutor {
         } else {
             Effect::None
         };
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
+        Terminal::refused(
+            context.invocation,
+            Shape {
                 status,
                 effect,
-                Readiness::Unknown,
-                status == Status::Failed && effect == Effect::None,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
-            decision: held.unwrap_or_else(Decision::permitted),
-            physical_id: acted_on,
-            observed: refusal.observed(),
-            audit: refusal.audit(),
-        }
+                readiness: Readiness::Unknown,
+                repeat_safe: status == Status::Failed && effect == Effect::None,
+            },
+            &refusal,
+            facts,
+            held.unwrap_or_else(Decision::permitted),
+            acted_on,
+        )
     }
 
     /// The decision a refusal on a tab under `hold` records (ADR-0203 Decision 5.5).
@@ -2366,23 +2288,19 @@ impl<'a> Completion<'a> {
 /// The terminal of `invocation` when it was cancelled by `by` before it started: nothing ran,
 /// so it is safe to repeat.
 fn cancelled_before_start(invocation: &InvocationId, by: CancelCause) -> Terminal {
-    let refusal = Refusal::CancelledBeforeStart { by };
-    Terminal {
-        result: InvocationResult::new(
-            invocation,
-            Status::Cancelled,
-            Effect::None,
-            Readiness::NotApplicable,
-            true,
-            &refusal.summary(),
-            json!({"reason":"cancelled"}),
-            refusal.next_steps(),
-        ),
-        decision: Decision::permitted(),
-        physical_id: None,
-        observed: Observed::default(),
-        audit: refusal.audit(),
-    }
+    Terminal::refused(
+        invocation,
+        Shape {
+            status: Status::Cancelled,
+            effect: Effect::None,
+            readiness: Readiness::NotApplicable,
+            repeat_safe: true,
+        },
+        &Refusal::CancelledBeforeStart { by },
+        json!({}),
+        Decision::permitted(),
+        None,
+    )
 }
 
 /// Milliseconds elapsed since an invocation began, saturating rather than wrapping.
@@ -2516,6 +2434,48 @@ struct Terminal {
     audit: AuditProjection,
 }
 
+/// How a result is shaped apart from its words: its status, its effect, the page's readiness,
+/// and whether repeating the call is safe.
+#[derive(Clone, Copy)]
+struct Shape {
+    status: Status,
+    effect: Effect,
+    readiness: Readiness,
+    repeat_safe: bool,
+}
+
+impl Terminal {
+    /// The terminal of `refusal` (ADR-0203 Decision 5.1). Its sentence, next steps, observation
+    /// and audit come from the refusal, and the refusal's model code is the `reason` fact beside
+    /// `facts`, so no call site writes that code.
+    fn refused(
+        invocation: &InvocationId,
+        shape: Shape,
+        refusal: &Refusal,
+        mut facts: Value,
+        decision: Decision,
+        physical_id: Option<u64>,
+    ) -> Self {
+        facts["reason"] = Value::from(refusal.reason());
+        Self {
+            result: InvocationResult::new(
+                invocation,
+                shape.status,
+                shape.effect,
+                shape.readiness,
+                shape.repeat_safe,
+                &refusal.summary(),
+                facts,
+                refusal.next_steps(),
+            ),
+            decision,
+            physical_id,
+            observed: refusal.observed(),
+            audit: refusal.audit(),
+        }
+    }
+}
+
 enum ResolvedLocation {
     Target {
         tab: SelectedTab,
@@ -2643,28 +2603,21 @@ fn routing_refusal(
     extension: impl FnOnce() -> ExtensionAdvice,
 ) -> Option<(Refusal, Value)> {
     match error {
-        BrowserError::AmbiguousBrowser(candidates) => Some((
-            Refusal::BrowserAmbiguous,
-            json!({"reason":"browser_ambiguous","browsers":candidates}),
-        )),
-        BrowserError::UnknownBrowser(_) => {
-            Some((Refusal::BrowserUnknown, json!({"reason":"browser_unknown"})))
+        BrowserError::AmbiguousBrowser(candidates) => {
+            Some((Refusal::BrowserAmbiguous, json!({"browsers":candidates})))
         }
-        BrowserError::BrowserPinned => Some((
-            Refusal::BrowserPinned,
-            json!({"reason":BROWSER_PINNED_FACT}),
-        )),
+        BrowserError::UnknownBrowser(_) => Some((Refusal::BrowserUnknown, json!({}))),
+        BrowserError::BrowserPinned => Some((Refusal::BrowserPinned, json!({}))),
         BrowserError::Primitive { detail, cause } => Some((
             Refusal::BrowserPrimitive {
                 detail: detail.clone(),
                 cause: *cause,
             },
-            json!({"reason":cause.as_str(),"detail":detail}),
+            json!({"detail":detail}),
         )),
-        BrowserError::CaptureTooLarge { detail } => Some((
-            Refusal::CaptureTooLarge,
-            json!({"reason":Refusal::CaptureTooLarge.reason(),"detail":detail}),
-        )),
+        BrowserError::CaptureTooLarge { detail } => {
+            Some((Refusal::CaptureTooLarge, json!({"detail":detail})))
+        }
         BrowserError::RecoveryManual { browsers } => Some((
             Refusal::BrowserStartupManual {
                 browsers: browsers.clone(),
@@ -2684,7 +2637,7 @@ fn routing_refusal(
                     ExtensionAdvice::Plain
                 },
             },
-            json!({"reason":reason.as_str(),"details":details}),
+            json!({"details":details}),
         )),
         _ => None,
     }
@@ -2692,7 +2645,6 @@ fn routing_refusal(
 
 fn manual_browser_facts(browsers: &[String]) -> Value {
     let mut facts = json!({
-        "reason": "browser_startup_manual",
         "browsers": browsers,
     });
     if let [browser] = browsers {
@@ -2964,19 +2916,6 @@ const fn unconfirmed_status(cause: CheckFailure) -> Status {
 /// The structured `reason` fact of an applied action whose check did not confirm it.
 ///
 /// A governed refusal keeps the governance reason every other refusal reports.
-const fn unconfirmed_reason(cause: CheckFailure, governed: ReasonCode) -> &'static str {
-    match cause {
-        CheckFailure::Unmet => "expectation_unmet",
-        CheckFailure::Blocked(_) => governed.as_str(),
-        CheckFailure::Cancelled => "cancelled",
-        CheckFailure::DeadlineExpired => "deadline",
-        CheckFailure::Disconnected => "browser_disconnected",
-        CheckFailure::BrowserUnavailable => "browser_unavailable",
-        CheckFailure::DocumentUnavailable => "document_unavailable",
-        CheckFailure::BrowserRefused => "browser_refused",
-    }
-}
-
 // Physical work must finish early enough for the extension, native relay, browser port, executor,
 // and MCP edge to return one decisive receipt. A quarter second was too narrow on a live
 // cache-bypassing reload and turned a normal timeout into an uncertain after-dispatch deadline.
@@ -3230,36 +3169,6 @@ fn bounded(value: &str, maximum: usize) -> String {
     value.chars().take(maximum).collect()
 }
 
-fn browser_reason(error: &BrowserError) -> &'static str {
-    match error {
-        BrowserError::DocumentAccess(_) => "document_access_denied",
-        BrowserError::DocumentUnavailable => "document_unavailable",
-        BrowserError::RuntimeControl(reason) => reason.as_str(),
-        BrowserError::DisconnectedBeforeDispatch => "browser_disconnected",
-        BrowserError::NotAnsweringBeforeDispatch => "browser_not_answering",
-        BrowserError::BusyBeforeDispatch => "browser_busy",
-        BrowserError::WrongProfile => "browser_wrong_profile",
-        BrowserError::CancelledBeforeDispatch => "cancelled",
-        BrowserError::DeadlineBeforeDispatch => "deadline",
-        BrowserError::Primitive { .. } | BrowserError::CaptureTooLarge { .. } => {
-            "browser_primitive_failed"
-        }
-        BrowserError::PageRefused(refusal) => refusal.as_str(),
-        BrowserError::FieldsRejected { .. } => "field_value_rejected",
-        BrowserError::DialogOpen => "dialog_open",
-        BrowserError::NoHistoryEntry => "no_history_entry",
-        BrowserError::TabNotShowing => "tab_not_showing",
-        BrowserError::StaleView => "stale_view",
-        BrowserError::StaleTab => WorkspaceReason::TabUnavailable.as_fact(),
-        BrowserError::LocalInterlock(_) => "browser_local_interlock",
-        BrowserError::Protocol(_)
-        | BrowserError::Authentication
-        | BrowserError::Incompatible { .. }
-        | BrowserError::Unsupported { .. } => "browser_contract_failed",
-        _ => "browser_effect_unknown",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     mod audit_health;
@@ -3312,9 +3221,8 @@ mod tests {
     use crate::workspace::{StaleReason, WorkspaceStore};
 
     use super::{
-        adapter_budget_ms, browser_reason, observed_from, readiness_name, routing_refusal,
-        ApplicationExecutor, BrowserError, BrowserPort, CancellationToken, Effect, Readiness,
-        Status,
+        adapter_budget_ms, observed_from, readiness_name, routing_refusal, ApplicationExecutor,
+        BrowserError, BrowserPort, CancellationToken, Effect, Readiness, Status,
     };
 
     #[derive(Default)]

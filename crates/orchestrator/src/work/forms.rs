@@ -14,7 +14,7 @@ use crate::governance::Capability;
 use crate::language::{
     field_echo::{self, HeldField},
     field_problem::{self, ControlRef, FieldProblem, RejectedControl, RejectedField},
-    outcome::{EmptyObject, FileProblem, Observed, Outcome, Refusal, TargetRole},
+    outcome::{EmptyObject, FileProblem, Outcome, Refusal, TargetRole},
     FillForm, PageCondition, PressKey, RunScript, TypeText, UploadFiles, Wait, WaitCondition,
 };
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
@@ -23,7 +23,7 @@ use super::result::Readiness;
 use super::{
     action_subject, adapter_budget_ms, bounded, followed, load_physical_files, named_key,
     observed_host, readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult,
-    ResolvedLocation, Status, Terminal, SELECTOR_MATCH_MAX,
+    ResolvedLocation, Shape, Status, Terminal, SELECTOR_MATCH_MAX,
 };
 use crate::browser::adapter::PhysicalFile;
 use crate::browser::adapter::{
@@ -60,7 +60,7 @@ impl ApplicationExecutor {
                     Some(established.physical_id),
                     Effect::None,
                     true,
-                    json!({"reason":pre.reason.as_str()}),
+                    json!({}),
                 );
             }
             selected = Some(established);
@@ -128,7 +128,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         let mut locators: Vec<_> = resolved
@@ -302,24 +302,19 @@ impl ApplicationExecutor {
             return self.protocol_failure(context, decision, Some(physical_id));
         };
         let facts = field_problem::reverted_facts(set, &reverted);
-        let refusal = Refusal::FieldsReverted { set, reverted };
-        let summary = refusal.summary();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Failed,
-                Effect::Partial,
-                Readiness::Unknown,
-                false,
-                &summary,
-                facts,
-                refusal.next_steps(),
-            ),
+        Terminal::refused(
+            context.invocation,
+            Shape {
+                status: Status::Failed,
+                effect: Effect::Partial,
+                readiness: Readiness::Unknown,
+                repeat_safe: false,
+            },
+            &Refusal::FieldsReverted { set, reverted },
+            facts,
             decision,
-            physical_id: Some(physical_id),
-            observed: Observed::default(),
-            audit: refusal.audit(),
-        }
+            Some(physical_id),
+        )
     }
 
     pub(super) fn perform_type_text(
@@ -351,7 +346,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         let described_rebound = match self.dispatch(
@@ -484,7 +479,7 @@ impl ApplicationExecutor {
                 Some(selected.physical_id),
                 Effect::None,
                 true,
-                json!({"reason":decision.reason.as_str()}),
+                json!({}),
             );
         }
         let mut described_rebound = false;
@@ -525,7 +520,7 @@ impl ApplicationExecutor {
                         decision,
                         Some(selected.physical_id),
                         Refusal::FilesUnreadable { problem },
-                        json!({"reason":problem.as_str()}),
+                        json!({}),
                     )
                 }
             }
@@ -538,7 +533,7 @@ impl ApplicationExecutor {
                         decision,
                         Some(selected.physical_id),
                         Refusal::FilesUnreadable { problem },
-                        json!({"reason":problem.as_str()}),
+                        json!({}),
                     )
                 }
             }
@@ -568,7 +563,7 @@ impl ApplicationExecutor {
                         Refusal::FilesUnreadable {
                             problem: FileProblem::StaleCapture,
                         },
-                        json!({"reason":FileProblem::StaleCapture.as_str()}),
+                        json!({}),
                     )
                 }
             }
@@ -905,15 +900,10 @@ impl ApplicationExecutor {
                 // semantic query every selector-based action uses, so no handle pre-resolution is
                 // needed and a stale handle can never be required to wait.
                 if value.condition == WaitCondition::SelectorPresent {
-                    let Some(selector) = value.selector.as_ref() else {
-                        return self.failed(
-                            context,
-                            decision,
-                            Some(selected.physical_id),
-                            Refusal::InvalidRequest,
-                            json!({"reason":"invalid_request"}),
-                        );
-                    };
+                    let selector = value
+                        .selector
+                        .as_ref()
+                        .expect("language validated the selector a selector_present wait needs");
                     let started = Instant::now();
                     let budget_end = started
                         + std::cmp::min(

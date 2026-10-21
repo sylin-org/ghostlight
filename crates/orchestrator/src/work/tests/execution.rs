@@ -16,11 +16,11 @@ fn primitive_adapter_errors_route_to_an_honest_refusal_with_detail() {
         ExtensionAdvice::Plain
     })
     .expect("primitive errors route to a refusal");
-    let crate::language::outcome::Refusal::BrowserPrimitive { detail, .. } = refusal else {
+    let crate::language::outcome::Refusal::BrowserPrimitive { detail, .. } = &refusal else {
         panic!("primitive errors must route to BrowserPrimitive");
     };
     assert_eq!(detail, "no such frame");
-    assert_eq!(facts["reason"], "browser_primitive_failed");
+    assert_eq!(refusal.reason(), "browser_primitive_failed");
     assert_eq!(facts["detail"], "no such frame");
 }
 
@@ -136,8 +136,37 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
             },
         ),
     ];
+    let (executor, _, _, workspace, _) = fixture();
+    let publication = executor.governance.published();
+    let cancellation = CancellationToken::default();
+    let findings = crate::work::findings::FrameFindings::default();
+    let context = crate::work::InvocationContext {
+        settlement_pending: &std::sync::atomic::AtomicBool::new(false),
+        settlement_requested: false,
+        provenance: &crate::provenance::ConnectionEvidence::claimed("test", IntakeChannel::Mcp),
+        invocation: &crate::work::InvocationId::mint(),
+        workspace: &workspace,
+        requested_browser: None,
+        requested_tab: None,
+        requested_target: None,
+        repeat_tool: None,
+        gesture: crate::language::page_refusal::PageGesture::Other,
+        snapshot: publication.snapshot(),
+        publication: &publication,
+        requirements: crate::governance::CapabilitySet::READ,
+        deadline: std::time::Instant::now() + std::time::Duration::from_secs(1),
+        deadline_adjustable: false,
+        cancellation: &cancellation,
+        findings: &findings,
+    };
     for (name, error) in &cases {
-        let claims = browser_reason(error) == "browser_disconnected";
+        let refused = executor.browser_failure(
+            &context,
+            crate::governance::Decision::permitted(),
+            error.clone(),
+            None,
+        );
+        let claims = refused.result.facts["reason"] == "browser_disconnected";
         let truth = matches!(error, BrowserError::DisconnectedBeforeDispatch);
         assert_eq!(
             claims, truth,
@@ -1577,10 +1606,10 @@ fn manual_recovery_maps_to_model_directed_summary_and_stable_facts() {
     )
     .expect("manual recovery is a model-facing refusal");
 
+    assert_eq!(refusal.reason(), "browser_startup_manual");
     assert_eq!(
         facts,
         json!({
-            "reason":"browser_startup_manual",
             "browser":"Chromium",
             "browsers":["Chromium"]
         })
@@ -1605,10 +1634,10 @@ fn manual_recovery_maps_to_model_directed_summary_and_stable_facts() {
     assert_eq!(
         plural_facts,
         json!({
-            "reason":"browser_startup_manual",
             "browsers":["Google Chrome", "Microsoft Edge"]
         })
     );
+    assert_eq!(plural.reason(), "browser_startup_manual");
 }
 
 #[test]
@@ -2968,6 +2997,7 @@ fn credential_target_returns_guidance_without_holding_the_session() {
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked);
+    assert_eq!(result.facts["reason"], "credential_authorization_required");
     assert_eq!(result.facts["user_authorization_required"], true);
     assert_eq!(result.facts["values_sent"], false);
     assert!(
@@ -4834,4 +4864,37 @@ fn a_stale_refusal_audits_the_word_only() {
     assert!(encoded.contains("removed"), "{encoded}");
     assert!(!encoded.contains(&target), "{encoded}");
     assert!(!encoded.contains("private patient action"), "{encoded}");
+}
+
+/// Answering a dialog when none is open says so with its own model code (ADR-0203 Decision 5.1).
+#[test]
+fn a_dialog_answer_with_none_open_names_no_dialog_visible() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        &CancellationToken::default(),
+    );
+    browser.push(Ok(BrowserOutcome::Dialog {
+        tab_id: 7,
+        present: false,
+        dialog_type: String::new(),
+        message: None,
+        url: None,
+        default_prompt: None,
+    }));
+    let result = executor.execute(
+        &workspace,
+        "browser_dialog",
+        json!({"action":"accept","tab":opened.facts["tab"]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Failed, "{result:?}");
+    assert_eq!(result.facts["reason"], "no_dialog_visible");
+    assert_eq!(result.facts["handled"], false);
 }
