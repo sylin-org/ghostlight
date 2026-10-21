@@ -312,13 +312,11 @@ impl Fixture {
             }
             None => facade,
         };
-        let server = WorkbenchServer::start(
-            &root,
+        let server = PendingWorkbench::bind(&root).unwrap().serve(
             &facade,
             "instance_test".into(),
             Arc::new(Watching::load(marker)),
-        )
-        .unwrap();
+        );
         Self {
             server,
             facade,

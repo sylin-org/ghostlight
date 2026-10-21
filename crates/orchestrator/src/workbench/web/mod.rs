@@ -247,16 +247,6 @@ impl fmt::Debug for WorkbenchServer {
 }
 
 impl WorkbenchServer {
-    /// Bind and serve in one step, for a caller that has no rule to put between the two.
-    pub fn start(
-        home: &Path,
-        facade: &WorkbenchFacade,
-        instance: String,
-        watching: Arc<Watching>,
-    ) -> io::Result<Self> {
-        Ok(PendingWorkbench::bind(home)?.serve(facade, instance, watching))
-    }
-
     /// Where the workbench is served.
     #[must_use]
     pub const fn address(&self) -> &WorkbenchAddress {
