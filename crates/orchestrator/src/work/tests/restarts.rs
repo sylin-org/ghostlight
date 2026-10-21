@@ -53,107 +53,6 @@ fn touched_old_id(browser: &FakeBrowser, before: usize) -> bool {
     })
 }
 
-#[test]
-fn a_browser_restart_never_hands_an_agent_handle_the_persons_tab() {
-    for tool in ["list", "read", "screenshot", "navigate"] {
-        let (executor, browser, workspaces, workspace, _) = fixture();
-        let handle = open_agent_tab(&executor, &browser, &workspace);
-        restart_listing(&workspaces, &browser, vec![tab(AGENT_TAB, PERSONS_URL)]);
-        let before = browser.calls().len();
-        let result = match tool {
-            "list" => executor.execute(
-                &workspace,
-                "browser_tabs",
-                json!({"action":"list"}),
-                &CancellationToken::default(),
-            ),
-            "read" => executor.execute(
-                &workspace,
-                "browser_read",
-                json!({"tab":handle}),
-                &CancellationToken::default(),
-            ),
-            "screenshot" => executor.execute(
-                &workspace,
-                "browser_screenshot",
-                json!({"tab":handle}),
-                &CancellationToken::default(),
-            ),
-            _ => {
-                // A navigation of the forgotten handle reopens the page in a fresh tab.
-                browser.push(Ok(BrowserOutcome::TabOpened {
-                    tab: tab(9, AGENT_URL),
-                    committed_urls: vec![AGENT_URL.into()],
-                }));
-                executor.execute(
-                    &workspace,
-                    "browser_navigate",
-                    json!({"tab":handle,"url":AGENT_URL}),
-                    &CancellationToken::default(),
-                )
-            }
-        };
-        assert!(
-            matches!(browser.calls()[before], BrowserCommand::ListTabs),
-            "{tool}: the call asks the browser first: {:?}",
-            browser.calls()
-        );
-        assert!(
-            !touched_old_id(&browser, before),
-            "{tool}: {:?}",
-            browser.calls()
-        );
-        assert!(
-            !result.model_text().contains(PERSONS_URL),
-            "{tool}: {}",
-            result.model_text()
-        );
-        match tool {
-            "list" => {
-                assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-                assert_eq!(result.facts["tabs"], json!([]));
-            }
-            "navigate" => {
-                assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-                assert_eq!(result.facts["tab"], json!(handle));
-                assert_eq!(result.facts["recovered"], "new_tab");
-            }
-            _ => {
-                assert_ne!(result.status, Status::Succeeded, "{tool}");
-                assert_eq!(
-                    result.summary, "That tab handle names no open tab in this session.",
-                    "{tool}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn a_port_restart_keeps_a_tab_whose_page_is_unchanged() {
-    let (executor, browser, workspaces, workspace, _) = fixture();
-    let handle = open_agent_tab(&executor, &browser, &workspace);
-    restart_listing(&workspaces, &browser, vec![tab(AGENT_TAB, AGENT_URL)]);
-    browser.push(Ok(BrowserOutcome::Text {
-        tab_id: AGENT_TAB,
-        text: "Agent page".into(),
-        truncated: false,
-        title: "Example".into(),
-        url: AGENT_URL.into(),
-    }));
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":handle}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
-    assert_eq!(read.facts["tab"], json!(handle));
-    let bindings = workspaces.tab_bindings(workspace.as_str());
-    assert_eq!(bindings.len(), 1);
-    assert!(!bindings[0].pending);
-}
-
 /// The extension life the agent's tab was opened in.
 const LIFE: &str = "life_first";
 
@@ -200,118 +99,6 @@ fn read_routed(
     )
 }
 
-#[test]
-fn a_worker_restart_in_the_same_life_keeps_a_tab_whose_page_routed_itself() {
-    let (executor, browser, workspaces, workspace, _) = fixture();
-    browser.set_life(FAKE_BROWSER, Some(LIFE));
-    let handle = open_agent_tab(&executor, &browser, &workspace);
-    reconnect_listing(
-        &workspaces,
-        &browser,
-        Some(LIFE),
-        Some(LIFE),
-        vec![tab(AGENT_TAB, ROUTED_URL)],
-    );
-    let read = read_routed(&executor, &browser, &workspace, &handle, ROUTED_URL);
-    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
-    assert_eq!(read.facts["tab"], json!(handle));
-    let bindings = workspaces.tab_bindings(workspace.as_str());
-    assert_eq!(bindings.len(), 1);
-    assert!(!bindings[0].pending);
-    assert_eq!(
-        bindings[0].url,
-        crate::workspace::UrlDigest::of(ROUTED_URL),
-        "the binding takes the live URL"
-    );
-}
-
-#[test]
-fn a_new_life_falls_back_to_the_url_check() {
-    // A browser restart or an extension reload: the routed tab is not the agent's any more.
-    let (executor, browser, workspaces, workspace, _) = fixture();
-    browser.set_life(FAKE_BROWSER, Some(LIFE));
-    let handle = open_agent_tab(&executor, &browser, &workspace);
-    reconnect_listing(
-        &workspaces,
-        &browser,
-        Some(LIFE),
-        Some(NEXT_LIFE),
-        vec![tab(AGENT_TAB, ROUTED_URL)],
-    );
-    let before = browser.calls().len();
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":handle}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(
-        read.summary,
-        "That tab handle names no open tab in this session."
-    );
-    assert!(!touched_old_id(&browser, before), "{:?}", browser.calls());
-    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
-
-    // The same id at the address the workspace knew still confirms in the new life.
-    let (executor, browser, workspaces, workspace, _) = fixture();
-    browser.set_life(FAKE_BROWSER, Some(LIFE));
-    let handle = open_agent_tab(&executor, &browser, &workspace);
-    reconnect_listing(
-        &workspaces,
-        &browser,
-        Some(LIFE),
-        Some(NEXT_LIFE),
-        vec![tab(AGENT_TAB, AGENT_URL)],
-    );
-    let read = read_routed(&executor, &browser, &workspace, &handle, AGENT_URL);
-    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
-}
-
-#[test]
-fn a_token_or_hello_without_a_life_falls_back_to_the_url_check() {
-    // (the life the ended hello named, the life the new hello names)
-    for (ended, now) in [(None, Some(LIFE)), (Some(LIFE), None), (None, None)] {
-        let (executor, browser, workspaces, workspace, _) = fixture();
-        browser.set_life(FAKE_BROWSER, ended);
-        let handle = open_agent_tab(&executor, &browser, &workspace);
-        reconnect_listing(
-            &workspaces,
-            &browser,
-            ended,
-            now,
-            vec![tab(AGENT_TAB, ROUTED_URL)],
-        );
-        let read = executor.execute(
-            &workspace,
-            "browser_read",
-            json!({"tab":handle}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(
-            read.summary, "That tab handle names no open tab in this session.",
-            "{ended:?} then {now:?}"
-        );
-    }
-
-    // A token that names no life for its browser resumes a binding the URL alone confirms.
-    let (executor, browser, workspaces, workspace) = resumed_session(AGENT_URL);
-    browser.set_life(FAKE_BROWSER, Some(LIFE));
-    browser.push(Ok(BrowserOutcome::Tabs {
-        tabs: vec![tab(AGENT_TAB, ROUTED_URL)],
-    }));
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":"tab_kept"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(
-        read.summary,
-        "That tab handle names no open tab in this session."
-    );
-    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
-}
-
 /// Give the agent's tab its page's document, as a browser that opened it in this run knows it.
 fn agent_documents(browser: &FakeBrowser) {
     browser.set_documents(
@@ -349,77 +136,313 @@ fn resumed_session(
     (executor, browser, workspaces, workspace)
 }
 
+/// The text the agent's page reads as.
+fn agent_text() -> BrowserOutcome {
+    BrowserOutcome::Text {
+        tab_id: AGENT_TAB,
+        text: "Agent page".into(),
+        truncated: false,
+        title: "Example".into(),
+        url: AGENT_URL.into(),
+    }
+}
+
+/// A browser port over the fake whose browser can go away, as a restarted browser or a
+/// reconnecting native host does, and comes back the first time a call looks for it, so a call
+/// that needs it has to wait. Armed, it goes away right after the next crossing.
+struct Restarting {
+    browser: Arc<FakeBrowser>,
+    workspaces: WorkspaceStore,
+    armed: Mutex<bool>,
+    away: Mutex<bool>,
+    /// How many commands the fake had recorded when it went away mid-call, once it has.
+    restarted_at: Mutex<Option<usize>>,
+}
+
+impl Restarting {
+    /// The browser's stream ends now; `gap` says whether the service saw it end.
+    fn go_away(&self, gap: bool) {
+        self.browser.connect(Vec::new());
+        if gap {
+            self.workspaces.apply_browser_disconnect(FAKE_BROWSER, None);
+        }
+        *self.away.lock().unwrap() = true;
+    }
+
+    fn restarted_at(&self) -> usize {
+        self.restarted_at
+            .lock()
+            .unwrap()
+            .expect("the browser restarted")
+    }
+}
+
+impl BrowserPort for Restarting {
+    fn call(
+        &self,
+        browser: &str,
+        command: BrowserCommand,
+        deadline: std::time::Instant,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        self.browser.call(browser, command, deadline, cancelled)
+    }
+
+    fn call_guarded(
+        &self,
+        browser: &str,
+        command: BrowserCommand,
+        dispatch: crate::browser::BrowserDispatch<'_>,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        let outcome = self.browser.call_guarded(browser, command, dispatch);
+        let mut armed = self.armed.lock().unwrap();
+        if *armed {
+            *armed = false;
+            *self.restarted_at.lock().unwrap() = Some(self.browser.calls().len());
+            self.go_away(true);
+        }
+        outcome
+    }
+
+    /// Absent once after it went away, then back.
+    fn browsers(&self) -> Vec<crate::browser::BrowserSummary> {
+        let mut away = self.away.lock().unwrap();
+        if *away {
+            *away = false;
+            self.browser.connect(vec![summary(FAKE_BROWSER, true)]);
+            return Vec::new();
+        }
+        drop(away);
+        self.browser.browsers()
+    }
+
+    fn publish_control_state(
+        &self,
+        state: crate::browser::adapter::RuntimeControlState,
+    ) -> Result<(), BrowserError> {
+        self.browser.publish_control_state(state)
+    }
+}
+
+/// An executor whose browser is the fake behind [`Restarting`].
+fn restartable() -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    Arc<Restarting>,
+    WorkspaceStore,
+    crate::workspace::WorkspaceId,
+) {
+    let browser = Arc::new(FakeBrowser::default());
+    let workspaces = WorkspaceStore::default();
+    let port = Arc::new(Restarting {
+        browser: Arc::clone(&browser),
+        workspaces: workspaces.clone(),
+        armed: Mutex::new(false),
+        away: Mutex::new(false),
+        restarted_at: Mutex::new(None),
+    });
+    let (executor, workspace, _) =
+        executor_on(GovernanceFacade::new(None), &workspaces, port.clone());
+    (executor, browser, port, workspaces, workspace)
+}
+
+/// What a call on a handle the gap forgot is told.
+fn forgotten() -> String {
+    crate::language::outcome::WorkspaceReason::TabUnavailable.summary()
+}
+
+/// Read through `handle` in `workspace`.
+fn read(
+    executor: &ApplicationExecutor,
+    workspace: &crate::workspace::WorkspaceId,
+    handle: &str,
+) -> crate::work::result::InvocationResult {
+    executor.execute(
+        workspace,
+        "browser_read",
+        json!({"tab":handle}),
+        &CancellationToken::default(),
+    )
+}
+
+/// ACCEPTANCE Contract 19 and ADR-0203 Decision 1 (1d10bf74, 8a16343f, c4e382aa): a tab binding
+/// kept across a gap in what the service knows of its browser is confirmed before any command
+/// reaches it.
+///
+/// - A restarted browser that gives the person's tab the agent's old id: list, read, screenshot
+///   and navigate all ask the browser first, never touch the old id or show the person's page;
+///   the reads are told the handle names no tab, a list shows none, and a navigation reopens the
+///   page in a fresh tab under the same handle.
+/// - The same id at the same address is kept; within one extension life a page that routed
+///   itself is kept and the binding takes its live address; a new life, or a hello or token with
+///   no life, falls back to the address check.
+/// - A resumed session's tab is confirmed by id and address before its first use and binds the
+///   session's browser; a token from before a restart restores nothing; a tab whose browser never
+///   returns is forgotten when named, left pending when not; opening in another browser forgets
+///   the resumed tabs and says so.
+/// - A gap inside a call: the next crossing asks first, never sends the old id, and keeps a tab
+///   whose page is unchanged.
+/// - A call that names no tab waits for its only tab's browser, resumed or not, and works in the
+///   session's own tab.
 #[test]
-fn a_resumed_tab_is_confirmed_by_id_and_url_before_its_first_use() {
+fn a_tab_binding_across_a_gap_is_confirmed_before_any_command_reaches_it() {
+    // A restart that hands the agent's old id to the person's tab.
+    for tool in ["list", "read", "screenshot", "navigate"] {
+        let (executor, browser, workspaces, workspace, _) = fixture();
+        let handle = open_agent_tab(&executor, &browser, &workspace);
+        restart_listing(&workspaces, &browser, vec![tab(AGENT_TAB, PERSONS_URL)]);
+        let before = browser.calls().len();
+        let result = match tool {
+            "list" => executor.execute(
+                &workspace,
+                "browser_tabs",
+                json!({"action":"list"}),
+                &CancellationToken::default(),
+            ),
+            "read" => read(&executor, &workspace, &handle),
+            "screenshot" => executor.execute(
+                &workspace,
+                "browser_screenshot",
+                json!({"tab":handle}),
+                &CancellationToken::default(),
+            ),
+            _ => {
+                browser.push(Ok(BrowserOutcome::TabOpened {
+                    tab: tab(9, AGENT_URL),
+                    committed_urls: vec![AGENT_URL.into()],
+                }));
+                executor.execute(
+                    &workspace,
+                    "browser_navigate",
+                    json!({"tab":handle,"url":AGENT_URL}),
+                    &CancellationToken::default(),
+                )
+            }
+        };
+        assert!(
+            matches!(browser.calls()[before], BrowserCommand::ListTabs),
+            "{tool}: the call asks the browser first: {:?}",
+            browser.calls()
+        );
+        assert!(
+            !touched_old_id(&browser, before),
+            "{tool}: {:?}",
+            browser.calls()
+        );
+        assert!(!result.model_text().contains(PERSONS_URL), "{tool}");
+        match tool {
+            "list" => assert_eq!(result.facts["tabs"], json!([])),
+            "navigate" => {
+                assert_eq!(result.facts["tab"], json!(handle));
+                assert_eq!(result.facts["recovered"], "new_tab");
+            }
+            _ => assert_eq!(result.summary, forgotten(), "{tool}"),
+        }
+    }
+
+    // The same id at the same address is kept.
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    let handle = open_agent_tab(&executor, &browser, &workspace);
+    restart_listing(&workspaces, &browser, vec![tab(AGENT_TAB, AGENT_URL)]);
+    browser.push(Ok(agent_text()));
+    let kept = read(&executor, &workspace, &handle);
+    assert_eq!(kept.status, Status::Succeeded, "{}", kept.summary);
+    assert_eq!(kept.facts["tab"], json!(handle));
+    let bindings = workspaces.tab_bindings(workspace.as_str());
+    assert_eq!(bindings.len(), 1);
+    assert!(!bindings[0].pending);
+
+    // Lives: one life keeps a routed page; a new or unnamed life checks the address.
+    // (the life the ended hello named, the life the new hello names, the address it lists)
+    for (ended, now, listed, kept) in [
+        (Some(LIFE), Some(LIFE), ROUTED_URL, true),
+        (Some(LIFE), Some(NEXT_LIFE), ROUTED_URL, false),
+        (Some(LIFE), Some(NEXT_LIFE), AGENT_URL, true),
+        (None, Some(LIFE), ROUTED_URL, false),
+        (Some(LIFE), None, ROUTED_URL, false),
+        (None, None, ROUTED_URL, false),
+    ] {
+        let label = format!("{ended:?} then {now:?} at {listed}");
+        let (executor, browser, workspaces, workspace, _) = fixture();
+        browser.set_life(FAKE_BROWSER, ended);
+        let handle = open_agent_tab(&executor, &browser, &workspace);
+        reconnect_listing(
+            &workspaces,
+            &browser,
+            ended,
+            now,
+            vec![tab(AGENT_TAB, listed)],
+        );
+        let before = browser.calls().len();
+        let result = if kept {
+            read_routed(&executor, &browser, &workspace, &handle, listed)
+        } else {
+            read(&executor, &workspace, &handle)
+        };
+        let bindings = workspaces.tab_bindings(workspace.as_str());
+        if kept {
+            assert_eq!(
+                result.status,
+                Status::Succeeded,
+                "{label}: {}",
+                result.summary
+            );
+            assert_eq!(result.facts["tab"], json!(handle), "{label}");
+            assert!(!bindings[0].pending, "{label}");
+            assert_eq!(
+                bindings[0].url,
+                crate::workspace::UrlDigest::of(listed),
+                "{label}: the binding takes the live address"
+            );
+        } else {
+            assert_eq!(result.summary, forgotten(), "{label}");
+            assert!(
+                !touched_old_id(&browser, before),
+                "{label}: {:?}",
+                browser.calls()
+            );
+            assert!(bindings.is_empty(), "{label}");
+        }
+    }
+
+    // A resumed tab is confirmed by id and address first, and binds the session's browser.
     let (executor, browser, workspaces, workspace) = resumed_session(AGENT_URL);
     assert_eq!(workspaces.browser_of(workspace.as_str()), None);
     agent_documents(&browser);
     browser.push(Ok(BrowserOutcome::Tabs {
         tabs: vec![tab(3, PERSONS_URL), tab(AGENT_TAB, AGENT_URL)],
     }));
-    browser.push(Ok(BrowserOutcome::Text {
-        tab_id: AGENT_TAB,
-        text: "Agent page".into(),
-        truncated: false,
-        title: "Example".into(),
-        url: AGENT_URL.into(),
-    }));
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":"tab_kept"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
+    browser.push(Ok(agent_text()));
+    let resumed = read(&executor, &workspace, "tab_kept");
+    assert_eq!(resumed.status, Status::Succeeded, "{}", resumed.summary);
     assert!(matches!(browser.calls()[0], BrowserCommand::ListTabs));
     assert_eq!(
         workspaces.browser_of(workspace.as_str()).as_deref(),
-        Some(FAKE_BROWSER),
-        "the confirmed tab binds the session's browser"
+        Some(FAKE_BROWSER)
     );
-}
 
-#[test]
-fn a_token_from_before_a_browser_restart_restores_nothing() {
-    let (executor, browser, workspaces, workspace) = resumed_session(AGENT_URL);
-    browser.push(Ok(BrowserOutcome::Tabs {
-        tabs: vec![tab(AGENT_TAB, PERSONS_URL)],
-    }));
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":"tab_kept"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(
-        read.summary,
-        "That tab handle names no open tab in this session."
-    );
-    assert!(!touched_old_id(&browser, 0), "{:?}", browser.calls());
-    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
-    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
-}
+    // A token whose tab moved, or that names no life, restores nothing.
+    for life in [None, Some(LIFE)] {
+        let (executor, browser, workspaces, workspace) = resumed_session(AGENT_URL);
+        browser.set_life(FAKE_BROWSER, life);
+        browser.push(Ok(BrowserOutcome::Tabs {
+            tabs: vec![tab(
+                AGENT_TAB,
+                if life.is_some() {
+                    ROUTED_URL
+                } else {
+                    PERSONS_URL
+                },
+            )],
+        }));
+        let result = read(&executor, &workspace, "tab_kept");
+        assert_eq!(result.summary, forgotten(), "{life:?}");
+        assert!(!touched_old_id(&browser, 0), "{:?}", browser.calls());
+        assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
+        assert_eq!(workspaces.browser_of(workspace.as_str()), None);
+    }
 
-#[test]
-fn a_call_on_a_tab_whose_browser_never_returns_forgets_it() {
-    let (executor, browser, workspaces, workspace) = resumed_session(AGENT_URL);
-    browser.connect(Vec::new());
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":"tab_kept","timeout_ms":1000}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(
-        read.summary,
-        "That tab handle names no open tab in this session."
-    );
-    assert!(browser.calls().is_empty(), "{:?}", browser.calls());
-    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
-}
-
-#[test]
-fn a_call_that_names_no_pending_tab_leaves_it_pending_while_its_browser_is_away() {
+    // A browser that never returns: a call naming its tab forgets it, one that does not leaves it.
     let (executor, browser, workspaces, workspace) = resumed_session(AGENT_URL);
     browser.connect(Vec::new());
     let listed = executor.execute(
@@ -429,14 +452,18 @@ fn a_call_that_names_no_pending_tab_leaves_it_pending_while_its_browser_is_away(
         &CancellationToken::default(),
     );
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert!(workspaces.tab_bindings(workspace.as_str())[0].pending);
+    let named = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":"tab_kept","timeout_ms":1000}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(named.summary, forgotten());
     assert!(browser.calls().is_empty(), "{:?}", browser.calls());
-    let bindings = workspaces.tab_bindings(workspace.as_str());
-    assert_eq!(bindings.len(), 1);
-    assert!(bindings[0].pending);
-}
+    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
 
-#[test]
-fn opening_in_another_browser_forgets_the_resumed_tabs_and_says_so() {
+    // Opening in another browser forgets the resumed tabs and says so.
     let (executor, browser, workspaces, workspace, _) = fixture();
     workspaces.remember_tab(
         &workspace,
@@ -461,208 +488,73 @@ fn opening_in_another_browser_forgets_the_resumed_tabs_and_says_so() {
     let bindings = workspaces.tab_bindings(workspace.as_str());
     assert_eq!(bindings.len(), 1);
     assert_eq!(bindings[0].browser, FAKE_BROWSER);
-}
 
-/// How long the restarted browser takes to connect again, well inside a call's return grace.
-const RECONNECT_AFTER: Duration = Duration::from_millis(150);
-
-/// Connect the fake browser again after [`RECONNECT_AFTER`], as a restarted browser or a
-/// reconnecting native host does.
-fn reconnect_soon(browser: &Arc<FakeBrowser>) {
-    let returning = Arc::clone(browser);
-    std::thread::spawn(move || {
-        std::thread::sleep(RECONNECT_AFTER);
-        returning.connect(vec![summary(FAKE_BROWSER, true)]);
-    });
-}
-
-/// End the fake browser's stream now and connect it again soon. What it lists when it is back
-/// is queued by the test.
-fn drop_and_reconnect(workspaces: &WorkspaceStore, browser: &Arc<FakeBrowser>) {
-    browser.connect(Vec::new());
-    workspaces.apply_browser_disconnect(FAKE_BROWSER, None);
-    reconnect_soon(browser);
-}
-
-/// A browser port whose browser restarts after the first crossing it carries once armed: the
-/// stream ends there, and the browser connects again shortly after.
-struct RestartsAfterOneCrossing {
-    browser: Arc<FakeBrowser>,
-    workspaces: WorkspaceStore,
-    armed: Mutex<bool>,
-    /// How many commands the fake had recorded when it restarted, once it has.
-    restarted_at: Mutex<Option<usize>>,
-}
-
-impl RestartsAfterOneCrossing {
-    fn after_crossing(&self) {
-        let mut armed = self.armed.lock().unwrap();
-        if *armed {
-            *armed = false;
-            *self.restarted_at.lock().unwrap() = Some(self.browser.calls().len());
-            drop_and_reconnect(&self.workspaces, &self.browser);
+    // A gap inside a call: the next crossing asks first.
+    for listed in [PERSONS_URL, AGENT_URL] {
+        let (executor, browser, port, workspaces, workspace) = restartable();
+        let handle = open_agent_tab(&executor, &browser, &workspace);
+        *port.armed.lock().unwrap() = true;
+        browser.push(Ok(BrowserOutcome::Tabs {
+            tabs: vec![tab(AGENT_TAB, listed)],
+        }));
+        if listed == AGENT_URL {
+            browser.push(Ok(agent_text()));
+        }
+        let result = read(&executor, &workspace, &handle);
+        let restarted = port.restarted_at();
+        assert!(
+            !*port.away.lock().unwrap(),
+            "{listed}: the call met the browser away"
+        );
+        assert!(
+            matches!(
+                browser.calls().get(restarted),
+                Some(BrowserCommand::ListTabs)
+            ),
+            "{listed}: {:?}",
+            browser.calls()
+        );
+        let bindings = workspaces.tab_bindings(workspace.as_str());
+        if listed == AGENT_URL {
+            assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+            assert!(!bindings[0].pending);
+        } else {
+            assert!(
+                !touched_old_id(&browser, restarted),
+                "{:?}",
+                browser.calls()
+            );
+            assert_eq!(result.summary, forgotten());
+            assert!(!result.model_text().contains(PERSONS_URL));
+            assert!(bindings.is_empty());
         }
     }
 
-    fn restarted_at(&self) -> usize {
-        self.restarted_at
-            .lock()
-            .unwrap()
-            .expect("the browser restarted")
-    }
-}
-
-impl BrowserPort for RestartsAfterOneCrossing {
-    fn call(
-        &self,
-        browser: &str,
-        command: BrowserCommand,
-        deadline: std::time::Instant,
-        cancelled: &std::sync::atomic::AtomicBool,
-    ) -> Result<BrowserOutcome, BrowserError> {
-        self.browser.call(browser, command, deadline, cancelled)
-    }
-
-    fn call_guarded(
-        &self,
-        browser: &str,
-        command: BrowserCommand,
-        dispatch: crate::browser::BrowserDispatch<'_>,
-    ) -> Result<BrowserOutcome, BrowserError> {
-        let outcome = self.browser.call_guarded(browser, command, dispatch);
-        self.after_crossing();
-        outcome
-    }
-
-    fn browsers(&self) -> Vec<crate::browser::BrowserSummary> {
-        self.browser.browsers()
-    }
-
-    fn publish_control_state(
-        &self,
-        state: crate::browser::adapter::RuntimeControlState,
-    ) -> Result<(), BrowserError> {
-        self.browser.publish_control_state(state)
-    }
-}
-
-/// The agent's tab open at [`AGENT_URL`], in an executor whose browser restarts after the next
-/// call's first crossing. Returns the executor, the fake, the port, the store, the workspace and
-/// the tab's handle.
-fn restarting_mid_call() -> (
-    ApplicationExecutor,
-    Arc<FakeBrowser>,
-    Arc<RestartsAfterOneCrossing>,
-    WorkspaceStore,
-    crate::workspace::WorkspaceId,
-    String,
-) {
-    let browser = Arc::new(FakeBrowser::default());
-    let workspaces = WorkspaceStore::default();
-    let port = Arc::new(RestartsAfterOneCrossing {
-        browser: Arc::clone(&browser),
-        workspaces: workspaces.clone(),
-        armed: Mutex::new(false),
-        restarted_at: Mutex::new(None),
-    });
-    let (executor, workspace, _) =
-        executor_on(GovernanceFacade::new(None), &workspaces, port.clone());
-    let handle = open_agent_tab(&executor, &browser, &workspace);
-    *port.armed.lock().unwrap() = true;
-    (executor, browser, port, workspaces, workspace, handle)
-}
-
-/// The text the agent's page reads as.
-fn agent_text() -> BrowserOutcome {
-    BrowserOutcome::Text {
-        tab_id: AGENT_TAB,
-        text: "Agent page".into(),
-        truncated: false,
-        title: "Example".into(),
-        url: AGENT_URL.into(),
-    }
-}
-
-#[test]
-fn a_gap_inside_a_call_never_sends_the_old_id_to_the_restarted_browser() {
-    let (executor, browser, port, workspaces, workspace, handle) = restarting_mid_call();
-    browser.push(Ok(BrowserOutcome::Tabs {
-        tabs: vec![tab(AGENT_TAB, PERSONS_URL)],
-    }));
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":handle}),
-        &CancellationToken::default(),
-    );
-    let restarted = port.restarted_at();
-    assert!(
-        matches!(
-            browser.calls().get(restarted),
-            Some(BrowserCommand::ListTabs)
-        ),
-        "the crossing after the gap asks the browser first: {:?}",
-        browser.calls()
-    );
-    assert!(
-        !touched_old_id(&browser, restarted),
-        "{:?}",
-        browser.calls()
-    );
-    assert_eq!(
-        read.summary,
-        "That tab handle names no open tab in this session."
-    );
-    assert!(
-        !read.model_text().contains(PERSONS_URL),
-        "{}",
-        read.model_text()
-    );
-    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
-}
-
-#[test]
-fn a_gap_inside_a_call_keeps_a_tab_whose_page_is_unchanged() {
-    let (executor, browser, port, workspaces, workspace, handle) = restarting_mid_call();
-    browser.push(Ok(BrowserOutcome::Tabs {
-        tabs: vec![tab(AGENT_TAB, AGENT_URL)],
-    }));
-    browser.push(Ok(agent_text()));
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":handle}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
-    assert!(matches!(
-        browser.calls().get(port.restarted_at()),
-        Some(BrowserCommand::ListTabs)
-    ));
-    let bindings = workspaces.tab_bindings(workspace.as_str());
-    assert_eq!(bindings.len(), 1);
-    assert!(!bindings[0].pending);
-}
-
-#[test]
-fn a_call_that_names_no_tab_waits_for_its_only_tabs_browser() {
-    for tool in ["read", "navigate"] {
-        let (executor, browser, workspaces, workspace, _) = fixture();
-        let handle = open_agent_tab(&executor, &browser, &workspace);
-        drop_and_reconnect(&workspaces, &browser);
+    // A call that names no tab waits for its only tab's browser.
+    for tool in ["read", "navigate", "resumed"] {
+        let (executor, browser, port, workspaces, workspace) = restartable();
+        let handle = if tool == "resumed" {
+            workspaces.remember_tab(
+                &workspace,
+                "tab_kept",
+                FAKE_BROWSER,
+                AGENT_TAB,
+                crate::workspace::UrlDigest::of(AGENT_URL),
+                None,
+            );
+            agent_documents(&browser);
+            port.go_away(false);
+            "tab_kept".to_owned()
+        } else {
+            let handle = open_agent_tab(&executor, &browser, &workspace);
+            port.go_away(true);
+            handle
+        };
         let before = browser.calls().len();
         browser.push(Ok(BrowserOutcome::Tabs {
             tabs: vec![tab(AGENT_TAB, AGENT_URL)],
         }));
-        let result = if tool == "read" {
-            browser.push(Ok(agent_text()));
-            executor.execute(
-                &workspace,
-                "browser_read",
-                json!({}),
-                &CancellationToken::default(),
-            )
-        } else {
+        let result = if tool == "navigate" {
             browser.push(Ok(BrowserOutcome::Navigated {
                 tab: tab(AGENT_TAB, "https://example.com/next"),
                 committed_urls: vec!["https://example.com/next".into()],
@@ -673,12 +565,24 @@ fn a_call_that_names_no_tab_waits_for_its_only_tabs_browser() {
                 json!({"url":"https://example.com/next"}),
                 &CancellationToken::default(),
             )
+        } else {
+            browser.push(Ok(agent_text()));
+            executor.execute(
+                &workspace,
+                "browser_read",
+                json!({}),
+                &CancellationToken::default(),
+            )
         };
         assert_eq!(
             result.status,
             Status::Succeeded,
             "{tool}: {}",
             result.summary
+        );
+        assert!(
+            !*port.away.lock().unwrap(),
+            "{tool}: the call met the browser away"
         );
         assert_eq!(result.facts["tab"], json!(handle), "{tool}");
         let calls = browser.calls()[before..].to_vec();
@@ -693,24 +597,4 @@ fn a_call_that_names_no_tab_waits_for_its_only_tabs_browser() {
             "{tool}: the call works in the session's own tab: {calls:?}"
         );
     }
-}
-
-#[test]
-fn a_resumed_session_that_names_no_tab_waits_for_its_tabs_browser() {
-    let (executor, browser, _, workspace) = resumed_session(AGENT_URL);
-    agent_documents(&browser);
-    browser.connect(Vec::new());
-    reconnect_soon(&browser);
-    browser.push(Ok(BrowserOutcome::Tabs {
-        tabs: vec![tab(AGENT_TAB, AGENT_URL)],
-    }));
-    browser.push(Ok(agent_text()));
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
-    assert_eq!(read.facts["tab"], "tab_kept");
 }
