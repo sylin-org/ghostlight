@@ -12,7 +12,7 @@ In progress since 2026-10-21. Every test in `language/` and `workbench/` was cla
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `language/` | 349 | 55 | 123 |
+| `language/` | 349 | 55 | 122 |
 | `workbench/` | 252 | 35 | 252 |
 
 ## Slices
@@ -36,7 +36,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL12 | test(language): the decoder and catalog tests become the model surface contract | 53 | 14 | 5 promise, 6 contract, 3 defect | landed (021297ff) |
 | TL13 | test(language): field_problem.rs and field_echo.rs keep the fill sentences LANGUAGE.md tables | 45 | 9 | 6 promise, 1 contract, 2 defect | landed (642f350d) |
 | TL14 | test(language): capability_map.rs keeps the rawx table LANGUAGE.md documents | 5 | 1 | 1 promise | landed (ce1c2cdc) |
-| TL15 | test(language): handle.rs keeps the prefix contract with the extension | 2 | 1 | 1 contract | landed (this commit) |
+| TL15 | test(language): handle.rs keeps the prefix contract with the extension | 2 | 1 | 1 contract | landed (234a35e4) |
+| TL16 | test(language): provenance.rs folds its live and record tables into one | 3 | 2 | 2 promise | landed (this commit) |
 
 ## Notes
 
