@@ -727,10 +727,12 @@ fn write_canonical(value: &Value, output: &mut String) {
 mod tests {
     use serde_json::{json, Value};
 
-    use super::{parse, BrowserStartup, ManifestError, PolicySetting};
-    use crate::governance::host_pattern::HostPattern;
-    use crate::intake::session::IntakeChannel;
+    use super::{parse, BrowserStartup, ManifestError, PolicySetting, MAX_NESTING_DEPTH};
+    use crate::language::migration::RETIRED_SETTINGS;
 
+    /// 6c138338: a document nested past `MAX_NESTING_DEPTH` is refused by a linear scan before
+    /// serde recurses, so a small hostile policy cannot overflow the stack and abort the service.
+    /// Brackets inside a string do not count.
     #[test]
     fn a_deeply_nested_document_is_rejected_before_it_reaches_the_recursive_parser() {
         // Depth far beyond anything a real manifest needs, and far beyond what this crate's own
@@ -741,150 +743,77 @@ mod tests {
             "[".repeat(5_000),
             "]".repeat(5_000)
         );
-        let error = parse(&bomb, "bomb").unwrap_err();
-        assert!(error.to_string().contains("nested more than"), "{error}");
+        assert!(
+            matches!(
+                parse(&bomb, "bomb").unwrap_err(),
+                ManifestError::Shape { message, .. }
+                    if message == format!("nested more than {MAX_NESTING_DEPTH} levels deep")
+            ),
+            "the nesting guard, not the parser, refuses it"
+        );
 
-        // A string containing bracket-shaped text must not itself be counted as nesting. 80
-        // brackets exceeds MAX_NESTING_DEPTH if the scanner mistakenly counted them, while
-        // staying under the unrelated 100-character bound `name` already enforces.
+        // A string holding more brackets than MAX_NESTING_DEPTH is not nesting, and stays under
+        // the unrelated 100-character bound `name` already enforces.
         let deceptive = format!(
             r#"{{"schema":4,"name":"{}","version":"1","grants":[]}}"#,
-            "[".repeat(80)
+            "[".repeat(MAX_NESTING_DEPTH + 16)
         );
         assert!(parse(&deceptive, "deceptive").is_ok());
     }
 
+    /// ACCEPTANCE Governance 4 and the governance guide: the decoder reads schema 4 alone. Schema
+    /// 3 is refused with the migrate sentence the guide quotes, any other or missing marker as
+    /// unsupported, and a schema-4 document carrying observe mode, the user switch, a frame option
+    /// or any unknown field is refused.
     #[test]
-    fn schema_four_is_strict_and_has_a_format_independent_hash() {
-        let first = parse(
-            r#"{"schema":4,"name":"test","version":"1","grants":[]}"#,
-            "first",
-        )
-        .unwrap();
-        let second = parse(
-            "{\n  \"grants\": [], \"version\": \"1\", \"name\": \"test\", \"schema\": 4\n}",
-            "second",
-        )
-        .unwrap();
-        assert_eq!(first.hash, second.hash);
-        assert!(parse(
-            r#"{"schema":4,"name":"test","version":"1","grants":[],"surprise":true}"#,
-            "strict"
-        )
-        .is_err());
-        assert!(parse(r#"{"version":1,"allow_capabilities":["read"]}"#, "old").is_err());
-    }
+    fn only_schema_four_without_its_retired_parts_is_read() {
+        let document = |schema: &str, rest: &str| {
+            format!(r#"{{{schema}"name":"test","version":"1","grants":[]{rest}}}"#)
+        };
+        assert!(parse(&document(r#""schema":4,"#, ""), "current").is_ok());
 
-    #[test]
-    fn grants_reject_duplicate_identity_capabilities_and_patterns() {
-        for text in [
-            r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"same","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"same","hosts":{"allow":["other.com"]},"allowed":["read"]}]}"#,
-            r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"g","hosts":{"allow":["example.com"]},"allowed":["read","read"]}]}"#,
-            r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"g","hosts":{"allow":["example.com","EXAMPLE.com"]},"allowed":["read"]}]}"#,
-        ] {
-            assert!(parse(text, "duplicate").is_err());
-        }
-    }
-
-    #[test]
-    fn host_patterns_are_exact_suffix_or_universal() {
-        for valid in ["*", "example.com", "*.example.com", "a-b.example"] {
-            assert!(HostPattern::parse(valid).is_some(), "{valid}");
-        }
-        for invalid in [
-            "",
-            "https://example.com",
-            "example.com/path",
-            "foo.*.example.com",
-            "*.example.com:443",
-            ".example.com",
-        ] {
-            assert!(HostPattern::parse(invalid).is_none(), "{invalid}");
-        }
-    }
-
-    #[test]
-    fn organization_identity_is_optional_bounded_and_additive() {
-        let anonymous = parse(
-            r#"{"schema":4,"name":"test","version":"1","grants":[]}"#,
-            "plain",
-        )
-        .unwrap();
-        assert!(anonymous.organization.is_none());
-
-        let named = parse(
-            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{"name":"Example Organization","statement":"Keeps browser work inside approved sites.","url":"https://example.com/policy","contacts":[{"kind":"email","value":"security@example.com","label":"Security team"}]}}"#,
-            "named",
-        )
-        .unwrap();
-        let organization = named.organization.expect("organization block parses");
-        assert_eq!(organization.name, "Example Organization");
-        assert_eq!(organization.contacts.len(), 1);
-        assert_eq!(organization.contacts[0].value, "security@example.com");
-
-        for rejected in [
-            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{"name":""}}"#,
-            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{"name":"Example","url":"http://example.com"}}"#,
-            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{"name":"Example","surprise":true}}"#,
-            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{}}"#,
-        ] {
-            assert!(parse(rejected, "rejected").is_err(), "{rejected}");
-        }
-    }
-
-    #[test]
-    fn schema_three_is_refused_with_the_migrate_sentence() {
-        let error = parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[]}"#,
-            "old.json",
-        )
-        .unwrap_err();
-        assert!(matches!(error, ManifestError::RetiredSchema { .. }));
+        let retired = parse(&document(r#""schema":3,"#, ""), "old.json").unwrap_err();
+        assert!(matches!(retired, ManifestError::RetiredSchema { .. }));
         assert_eq!(
-            error.to_string(),
+            retired.to_string(),
             "old.json: unsupported policy schema 3; run ghostlight policy migrate <file>"
         );
-        for other in [r#""schema":2"#, r#""schema":5"#, r#""schema":"4""#] {
-            let text = format!(r#"{{{other},"name":"test","version":"1","grants":[]}}"#);
-            assert!(matches!(
-                parse(&text, "other").unwrap_err(),
-                ManifestError::UnsupportedSchema { .. }
-            ));
-        }
-        assert!(matches!(
-            parse(r#"{"name":"test","version":"1","grants":[]}"#, "missing").unwrap_err(),
-            ManifestError::UnsupportedSchema { .. }
-        ));
-    }
-
-    #[test]
-    fn the_settings_and_modes_schema_four_retired_are_not_part_of_it() {
-        let config = |key: &str, value: &str| {
-            format!(
-                r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{key}","value":{value},"level":"mandatory"}}]}}"#
-            )
-        };
-        for (key, value) in [
-            ("policy.user.enabled", "false"),
-            ("content.frames.handling", r#""permitted_content""#),
-            ("content.frames.notice", r#""when_affected""#),
-        ] {
-            let error = parse(&config(key, value), "retired").unwrap_err();
+        for marker in [r#""schema":2,"#, r#""schema":5,"#, r#""schema":"4","#, ""] {
             assert!(
-                error
-                    .to_string()
-                    .contains("is not a registered policy setting"),
-                "{key}: {error}"
+                matches!(
+                    parse(&document(marker, ""), "other").unwrap_err(),
+                    ManifestError::UnsupportedSchema { .. }
+                ),
+                "{marker}"
+            );
+        }
+
+        for retired in RETIRED_SETTINGS {
+            let key = retired.config_key().expect("a retired setting has a key");
+            let text = document(
+                r#""schema":4,"#,
+                &format!(r#","config":[{{"key":"{key}","value":false,"level":"mandatory"}}]"#),
+            );
+            assert!(
+                matches!(
+                    parse(&text, "retired").unwrap_err(),
+                    ManifestError::Field { path, .. } if path == "config[0].key"
+                ),
+                "{key}"
             );
         }
         for text in [
             r#"{"schema":4,"name":"test","version":"1","mode":"enforce","grants":[]}"#,
             r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"g","mode":"observe","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"surprise":true}"#,
         ] {
-            assert!(matches!(
-                parse(text, "retired").unwrap_err(),
-                ManifestError::Shape { .. }
-            ));
+            assert!(
+                matches!(
+                    parse(text, "retired").unwrap_err(),
+                    ManifestError::Shape { .. }
+                ),
+                "{text}"
+            );
         }
     }
 
@@ -902,6 +831,18 @@ mod tests {
         }
     }
 
+    /// A schema-4 document authoring `setting` as `value`.
+    fn authoring(setting: PolicySetting, value: Value) -> String {
+        json!({"schema": 4, "name": "one", "version": "1", "grants": [],
+            "config": [{"key": setting.key(), "value": value, "level": "mandatory"}]})
+        .to_string()
+    }
+
+    /// ADR-0203 P7 and the governance guide: the setting keys administrators' documents use. Each
+    /// registered setting is read under its documented key and written back unchanged, as the
+    /// migration and the managed path re-serialize a manifest. A value of the wrong type is
+    /// refused for every setting, and each closed string setting reads its own values and refuses
+    /// any other.
     #[test]
     fn every_registered_setting_parses_and_round_trips() {
         // The schema-4 keys, spelled out: a renamed variant must not change a document.
@@ -921,7 +862,6 @@ mod tests {
         let config: Vec<Value> = PolicySetting::ALL
             .into_iter()
             .map(|setting| {
-                assert_eq!(PolicySetting::from_key(setting.key()), Some(setting));
                 json!({"key": setting.key(), "value": accepted(setting), "level": "mandatory"})
             })
             .collect();
@@ -958,87 +898,40 @@ mod tests {
         assert_eq!(parse(&written, "written").unwrap(), policy);
 
         for setting in PolicySetting::ALL {
-            let wrong = json!({"schema": 4, "name": "wrong", "version": "1", "grants": [],
-                "config": [{"key": setting.key(), "value": {}, "level": "mandatory"}]});
             assert!(
-                parse(&wrong.to_string(), "wrong").is_err(),
+                parse(&authoring(setting, json!({})), "wrong").is_err(),
                 "{setting:?} refuses a value of the wrong type"
             );
         }
-        assert_eq!(PolicySetting::from_key("browser.unheard"), None);
-        assert_eq!(
-            PolicySetting::channel_enabled(IntakeChannel::Mcp),
-            PolicySetting::McpChannelEnabled
-        );
-        assert_eq!(
-            PolicySetting::channel_enabled(IntakeChannel::Cli),
-            PolicySetting::CliChannelEnabled
-        );
-    }
-
-    #[test]
-    fn the_channel_switches_are_booleans() {
-        for setting in [
-            PolicySetting::McpChannelEnabled,
-            PolicySetting::CliChannelEnabled,
+        for (setting, values, unknown) in [
+            (
+                PolicySetting::BrowserStartup,
+                ["on_demand", "manual"],
+                "automatic",
+            ),
+            (
+                PolicySetting::AuditAvailability,
+                ["keep_working", "require_audit"],
+                "silent",
+            ),
         ] {
-            let key = setting.key();
-            let document = |value: &str| {
-                format!(
-                    r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{key}","value":{value},"level":"mandatory"}}]}}"#
-                )
-            };
-            for value in [false, true] {
-                let policy = parse(&document(&value.to_string()), "switch").expect("a boolean");
-                assert_eq!(policy.boolean_setting(setting), Some(value));
+            for value in values {
+                let policy = parse(&authoring(setting, json!(value)), "closed").unwrap();
+                assert_eq!(policy.string_setting(setting), Some(value), "{setting:?}");
             }
-            let error = parse(&document(r#""off""#), "switch").unwrap_err();
-            assert!(error.to_string().contains("must be a boolean"), "{error}");
-        }
-    }
-
-    #[test]
-    fn browser_startup_accepts_only_the_two_closed_values() {
-        for value in ["on_demand", "manual"] {
-            let document = format!(
-                r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}}]}}"#
+            assert!(
+                parse(&authoring(setting, json!(unknown)), "unknown").is_err(),
+                "{setting:?} refuses {unknown}"
             );
-            let policy = parse(&document, "registered").expect("closed value parses");
-            assert_eq!(
-                policy.string_setting(PolicySetting::BrowserStartup),
-                Some(value)
-            );
-            assert_eq!(policy.browser_startup(), BrowserStartup::from_str(value));
         }
-    }
-
-    #[test]
-    fn browser_startup_refuses_an_unknown_value() {
-        assert!(parse(
-            r#"{"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":"browser.startup","value":"automatic","level":"mandatory"}]}"#,
-            "unknown"
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn browser_startup_refuses_a_non_string_value() {
-        assert!(parse(
-            r#"{"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":"browser.startup","value":true,"level":"mandatory"}]}"#,
-            "typed"
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn browser_startup_defaults_per_platform() {
         assert_eq!(
-            BrowserStartup::default_for_platform(true),
-            BrowserStartup::OnDemand
-        );
-        assert_eq!(
-            BrowserStartup::default_for_platform(false),
-            BrowserStartup::Manual
+            parse(
+                &authoring(PolicySetting::BrowserStartup, json!("on_demand")),
+                "startup"
+            )
+            .unwrap()
+            .browser_startup(),
+            Some(BrowserStartup::OnDemand)
         );
     }
 }

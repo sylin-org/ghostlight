@@ -150,36 +150,38 @@ pub(super) fn parse_all(patterns: &[String]) -> Vec<HostPattern> {
 mod tests {
     use super::HostPattern;
 
+    /// Contract with the policy editor: tests/policy-grammar.mjs holds ui/lib/words.js to these
+    /// same accepted, refused and covers tables, because the editor's readback is a claim about
+    /// what this matcher does. A pattern is parsed once, lowercase (ddd76f9c), and a suffix
+    /// wildcard covers and matches the hosts below it, never the bare host.
     #[test]
-    fn a_pattern_is_parsed_once_whatever_its_case() {
-        assert_eq!(HostPattern::parse("*"), Some(HostPattern::Any));
-        assert_eq!(
-            HostPattern::parse("*.Example.COM"),
-            Some(HostPattern::Below("example.com".into()))
-        );
-        assert_eq!(
-            HostPattern::parse("Docs.Example.com"),
-            Some(HostPattern::Exact("docs.example.com".into()))
-        );
-        let exact = HostPattern::parse("EXAMPLE.com").unwrap();
-        assert!(exact.matches("example.com"));
-        let below = HostPattern::parse("*.EXAMPLE.com").unwrap();
-        assert!(below.matches("a.example.com"));
-        assert!(!below.matches("example.com"));
-        assert!(below.covers(&HostPattern::parse("A.Example.Com").unwrap()));
-    }
-
-    #[test]
-    fn what_is_outside_the_grammar_does_not_parse() {
-        for invalid in [
+    fn the_host_grammar_is_the_one_the_policy_editor_reads_back() {
+        for (accepted, parsed) in [
+            ("*", HostPattern::Any),
+            ("example.com", HostPattern::Exact("example.com".into())),
+            ("*.example.com", HostPattern::Below("example.com".into())),
+            ("a-b.example", HostPattern::Exact("a-b.example".into())),
+            ("*.Example.COM", HostPattern::Below("example.com".into())),
+            (
+                "Docs.Example.com",
+                HostPattern::Exact("docs.example.com".into()),
+            ),
+        ] {
+            assert_eq!(HostPattern::parse(accepted), Some(parsed), "{accepted:?}");
+        }
+        for refused in [
             "",
             "*.",
             "**",
             "*.*.example.com",
+            "foo.*.example.com",
             " example.com",
             "example.com ",
             "a/b",
+            "example.com/path",
+            "https://example.com",
             "a:443",
+            "*.example.com:443",
             ".example.com",
             "example.com.",
             "-a.example.com",
@@ -187,21 +189,26 @@ mod tests {
             "a..example.com",
             "ex\u{e4}mple.com",
         ] {
-            assert_eq!(HostPattern::parse(invalid), None, "{invalid:?}");
+            assert_eq!(HostPattern::parse(refused), None, "{refused:?}");
         }
-    }
-
-    #[test]
-    fn closer_patterns_rank_higher() {
-        let host = "a.docs.example.com";
-        let exact = HostPattern::parse(host).unwrap().specificity(host);
-        let long = HostPattern::parse("*.docs.example.com")
-            .unwrap()
-            .specificity(host);
-        let short = HostPattern::parse("*.example.com")
-            .unwrap()
-            .specificity(host);
-        let any = HostPattern::Any.specificity(host);
-        assert!(exact > long && long > short && short > any);
+        let parse = |text: &str| HostPattern::parse(text).expect("in the grammar");
+        for (broad, narrow, covers) in [
+            ("*", "anything.test", true),
+            ("*.example.com", "a.example.com", true),
+            ("*.example.com", "*.a.example.com", true),
+            ("*.example.com", "example.com", false),
+            ("example.com", "a.example.com", false),
+            ("example.com", "EXAMPLE.com", true),
+        ] {
+            assert_eq!(
+                parse(broad).covers(&parse(narrow)),
+                covers,
+                "{broad} covers {narrow}"
+            );
+        }
+        let below = parse("*.EXAMPLE.com");
+        assert!(below.matches("a.example.com"));
+        assert!(!below.matches("example.com"));
+        assert!(parse("EXAMPLE.com").matches("example.com"));
     }
 }

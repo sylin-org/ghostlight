@@ -6,8 +6,8 @@
 //
 // These assertions exist because the readback is a claim about what the production matcher will
 // do. If the two ever disagree, the window is lying politely, which is worse than saying nothing.
-// The Rust side is pinned by governance::effective::tests::suffix_wildcards_cover_subdomains_and_
-// never_the_bare_host and by manifest::tests::host_patterns_are_exact_suffix_or_universal.
+// The Rust side is pinned by governance::host_pattern::tests::the_host_grammar_is_the_one_the_
+// policy_editor_reads_back, which holds the same accepted, refused and covers tables.
 //
 // Run with: node tests/policy-grammar.mjs
 import { createRequire } from "node:module";
