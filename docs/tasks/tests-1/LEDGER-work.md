@@ -18,7 +18,7 @@ added there in the commit that deletes it. Then `governance/`.
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 373 | 55 | 344 |
+| `work/` and `workspace/` | 373 | 55 | 336 |
 | `governance/` | 136 | 40 | 136 |
 
 ## Slices
@@ -32,7 +32,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | W2 | `tests/channels.rs` and `tests/audit_health.rs`: one test per promise, with the channel refusal's words read from the typed refusal and the storage note from its constant | 357 | 354 | promise 2 (Gov 4, ADR-0159 1-2), contract 1 (`channel_refusal.json`) | landed (71fee018) |
 | R1 | reserve: `a_stopped_recordings_status_says_it_stopped_and_a_running_one_that_it_runs` in `tests/execution.rs`, the coverage be54ad44 lost with the language outcome table | 354 | 355 | defect 1 (be54ad44), from the reserve | landed (d6a305f9) |
 | W3 | credentials: `tests/credentials.rs`'s four tests are one, with a new grouped-fill row; `item.rs`'s three masking tests fold into `tests/controls.rs`'s executor-level masking test; the golden and provenance tests say what they protect | 355 | 349 | promise 2 (ADR-0185 3; Executor 7 masking), contract 5 goldens and 1 promise (Connection reporting 3, 5) kept as they were | landed (d40f1247) |
-| W4 | `tests/controls.rs`: five tests that restated pass-through keys, a key list, a literal next step and a summary go, with their helpers; the masking test stays and the repeated-row test waits for the RAWX test | 349 | 344 | promise 1 (Executor 7); 1 left to fold | landed |
+| W4 | `tests/controls.rs`: five tests that restated pass-through keys, a key list, a literal next step and a summary go, with their helpers; the masking test stays and the repeated-row test waits for the RAWX test | 349 | 344 | promise 1 (Executor 7); 1 left to fold | landed (c2f4b188) |
+| W5 | `tests/control.rs`: five control tests are one, over the moment Pause or End lands; a cancellation unit, a workbench start-time check, a retired-argument decode test (the language lane's) and an explain deadline test (Executor 3, kept in execution.rs) go; two tests wait for the RAWX test | 344 | 336 | promise 1 (Gov 12, ADR-0185 4-5); 2 left to fold | landed |
 
 ## Notes
 
