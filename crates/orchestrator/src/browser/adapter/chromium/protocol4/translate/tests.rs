@@ -16,6 +16,7 @@ use crate::browser::adapter::{
     PhysicalPoint, RecordingDestination,
 };
 use crate::browser::{BrowserError, BrowserPort, RelayBrowserPort};
+use crate::language::PageCondition;
 use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
@@ -170,10 +171,10 @@ fn observed(satisfied: bool, elapsed_ms: u64) -> Value {
     returned(json!({"satisfied": satisfied, "elapsed_ms": elapsed_ms, "readiness": "complete"}))
 }
 
-fn wait(condition: &str) -> BrowserCommand {
+fn wait(condition: PageCondition) -> BrowserCommand {
     BrowserCommand::Observe {
         tab_id: 12,
-        condition: condition.into(),
+        condition,
         value: Some("Saved".into()),
         locator: None,
         timeout_ms: 2_000,
@@ -192,7 +193,10 @@ fn text_present_races_the_documents_and_completes_at_the_first_satisfied_one() {
     let (observation, result) = unwrap_scoped(
         call(
             &port,
-            scoped(scope(&["T.t1", "C.c1"], false), wait("text_present")),
+            scoped(
+                scope(&["T.t1", "C.c1"], false),
+                wait(PageCondition::TextPresent),
+            ),
         )
         .unwrap(),
     );
@@ -245,7 +249,10 @@ fn text_absent_needs_every_document_and_an_unavailable_one_counts_as_absent() {
         let (observation, result) = unwrap_scoped(
             call(
                 &port,
-                scoped(scope(&["T.t1", "C.c1"], false), wait("text_absent")),
+                scoped(
+                    scope(&["T.t1", "C.c1"], false),
+                    wait(PageCondition::TextAbsent),
+                ),
             )
             .unwrap(),
         );
@@ -824,7 +831,7 @@ fn a_content_command_without_a_scope_is_a_protocol_error() {
             kind: "all".into(),
             max_results: 5,
         },
-        wait("load_ready"),
+        wait(PageCondition::LoadReady),
         BrowserCommand::Activate {
             tab_id: 12,
             locator: locator.into(),

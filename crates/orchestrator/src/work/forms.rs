@@ -15,7 +15,7 @@ use crate::language::{
     field_echo::{self, HeldField},
     field_problem::{self, ControlRef, FieldProblem, RejectedControl, RejectedField},
     outcome::{EmptyObject, Observed, Outcome, Refusal, TargetRole},
-    FillForm, PressKey, RunScript, TypeText, UploadFiles, Wait,
+    FillForm, PageCondition, PressKey, RunScript, TypeText, UploadFiles, Wait, WaitCondition,
 };
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
@@ -798,7 +798,7 @@ impl ApplicationExecutor {
             value.tab.as_deref(),
             value.target.as_deref(),
             |selected, locator, _target_role, decision| {
-                if value.condition == "duration" {
+                if value.condition == WaitCondition::Duration {
                     // A sleep sends nothing, so the deadline can never leave its effect in doubt.
                     // One that would end after the deadline is refused before it starts, and one
                     // that fits always finishes before it.
@@ -836,7 +836,7 @@ impl ApplicationExecutor {
                     }
                     let elapsed_ms =
                         u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    let should_settle = value.visual_settle != Some(false);
+                    let should_settle = value.condition.settles(value.visual_settle);
                     let settlement = if should_settle {
                         match self.settle_wait(
                             context,
@@ -862,14 +862,14 @@ impl ApplicationExecutor {
                     let final_elapsed_ms =
                         elapsed_ms.saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
                     let outcome = Outcome::Waited {
-                        condition: value.condition.clone(),
+                        condition: value.condition,
                         elapsed_ms: final_elapsed_ms,
                         satisfied: true,
                         host: observed_host(&selected.url),
                     };
                     let facts = json!({
                         "tab": selected.handle.as_str(),
-                        "condition": "duration",
+                        "condition": value.condition.as_str(),
                         "satisfied": true,
                         "elapsed_ms": final_elapsed_ms,
                         "readiness": readiness(selected.readiness),
@@ -896,7 +896,7 @@ impl ApplicationExecutor {
                 // Waiting on what the page calls a control: polled executor-side through the same
                 // semantic query every selector-based action uses, so no handle pre-resolution is
                 // needed and a stale handle can never be required to wait.
-                if value.condition == "selector_present" {
+                if value.condition == WaitCondition::SelectorPresent {
                     let Some(selector) = value.selector.as_ref() else {
                         return self.failed(
                             context,
@@ -957,7 +957,7 @@ impl ApplicationExecutor {
                     }
                     let elapsed_ms =
                         u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    let should_settle = value.visual_settle != Some(false);
+                    let should_settle = value.condition.settles(value.visual_settle);
                     let settlement = if satisfied && should_settle {
                         match self.settle_wait(
                             context,
@@ -989,14 +989,14 @@ impl ApplicationExecutor {
                         Status::Failed
                     };
                     let outcome = Outcome::Waited {
-                        condition: value.condition.clone(),
+                        condition: value.condition,
                         elapsed_ms: final_elapsed_ms,
                         satisfied: final_satisfied,
                         host: observed_host(&selected.url),
                     };
                     let facts = json!({
                         "tab": selected.handle.as_str(),
-                        "condition": "selector_present",
+                        "condition": value.condition.as_str(),
                         "satisfied": final_satisfied,
                         "elapsed_ms": final_elapsed_ms,
                         "readiness": readiness(selected.readiness),
@@ -1020,11 +1020,14 @@ impl ApplicationExecutor {
                         audit: outcome.audit(),
                     };
                 }
+                let Some(condition) = value.condition.page() else {
+                    unreachable!("duration and selector_present waits return above")
+                };
                 match self.dispatch(
                     context,
                     BrowserCommand::Observe {
                         tab_id: selected.physical_id,
-                        condition: value.condition.clone(),
+                        condition,
                         value: value.value.clone(),
                         locator: locator.clone(),
                         timeout_ms: adapter_budget_ms(
@@ -1040,15 +1043,7 @@ impl ApplicationExecutor {
                         readiness: browser_readiness,
                     }) if tab_id == selected.physical_id => {
                         let _ = lease.update_readiness(&selected.handle, browser_readiness);
-                        let is_composite_default =
-                            value.condition == "load_ready" || value.condition == "target_present";
-                        let should_settle = if value.condition == "visual_settle" {
-                            false
-                        } else if is_composite_default {
-                            value.visual_settle != Some(false)
-                        } else {
-                            value.visual_settle == Some(true)
-                        };
+                        let should_settle = value.condition.settles(value.visual_settle);
                         let settlement = if satisfied && should_settle {
                             match self.settle_wait(
                                 context,
@@ -1082,7 +1077,7 @@ impl ApplicationExecutor {
                         // The condition is a closed vocabulary and its value is not: only the name of the
                         // condition joins the sentence that reaches audit.
                         let outcome = Outcome::Waited {
-                            condition: value.condition.clone(),
+                            condition: value.condition,
                             elapsed_ms: final_elapsed_ms,
                             satisfied: final_satisfied,
                             host: observed_host(&selected.url),
@@ -1092,7 +1087,7 @@ impl ApplicationExecutor {
                         let outcome_observed = outcome.observed();
                         let facts = json!({
                             "tab": selected.handle.as_str(),
-                            "condition": value.condition,
+                            "condition": value.condition.as_str(),
                             "satisfied": final_satisfied,
                             "elapsed_ms": final_elapsed_ms,
                             "readiness": readiness(browser_readiness),
@@ -1142,7 +1137,7 @@ impl ApplicationExecutor {
             context,
             BrowserCommand::Observe {
                 tab_id: selected.physical_id,
-                condition: "visual_settle".into(),
+                condition: PageCondition::VisualSettle,
                 value: None,
                 locator,
                 timeout_ms: adapter_budget_ms(

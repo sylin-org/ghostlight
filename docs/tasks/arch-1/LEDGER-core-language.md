@@ -10,9 +10,10 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-The five defect slices, L-D1 to L-D5, have landed. Next is C17, the first refactor; core-work
-and adapter wait for it. A slice's hash is filled in by the next slice's commit, since a rebase
-before the push changes it.
+L-D1 to L-D5 have landed, and C17 lands as two commits: C17a (the wait vocabulary) is in, C17b
+(the coverage predicate) is next. The coordinator's hold on C17's files in core-work, adapter and
+core-service lasts until C17b lands. A slice's hash is filled in by the next slice's commit,
+since a rebase before the push changes it.
 
 ## Slices
 
@@ -24,8 +25,8 @@ In order. "After" names what a slice waits for.
 | L-D2 | fix(language): a summary with its coverage note stays within its bound, to the character | - | LANG-6 and its note | landed (69e58321) |
 | L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed (09d78bd9) |
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
-| L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed |
-| C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | todo |
+| L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed (b5135a14) |
+| C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | C17a landed; C17b todo |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | todo |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | todo |
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | todo |
@@ -69,3 +70,18 @@ In order. "After" names what a slice waits for.
   boundary. For core-work: `work/forms.rs` keeps its own `base64_decoded_len` until WORK-1 reads
   this one, and the screenshot path estimates the same way the decoder did
   (`work/reading.rs`, `data.len() / 4 * 3`, against `workspace/mod.rs`'s image ceiling).
+- C17a: `language/wait.rs` holds `WaitCondition` (all nine, in catalog order, with
+  `settles_by_default`, `settles` and `page`) and `PageCondition`, the seven the page evaluates,
+  which `BrowserCommand::Observe` now carries (with `tests_absence` and `reads_whole_page`).
+  `Wait.condition` and `Postcondition.condition` decode through serde hooks that keep the curated
+  refusal words exactly, pinned through `decode`. The catalog builds the wait branches, the
+  `visual_settle` description and the expect enum from the types; the golden is byte-identical,
+  and `the_wait_catalog_is_unchanged` compares the wait schema without the update variable. A
+  duration wait now reads "Waited 1 second on example.com." instead of "The condition was met
+  ..." (model-visible on purpose); no result golden holds a wait. Gone: the literals in
+  `work/forms.rs` (its three settle rules are `WaitCondition::settles`), `work/documents.rs` and
+  the test fake, and the translator's `condition` module with its unknown-condition failure.
+  Cross-lane edits, under the coordinator's hold: `work/forms.rs`, `work/documents.rs`,
+  `work/mod.rs`, `work/tests/execution.rs` (two test matches), `browser/adapter/work.rs`,
+  `protocol4/mod.rs`, `translate/observe.rs`, `translate/tests.rs` and `browser/mod.rs`. The
+  duration re-parse in `work/forms.rs` stays for WORK-13's `finish_wait`.

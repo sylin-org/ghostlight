@@ -992,7 +992,7 @@ impl ApplicationExecutor {
             context,
             BrowserCommand::Observe {
                 tab_id: selected.physical_id,
-                condition: expectation.condition.clone(),
+                condition: expectation.condition,
                 value: expectation.value.clone(),
                 locator: None,
                 timeout_ms: budget,

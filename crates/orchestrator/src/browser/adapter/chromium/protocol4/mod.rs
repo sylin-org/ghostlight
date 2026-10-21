@@ -210,7 +210,7 @@ fn translate(
             reach(scope)?,
             tab_id,
             Wait {
-                condition: &condition,
+                condition,
                 value: value.as_deref(),
                 locator: locator.as_deref(),
                 timeout_ms,

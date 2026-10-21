@@ -130,7 +130,7 @@ impl RequestScope {
                 ..
             } => {
                 scope.locators.extend(locator.clone());
-                scope.whole = matches!(condition.as_str(), "text_present" | "text_absent");
+                scope.whole = condition.reads_whole_page();
                 *tab_id
             }
             BrowserCommand::SetZoom { tab_id, .. } => *tab_id,
@@ -389,7 +389,7 @@ impl ApplicationExecutor {
         {
             return Err(BrowserError::DocumentUnavailable);
         }
-        let tests_absence = matches!(&command, BrowserCommand::Observe { condition, .. } if condition.ends_with("_absent"));
+        let tests_absence = matches!(&command, BrowserCommand::Observe { condition, .. } if condition.tests_absence());
         let admitted = allowed.clone();
         let scoped = BrowserCommand::InDocuments {
             scope: DocumentScope {

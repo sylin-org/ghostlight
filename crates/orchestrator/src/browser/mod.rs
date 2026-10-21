@@ -1667,7 +1667,13 @@ pub(crate) mod testing {
                     written,
                 );
             }
-            if matches!(&command, Work::Observe { condition, .. } if condition == "visual_settle") {
+            if matches!(
+                &command,
+                Work::Observe {
+                    condition: crate::language::PageCondition::VisualSettle,
+                    ..
+                }
+            ) {
                 let tab_id = match &command {
                     Work::Observe { tab_id, .. } => *tab_id,
                     _ => unreachable!(),

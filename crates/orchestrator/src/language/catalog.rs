@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 
 use crate::governance::AuthoritySnapshot;
 
+use super::wait::{PageCondition, WaitCondition};
 use super::{
     DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
     MAX_INSPECT_ITEMS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
@@ -849,31 +850,8 @@ fn drag_schema() -> Value {
 }
 
 fn wait_schema() -> Value {
-    use WaitInput::{OptionalTarget, Selector, Target, Text};
     union(
-        vec![
-            wait_branch("load_ready", "Page finished loading.", None),
-            wait_branch("url_contains", "URL contains value.", Some(Text)),
-            wait_branch("text_present", "value is in the visible text.", Some(Text)),
-            wait_branch(
-                "text_absent",
-                "value is gone from the visible text.",
-                Some(Text),
-            ),
-            wait_branch("target_present", "target exists.", Some(Target)),
-            wait_branch("target_absent", "target is gone.", Some(Target)),
-            wait_branch(
-                "visual_settle",
-                "The page, or target, stopped moving and repainting.",
-                Some(OptionalTarget),
-            ),
-            wait_branch(
-                "selector_present",
-                "selector matches a control.",
-                Some(Selector),
-            ),
-            wait_branch("duration", "Waits value milliseconds.", Some(Text)),
-        ],
+        WaitCondition::ALL.into_iter().map(wait_branch).collect(),
         vec![
             json!({"condition":"load_ready"}),
             json!({"condition":"text_present","value":"Ready"}),
@@ -894,13 +872,50 @@ enum WaitInput {
     Selector,
 }
 
-fn wait_branch(condition: &str, description: &str, input: Option<WaitInput>) -> Value {
+/// What a condition's branch says it waits for, and the one input it takes besides the shared
+/// fields.
+fn wait_condition(condition: WaitCondition) -> (&'static str, Option<WaitInput>) {
+    use WaitInput::{OptionalTarget, Selector, Target, Text};
+    match condition {
+        WaitCondition::LoadReady => ("Page finished loading.", None),
+        WaitCondition::UrlContains => ("URL contains value.", Some(Text)),
+        WaitCondition::TextPresent => ("value is in the visible text.", Some(Text)),
+        WaitCondition::TextAbsent => ("value is gone from the visible text.", Some(Text)),
+        WaitCondition::TargetPresent => ("target exists.", Some(Target)),
+        WaitCondition::TargetAbsent => ("target is gone.", Some(Target)),
+        WaitCondition::VisualSettle => (
+            "The page, or target, stopped moving and repainting.",
+            Some(OptionalTarget),
+        ),
+        WaitCondition::SelectorPresent => ("selector matches a control.", Some(Selector)),
+        WaitCondition::Duration => ("Waits value milliseconds.", Some(Text)),
+    }
+}
+
+/// The `visual_settle` description: which conditions settle by default, read from the type.
+fn wait_settle_description() -> String {
+    let off: Vec<&str> = WaitCondition::ALL
+        .into_iter()
+        .filter(|condition| {
+            *condition != WaitCondition::VisualSettle && !condition.settles_by_default()
+        })
+        .map(WaitCondition::as_str)
+        .collect();
+    let named = match off.as_slice() {
+        [rest @ .., last] if !rest.is_empty() => format!("{}, and {last}", rest.join(", ")),
+        _ => off.join(""),
+    };
+    format!("Also settle the layout once the condition holds. Off by default for {named}; on for the rest.")
+}
+
+fn wait_branch(condition: WaitCondition) -> Value {
+    let (description, input) = wait_condition(condition);
     let mut fields = vec![
-        ("condition", constant(condition, description)),
+        ("condition", constant(condition.as_str(), description)),
         ("tab", tab()),
         (
             "visual_settle",
-            json!({"type":"boolean","description":"Also settle the layout once the condition holds. Off by default for url_contains, text_present, text_absent, and target_absent; on for the rest."}),
+            json!({"type":"boolean","description":wait_settle_description()}),
         ),
     ];
     let mut required = vec!["condition"];
@@ -1487,7 +1502,7 @@ fn with_expect(mut schema: Value) -> Value {
         "additionalProperties":false,
         "description":"Checked after the effect; needs read, admitted before the effect. A failed check keeps the effect.",
         "properties":{
-            "condition":{"type":"string","enum":["load_ready","url_contains","text_present","text_absent"]},
+            "condition":{"type":"string","enum":PageCondition::EXPECTABLE.map(PageCondition::as_str)},
             "value":{"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS,"description":"Omit for load_ready, else required; page text, not field values."}
         },
         "required":["condition"]

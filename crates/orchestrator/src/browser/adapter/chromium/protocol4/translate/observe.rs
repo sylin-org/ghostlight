@@ -20,32 +20,12 @@ use super::{route, value};
 use crate::browser::adapter::documents::DocumentInventory;
 use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalPoint};
 use crate::browser::BrowserError;
+use crate::language::PageCondition;
 use crate::workspace::StaleReason;
 
 /// How much longer than the page's own wait a waiting call may take, so the page answers
 /// before the call gives up.
 const CALL_MARGIN_MS: u64 = 500;
-/// The failure for a wait condition this service does not know.
-const UNKNOWN_CONDITION: &str = "unknown wait condition";
-
-/// The wait conditions work may name.
-pub mod condition {
-    /// The page stops moving.
-    pub const VISUAL_SETTLE: &str = "visual_settle";
-    /// The top document is interactive or complete.
-    pub const LOAD_READY: &str = "load_ready";
-    /// The top document's URL contains the value.
-    pub const URL_CONTAINS: &str = "url_contains";
-    /// The locator's target is in the page.
-    pub const TARGET_PRESENT: &str = "target_present";
-    /// The locator's target is gone.
-    pub const TARGET_ABSENT: &str = "target_absent";
-    /// Some readable document shows the text.
-    pub const TEXT_PRESENT: &str = "text_present";
-    /// No readable document shows the text.
-    pub const TEXT_ABSENT: &str = "text_absent";
-}
-
 /// What a request asks a document description to bind.
 #[derive(Clone, Copy, Debug)]
 pub struct Subjects<'a> {
@@ -61,7 +41,7 @@ pub struct Subjects<'a> {
 /// than fails when the page does not settle in time.
 pub(super) fn settle(settle_ms: u64) -> PlannedCall {
     PlannedCall::top(world::observe(
-        condition::VISUAL_SETTLE,
+        PageCondition::VisualSettle.as_str(),
         None,
         None,
         settle_ms,
@@ -175,7 +155,7 @@ fn focused_document(
 #[derive(Clone, Copy, Debug)]
 pub struct Wait<'a> {
     /// The condition.
-    pub condition: &'a str,
+    pub condition: PageCondition,
     /// The text or URL fragment the condition compares, when it takes one.
     pub value: Option<&'a str>,
     /// The target the condition watches, when it watches one.
@@ -193,7 +173,7 @@ pub struct Wait<'a> {
 ///
 /// # Errors
 ///
-/// Returns the plain failure of an unknown condition or a malformed locator, the failure of a
+/// Returns the plain failure of a malformed locator, the failure of a
 /// `call` primitive, and a single document's own failure.
 pub fn observe(
     l: &mut Link<'_>,
@@ -203,24 +183,19 @@ pub fn observe(
 ) -> Result<BrowserOutcome, BrowserError> {
     let budget = wait.timeout_ms.saturating_add(CALL_MARGIN_MS);
     let (doc, local) = match wait.condition {
-        condition::VISUAL_SETTLE => scope.target(wait.locator)?,
-        condition::LOAD_READY | condition::URL_CONTAINS => scope.target(None)?,
-        condition::TARGET_PRESENT | condition::TARGET_ABSENT => {
+        PageCondition::VisualSettle => scope.target(wait.locator)?,
+        PageCondition::LoadReady | PageCondition::UrlContains => scope.target(None)?,
+        PageCondition::TargetPresent | PageCondition::TargetAbsent => {
             scope.target(Some(wait.locator.unwrap_or_default()))?
         }
-        condition::TEXT_PRESENT | condition::TEXT_ABSENT => {
+        PageCondition::TextPresent | PageCondition::TextAbsent => {
             return observe_text(l, scope, tab_id, wait, budget)
-        }
-        other => {
-            return Err(BrowserError::Primitive(format!(
-                "{UNKNOWN_CONDITION} {other}"
-            )))
         }
     };
     let plan = scope.call(
         &doc,
         world::observe(
-            wait.condition,
+            wait.condition.as_str(),
             wait.value,
             local.as_deref(),
             wait.timeout_ms,
@@ -247,7 +222,7 @@ fn observe_text(
     wait: Wait<'_>,
     budget: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let presence = wait.condition == condition::TEXT_PRESENT;
+    let presence = wait.condition == PageCondition::TextPresent;
     let docs = scope.content_docs();
     if docs.is_empty() {
         return Err(BrowserError::DocumentUnavailable);
@@ -257,7 +232,13 @@ fn observe_text(
         .map(|doc| {
             scope.call(
                 doc,
-                world::observe(wait.condition, wait.value, None, wait.timeout_ms, presence),
+                world::observe(
+                    wait.condition.as_str(),
+                    wait.value,
+                    None,
+                    wait.timeout_ms,
+                    presence,
+                ),
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -304,7 +285,7 @@ fn top_readiness(
     let top = scope.top();
     let Ok(plan) = scope.call(
         &top,
-        world::observe(condition::LOAD_READY, None, None, 0, false),
+        world::observe(PageCondition::LoadReady.as_str(), None, None, 0, false),
     ) else {
         return Ok(BrowserReadiness::Loading);
     };

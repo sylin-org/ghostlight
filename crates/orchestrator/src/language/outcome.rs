@@ -6,6 +6,7 @@ use super::area::{LeftOut, LeftOutKey};
 use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
 use super::page_refusal::{self, PageGesture, PageRefusal};
+use super::wait::WaitCondition;
 use super::{adapter, deployment, setup, MAX_INSPECT_ITEMS};
 use crate::intake::session::IntakeChannel;
 use crate::workspace::{StaleReason, WorkspaceError};
@@ -555,7 +556,7 @@ pub enum Outcome {
     },
     /// An explicit observable condition was awaited.
     Waited {
-        condition: String,
+        condition: WaitCondition,
         elapsed_ms: u64,
         satisfied: bool,
         host: Option<String>,
@@ -902,7 +903,7 @@ impl Outcome {
                 elapsed_ms,
                 satisfied,
                 host,
-            } => waited(condition, *elapsed_ms, *satisfied, host),
+            } => waited(*condition, *elapsed_ms, *satisfied, host),
             Self::DialogHandled { accepted: true } => "Accepted the browser dialog.".into(),
             Self::DialogHandled { accepted: false } => "Dismissed the browser dialog.".into(),
             Self::DialogObserved {
@@ -2414,27 +2415,33 @@ fn channel_off(channel: IntakeChannel, author: PolicyAuthor) -> String {
 ///
 /// "Wait condition text_present was satisfied after 1687 ms" describes the mechanism doing the
 /// looking. A reader wants to know that the text showed up, and roughly when.
-fn waited(condition: &str, elapsed_ms: u64, satisfied: bool, host: &Option<String>) -> String {
+fn waited(
+    condition: WaitCondition,
+    elapsed_ms: u64,
+    satisfied: bool,
+    host: &Option<String>,
+) -> String {
+    let location = place(host, "the page");
     let (subject, arrived, missing) = match condition {
-        "load_ready" => (None, "finished loading", "never finished loading"),
-        "text_present" => (Some("Text"), "appeared", "never appeared"),
-        "text_absent" => (Some("Text"), "disappeared", "never disappeared"),
-        "url_contains" => (Some("The address"), "matched", "never matched"),
-        "target_present" => (Some("The target"), "appeared", "never appeared"),
-        "target_absent" => (Some("The target"), "disappeared", "never disappeared"),
-        "selector_present" => (
+        WaitCondition::LoadReady => (None, "finished loading", "never finished loading"),
+        WaitCondition::TextPresent => (Some("Text"), "appeared", "never appeared"),
+        WaitCondition::TextAbsent => (Some("Text"), "disappeared", "never disappeared"),
+        WaitCondition::UrlContains => (Some("The address"), "matched", "never matched"),
+        WaitCondition::TargetPresent => (Some("The target"), "appeared", "never appeared"),
+        WaitCondition::TargetAbsent => (Some("The target"), "disappeared", "never disappeared"),
+        WaitCondition::SelectorPresent => (
             Some("The selector"),
             "matched a control",
             "matched no control",
         ),
-        "visual_settle" => (
+        WaitCondition::VisualSettle => (
             Some("The view"),
             "settled visually",
             "never settled visually",
         ),
-        _ => (Some("The condition"), "was met", "was never met"),
+        // A duration watches nothing on the page; it only lets time pass.
+        WaitCondition::Duration => return format!("Waited {} on {location}.", spanned(elapsed_ms)),
     };
-    let location = place(host, "the page");
     let clause = |verb: &str| {
         subject.map_or_else(
             || format!("{location} {verb}"),
@@ -2652,7 +2659,36 @@ mod tests {
     use crate::intake::session::IntakeChannel;
     use crate::language::area::{LeftOut, LeftOutKey};
     use crate::language::field_problem::ControlRef;
+    use crate::language::WaitCondition;
     use crate::workspace::{StaleReason, WorkspaceError};
+
+    #[test]
+    fn a_duration_wait_has_its_own_sentence() {
+        let waited = |elapsed_ms, host: Option<&str>| {
+            Outcome::Waited {
+                condition: WaitCondition::Duration,
+                elapsed_ms,
+                satisfied: true,
+                host: host.map(str::to_owned),
+            }
+            .summary()
+        };
+        assert_eq!(
+            waited(1_200, Some("example.com")),
+            "Waited 1 second on example.com."
+        );
+        assert_eq!(waited(300, None), "Waited under a second on the page.");
+        for condition in WaitCondition::ALL {
+            let summary = Outcome::Waited {
+                condition,
+                elapsed_ms: 1_200,
+                satisfied: true,
+                host: None,
+            }
+            .summary();
+            assert!(!summary.contains("The condition"), "{summary}");
+        }
+    }
 
     #[test]
     fn outcome_summaries_transcribe_the_product_oracles() {
@@ -2972,7 +3008,7 @@ mod tests {
             (composition(5, 5), "Completed all 5 steps."),
             (
                 Outcome::Waited {
-                    condition: "load_ready".into(),
+                    condition: WaitCondition::LoadReady,
                     elapsed_ms: 1830,
                     satisfied: true,
                     host: Some("example.com".into()),
@@ -2981,7 +3017,7 @@ mod tests {
             ),
             (
                 Outcome::Waited {
-                    condition: "text_present".into(),
+                    condition: WaitCondition::TextPresent,
                     elapsed_ms: 8000,
                     satisfied: false,
                     host: Some("example.com".into()),
@@ -3399,7 +3435,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Outcome::Waited {
-                    condition: "load_ready".into(),
+                    condition: WaitCondition::LoadReady,
                     elapsed_ms: 3_000,
                     satisfied: true,
                     host: Some("example.com".into()),
@@ -4318,7 +4354,7 @@ Changes are \"unsaved\".".into()),
         );
         assert_eq!(
             Outcome::Waited {
-                condition: "text_present".into(),
+                condition: WaitCondition::TextPresent,
                 elapsed_ms: 8_000,
                 satisfied: false,
                 host: None,

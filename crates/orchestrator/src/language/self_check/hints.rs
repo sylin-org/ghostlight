@@ -869,12 +869,18 @@ fn outcome_samples() -> Vec<Outcome> {
     }
     for satisfied in [false, true] {
         samples.push(Outcome::Waited {
-            condition: "text_present".into(),
+            condition: crate::language::WaitCondition::TextPresent,
             elapsed_ms: 1_200,
             satisfied,
             host: host(),
         });
     }
+    samples.push(Outcome::Waited {
+        condition: crate::language::WaitCondition::Duration,
+        elapsed_ms: 1_200,
+        satisfied: true,
+        host: host(),
+    });
     samples.extend(
         composition_samples()
             .into_iter()

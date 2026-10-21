@@ -646,6 +646,29 @@ fn the_catalog_matches_docs_1_0_catalog_json() {
     );
 }
 
+/// The wait schema the catalog builds from `WaitCondition` is the one the golden records. Unlike
+/// the full comparison, no update variable can rewrite this expectation.
+#[test]
+fn the_wait_catalog_is_unchanged() {
+    let text = std::fs::read_to_string(repository_path(CATALOG_GOLDEN)).expect("golden exists");
+    let golden: serde_json::Value = serde_json::from_str(&text).expect("the golden parses");
+    let tools = golden
+        .get("tools")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| golden.as_array())
+        .expect("the golden lists tools");
+    let recorded = tools
+        .iter()
+        .find(|tool| tool["name"] == "browser_wait")
+        .expect("the golden holds browser_wait");
+    let built = catalog()
+        .into_iter()
+        .find(|tool| tool.name == "browser_wait")
+        .expect("the catalog holds browser_wait");
+    assert_eq!(built.input_schema, recorded["inputSchema"]);
+    assert_eq!(built.description, recorded["description"]);
+}
+
 #[test]
 fn the_catalog_golden_is_ascii() {
     let text = std::fs::read_to_string(repository_path(CATALOG_GOLDEN)).expect("golden exists");

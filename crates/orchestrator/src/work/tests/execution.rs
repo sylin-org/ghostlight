@@ -3523,9 +3523,9 @@ fn wait_condition_visual_settle_observes_view_settlement() {
     assert!(calls.iter().any(|call| matches!(
         call,
         BrowserCommand::Observe {
-            condition,
+            condition: crate::language::PageCondition::VisualSettle,
             ..
-        } if condition == "visual_settle"
+        }
     )));
 }
 
@@ -3777,9 +3777,13 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
     assert!(calls
         .iter()
         .any(|c| matches!(c, BrowserCommand::QuerySemantic { .. })));
-    assert!(calls.iter().any(
-        |c| matches!(c, BrowserCommand::Observe { condition, .. } if condition == "visual_settle")
-    ));
+    assert!(calls.iter().any(|c| matches!(
+        c,
+        BrowserCommand::Observe {
+            condition: crate::language::PageCondition::VisualSettle,
+            ..
+        }
+    )));
 }
 
 /// A document inspection hands the model the tree its summary describes, and a later

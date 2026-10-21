@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::documents;
 use crate::language::area::LeftOut;
 use crate::language::field_echo::ChoiceMatch;
+use crate::language::PageCondition;
 
 /// The service's internal browser work vocabulary, by its executor name.
 pub type Work = BrowserCommand;
@@ -882,7 +883,7 @@ pub enum BrowserCommand {
     /// Observe one condition.
     Observe {
         tab_id: u64,
-        condition: String,
+        condition: PageCondition,
         value: Option<String>,
         locator: Option<String>,
         timeout_ms: u64,

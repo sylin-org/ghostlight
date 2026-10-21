@@ -29,9 +29,11 @@ pub(crate) mod settlement;
 pub mod setup;
 #[path = "catalog.rs"]
 mod tool_catalog;
+pub mod wait;
 pub mod workbench;
 
 pub use tool_catalog::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
+pub use wait::{PageCondition, WaitCondition};
 
 use std::path::Path;
 
@@ -58,8 +60,6 @@ pub const MAX_INSPECT_ITEMS: usize = 200;
 /// sends nothing longer, so it also bounds a script it wraps.
 pub const SCRIPT_MAX_CHARS: usize = 20_000;
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
-/// A wait condition name for the concept `visual_settle` already names, refused with a pointer to it.
-const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
 
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
 ///
@@ -534,7 +534,8 @@ pub struct SemanticSelector {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Postcondition {
     /// Closed observable condition from the shared wait vocabulary.
-    pub condition: String,
+    #[serde(deserialize_with = "wait::decode_expected")]
+    pub condition: PageCondition,
     /// Required by the textual conditions.
     #[serde(default)]
     pub value: Option<String>,
@@ -832,7 +833,8 @@ pub struct RunScript {
 /// Input for one explicit wait.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Wait {
-    pub condition: String,
+    #[serde(deserialize_with = "wait::decode_condition")]
+    pub condition: WaitCondition,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
@@ -1834,22 +1836,23 @@ fn validate_expect(expect: &Option<Postcondition>) -> Result<(), LanguageError> 
     let Some(expectation) = expect else {
         return Ok(());
     };
-    match expectation.condition.as_str() {
-        "load_ready" => {
+    let condition = expectation.condition;
+    match condition {
+        PageCondition::LoadReady => {
             if expectation.value.is_some() {
                 return Err(LanguageError::Invalid("load_ready accepts no value".into()));
             }
             Ok(())
         }
-        "url_contains" | "text_present" | "text_absent" => {
+        PageCondition::UrlContains | PageCondition::TextPresent | PageCondition::TextAbsent => {
             let value = expectation.value.as_deref().ok_or_else(|| {
-                LanguageError::Invalid(format!("{} requires value", expectation.condition))
+                LanguageError::Invalid(format!("{} requires value", condition.as_str()))
             })?;
             validate_text(value, MAX_POSTCONDITION_VALUE_CHARS, "value")
         }
-        _ => Err(LanguageError::Invalid(
-            "expect supports load_ready, url_contains, text_present, or text_absent".into(),
-        )),
+        PageCondition::TargetPresent
+        | PageCondition::TargetAbsent
+        | PageCondition::VisualSettle => Err(LanguageError::Invalid(wait::EXPECT_REFUSAL.into())),
     }
 }
 
@@ -2333,7 +2336,7 @@ fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
 fn validate_wait(value: &Wait) -> Result<(), LanguageError> {
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_timeout(value.timeout_ms)?;
-    if value.condition == "selector_present" {
+    if value.condition == WaitCondition::SelectorPresent {
         let selector = value
             .selector
             .as_ref()
@@ -2356,63 +2359,45 @@ fn validate_wait(value: &Wait) -> Result<(), LanguageError> {
         ));
     }
     validate_condition(
-        &value.condition,
+        value.condition,
         value.value.as_deref(),
         value.target.as_deref(),
-    )?;
-    Ok(())
+    )
 }
 
 fn validate_condition(
-    condition: &str,
+    condition: WaitCondition,
     value: Option<&str>,
     target: Option<&str>,
 ) -> Result<(), LanguageError> {
-    if condition == RETIRED_LAYOUT_STABLE {
-        return Err(LanguageError::Invalid(
-            "condition layout_stable was merged into visual_settle; use condition visual_settle"
-                .into(),
-        ));
-    }
-    validate_choice(
-        condition,
-        &[
-            "load_ready",
-            "url_contains",
-            "text_present",
-            "text_absent",
-            "target_present",
-            "target_absent",
-            "visual_settle",
-            "duration",
-        ],
-        "condition",
-    )?;
-    if condition == "duration" {
-        let raw = value.ok_or_else(|| LanguageError::Invalid("duration requires value".into()))?;
-        if target.is_some() {
-            return Err(LanguageError::Invalid(
-                "duration does not accept target".into(),
-            ));
-        }
-        let milliseconds = raw
-            .parse::<u64>()
-            .map_err(|_| LanguageError::Invalid("duration requires whole milliseconds".into()))?;
-        return validate_range(
-            usize::try_from(milliseconds).unwrap_or(usize::MAX),
-            0,
-            10_000,
-            "duration",
-        );
-    }
+    let name = condition.as_str();
     match condition {
-        "load_ready" if value.is_some() || target.is_some() => Err(LanguageError::Invalid(
-            "load_ready accepts neither value nor target".into(),
-        )),
-        "visual_settle" => {
+        WaitCondition::Duration => {
+            let raw =
+                value.ok_or_else(|| LanguageError::Invalid("duration requires value".into()))?;
+            if target.is_some() {
+                return Err(LanguageError::Invalid(
+                    "duration does not accept target".into(),
+                ));
+            }
+            let milliseconds = raw.parse::<u64>().map_err(|_| {
+                LanguageError::Invalid("duration requires whole milliseconds".into())
+            })?;
+            validate_range(
+                usize::try_from(milliseconds).unwrap_or(usize::MAX),
+                0,
+                10_000,
+                "duration",
+            )
+        }
+        WaitCondition::LoadReady if value.is_some() || target.is_some() => Err(
+            LanguageError::Invalid("load_ready accepts neither value nor target".into()),
+        ),
+        WaitCondition::LoadReady | WaitCondition::SelectorPresent => Ok(()),
+        WaitCondition::VisualSettle => {
             if value.is_some() {
                 return Err(LanguageError::Invalid(format!(
-                    "{condition} does not accept value"
+                    "{name} does not accept value"
                 )));
             }
             if let Some(target) = target {
@@ -2420,31 +2405,30 @@ fn validate_condition(
             }
             Ok(())
         }
-        "url_contains" | "text_present" | "text_absent" => {
-            let value = value
-                .ok_or_else(|| LanguageError::Invalid(format!("{condition} requires value")))?;
+        WaitCondition::UrlContains | WaitCondition::TextPresent | WaitCondition::TextAbsent => {
+            let value =
+                value.ok_or_else(|| LanguageError::Invalid(format!("{name} requires value")))?;
             validate_text(value, 2_000, "value")?;
             if target.is_some() {
                 Err(LanguageError::Invalid(format!(
-                    "{condition} does not accept target"
+                    "{name} does not accept target"
                 )))
             } else {
                 Ok(())
             }
         }
-        "target_present" | "target_absent" => {
-            let target = target
-                .ok_or_else(|| LanguageError::Invalid(format!("{condition} requires target")))?;
+        WaitCondition::TargetPresent | WaitCondition::TargetAbsent => {
+            let target =
+                target.ok_or_else(|| LanguageError::Invalid(format!("{name} requires target")))?;
             validate_handle(target, "target_")?;
             if value.is_some() {
                 Err(LanguageError::Invalid(format!(
-                    "{condition} does not accept value"
+                    "{name} does not accept value"
                 )))
             } else {
                 Ok(())
             }
         }
-        _ => Ok(()),
     }
 }
 
