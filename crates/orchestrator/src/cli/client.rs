@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 
 use crate::intake::listener::control;
-use crate::intake::mcp::{method, LATEST_REVISION};
+use crate::intake::mcp::{content, method, result_field, JSONRPC_VERSION, LATEST_REVISION};
 use crate::workbench::ReadinessSummary;
 
 /// The label controlled tabs are grouped under for scripted work.
@@ -28,11 +28,6 @@ use crate::workbench::ReadinessSummary;
 /// One stable label per channel, not one per calling program: the tab strip has a fixed budget of
 /// attention, so a script's tabs group together instead of multiplying groups (ADR-0105).
 pub const CLI_CLIENT_LABEL: &str = "ghostlight call";
-
-const JSONRPC_VERSION: &str = "2.0";
-
-/// The MCP content block kind that carries an image.
-const IMAGE_CONTENT: &str = "image";
 
 /// Why the command line could not finish an exchange with the service.
 #[derive(Debug, Error)]
@@ -234,13 +229,13 @@ impl McpClient {
             json!({"name": tool, "arguments": input}),
         )?;
         let images = called
-            .get("content")
+            .get(result_field::CONTENT)
             .and_then(Value::as_array)
             .map(|blocks| {
                 blocks
                     .iter()
                     .filter(|block| {
-                        block.get("type").and_then(Value::as_str) == Some(IMAGE_CONTENT)
+                        block.get("type").and_then(Value::as_str) == Some(content::IMAGE)
                     })
                     .filter_map(|block| block.get("data").and_then(Value::as_str))
                     .map(str::to_owned)
@@ -249,7 +244,7 @@ impl McpClient {
             .unwrap_or_default();
         Ok(Invocation {
             result: called
-                .get("structuredContent")
+                .get(result_field::STRUCTURED)
                 .cloned()
                 .unwrap_or(Value::Null),
             images,

@@ -50,8 +50,12 @@ pub const LATEST_REVISION: &str = "2025-11-25";
 /// lean JSON as text, which a client of any revision reads.
 pub const OLDEST_REVISION: &str = "2024-11-05";
 /// Every initialized MCP revision this engine serves, oldest first.
-pub const SUPPORTED_REVISIONS: [&str; 4] =
-    [OLDEST_REVISION, "2025-03-26", "2025-06-18", LATEST_REVISION];
+pub const SUPPORTED_REVISIONS: [&str; 4] = [
+    OLDEST_REVISION,
+    "2025-03-26",
+    STRUCTURED_CONTENT_REVISION,
+    LATEST_REVISION,
+];
 /// The first MCP revision whose clients read `structuredContent`; earlier ones get the lean JSON
 /// in the text block as well (ADR-0198 Decision 24).
 const STRUCTURED_CONTENT_REVISION: &str = "2025-06-18";
@@ -62,7 +66,8 @@ Result: ";
 /// The MCP revision whose stateless `server/discover` request this engine answers.
 pub const DISCOVERY_REVISION: &str = "2026-07-28";
 
-const JSONRPC_VERSION: &str = "2.0";
+/// The JSON-RPC version every message names, the engine's and the command line's alike.
+pub(crate) const JSONRPC_VERSION: &str = "2.0";
 const RESUME_TOKEN_PREFIX: &str = "rs1.";
 /// The longest resume token an opening may carry: [`ResumeState::decode`] reads none longer, and
 /// [`ResumeState::encode`] writes none longer.
@@ -114,9 +119,19 @@ mod discovery {
 }
 
 /// MCP content block kinds a tool result carries.
-mod content {
-    pub(super) const TEXT: &str = "text";
-    pub(super) const IMAGE: &str = "image";
+pub(crate) mod content {
+    pub(crate) const TEXT: &str = "text";
+    pub(crate) const IMAGE: &str = "image";
+}
+
+/// The fields of a tool result the engine writes and the command line reads.
+pub(crate) mod result_field {
+    /// The content blocks: the text, and any images.
+    pub(crate) const CONTENT: &str = "content";
+    /// The lean JSON envelope.
+    pub(crate) const STRUCTURED: &str = "structuredContent";
+    /// Whether the call failed.
+    pub(crate) const IS_ERROR: &str = "isError";
 }
 
 /// Reasons a failure template's structured content names.
@@ -871,7 +886,11 @@ fn call_tool_result(
             }
         }
     }
-    json!({"content": blocks, "structuredContent": lean, "isError": is_error})
+    let mut result = serde_json::Map::new();
+    result.insert(result_field::CONTENT.into(), Value::Array(blocks));
+    result.insert(result_field::STRUCTURED.into(), lean);
+    result.insert(result_field::IS_ERROR.into(), Value::Bool(is_error));
+    Value::Object(result)
 }
 
 fn success(id: Value, result: Value) -> Value {

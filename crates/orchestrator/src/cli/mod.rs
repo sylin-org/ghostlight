@@ -27,6 +27,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde_json::Value;
 
+use crate::work::result::Status;
 use client::{ClientError, McpClient};
 
 /// Terminal status to process exit code.
@@ -265,13 +266,19 @@ fn summary_of(result: &Value) -> String {
 }
 
 /// Map the terminal status onto a process exit code.
+/// The exit code of a call's status. A status this build does not know, as from a service of
+/// another build, exits as unknown.
 fn exit_code(result: &Value) -> i32 {
-    match result.get("status").and_then(Value::as_str) {
-        Some("succeeded") => EXIT_SUCCEEDED,
-        Some("blocked") => EXIT_BLOCKED,
-        Some("failed") => EXIT_FAILED,
-        Some("cancelled") => EXIT_CANCELLED,
-        _ => EXIT_UNKNOWN,
+    let status = result
+        .get("status")
+        .cloned()
+        .and_then(|status| serde_json::from_value::<Status>(status).ok());
+    match status {
+        Some(Status::Succeeded) => EXIT_SUCCEEDED,
+        Some(Status::Blocked) => EXIT_BLOCKED,
+        Some(Status::Failed) => EXIT_FAILED,
+        Some(Status::Cancelled) => EXIT_CANCELLED,
+        Some(Status::Unknown) | None => EXIT_UNKNOWN,
     }
 }
 
