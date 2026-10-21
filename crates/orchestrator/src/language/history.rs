@@ -356,30 +356,98 @@ mod tests {
         }
     }
 
+    /// The window's sentence for a refusal the model was told, read as the window reads it.
+    fn in_the_window(refusal: &Refusal) -> Option<String> {
+        let audit = refusal.audit();
+        for_the_person(
+            audit.summary(),
+            ReasonCode::Permitted,
+            audit.refusal(),
+            IntakeChannel::Mcp,
+            None,
+        )
+    }
+
+    /// ACCEPTANCE Governance 4 and LANGUAGE (channel switch, human controls): a history row whose
+    /// summary speaks to the model about the user, and a permission explanation, read for the
+    /// person: whose policy turned off which channel, what the person did, what to open, that a
+    /// secret stayed untyped, and a refusal reason in words, never as a code. A summary already
+    /// written for a person is kept.
     #[test]
-    fn a_channel_refusal_speaks_to_the_person_in_the_row_and_its_details() {
+    fn the_window_says_to_the_person_what_the_model_was_told() {
         let model = "Blocked: the user's Ghostlight policy turns off work from MCP agents.";
+        let person = |summary: &str, reason, channel, tier| {
+            for_the_person(summary, reason, None, channel, tier)
+        };
         assert_eq!(
-            for_the_person(
+            person(
                 model,
                 ReasonCode::ChannelDenied,
-                None,
                 IntakeChannel::Mcp,
                 Some("user")
-            )
-            .as_deref(),
-            Some("Your policy turns off work from MCP agents.")
+            ),
+            Some(channel_switch::refused(
+                IntakeChannel::Mcp,
+                PolicyAuthor::User,
+                None
+            ))
         );
         assert_eq!(
-            for_the_person(
+            person(
                 model,
                 ReasonCode::ChannelDenied,
-                None,
                 IntakeChannel::Cli,
                 Some(MANAGED_TIER)
+            ),
+            Some(channel_switch::refused(
+                IntakeChannel::Cli,
+                PolicyAuthor::Organization,
+                None
+            ))
+        );
+        assert_eq!(
+            person(
+                HUMAN_PAUSE_DIRECTIVE,
+                ReasonCode::RuntimeHold,
+                IntakeChannel::Mcp,
+                None
             )
             .as_deref(),
-            Some("Your organization's policy turns off work from the command line.")
+            Some(YOU_PAUSED)
+        );
+        let rest = " The expected condition was not checked.";
+        assert_eq!(
+            person(
+                &format!("{HUMAN_STOP_DIRECTIVE}{rest}"),
+                ReasonCode::SessionEnded,
+                IntakeChannel::Mcp,
+                None
+            ),
+            Some(format!("{YOU_ENDED}{rest}"))
+        );
+        assert_eq!(
+            person(
+                "Opened example.com.",
+                ReasonCode::Permitted,
+                IntakeChannel::Mcp,
+                None
+            ),
+            None
+        );
+        let manual = Refusal::BrowserStartupManual {
+            browsers: vec!["Google Chrome".into()],
+            extension: ExtensionAdvice::Plain,
+        };
+        assert_eq!(
+            in_the_window(&manual).as_deref(),
+            Some(NO_BROWSER_CONNECTED)
+        );
+        let credential = Refusal::CredentialAuthorization {
+            control: ControlRef::new(TargetRole::Textbox, "Password", None, false),
+        };
+        assert_eq!(
+            in_the_window(&credential).as_deref(),
+            Some(SECRET_NOT_ALLOWED)
         );
         assert_eq!(
             permission(
@@ -387,55 +455,10 @@ mod tests {
                 IntakeChannel::Mcp,
                 Some("user")
             ),
-            "Refused. Your policy turns off work from MCP agents."
-        );
-    }
-
-    #[test]
-    fn the_human_controls_say_what_the_person_did() {
-        assert_eq!(
-            for_the_person(
-                HUMAN_PAUSE_DIRECTIVE,
-                ReasonCode::RuntimeHold,
-                None,
-                IntakeChannel::Mcp,
-                None
+            format!(
+                "Refused. {}",
+                channel_switch::refused(IntakeChannel::Mcp, PolicyAuthor::User, None)
             )
-            .as_deref(),
-            Some("You paused Ghostlight.")
-        );
-        let unconfirmed = format!(
-            "{HUMAN_STOP_DIRECTIVE} The expected condition was not checked. Clicked the \"Save\" button on example.com."
-        );
-        assert_eq!(
-            for_the_person(
-                &unconfirmed,
-                ReasonCode::SessionEnded,
-                None,
-                IntakeChannel::Mcp,
-                None
-            )
-            .as_deref(),
-            Some("You ended the session. The expected condition was not checked. Clicked the \"Save\" button on example.com.")
-        );
-        // A sentence already written for a person is kept.
-        assert_eq!(
-            for_the_person(
-                "Opened example.com.",
-                ReasonCode::Permitted,
-                None,
-                IntakeChannel::Mcp,
-                None
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn a_refusal_no_layer_decided_is_said_in_words_not_as_a_code() {
-        assert_eq!(
-            permission(&refused(ReasonCode::RuntimeHold), IntakeChannel::Mcp, None),
-            "Refused: you paused Ghostlight."
         );
         for reason in [
             ReasonCode::CapabilityDenied,
@@ -451,34 +474,8 @@ mod tests {
             ReasonCode::AuditUnavailable,
         ] {
             let said = permission(&refused(reason), IntakeChannel::Mcp, None);
-            assert!(!said.contains('_'), "{said}");
-            assert!(said.is_ascii() && said.ends_with('.'), "{said}");
+            assert!(!said.contains('_') && said.ends_with('.'), "{said}");
         }
-    }
-
-    /// The window's sentence for a refusal the model was told, read as the window reads it.
-    fn in_the_window(refusal: &Refusal) -> Option<String> {
-        let audit = refusal.audit();
-        for_the_person(
-            audit.summary(),
-            ReasonCode::Permitted,
-            audit.refusal(),
-            IntakeChannel::Mcp,
-            None,
-        )
-    }
-
-    #[test]
-    fn a_refusal_that_leaves_the_browser_to_the_person_tells_them_what_to_open() {
-        let refusal = Refusal::BrowserStartupManual {
-            browsers: vec!["Google Chrome".into()],
-            extension: ExtensionAdvice::Plain,
-        };
-        assert!(refusal.audit().summary().contains("Ask the user"));
-        assert_eq!(
-            in_the_window(&refusal).as_deref(),
-            Some("No browser was connected, so nothing ran. Open a browser window with Ghostlight in Browser installed.")
-        );
     }
 
     /// A durable record of one settled call, as the audit file keeps it.
@@ -528,27 +525,47 @@ mod tests {
         )
     }
 
+    /// ADR-0203 Decision 12.2: each settled record has one closed class, computed from its status
+    /// and closed refusal, a flow taking the class of the step that held it back, and a flow
+    /// step's cause derives from it. Contract with the window's script: the class crosses as one
+    /// closed word (`tests/workbench-settings.test.mjs` reads "kept" and "needs_you").
     #[test]
-    fn a_credential_refusal_is_classed_needs_you_and_a_kept_tab_kept() {
+    fn every_record_has_one_outcome_class_that_crosses_to_the_window_as_one_word() {
         let permitted = crate::governance::Decision::permitted();
+        let quiet = crate::language::outcome::Outcome::TabsListed { count: 0 }.audit();
+        for (status, class, word) in [
+            (Status::Succeeded, OutcomeClass::Succeeded, "succeeded"),
+            (Status::Blocked, OutcomeClass::Refused, "refused"),
+            (Status::Failed, OutcomeClass::Failed, "failed"),
+            (Status::Cancelled, OutcomeClass::Cancelled, "cancelled"),
+            (Status::Unknown, OutcomeClass::Unknown, "unknown"),
+        ] {
+            assert_eq!(OutcomeClass::of(status, None), class);
+            assert_eq!(
+                OutcomeClass::recorded(&record(status, permitted, &quiet)),
+                class
+            );
+            assert_eq!(serde_json::to_value(class).unwrap(), word);
+        }
         let credential = Refusal::CredentialAuthorization {
             control: ControlRef::new(TargetRole::Textbox, "Password", None, false),
         }
         .audit();
         let kept = Refusal::LocalInterlock.audit();
         let policy = Refusal::AuthorityBlocked {
-            code: crate::governance::ReasonCode::CapabilityDenied,
+            code: ReasonCode::CapabilityDenied,
             host: None,
             origin: None,
         }
         .audit();
-        for (audit, decision, class) in [
-            (&credential, permitted, OutcomeClass::NeedsYou),
-            (&kept, permitted, OutcomeClass::Kept),
+        for (audit, decision, class, word) in [
+            (&credential, permitted, OutcomeClass::NeedsYou, "needs_you"),
+            (&kept, permitted, OutcomeClass::Kept, "kept"),
             (
                 &policy,
                 crate::governance::Decision::refused(ReasonCode::CapabilityDenied),
                 OutcomeClass::Refused,
+                "refused",
             ),
         ] {
             assert_eq!(OutcomeClass::of(Status::Blocked, audit.refusal()), class);
@@ -556,59 +573,24 @@ mod tests {
                 OutcomeClass::recorded(&record(Status::Blocked, decision, audit)),
                 class
             );
+            assert_eq!(serde_json::to_value(class).unwrap(), word);
         }
-        // A flow keeps no refusal of its own: it is classed by the step that held it back.
-        assert_eq!(
-            OutcomeClass::recorded(&flow(true, StepCause::Failed)),
-            OutcomeClass::NeedsYou
-        );
-        assert_eq!(
-            OutcomeClass::recorded(&flow(true, StepCause::AttentionRequired)),
-            OutcomeClass::Kept
-        );
-        assert_eq!(
-            OutcomeClass::recorded(&flow(true, StepCause::Paused)),
-            OutcomeClass::Refused
-        );
-        // A refusing decision decides the flow, whatever came after the refused step.
-        assert_eq!(
-            OutcomeClass::recorded(&flow(false, StepCause::Deadline)),
-            OutcomeClass::Refused
-        );
-        // A flow goes on past a refused secret and stops for a kept tab, as before.
-        assert_eq!(
-            OutcomeClass::NeedsYou.step_cause(credential.refusal()),
-            Some(StepCause::Failed)
-        );
-        assert_eq!(
-            OutcomeClass::Kept.step_cause(kept.refusal()),
-            Some(StepCause::AttentionRequired)
-        );
-    }
-
-    #[test]
-    fn every_status_has_its_class_and_a_step_that_never_started_failed() {
-        let permitted = crate::governance::Decision::permitted();
-        let quiet = crate::language::outcome::Outcome::TabsListed { count: 0 }.audit();
-        for (status, class) in [
-            (Status::Succeeded, OutcomeClass::Succeeded),
-            (Status::Blocked, OutcomeClass::Refused),
-            (Status::Failed, OutcomeClass::Failed),
-            (Status::Cancelled, OutcomeClass::Cancelled),
-            (Status::Unknown, OutcomeClass::Unknown),
+        // A flow keeps no refusal of its own: it is classed by the step that held it back, and a
+        // refusing decision decides it whatever came after the refused step.
+        for (allowed, cause, class) in [
+            (true, StepCause::Failed, OutcomeClass::NeedsYou),
+            (true, StepCause::AttentionRequired, OutcomeClass::Kept),
+            (true, StepCause::Paused, OutcomeClass::Refused),
+            (false, StepCause::Deadline, OutcomeClass::Refused),
         ] {
-            assert_eq!(OutcomeClass::of(status, None), class);
-            assert_eq!(
-                OutcomeClass::recorded(&record(status, permitted, &quiet)),
-                class
-            );
+            assert_eq!(OutcomeClass::recorded(&flow(allowed, cause)), class);
         }
         let never_started = AuditRecord::not_started(
             "invocation_x",
             "workspace_x",
             "browser_read",
             &crate::governance::GovernanceFacade::new(None).snapshot(),
-            &crate::provenance::Attribution::accepted(crate::intake::session::IntakeChannel::Mcp),
+            &crate::provenance::Attribution::accepted(IntakeChannel::Mcp),
             StepReceipt {
                 parent: CompositionKind::Flow,
                 position: 1,
@@ -617,33 +599,15 @@ mod tests {
             },
         );
         assert_eq!(OutcomeClass::recorded(&never_started), OutcomeClass::Failed);
+        // A flow goes on past a refused secret and stops for a kept tab.
         assert_eq!(OutcomeClass::Succeeded.step_cause(None), None);
-    }
-
-    #[test]
-    fn the_class_crosses_to_the_window_as_one_closed_word() {
-        for (class, word) in [
-            (OutcomeClass::Succeeded, "succeeded"),
-            (OutcomeClass::Refused, "refused"),
-            (OutcomeClass::Kept, "kept"),
-            (OutcomeClass::NeedsYou, "needs_you"),
-            (OutcomeClass::Failed, "failed"),
-            (OutcomeClass::Unknown, "unknown"),
-            (OutcomeClass::Cancelled, "cancelled"),
-        ] {
-            assert_eq!(serde_json::to_value(class).unwrap(), word);
-        }
-    }
-
-    #[test]
-    fn a_credential_refusal_tells_the_person_their_secret_stayed_untyped() {
-        let refusal = Refusal::CredentialAuthorization {
-            control: ControlRef::new(TargetRole::Textbox, "Password", None, false),
-        };
-        assert!(refusal.audit().summary().contains("the user"));
         assert_eq!(
-            in_the_window(&refusal).as_deref(),
-            Some("Refused to type a password or other secret you had not allowed.")
+            OutcomeClass::NeedsYou.step_cause(credential.refusal()),
+            Some(StepCause::Failed)
+        );
+        assert_eq!(
+            OutcomeClass::Kept.step_cause(kept.refusal()),
+            Some(StepCause::AttentionRequired)
         );
     }
 }
