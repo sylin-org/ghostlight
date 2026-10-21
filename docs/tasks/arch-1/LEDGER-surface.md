@@ -118,6 +118,7 @@ C3c), then the rows below.
 | U-D1 | fix(workbench): a policy draft near the limit gets the policy-size sentence | - | SURF-5's size defect; one web test | todo |
 | U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | todo |
 | U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | todo |
+| U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first | todo |
 | SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1 | todo |
 | SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | todo |
 | SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | todo |
@@ -129,3 +130,10 @@ C3c), then the rows below.
 | SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | todo |
 | SURF-9 | refactor(workbench): `workbench/mod.rs` splits on its seams | S3 | SURF-9; no `kit.css` rename | todo |
 | SURF-11 | refactor(window): the palette has tokens, and the desktop one module | - | SURF-11; colour values stay | todo |
+- U-D4, found by tests-1's pilot cut of `service/mod.rs` on 2026-10-21: the service test
+  `the_browser_toolbar_pauses_through_the_workbench_and_says_so` required a second
+  `RuntimeChanged` event for a repeated Hold, which its own comment calls a change of nothing a
+  screen shows. `WorkbenchFacade::apply_runtime_control` publishes on every call. It also records
+  which source paused, so check whether a repeated control from another source changes what a
+  screen shows before deciding; publish only when the state or the pausing source changed. The
+  pilot deletes the test.

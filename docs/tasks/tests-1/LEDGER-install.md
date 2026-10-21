@@ -25,4 +25,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 
 ## Notes
 
-None yet.
+- From the service lane's pilot (2026-10-21): `cli/desktop.rs` has a test near line 739 that
+  repeats the service's deleted `show_reveals_the_existing_workbench` through a real host, with
+  a 2 s sleep and a deadline under 1 s. Take it in this lane's `cli/` slice: keep it only as a
+  condition-waiting test if no kept test proves the reveal.
