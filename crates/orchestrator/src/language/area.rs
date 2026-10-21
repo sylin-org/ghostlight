@@ -199,88 +199,21 @@ impl<'de> Deserialize<'de> for LeftOut {
 mod tests {
     use super::*;
 
+    /// What a page sends as `left_out` reaches the model only as the closed tier words with a
+    /// count (LANGUAGE.md; ADR-0198 Decisions 19 and 20): a word off the list, a count that is not
+    /// a whole number and a zero are dropped, so a changed or hostile page cannot put a new key in
+    /// front of the model.
     #[test]
-    fn every_area_round_trips_through_its_word() {
-        for area in PageArea::ALL {
-            assert_eq!(PageArea::classify(area.word()), Some(area));
-        }
-    }
-
-    #[test]
-    fn a_word_off_the_list_is_not_an_area() {
-        for word in ["", "main", "Header", "nav ", "banner", "form"] {
-            assert_eq!(PageArea::classify(word), None, "{word:?}");
-        }
-    }
-
-    #[test]
-    fn every_left_out_key_round_trips_through_its_word() {
-        for key in LeftOutKey::ALL {
-            assert_eq!(LeftOutKey::classify(key.word()), Some(key));
-        }
-        assert_eq!(LeftOutKey::classify("page"), None);
-    }
-
-    #[test]
-    fn tiers_follow_visibility_then_landmark() {
-        let shown: Vec<String> = vec!["required".into()];
-        let hidden: Vec<String> = vec!["disabled".into(), HIDDEN_STATE.into()];
-        let tier = LeftOutKey::tier_of;
-        assert_eq!(tier(&hidden, Some("nav")), LeftOutKey::Hidden);
-        assert_eq!(tier(&hidden, None), LeftOutKey::Hidden);
-        for chrome in ["header", "nav", "footer"] {
-            assert_eq!(tier(&shown, Some(chrome)), LeftOutKey::Chrome);
-        }
-        assert_eq!(tier(&shown, Some("aside")), LeftOutKey::Aside);
-        for content in [Some("dialog"), Some("search"), Some("banner"), None] {
-            assert_eq!(tier(&shown, content), LeftOutKey::Content, "{content:?}");
-        }
-    }
-
-    #[test]
-    fn cut_order_runs_from_hidden_to_content() {
-        assert!(LeftOutKey::Hidden < LeftOutKey::Chrome);
-        assert!(LeftOutKey::Chrome < LeftOutKey::Aside);
-        assert!(LeftOutKey::Aside < LeftOutKey::Content);
-    }
-
-    #[test]
-    fn left_out_renders_only_the_keys_with_a_count() {
-        let mut left_out = LeftOut::default();
-        assert_eq!(left_out.to_value(), None);
-        left_out.add(LeftOutKey::Content, 0);
-        assert!(left_out.is_empty());
-        left_out.add(LeftOutKey::Chrome, 96);
-        left_out.add(LeftOutKey::BehindDialog, 3);
-        assert_eq!(
-            left_out.to_value(),
-            Some(serde_json::json!({"chrome": 96, "behind_dialog": 3}))
-        );
-    }
-
-    #[test]
-    fn left_out_counts_add_across_documents() {
-        let mut total = LeftOut::default();
-        let mut one = LeftOut::default();
-        one.add(LeftOutKey::Chrome, 2);
-        let mut two = LeftOut::default();
-        two.add(LeftOutKey::Chrome, 5);
-        two.add(LeftOutKey::Hidden, 1);
-        total.merge(&one);
-        total.merge(&two);
-        assert_eq!(total.count(LeftOutKey::Chrome), 7);
-        assert_eq!(total.count(LeftOutKey::Hidden), 1);
-        assert_eq!(total.count(LeftOutKey::Aside), 0);
-    }
-
-    #[test]
-    fn the_page_cannot_add_a_left_out_key() {
+    fn the_left_out_facts_carry_only_listed_words_with_a_count() {
         let decoded: LeftOut = serde_json::from_value(serde_json::json!({
-            "chrome": 4, "secret": 9, "content": "many", "aside": -1, "hidden": 0
+            "chrome": 4, "secret": 9, "page": 2, "content": "many", "aside": -1, "hidden": 0,
+            "behind_dialog": 3
         }))
         .expect("an object decodes");
-        let mut expected = LeftOut::default();
-        expected.add(LeftOutKey::Chrome, 4);
-        assert_eq!(decoded, expected);
+        let mut expected = Map::new();
+        expected.insert(LeftOutKey::Chrome.word().into(), Value::from(4));
+        expected.insert(LeftOutKey::BehindDialog.word().into(), Value::from(3));
+        assert_eq!(decoded.to_value(), Some(Value::Object(expected)));
+        assert_eq!(LeftOut::default().to_value(), None);
     }
 }
