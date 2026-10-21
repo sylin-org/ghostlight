@@ -423,11 +423,12 @@ mod tests {
         }
     }
 
-    /// Protects doctor as the support surface, which names what is wrong and the way back: in text and in JSON it names the window program, why there is no window, an app
-    /// container's view instead of blaming the browser, the strays and the service fields (none when
-    /// nothing is left running), the 1.x version directories left in `bin`, per agent whether an icon
-    /// was found and from where, every workbench readiness state in the same words, and the way back
-    /// for a development build with a missing executable.
+    /// Protects doctor as the support surface, which names what is wrong and the way back. In text
+    /// and in JSON it names the window program, why there is no window, an app container's view
+    /// instead of blaming the browser, the strays and the service fields (none when nothing is left
+    /// running), the 1.x version directories left in `bin`, per agent whether an icon was found and
+    /// from where, every workbench readiness state in the same words, and the way back for a
+    /// development build with a missing executable.
     #[test]
     fn doctor_names_every_state_a_person_must_act_on_in_text_and_json() {
         {
