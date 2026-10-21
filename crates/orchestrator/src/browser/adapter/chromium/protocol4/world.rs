@@ -280,12 +280,6 @@ impl Message {
         self.kind
     }
 
-    /// The message as sent: the kind and its members.
-    #[must_use]
-    pub const fn payload(&self) -> &Value {
-        &self.payload
-    }
-
     /// The message as the `call` primitive carries it.
     #[must_use]
     pub fn to_json(&self) -> Value {
