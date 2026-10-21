@@ -176,8 +176,9 @@ Now:
   - The one-line installers never run the GitHub CLI (53ce4654). In Windows PowerShell 5.1 a `gh`
     that was installed but not signed in stopped `get.ps1` before it installed anything, and the
     check could never stop a bad install. The owner wants the installers to need nothing from
-    GitHub but the files (MEMORY.md). `main`, which the short links serve, keeps the old scripts
-    until it advances, unless the owner moves those two files sooner.
+    GitHub but the files (MEMORY.md). At the owner's go, `main`, which the short links serve, took
+    those two scripts at once (2303c404, merged back into `dev` as a3686360). Test-04 then ran
+    the public one-liner in Windows PowerShell 5.1 with a signed-out `gh`: it installed, exit 0.
   - The install never chooses another app's container for an agent (4fac15a7, ADR-0197 amendment
     of 2026-10-20): VS Code, never started on leo-desktop-02, was registered inside the Codex app's
     container and called connected.
@@ -189,6 +190,15 @@ Now:
     extension, answering or cancelling the dialog ends the stall; the release notes say so.
   - Alpine is proven: release run 39508116197 on 627940a8 passed all ten jobs, and test-03 installed
     that bundle with `get.sh` and rang the desk bell in its Chromium (linux-2 L2-14).
+  - The Claude Desktop bundle ships with 2.0.1 instead of ending at 2.0.0 (ADR-0197 amendment of
+    2026-10-20), under the owner's rule that rules serve the end user (MEMORY.md).
+- The 2.0.1 candidate, at the owner's go: version 2.0.1 stamped (fb72dea4), notes in
+  `release/notes-v2.0.1.md`. Release run 39517667200 on dc89cd60 passed all ten jobs, the installs
+  from the bundle on Alpine and Ubuntu 22.04 and 24.04 included. `scripts/check-release-candidate.ps1`
+  verifies the bundle (2.0.1, 19 artifacts, the MCPB among them), and its extension ZIP
+  (`bddfb37a...`) is the one the freeze golden records. Deployed on the owner's machine (a real
+  task passed on 2.0.1). The four test machines upgrade their 2.0.0 installs to it; then the owner's
+  go for the store submission of the 2.0.1 extension and for the cutover.
 - The public one-liner on the real installations, which the cutover went on without: done on
   CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
   service is kept until `--restore`, so a second candidate of one version is installed after an
