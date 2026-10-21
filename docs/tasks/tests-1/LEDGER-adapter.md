@@ -9,14 +9,14 @@ Machine: test-02 (Bluefin). Paths without a crate are under `crates/orchestrator
 Opened on 2026-10-21. Every test of `browser/adapter/` was classified first, read-only, against
 ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (`wire.rs`), A2
 (`keys/tests.rs`) A3 (`world/tests.rs`), A4
-(`assets.rs`) and A5 (`work.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+(`assets.rs`), A5 (`work.rs`) and A6 (`geometry/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 265 |
+| `browser/adapter/` | 337 | 55 | 249 |
 
 ## Slices
 
@@ -29,7 +29,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A2 | `protocol4/keys/tests.rs`: what a press, a text fill and a double click send | 30 | 3 | promise 2, contract 1 | landed (82e4df75) |
 | A3 | `protocol4/world/tests.rs`: what the service reads from a page's answer | 21 | 4 | promise 2, contract 1, defect 1 | landed (a50e4956) |
 | A4 | `protocol4/assets.rs`: the shipped page assets and their frame | 3 | 2 | contract 2 (one also defect 95faf5ee) | landed (008afe1e) |
-| A5 | `work.rs`: the command vocabulary's checks become build-time assertions | 3 | 0 | - | landed (this commit) |
+| A5 | `work.rs`: the command vocabulary's checks become build-time assertions | 3 | 0 | - | landed (355d492c) |
+| A6 | `protocol4/geometry/tests.rs`: a view is current only within its tolerances | 17 | 1 | promise 1 | landed (this commit) |
 
 ## Notes
 
@@ -43,7 +44,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   iframe table proves the single-locator rule end to end); `merge` 37 to 5; `scope` 26 to 4
   (tree's addressable-documents test becomes rows of the admission table; the point-routing test
   is points' all-open row); `tree` 15 to 1 (order and malformed inventory, one inventory test);
-  `geometry` 17 to 0 (the view tolerances become rows of points' refused-point table); `locator.rs`
+  `geometry` 17 to 1 (planned as rows of points' refused-point table, kept instead as one table
+  of the tolerances, because the points rig would have to script drifted viewports); `locator.rs`
   6 to 1 (the stale-lookup binding is interaction's removed-control case); `link` 20 to 5 (the
   unreadable receipt joins the receipt-mapping table, the notice joins the native rows);
   `connection` 16 to 7 (accepted and refused hellos, one table); `golden.rs` 19 to 10 (one table
@@ -51,7 +53,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   limits, and the vocabulary halves of the stop-reason, runtime-state and asset-error tests as rows
   of the closed-names test; no golden file changes); translate 99 to 14 (`tests.rs` 4,
   `interaction.rs` 4, `points.rs` 3, `forms.rs` 3, `script.rs` 1, less the composed ceiling, which
-  `merge` proves, and the fill's followed handle, which `world` proves). Total 55.
+  `merge` proves, and the fill's followed handle, which `world` proves). Total 56 with geometry's one test: one more overlap goes in a later slice.
 - A2: the 27 cut tests restated the key tables, the modifier masks, the wheel tick, the drag
   stride count and the button map, or were cases of the three kept rules: a press types its text
   unless a shortcut modifier is held (Enter as the carriage return a form submits on), a text fill
@@ -75,6 +77,11 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   test, is now two module `const` assertions, so every build checks it: the local ceiling stays
   above the transfer one (`work.rs`), and a returned GIF fits one transfer base64-encoded
   (`wire.rs`, beside `TRANSFER_MAX_BYTES`).
+- A6: kept, one table derived from `POSITION_TOLERANCE`, `DEVICE_SCALE_TOLERANCE` and
+  `ZOOM_TOLERANCE`: a view is current within half its tolerance, stale beyond one and a half, and
+  never current when a value is not a number. Cut: the budget and region tests (restated
+  literals; the language bounds region input), the struct copies and point arithmetic, and the
+  point-routing cases, which points' tests prove through the translator.
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden
