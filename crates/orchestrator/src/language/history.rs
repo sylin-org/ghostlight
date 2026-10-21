@@ -267,9 +267,6 @@ const fn refused_because(reason: ReasonCode) -> &'static str {
     }
 }
 
-/// Maximum child count supported by a composition, including restored history.
-pub const COMPOSITION_STEP_LIMIT: usize = 20;
-
 /// The composition identity; caller labels never supply one.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

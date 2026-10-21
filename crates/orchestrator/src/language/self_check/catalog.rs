@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use super::golden::{check_golden, golden_text, repository_path, CATALOG_GOLDEN};
 use super::schema::{is_valid, violations};
-use crate::language::tool_catalog::EXAMPLE_UPLOAD_PATH;
+use crate::language::catalog::EXAMPLE_UPLOAD_PATH;
 use crate::language::{catalog, decode};
 
 /// An absolute path the decoder accepts on the platform the tests run on.

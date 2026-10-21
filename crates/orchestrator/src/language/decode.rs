@@ -763,7 +763,7 @@ fn validate_flow(value: &RunFlow) -> Result<(), LanguageError> {
     validate_range(
         value.steps.len(),
         1,
-        history::COMPOSITION_STEP_LIMIT,
+        composition::COMPOSITION_STEP_LIMIT,
         "steps",
     )?;
     validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;

@@ -3,7 +3,8 @@
 use super::{push_bounded, AuditRecord, HistoryItem, VecDeque};
 use crate::governance::CapabilitySet;
 use crate::language::composition;
-use crate::language::history::{CompositionKind, OutcomeClass, COMPOSITION_STEP_LIMIT};
+use crate::language::composition::COMPOSITION_STEP_LIMIT;
+use crate::language::history::{CompositionKind, OutcomeClass};
 use crate::language::outcome::Observed;
 use serde::Serialize;
 

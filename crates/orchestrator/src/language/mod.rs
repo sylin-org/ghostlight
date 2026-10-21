@@ -1,4 +1,11 @@
-//! The complete model-facing catalog, typo-closed decoding, and executable defaults.
+//! Ghostlight's language: every word it accepts and every word it says.
+//!
+//! Model-facing: `catalog` advertises the tools, `operation` holds the typed call each decodes to,
+//! `decode` turns a call's JSON into one or refuses it, and `outcome` says what a call did, with
+//! `wait`, `choices`, `handle` and `bounds` holding the closed vocabularies and the limits they
+//! share. Person-facing: `setup`, `deployment`, `workbench`, `readiness`, `policy` and
+//! `environment` word the window, the installer, `doctor` and the policy surfaces. History and the
+//! audit record speak through `history`, `composition`, `audit` and `audit_health`.
 
 pub mod adapter;
 pub mod agent_icon;
@@ -7,6 +14,7 @@ pub mod audit;
 pub mod audit_health;
 mod bounds;
 pub mod capability_map;
+mod catalog;
 pub mod channel_switch;
 pub mod choices;
 pub mod composition;
@@ -33,11 +41,10 @@ pub mod readiness;
 pub(crate) mod self_check;
 pub(crate) mod settlement;
 pub mod setup;
-#[path = "catalog.rs"]
-mod tool_catalog;
 pub mod wait;
 pub mod workbench;
 
+pub use catalog::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
 pub use choices::{
     DiagnosticDetail, DiagnosticSource, DialogAction, FindScope, HistoryDirection, InspectScope,
     OnError, PointerButton, RecordAction, ScrollAmount, ScrollDirection,
@@ -47,7 +54,6 @@ pub(crate) use decode::{decode_flow_step, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTIO
 use decode::{HISTORY_RELOAD, WHEEL_DIRECTIONS};
 pub use handle::HandleKind;
 pub use operation::*;
-pub use tool_catalog::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
 pub use wait::{PageCondition, WaitCondition};
 
 use std::path::Path;

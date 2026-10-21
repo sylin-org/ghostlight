@@ -81,6 +81,9 @@ pub struct StepIssue {
     pub cause: StepCause,
 }
 
+/// Maximum child count supported by a composition, including restored history.
+pub const COMPOSITION_STEP_LIMIT: usize = 20;
+
 /// What live history says of a flow still running: how many of its steps succeeded so far.
 #[must_use]
 pub fn running_summary(completed: usize, total: usize) -> String {

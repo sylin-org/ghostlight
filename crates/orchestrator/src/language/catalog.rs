@@ -206,7 +206,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
             "Run flow",
             &format!(
                 "Run 1 to {} tool calls. tab defaults tab-scoped steps; a step's own tab wins. Later arguments may reference earlier results. Stops at the first failed step by default.",
-                super::history::COMPOSITION_STEP_LIMIT
+                super::composition::COMPOSITION_STEP_LIMIT
             ),
             flow_schema(),
             Hints::browser_action(true),
@@ -1103,7 +1103,7 @@ fn flow_schema() -> Value {
             vec![
                 (
                     "steps",
-                    json!({"type":"array","minItems":1,"maxItems":super::history::COMPOSITION_STEP_LIMIT,"description":"Omitted ids become step_1, step_2, ...","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":FLOW_STEP_ID_CHARS},"tool":{"type":"string","description":"An advertised non-composite tool."},"arguments":{"type":"object","description":"That tool's arguments. Any value may be a reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["tool"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":super::composition::COMPOSITION_STEP_LIMIT,"description":"Omitted ids become step_1, step_2, ...","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":FLOW_STEP_ID_CHARS},"tool":{"type":"string","description":"An advertised non-composite tool."},"arguments":{"type":"object","description":"That tool's arguments. Any value may be a reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["tool"]}}),
                 ),
                 (
                     "on_error",

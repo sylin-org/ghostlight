@@ -74,7 +74,7 @@ impl AuditProjection {
     pub fn with_tools(mut self, tools: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         self.tools = tools
             .into_iter()
-            .take(super::history::COMPOSITION_STEP_LIMIT)
+            .take(super::composition::COMPOSITION_STEP_LIMIT)
             .map(|name| tool_name(name.as_ref()).into())
             .collect();
         self
