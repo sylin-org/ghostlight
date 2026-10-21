@@ -2162,7 +2162,20 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
 }
 
 const INLINE_FILE_LIMIT: usize = 5;
-const UPLOAD_AGGREGATE_BYTES: usize = 5_000_000;
+const UPLOAD_AGGREGATE_BYTES: u64 = 5_000_000;
+
+/// How many bytes standard base64 decodes to, counted exactly: the digits without their `=`
+/// padding give three bytes per four, and a final group of two or three digits one or two more.
+#[must_use]
+pub fn base64_decoded_len(data: &str) -> u64 {
+    let digits = data.trim_end_matches('=').len();
+    let partial = match digits % 4 {
+        2 => 1,
+        3 => 2,
+        _ => 0,
+    };
+    (digits / 4 * 3 + partial) as u64
+}
 
 fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
     let sources = usize::from(!value.paths.is_empty())
@@ -2239,7 +2252,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
         }
     } else {
         validate_range(value.files.len(), 0, INLINE_FILE_LIMIT, "files")?;
-        let mut aggregate = 0usize;
+        let mut aggregate = 0u64;
         for file in &value.files {
             validate_text(&file.name, 255, "name")?;
             validate_text(&file.media_type, 100, "media_type")?;
@@ -2256,7 +2269,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
                     "data_base64 must be standard base64".into(),
                 ));
             }
-            aggregate = aggregate.saturating_add(data.len() / 4 * 3);
+            aggregate = aggregate.saturating_add(base64_decoded_len(&file.data_base64));
         }
         if aggregate > UPLOAD_AGGREGATE_BYTES {
             return Err(LanguageError::Invalid(
@@ -2607,8 +2620,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy, CATALOG_TOOL_COUNT,
-        DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
+        base64_decoded_len, catalog, decode, LanguageError, Operation, ReadMode, ReusePolicy,
+        CATALOG_TOOL_COUNT, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
         EXPECTED_TOOL_NAMES, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, SCROLL_AMOUNT_DEFAULT,
         SCROLL_DIRECTION_DEFAULT, SERVER_INSTRUCTIONS,
     };
@@ -3136,6 +3149,32 @@ mod tests {
             json!({"target":"target_x","paths":["relative.txt"]})
         )
         .is_err());
+    }
+
+    #[test]
+    fn base64_decoded_len_counts_exactly() {
+        use base64::Engine as _;
+        for length in 0..=12 {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(vec![7u8; length]);
+            assert_eq!(base64_decoded_len(&encoded), length as u64, "{encoded}");
+        }
+    }
+
+    #[test]
+    fn inline_uploads_are_bounded_at_exactly_five_million_bytes() {
+        let upload = |data_base64: String| {
+            decode(
+                "browser_upload",
+                json!({"target":"target_x","files":[{"name":"a.bin","data_base64":data_base64}]}),
+            )
+        };
+        // 5,000,000 bytes: 1,666,666 full groups and a last group of two bytes, "AAA=".
+        let at_ceiling = format!("{}=", "A".repeat(6_666_667));
+        assert_eq!(base64_decoded_len(&at_ceiling), 5_000_000);
+        assert!(upload(at_ceiling).is_ok());
+        let over = "A".repeat(6_666_668);
+        assert_eq!(base64_decoded_len(&over), 5_000_001);
+        assert!(upload(over).is_err());
     }
 
     #[test]

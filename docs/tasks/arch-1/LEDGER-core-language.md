@@ -10,8 +10,9 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D4 have landed. Next is L-D5. A slice's hash is filled in by the next slice's
-commit, since a rebase before the push changes it.
+The five defect slices, L-D1 to L-D5, have landed. Next is C17, the first refactor; core-work
+and adapter wait for it. A slice's hash is filled in by the next slice's commit, since a rebase
+before the push changes it.
 
 ## Slices
 
@@ -22,8 +23,8 @@ In order. "After" names what a slice waits for.
 | L-D1 | fix(language): a wheel scroll may leave out its direction, and its amount is checked | - | LANG-3's skeptic note | landed (59c67621) |
 | L-D2 | fix(language): a summary with its coverage note stays within its bound, to the character | - | LANG-6 and its note | landed (69e58321) |
 | L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed (09d78bd9) |
-| L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed |
-| L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | todo |
+| L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
+| L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed |
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | todo |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | todo |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | todo |
@@ -62,3 +63,9 @@ In order. "After" names what a slice waits for.
   `invocation_`, and `<counter>_<8 hex>` after `diag_` (`extension/lib/diagnostics.js`). The set
   of prefixes is unchanged; `snapshot_` and `browser_` stay out of page-text replacement until
   LANG-2's `HandleKind` decides each kind's shape.
+- L-D5: `language::base64_decoded_len` counts the bytes standard base64 decodes to exactly
+  (padding dropped), and the upload decoder sums it, so 5,000,000 bytes pass and 5,000,001 are
+  refused. The executor's `decode_inline_files` decodes for real and already accepted the
+  boundary. For core-work: `work/forms.rs` keeps its own `base64_decoded_len` until WORK-1 reads
+  this one, and the screenshot path estimates the same way the decoder did
+  (`work/reading.rs`, `data.len() / 4 * 3`, against `workspace/mod.rs`'s image ceiling).
