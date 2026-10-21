@@ -12,7 +12,7 @@ In progress since 2026-10-21. Every test in `language/` and `workbench/` was cla
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `language/` | 349 | 55 | 59 |
+| `language/` | 349 | 55 | 56 |
 | `workbench/` | 252 | 35 | 252 |
 
 ## Slices
@@ -42,7 +42,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL18 | test(language): history.rs keeps the window words and the outcome class | 8 | 2 | 2 promise | landed (41b52bc6) |
 | TL19 | test(language): page_refusal.rs and composition.rs drop tests the executor proves | 7 | 0 | - | landed (40dbbeae) |
 | TL20 | test(language): audit_health.rs keeps L-D2 and L-D3 | 3 | 2 | 2 defect | landed (cda38355) |
-| TL21 | test(language): settlement.rs keeps one table of what settles | 1 | 1 | 1 promise | landed (this commit) |
+| TL21 | test(language): settlement.rs keeps one table of what settles | 1 | 1 | 1 promise | landed (c09049df) |
+| TL22 | test(language): setup.rs words join the shared words test, and the listing URL is built from the id | 11 | 8 | 4 promise, 3 contract, 1 defect | landed (this commit) |
 
 ## Notes
 

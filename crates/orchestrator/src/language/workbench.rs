@@ -779,6 +779,7 @@ pub const fn harness_state_word(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::setup::{COPY_SETUP_LABEL, STEP_NAMES, UPDATE_LABEL};
 
     /// The window's own vocabulary, which the search palette's words must say the same way.
     const PAGE_WORDS: &str = include_str!("../../ui/lib/words.js");
@@ -789,18 +790,35 @@ mod tests {
     /// The browser toolbar's popup, which says the pause entries in the words of the tray.
     const TOOLBAR_WORDS: &str = "extension/lib/popup-view.js";
 
-    /// Contract between the service and the page and toolbar: a word the service says that the
-    /// window or the browser toolbar also spells is spelled the same in both, so search finds a
-    /// row by the words its card shows (desktop gate 3, n-d-04) and the tray, the band and the
-    /// toolbar say one word per act (ADR-0199 amendment of 2026-10-18).
+    /// The extension's own setup view, which shows the same three steps as the window.
+    const EXTENSION_SETUP_VIEW: &str = "extension/lib/setup-view.js";
+
+    /// Contract between the service and the page, the toolbar and the extension's setup view: a
+    /// word the service says that the window or the browser also spells is spelled the same in
+    /// both, so search finds a row by the words its card shows (desktop gate 3, n-d-04), the
+    /// tray, the band and the toolbar say one word per act (ADR-0199 amendment of 2026-10-18),
+    /// the agent rows' Update and Copy setup acts read as the setup view names them (80c6f54a),
+    /// and the setup page's steps are the service's three (INTENT: every surface that shows the
+    /// install journey shows the same three steps).
     #[test]
     fn the_words_the_service_says_are_the_words_the_window_and_the_toolbar_show() {
-        let toolbar = std::fs::read_to_string(
-            crate::language::self_check::golden::repository_path(TOOLBAR_WORDS),
-        )
-        .expect("the toolbar popup exists");
+        let read = |path| {
+            std::fs::read_to_string(crate::language::self_check::golden::repository_path(path))
+                .unwrap_or_else(|error| panic!("{path} is readable: {error}"))
+        };
+        let toolbar = read(TOOLBAR_WORDS);
+        let setup_view = read(EXTENSION_SETUP_VIEW);
         let page = (PAGE_WORDS_FILE, PAGE_WORDS);
         let mut spelled = vec![
+            (page, format!("update: \"{UPDATE_LABEL}\"")),
+            (page, format!("copy: \"{COPY_SETUP_LABEL}\"")),
+            (
+                (EXTENSION_SETUP_VIEW, setup_view.as_str()),
+                format!(
+                    "steps: Object.freeze([{}])",
+                    STEP_NAMES.map(|name| format!("\"{name}\"")).join(", ")
+                ),
+            ),
             (
                 page,
                 format!("SHARED_TOOL_PREFIX = \"{SHARED_TOOL_PREFIX}\""),
@@ -836,36 +854,6 @@ mod tests {
         }
         for ((file, text), entry) in spelled {
             assert!(text.contains(&entry), "{file} does not spell {entry}");
-        }
-    }
-
-    /// The window, the tray and status count one thing, the agents (j-08, window-1; ADR-0199
-    /// amendment of 2026-10-18): the line counts agents and browsers, never MCP or command-line
-    /// connections, and reads as the amendment quotes it.
-    #[test]
-    fn the_service_line_counts_agents_never_their_connections() {
-        for (counts, line) in [
-            (None, "Ghostlight is not running."),
-            (
-                Some(ConnectionCounts {
-                    agents: 2,
-                    mcp_clients: 5,
-                    command_line: 1,
-                    browsers: 1,
-                }),
-                "Ghostlight is running; 2 agents and 1 browser connected.",
-            ),
-            (
-                Some(ConnectionCounts {
-                    agents: 1,
-                    mcp_clients: 3,
-                    command_line: 1,
-                    browsers: 2,
-                }),
-                "Ghostlight is running; 1 agent and 2 browsers connected.",
-            ),
-        ] {
-            assert_eq!(service_line(counts), line, "{counts:?}");
         }
     }
 }

@@ -44,9 +44,34 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::environment::{run_by_full_path, Environment, OPEN_NEW_TERMINAL};
+use crate::install::native_host::STORE_EXTENSION_ID;
 
-/// The Chrome Web Store listing of the Ghostlight extension.
-pub const STORE_LISTING_URL: &str = "https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl";
+/// Where the Chrome Web Store lists an extension, before its id.
+const STORE_DETAIL_PAGE: &str = "https://chromewebstore.google.com/detail/ghostlight-in-browser/";
+
+/// The bytes of [`STORE_LISTING_URL`]: the store's detail page followed by the id the native host
+/// admits, joined at compile time so the two cannot drift.
+const STORE_LISTING_BYTES: [u8; STORE_DETAIL_PAGE.len() + STORE_EXTENSION_ID.len()] = {
+    let mut bytes = [0; STORE_DETAIL_PAGE.len() + STORE_EXTENSION_ID.len()];
+    let (page, id) = (STORE_DETAIL_PAGE.as_bytes(), STORE_EXTENSION_ID.as_bytes());
+    let mut index = 0;
+    while index < bytes.len() {
+        bytes[index] = if index < page.len() {
+            page[index]
+        } else {
+            id[index - page.len()]
+        };
+        index += 1;
+    }
+    bytes
+};
+
+/// The Chrome Web Store listing of the Ghostlight extension: the listing of the extension the
+/// native host admits ([`STORE_EXTENSION_ID`]), so Add and every Next line send a person there.
+pub const STORE_LISTING_URL: &str = match std::str::from_utf8(&STORE_LISTING_BYTES) {
+    Ok(url) => url,
+    Err(_) => panic!("the store listing joins two ASCII strings"),
+};
 
 /// The first request a person gives their agent. It works on a page Sylin keeps for the purpose.
 pub const PROMPT: &str = "Open sylin.org/ghostlight/demo/desk and ring the bell.";
@@ -1137,13 +1162,10 @@ fn join_list(names: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::native_host::STORE_EXTENSION_ID;
     use crate::language::self_check::golden::repository_path;
 
     /// The window's setup page, which renders the view and posts its acts back.
     const SETUP_PAGE: &str = "crates/orchestrator/ui/lib/setup-view.js";
-    /// The extension's own setup view, which shows the same three steps.
-    const EXTENSION_SETUP_VIEW: &str = "extension/lib/setup-view.js";
     /// The kit stylesheet, which styles the lantern.
     const KIT_CSS: &str = "extension/kit.css";
     /// The profile directory the test browsers keep the extension in.
@@ -1506,32 +1528,6 @@ mod tests {
         }
     }
 
-    /// Contract with `ui/lib/words.js` (80c6f54a) and `extension/lib/setup-view.js` (INTENT:
-    /// every surface that shows the install journey shows the same three steps): each word
-    /// another surface repeats is the one this module says.
-    #[test]
-    fn the_words_another_surface_repeats_are_the_services() {
-        let page = include_str!("../../ui/lib/words.js");
-        for line in [
-            format!("updatable: \"{WORD_NEEDS_UPDATE}\""),
-            format!("by_hand: \"{WORD_BY_HAND}\""),
-            format!("update: \"{UPDATE_LABEL}\""),
-            format!("copy: \"{COPY_SETUP_LABEL}\""),
-        ] {
-            assert!(page.contains(&line), "the page does not say {line}");
-        }
-        let extension = std::fs::read_to_string(repository_path(EXTENSION_SETUP_VIEW))
-            .expect("the extension's setup view is readable");
-        let steps = format!(
-            "steps: Object.freeze([{}])",
-            STEP_NAMES.map(|name| format!("\"{name}\"")).join(", ")
-        );
-        assert!(
-            extension.contains(&steps),
-            "{EXTENSION_SETUP_VIEW} does not say {steps}"
-        );
-    }
-
     /// Contract with the window's setup page: every stage, step state, row tone and action kind
     /// the view serializes is a value `ui/lib/setup-view.js` knows, every light is one
     /// `extension/kit.css` styles, and a step the page posts back to `/api/setup/act` without a
@@ -1620,13 +1616,6 @@ mod tests {
             serde_json::json!({ "kind": "copy_setup", "agent": "goose" }),
             "the page reads the agent to copy its setup"
         );
-    }
-
-    /// Contract with `install::native_host::STORE_EXTENSION_ID`: Add and every Next line send a
-    /// person to the listing of the extension the native host admits.
-    #[test]
-    fn the_listing_url_names_the_store_extension() {
-        assert!(STORE_LISTING_URL.ends_with(STORE_EXTENSION_ID));
     }
 
     /// ACCEPTANCE D21: a real install prints the version, where Ghostlight lives, which agents
