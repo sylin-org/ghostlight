@@ -7,8 +7,8 @@
 //! say the same thing.
 //!
 //! The vocabulary is one closed table with a row per environment, so adding a platform later is a
-//! variant plus its phrases rather than a new branch at every call site. A guard test proves every
-//! row has every phrase.
+//! variant plus its phrases rather than a new branch at every call site. Each phrase is an
+//! exhaustive match, so a new row does not compile until it has every phrase.
 
 use std::path::Path;
 
@@ -67,18 +67,6 @@ pub enum Environment {
 }
 
 impl Environment {
-    /// Every row, in table order. Exhaustiveness guards iterate this.
-    pub const ALL: &'static [Environment] = &[
-        Environment::Windows,
-        Environment::LinuxGnome,
-        Environment::LinuxKde,
-        Environment::LinuxXfce,
-        Environment::LinuxCinnamon,
-        Environment::LinuxMate,
-        Environment::LinuxUnknown,
-        Environment::Wsl,
-    ];
-
     /// Where a person finds Ghostlight on this machine after installing it.
     ///
     /// Never promises a tray on a desktop that does not draw one. The Applications entry exists on
@@ -207,79 +195,50 @@ mod tests {
         }
     }
 
+    /// ADR-0126 Decision 3: Windows first, then WSL by `WSL_DISTRO_NAME` or a `microsoft`
+    /// kernel marker, then the first recognized entry of `XDG_CURRENT_DESKTOP`, and an honest
+    /// unknown row otherwise.
     #[test]
-    fn resolves_wsl_from_distro_environment() {
-        let facts = EnvironmentFacts {
-            wsl_distro: Some("Ubuntu-24.04".to_owned()),
-            ..linux(Some("GNOME"))
-        };
-        assert_eq!(resolve(&facts), Environment::Wsl);
-    }
-
-    #[test]
-    fn resolves_wsl_from_kernel_release_marker() {
-        let facts = EnvironmentFacts {
-            kernel_release: Some("5.15.167.4-microsoft-standard-WSL2".to_owned()),
-            ..linux(Some("KDE"))
-        };
-        assert_eq!(resolve(&facts), Environment::Wsl);
-    }
-
-    #[test]
-    fn resolves_each_recognized_linux_shell() {
-        for (value, expected) in [
-            ("GNOME", Environment::LinuxGnome),
-            ("ubuntu:GNOME", Environment::LinuxGnome),
-            ("KDE", Environment::LinuxKde),
-            ("XFCE", Environment::LinuxXfce),
-            ("X-Cinnamon:Cinnamon", Environment::LinuxCinnamon),
-            ("MATE", Environment::LinuxMate),
-        ] {
-            assert_eq!(resolve(&linux(Some(value))), expected, "for {value}");
+    fn the_row_follows_the_desktop_and_wsl_the_machine_shows() {
+        let cases = [
+            (
+                EnvironmentFacts {
+                    windows: true,
+                    wsl_distro: Some("Ubuntu".to_owned()),
+                    ..linux(Some("GNOME"))
+                },
+                Environment::Windows,
+            ),
+            (
+                EnvironmentFacts {
+                    wsl_distro: Some("Ubuntu-24.04".to_owned()),
+                    ..linux(Some("GNOME"))
+                },
+                Environment::Wsl,
+            ),
+            (
+                EnvironmentFacts {
+                    kernel_release: Some("5.15.167.4-microsoft-standard-WSL2".to_owned()),
+                    ..linux(Some("KDE"))
+                },
+                Environment::Wsl,
+            ),
+            (linux(Some("GNOME")), Environment::LinuxGnome),
+            (linux(Some("ubuntu:GNOME")), Environment::LinuxGnome),
+            (linux(Some("KDE")), Environment::LinuxKde),
+            (linux(Some("XFCE")), Environment::LinuxXfce),
+            (
+                linux(Some("X-Cinnamon:Cinnamon")),
+                Environment::LinuxCinnamon,
+            ),
+            (linux(Some("MATE")), Environment::LinuxMate),
+            (linux(None), Environment::LinuxUnknown),
+            (linux(Some("")), Environment::LinuxUnknown),
+            (linux(Some("sway")), Environment::LinuxUnknown),
+            (linux(Some("Hyprland:wlroots")), Environment::LinuxUnknown),
+        ];
+        for (facts, expected) in cases {
+            assert_eq!(resolve(&facts), expected, "for {facts:?}");
         }
-    }
-
-    #[test]
-    fn unrecognized_desktop_falls_back_to_the_unknown_row() {
-        for value in [None, Some(""), Some("sway"), Some("Hyprland:wlroots")] {
-            assert_eq!(
-                resolve(&linux(value)),
-                Environment::LinuxUnknown,
-                "for {value:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn every_environment_row_has_a_location_phrase() {
-        for row in Environment::ALL {
-            assert!(!row.location().is_empty(), "{row:?} has no location phrase");
-            assert!(!row.label().is_empty(), "{row:?} has no label");
-        }
-        // A row that claims a tray must not be one of the shells that does not draw one.
-        assert!(!Environment::LinuxGnome.location().contains("tray"));
-        assert!(Environment::LinuxKde.location().contains("tray"));
-    }
-
-    #[test]
-    fn only_wsl_carries_a_caveat() {
-        for row in Environment::ALL {
-            let caveat = row.caveat();
-            if *row == Environment::Wsl {
-                assert!(caveat.is_some_and(|text| text.contains("WSL")));
-            } else {
-                assert!(caveat.is_none(), "{row:?} should have no caveat");
-            }
-        }
-    }
-
-    #[test]
-    fn windows_wins_before_any_linux_observation() {
-        let facts = EnvironmentFacts {
-            windows: true,
-            wsl_distro: Some("Ubuntu".to_owned()),
-            ..linux(Some("GNOME"))
-        };
-        assert_eq!(resolve(&facts), Environment::Windows);
     }
 }

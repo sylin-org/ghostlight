@@ -12,7 +12,7 @@ In progress since 2026-10-21. Every test in `language/` and `workbench/` was cla
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `language/` | 349 | 55 | 220 |
+| `language/` | 349 | 55 | 214 |
 | `workbench/` | 252 | 35 | 252 |
 
 ## Slices
@@ -28,7 +28,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL4 | test(language): area.rs keeps the one test of what left_out may carry | 8 | 1 | 1 contract | landed (26df3a1a) |
 | TL5 | test(language): setup.rs keeps the 9 tests of the install journey | 44 | 9 | 4 promise, 3 contract, 2 defect | landed (2c198639) |
 | TL6 | test(language): deployment.rs keeps the way back and the dry run | 23 | 2 | 1 contract, 1 defect | landed (f7283728) |
-| TL7 | test(language): readiness.rs keeps the precedence and what the answer means | 15 | 2 | 2 promise | landed (this commit) |
+| TL7 | test(language): readiness.rs keeps the precedence and what the answer means | 15 | 2 | 2 promise | landed (d09fc923) |
+| TL8 | test(language): environment.rs keeps one table of the machine row | 7 | 1 | 1 promise | landed (this commit) |
 
 ## Notes
 
