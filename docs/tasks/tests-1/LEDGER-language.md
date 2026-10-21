@@ -8,18 +8,22 @@ Machine: test-01 (CachyOS). Paths without a crate are under `crates/orchestrator
 
 Both areas are cut, on 2026-10-21. `language/` closed at 55 of 349, its budget, in TL1-TL23.
 `workbench/` closed at 37 of 252 in TW1-TW6: its budget of 35, plus the U-D5 and U-D6
-reproductions, which landed after the allocation was written. The lane asked the coordinator for 2
-from the reserve for them. Every test was first classified read-only (keep, rewrite or delete,
+reproductions, which landed after the allocation was written. The coordinator granted 2 from the
+reserve for them. Every test was first classified read-only (keep, rewrite or delete,
 each with what it protects), and one review per area fitted the plans into the budget without
 merging unrelated behaviors. The cut found three product defects, each fixed first with one test:
-arch-1 L-D7 (decoder), U-D5 and U-D6 (the loopback workbench). Nothing is open in this lane.
+arch-1 L-D7 (decoder), U-D5 and U-D6 (the loopback workbench).
+
+Next: `governance/`, moved here from the work lane on 2026-10-21 with its budget of 40. Classify
+every test read-only first, then cut one file per commit.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `language/` | 349 | 55 | 55 |
-| `workbench/` | 252 | 35 + 2 reserve (asked) | 37 |
+| `workbench/` | 252 | 35 + 2 reserve | 37 |
+| `governance/` | 136 | 40 | 136 |
 
 ## Slices
 

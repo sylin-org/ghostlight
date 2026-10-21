@@ -12,14 +12,14 @@ Cut order: the inline modules, then `work/tests/` file by file (golden, channels
 audit_health, credentials, controls, control, configured_authority, catalog_authority, documents,
 presentation, composition, findings, replacement, restarts, availability, protocol4, rebound,
 tabs), then `workspace/tests.rs`, then `execution.rs`. A test that folds into another file's test is
-added there in the commit that deletes it. Then `governance/`.
+added there in the commit that deletes it. `governance/` moved to the language lane on 2026-10-21.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `work/` and `workspace/` | 373 | 55 | 336 |
-| `governance/` | 136 | 40 | 136 |
+| `governance/` | 136 | 40 | moved to the language lane (2026-10-21) |
 
 ## Slices
 

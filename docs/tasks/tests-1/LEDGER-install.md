@@ -13,7 +13,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 214 |
-| `crates/desktop` | 161 | 20 | 161 |
+| `crates/desktop` | 161 | 20 | moved to the adapter lane (2026-10-21) |
 
 ## Slices
 
@@ -56,8 +56,9 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 - From the coordinator (2026-10-21): `crates/desktop/src/link.rs`'s golden test now checks the
   service's longest tray, its bearer and its address with the shell's own `validate()`,
   `well_formed_bearer` and `validate_workbench_url`, against the desktop goldens the service writes.
-  Keep that test in this lane's `crates/desktop` cut; `tray.rs`'s `assert_eq!(MAX_TOOLTIP_LEN, 127)`
-  only restates the number and can go.
+  Keep that test in the `crates/desktop` cut; `tray.rs`'s `assert_eq!(MAX_TOOLTIP_LEN, 127)`
+  only restates the number and can go. (`crates/desktop` moved to the adapter lane on 2026-10-21;
+  the note is copied into its ledger.)
 - The install area's plan (2026-10-21), from a read of every test against ADR-0204 Decision 1,
   folded so each kept test is one behavior and keeps every meaningful assertion it absorbs:
   install/mod.rs and its neighbours 16; deployment, swap, record, reconcile and

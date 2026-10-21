@@ -17,6 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
+| `crates/desktop` | 161 | 20 | 158 |
 
 ## Slices
 
@@ -46,6 +47,14 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A19 | `protocol4/tree/tests.rs`: an inventory decodes to a tree or to a refusal | 2 | 1 | contract 1 | landed (this commit) |
 
 ## Notes
+
+- From the coordinator (2026-10-21): `crates/desktop` moves here from the install lane, with its
+  budget of 20 (161 tests at the batch's opening, 158 now). Some of its code and tests compile only on
+  Windows: send any change there to the coordinator to check on Windows before it lands. Its
+  `link.rs` golden test checks the service's longest tray, its bearer and its address with the
+  shell's own `validate()`, `well_formed_bearer` and `validate_workbench_url`, against the desktop
+  goldens the service writes: keep it. `tray.rs`'s `assert_eq!(MAX_TOOLTIP_LEN, 127)` only restates
+  the number and can go.
 
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
