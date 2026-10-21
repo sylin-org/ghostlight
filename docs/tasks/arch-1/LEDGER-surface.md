@@ -119,6 +119,8 @@ C3c), then the rows below.
 | U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | todo |
 | U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | todo |
 | U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first | todo |
+| U-D5 | fix(workbench): a window with the bearer always finds room among the workbench's connections | - | found by test-01's tests-1 classification, 2026-10-21 (Notes, second sweep); test-01 takes it first in `workbench/` | todo |
+| U-D6 | fix(workbench): a refused HEAD request carries no body | - | the same classification; test-01 | todo |
 | SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1 | todo |
 | SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | todo |
 | SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | todo |
@@ -137,3 +139,9 @@ C3c), then the rows below.
   which source paused, so check whether a repeated control from another source changes what a
   screen shows before deciding; publish only when the state or the pausing source changed. The
   pilot deletes the test.
+- U-D5 and U-D6, found by test-01 classifying `workbench/`'s tests on 2026-10-21 and decided by the
+  coordinator for what delights the person. U-D5: the loopback workbench's 32-connection cap is
+  shared with callers that carry no bearer, so any local account could hold all 32 open and lock the
+  person's own window out; connections without a bearer get their own smaller share. U-D6: a HEAD
+  request that is refused (401, 403, 404, 421) is answered with a JSON body, which an HTTP HEAD
+  answer never carries (RFC 9110); only page files and agent images stripped it.

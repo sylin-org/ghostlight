@@ -29,6 +29,7 @@ In order. "After" names what a slice waits for.
 | S-D4 | fix(cli): a start relaunches itself, so a tree kill of its starter cannot reach the service | - | leo-desktop-02's finding while proving S-D3 (ADR-0199 amendment of 2026-10-21); cross-lane `cli/parse.rs`, `cli/mod.rs`, `cli/desktop.rs`, `cli/start.rs` under test-04's hold | landed (this commit) |
 | S-D5 | fix(intake): a batch is answered as one array, its tool results in it | - | tests-1's service plan; the owner's question of 2026-10-21, sent back to the coordinator (Notes) | landed (this commit) |
 | S-D6 | fix(intake): a client before MCP 2025-06-18 gets the lean JSON in a cut-off or expired answer too | - | tests-1's service plan (Notes) | landed (this commit) |
+| S-D7 | fix(browser): a browser with no Ghostlight extension reads as the missing extension, with the step to add it | - | found on leo-desktop-02 and by test-01, 2026-10-21 (Notes) | todo |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
 | BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
@@ -120,3 +121,10 @@ A kill-on-close job would need the relay to break away; none has been seen.
   the cut-off and expired templates at the latest revision, so a client before 2025-06-18 gets
   them without the lean JSON copy in the text block that C21 promises it for every other answer.
   Each lands with one test that reproduces it.
+- S-D7, found on 2026-10-21: leo-desktop-02's Chrome started with no Ghostlight extension, and the
+  agent was told "The Ghostlight adapter did not connect in time after the browser started." The
+  outcome vocabulary already has `browser_extension_absent`, with its sentence and its step, but
+  nothing constructs `RecoveryFailure::ExtensionAbsent` (test-01 found it unreachable while cutting
+  `language/`). The browser profiles the installer reads say whether a profile holds the extension
+  (`install/browser_profiles.rs`); recovery should use that, so a start into a browser with no
+  Ghostlight extension says so and how to add it.
