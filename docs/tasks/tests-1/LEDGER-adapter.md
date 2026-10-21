@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 106 |
+| `crates/desktop` | 161 | 20 | 98 |
 
 ## Slices
 
@@ -46,7 +46,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A18 | `protocol4/translate/tests.rs`: no unguarded content, the diagnostics binding and a changed document | 18 | 4 | contract 1, defect 3 | landed (8be0e02c) |
 | A19 | `protocol4/tree/tests.rs`: an inventory decodes to a tree or to a refusal | 2 | 1 | contract 1 | landed (fb1b7b29) |
 | D1 | `crates/desktop/src/machine.rs`: what the shell starts and when | 37 | 5 | promise 4, defect 1 | landed (60dbba71; its ledger row came in the next commit) |
-| D2 | `crates/desktop/src/link.rs`: the frames the service writes, the bearer and the link's life | 26 | 3 | contract 2, promise 1 | landed (this commit) |
+| D2 | `crates/desktop/src/link.rs`: the frames the service writes, the bearer and the link's life | 26 | 3 | contract 2, promise 1 | landed (e3d4bb73) |
+| D3 | `crates/desktop/src/states.rs`: a state screen navigates nowhere else | 9 | 1 | promise 1 | landed (this commit) |
 
 ## Notes
 
@@ -81,6 +82,10 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   tooltip or item lists, which earlier service changes had to edit. Cut: restated wire words, a
   private bearer shape helper, reader internals, socket writes the goldens prove, and error
   passthroughs. The link test's 200 ms wait for a second end goes: `on_end` is `FnOnce`.
+- D3: kept one: a state screen loads its own document and takes its buttons as presses, and
+  refuses every other navigation (gate 11). Cut: tests that restated the screens' words, buttons,
+  classes and the const document's contents, and an escape test of text that is only ever
+  constant. The `SCREENS` list goes with them.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against

@@ -232,92 +232,6 @@ fn escape(text: &str) -> String {
 mod tests {
     use super::*;
 
-    const SCREENS: [StateScreen; 4] = [
-        StateScreen::Starting,
-        StateScreen::Updating,
-        StateScreen::Restarting,
-        StateScreen::Stopped,
-    ];
-
-    #[test]
-    fn each_state_says_its_own_words() {
-        assert_eq!(StateScreen::Starting.words(), "Starting Ghostlight...");
-        assert_eq!(StateScreen::Updating.words(), "Updating Ghostlight...");
-        assert_eq!(
-            StateScreen::Restarting.words(),
-            "Ghostlight is restarting..."
-        );
-        assert_eq!(
-            StateScreen::Stopped.words(),
-            "Ghostlight stopped unexpectedly."
-        );
-    }
-
-    #[test]
-    fn only_the_stopped_state_has_buttons_and_they_are_start_and_diagnostics() {
-        for screen in SCREENS {
-            let expected: &[StateButton] = if screen == StateScreen::Stopped {
-                &[StateButton::Start, StateButton::Diagnostics]
-            } else {
-                &[]
-            };
-            assert_eq!(screen.buttons(), expected, "{screen:?}");
-        }
-        assert_eq!(StateButton::Start.label(), "Start");
-        assert_eq!(StateButton::Diagnostics.label(), "Diagnostics");
-    }
-
-    #[test]
-    fn a_document_holds_its_words_and_its_buttons_and_nothing_left_to_fill() {
-        for screen in SCREENS {
-            let document = document(screen);
-            assert!(document.contains(screen.words()), "{screen:?}");
-            for button in screen.buttons() {
-                assert!(
-                    document.contains(&format!(
-                        "<a class=\"button\" href=\"{}\">{}</a>",
-                        button.address(),
-                        button.label()
-                    )),
-                    "{screen:?} {button:?}"
-                );
-            }
-            if screen.buttons().is_empty() {
-                assert!(!document.contains("<a "), "{screen:?}");
-            }
-            for placeholder in ["{ground}", "{class}", "{words}", "{buttons}"] {
-                assert!(!document.contains(placeholder), "{screen:?} {placeholder}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_document_has_the_workbench_ground_and_no_script_and_loads_nothing() {
-        let document = document(StateScreen::Starting);
-        assert!(document.contains("--bg: #0f0e12;"));
-        assert!(!document.contains("<script"));
-        assert!(!document.contains("src="));
-        assert!(!document.contains("@import"));
-        assert!(document.contains("default-src 'none'"));
-        assert!(document.is_ascii());
-    }
-
-    #[test]
-    fn a_document_follows_reduced_motion_and_forced_colors() {
-        let document = document(StateScreen::Stopped);
-        assert!(document.contains("@media (prefers-reduced-motion: reduce)"));
-        assert!(document.contains("@media (forced-colors: active)"));
-        assert!(document.contains("ButtonText"));
-        assert!(document.contains("Highlight"));
-    }
-
-    #[test]
-    fn a_working_state_breathes_and_a_stopped_one_does_not() {
-        assert!(document(StateScreen::Restarting).contains("<body class=\"working\">"));
-        assert!(document(StateScreen::Stopped).contains("<body class=\"stopped\">"));
-    }
-
-    #[test]
     fn the_document_itself_loads_and_a_button_is_a_press() {
         assert_eq!(navigation("about:blank"), Navigation::Allow);
         assert_eq!(
@@ -334,8 +248,10 @@ mod tests {
         );
     }
 
+    /// A state screen loads its own document and takes its buttons as presses, and refuses every
+    /// other navigation (ACCEPTANCE, gate 11: any other navigation is refused).
     #[test]
-    fn every_other_address_is_refused() {
+    fn a_state_screen_loads_itself_and_its_buttons_and_nothing_else() {
         for url in [
             "",
             "http://127.0.0.1:41234/",
@@ -350,13 +266,7 @@ mod tests {
         ] {
             assert_eq!(navigation(url), Navigation::Refuse, "{url}");
         }
-    }
 
-    #[test]
-    fn text_is_escaped_where_it_enters_the_document() {
-        assert_eq!(
-            escape("a<b>&\"c\""),
-            "a&lt;b&gt;&amp;&quot;c&quot;".to_owned()
-        );
+        the_document_itself_loads_and_a_button_is_a_press();
     }
 }
