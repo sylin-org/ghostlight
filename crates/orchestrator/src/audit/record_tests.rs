@@ -115,7 +115,8 @@ fn navigate_succeeded() -> AuditRecord {
         readiness: Some("complete".into()),
         ..Observed::default()
     })
-    .with_browser(Some("Chromium".into()));
+    .with_browser(Some("Chromium".into()))
+    .with_browser_id(Some("browser_7d1c0a9e5b2f4c38a1e6d0b9f3a2c5e8".into()));
     record.permissions = trace;
     fixed(record, 412)
 }

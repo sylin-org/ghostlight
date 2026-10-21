@@ -15,13 +15,23 @@ use crate::language::coverage::Coverage;
 use crate::language::outcome::Observed;
 use crate::language::{self, Operation};
 
+/// The browser that received a command of a frame: its install-local id, and its name when it
+/// reported one. Two profiles of one browser are two ids (ADR-0203 Decision 4.6).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct Reached {
+    /// The browser identity the command went to.
+    pub(super) id: String,
+    /// Its product name, or family when it reports none.
+    pub(super) name: Option<String>,
+}
+
 /// The closed set of facts one frame gathers on its way to completion.
 #[derive(Default)]
 pub(super) struct Findings {
     /// What the page showed, merged at each browser crossing.
     pub(super) observed: Observed,
-    /// The browser that received a command of this frame, by name.
-    pub(super) reached: Option<String>,
+    /// The browser that received a command of this frame.
+    pub(super) reached: Option<Reached>,
     /// The browser this frame's crossings go to, by id, once the frame chose one.
     ///
     /// Until a tab binds the workspace to a browser, the frame's own first choice holds for the
@@ -78,12 +88,12 @@ impl FrameFindings {
     }
 
     /// Remember the browser that received one of this frame's commands; the latest one stands.
-    pub(super) fn reach(&self, browser: String) {
+    pub(super) fn reach(&self, browser: Reached) {
         self.0.borrow_mut().reached = Some(browser);
     }
 
     /// The browser this frame has reached so far, if any.
-    pub(super) fn reached(&self) -> Option<String> {
+    pub(super) fn reached(&self) -> Option<Reached> {
         self.0.borrow().reached.clone()
     }
 

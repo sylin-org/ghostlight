@@ -45,5 +45,6 @@
       "image": "claude.exe"
     }
   },
-  "browser": "Chromium"
+  "browser": "Chromium",
+  "browser_id": "browser_7d1c0a9e5b2f4c38a1e6d0b9f3a2c5e8"
 }

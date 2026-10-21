@@ -132,6 +132,11 @@ pub struct AuditRecord {
     /// or one that needed no browser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<String>,
+    /// The install-local, random id of the browser that received this work's commands, so two
+    /// profiles of one browser are two browsers in the record (ADR-0203 Decision 4.6). Opaque and
+    /// bounded, a declared fact, never authority. Absent when no browser received any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_id: Option<String>,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -186,6 +191,7 @@ impl AuditRecord {
             channel: None,
             provenance: None,
             browser: None,
+            browser_id: None,
         }
     }
 
@@ -226,6 +232,13 @@ impl AuditRecord {
     #[must_use]
     pub fn with_browser(mut self, browser: Option<String>) -> Self {
         self.browser = browser;
+        self
+    }
+
+    /// Attach the id of the browser that received the work's commands, if one did.
+    #[must_use]
+    pub fn with_browser_id(mut self, browser_id: Option<String>) -> Self {
+        self.browser_id = browser_id;
         self
     }
 
@@ -321,10 +334,18 @@ impl JsonlAuditSink {
             bytes.insert(0, b'\n');
         }
         let result = (|| {
-            let mut file = private::file_options()
-                .create(true)
-                .append(true)
-                .open(&self.path)?;
+            let mut file = match private::file_options().append(true).open(&self.path) {
+                // A log that does not exist yet is created owner-only, as every private record is.
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    match crate::install::record::create_private(&self.path) {
+                        Err(raced) if raced.kind() == io::ErrorKind::AlreadyExists => {
+                            private::file_options().append(true).open(&self.path)?
+                        }
+                        created => created?,
+                    }
+                }
+                opened => opened?,
+            };
             file.write_all(&bytes)?;
             file.sync_all()
         })();
@@ -848,6 +869,20 @@ mod tests {
     /// as unreadable without erasing the good receipt before it; a destination that goes away
     /// leaves a receipt unconfirmed; and once the destination is repaired, recovery reopens it,
     /// new receipts are saved after the gap marker, and the missing receipt is never written.
+    /// Promise (ADR-0203 C19b, I1): a log that does not exist yet is created owner-only, as every
+    /// private record is, and later lines append to it.
+    #[test]
+    fn a_new_audit_log_is_owner_only() {
+        let root = Scratch::named("audit-private");
+        let path = root.join("audit.jsonl");
+        let sink = JsonlAuditSink::new(&path);
+        sink.record(&record("first")).unwrap();
+        sink.record(&record("second")).unwrap();
+        crate::install::record::assert_owner_only(&path);
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(text.lines().filter(|line| !line.is_empty()).count(), 2);
+    }
+
     #[test]
     fn actual_file_repair_keeps_good_history_and_reports_torn_and_missing_entries() {
         let root = Scratch::named("audit-repair");

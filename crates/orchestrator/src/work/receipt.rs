@@ -110,7 +110,13 @@ impl ApplicationExecutor {
         .with_policy(snapshot, terminal.decision)
         .with_observation(observed)
         // The record names a browser only when one received a command of this frame.
-        .with_browser(findings.reached);
+        .with_browser(
+            findings
+                .reached
+                .as_ref()
+                .and_then(|reached| reached.name.clone()),
+        )
+        .with_browser_id(findings.reached.map(|reached| reached.id));
         record.step = step;
         record.permissions = findings.permissions;
         let storage = self.audit.record_with_provenance(&record, Some(provenance));

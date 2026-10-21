@@ -1434,8 +1434,11 @@ impl ApplicationExecutor {
                 written: &written,
             },
         );
-        if let Some(name) = name.filter(|_| written.load(Ordering::SeqCst)) {
-            context.findings.reach(name);
+        if written.load(Ordering::SeqCst) {
+            context.findings.reach(findings::Reached {
+                id: browser.into(),
+                name,
+            });
         }
         if outcome.is_ok() && !asked.load(Ordering::SeqCst) {
             self.confirm_crossing(context, browser, tab)?;

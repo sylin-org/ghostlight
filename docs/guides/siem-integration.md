@@ -64,7 +64,8 @@ its bounded History view from the same file.
       "image": "claude.exe"
     }
   },
-  "browser": "Chromium"
+  "browser": "Chromium",
+  "browser_id": "browser_7d1c0a9e5b2f4c38a1e6d0b9f3a2c5e8"
 }
 ```
 
@@ -98,6 +99,7 @@ when the service writes a different shape.
 | `channel` | `mcp` or `cli`, as Ghostlight's own peer declared it. Attribution, and what a policy's channel switch decides by; never proof of who called. |
 | `provenance` | Opaque `connection_id`, `observed_at_ms` (when the service accepted the connection) and `channel` of the connection that sent the work, its optional `claimed_agent` and its optional `source`. `claimed_agent` is the catalog id of the agent the connection's client claimed to be, kept only when that claim names an agent in Ghostlight's catalog; it is the client's claim, never verified, and the client's own words are never written. `source` is the app Ghostlight saw start that connection, read from the operating system and never from the client. `source.agent` is the catalog id of the agent whose installed app it is, when one is; `source.image` is that app's executable file name, or the nearest program that is not a shell or interpreter, never a path. Attribution, not authority. |
 | `browser` | Browser family or product name that performed the work. |
+| `browser_id` | Optional. The install-local, random id of the browser that performed the work, so two profiles of one browser are two ids. Opaque; it grants nothing. |
 
 Readers ignore any field they do not know and never write it back, so a collector, `ghostlight
 policy simulate` and the workbench read lines written by a later release. A field this version
