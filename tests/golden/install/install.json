@@ -1,0 +1,7 @@
+{
+  "service_version": "2.0.0",
+  "relay_revision": "5",
+  "service_sha256": "9df6b026a8c6c26e3c3acd2370a16e93fffdc0015ff5bd879218788025db0280",
+  "edge_sha256": "a1cb100f57e971cacf269e7c26e4630a25a8e9d4bdd35e32df1a80b66b896254",
+  "channel": "development"
+}

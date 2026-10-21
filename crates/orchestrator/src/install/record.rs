@@ -538,6 +538,37 @@ mod tests {
         malformed: Vec<String>,
     }
 
+    /// The record the service writes as the npm and mcpb launchers read it, which their own tests
+    /// can read too.
+    const INSTALL_GOLDEN: &str = include_str!("../../../../tests/golden/install/install.json");
+
+    /// Protects the coordinator's reserve contract between the service and its launchers:
+    /// `bin/install.json` is written byte for byte as `tests/golden/install/install.json` records,
+    /// so `service_version` and `channel`, which the npm and mcpb launchers read, keep their names,
+    /// their spelling and the development channel's value, and the golden reads back as the record.
+    #[test]
+    fn install_json_is_written_as_the_golden_the_launchers_read() {
+        let record = InstallRecord {
+            service_version: "2.0.0".to_owned(),
+            relay_revision: "5".to_owned(),
+            service_sha256: "9df6b026a8c6c26e3c3acd2370a16e93fffdc0015ff5bd879218788025db0280"
+                .to_owned(),
+            edge_sha256: Some(
+                "a1cb100f57e971cacf269e7c26e4630a25a8e9d4bdd35e32df1a80b66b896254".to_owned(),
+            ),
+            channel: Channel::Development,
+        };
+        let scratch = Scratch::new();
+        let path = scratch.path().join("install.json");
+        record.write(&path).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            INSTALL_GOLDEN,
+            "the launchers read tests/golden/install/install.json: change it and them together"
+        );
+        assert_eq!(InstallRecord::read(&path).unwrap(), Some(record));
+    }
+
     /// Protects promise 1 (ADR-0197 Decision 14): `bin/install.json` reads whatever an earlier or
     /// later release wrote. A missing, broken or incomplete record reads as none, so the next
     /// install replaces it; a record from before channels and the edge reads as a release with no
