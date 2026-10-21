@@ -59,18 +59,20 @@ async function racingStarts() {
     const contenders = Array.from({ length: CONTENDERS }, () =>
       race.start(race.service, ["serve", "--reason", startReason.agent], { stdio: ["ignore", "ignore", "pipe"] }));
     const first = await race.serviceUp();
-    await until(() => contenders.filter((child) => child.exitCode === null && child.signalCode === null).length === 1,
-      "all but one contender exits", 40_000);
-    const survivors = contenders.filter((child) => child.exitCode === null && child.signalCode === null);
-    for (const child of contenders.filter((candidate) => !survivors.includes(candidate))) {
-      assert.equal(child.exitCode, 0, `a losing start exits quietly: ${child.output}`);
+    // Each start relaunches itself once and leaves (ADR-0199 amendment of 2026-10-21), so every
+    // contender exits quietly and the relaunched copies race for the lock.
+    await until(() => contenders.every((child) => child.exitCode !== null || child.signalCode !== null),
+      "every contender relaunches and exits", 40_000);
+    for (const child of contenders) {
+      assert.equal(child.exitCode, 0, `a start exits quietly once it has relaunched: ${child.output}`);
     }
+    await until(() => race.serviceProcesses().length === 1, "all but one relaunched start exits", 40_000);
     await delay(1500);
     const later = await race.status();
     assert.equal(later.instance, first.instance, "the instance is stable");
-    assert.equal(later.pid, survivors[0].pid, "the survivor is the service");
+    assert.deepEqual(race.serviceProcesses(), [later.pid], "the one left is the service");
     await race.quit();
-    await within(survivors[0].exited, 10_000, "the surviving contender exits after quit");
+    await until(() => race.serviceProcesses().length === 0, "the service exits after quit", 10_000);
     console.log("PASS ten racing starts leave exactly one service");
   } finally {
     await race.cleanup();

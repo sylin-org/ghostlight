@@ -181,6 +181,9 @@ handshake and listings again, and resume by token; browser edges exit on the nex
 Every start of the service carries a reason: `agent`, `browser`, `command`, `person`, `recover` or
 `update`. A starter passes it as `serve --reason <word>`; `serve` without one of the six is a usage
 error. The command line is the only place the reason travels: no opening carries it (section 4).
+The service image then relaunches itself once with an internal `--relaunched` option, which no
+starter passes, so the process that serves is never a living child of its starter (ADR-0199
+amendment of 2026-10-21). The starters' arguments do not change.
 The service writes `state/quit` when a person quits (the tray, the workbench, or control `quit`
 with reason `quit`), before it exits. In order, a starting service refuses a wrong image
 and an elevated token, then, for a `browser` or `recover` start, exits 0 at once while that file

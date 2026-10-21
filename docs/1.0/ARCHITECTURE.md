@@ -187,8 +187,12 @@ Every start of the service is `serve --reason <word>`, and the reason is one of 
 MCP relay, at its own start and for each held request), `browser` (the browser relay, once, at
 its own start), `command` (`call`, when no service answers), `person` (`open` and a bare
 launch), `recover` (the shell, after a loss without goodbye) and `update` (the installer). `serve`
-requires the reason. `status`, `doctor`, `help` and `--version` never start the service. In
-order, `serve` refuses an image other than `bin/ghostlight-service`,
+requires the reason. `status`, `doctor`, `help` and `--version` never start the service. A start
+relaunches itself once (ADR-0199 amendment of 2026-10-21): it refuses an elevated token, starts
+its own image again as `serve --reason <word> --relaunched`, an option no starter passes, and
+exits 0. The copy serves, so the service is never a living child of its starter, and an agent
+host that kills its MCP server's process tree on exit cannot reach it. In
+order, the serving copy refuses an image other than `bin/ghostlight-service`,
 refuses an elevated Windows token, applies the quit latch, takes the operating-system lock on
 `run/service.lock`, and only then opens state. The lock is held until exit and admits the single
 local authority; the endpoint's first-instance flag is a second refusal. A start that finds the

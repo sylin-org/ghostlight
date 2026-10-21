@@ -790,3 +790,27 @@ This amends Decision 10. Who may start the service, and the quit latch, are unch
    checks. The installer replaces the edge because the revision changed.
 
 ADR-0203 Decision 13's lock on `crates/relay` and `crates/edge` is amended for this one change.
+
+## Amendment (2026-10-21): a start relaunches itself once
+
+Found on leo-desktop-02 while proving the wake of the previous amendment (S-D4 in the core-service
+ledger). An agent host that ends its MCP server by killing the server's process tree, as the
+Copilot CLI does on Windows, took with it the service its edge had started, and the service's
+window too. The service was the edge's child, so `taskkill /T` reached it, and it left no
+`process_exited` line. Stopping the edge alone left the service running, and a service that
+`ghostlight call` had started outlived its caller.
+
+This amends Decision 9. A start made with `serve --reason R` refuses an elevated token (step 2),
+starts its own image again as `serve --reason R --relaunched`, and exits 0. The relaunched copy
+runs steps 1 to 6 as before. The service is therefore never a living child of the program that
+started it: a tree kill of the starter cannot reach it, and on Linux it is reparented to init.
+
+- The starters' arguments and the relay do not change. `--relaunched` is internal to the
+  service image: no starter passes it, and the usage does not name it.
+- The elevated refusal stays in the start that was asked, so it still reaches whoever ran
+  `serve`. An image outside `bin` is still refused before `serve` runs at all.
+- A start that Quit holds back, or that meets a running service, now leaves from the copy, with
+  the same exit and diagnostics as before.
+- A job object that kills on close is a different trap, and nothing has been seen of one: the
+  edges are not started in one by the hosts tried. Breaking away from a job would need a relay
+  change, and it waits for a case.

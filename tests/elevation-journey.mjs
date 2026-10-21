@@ -6,7 +6,7 @@
 // journey then skips quietly.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHome, startReason } from "./lib/home.mjs";
+import { createHome, delay, startReason, within } from "./lib/home.mjs";
 
 /** The environment variable a debug build reads to let an elevated token run. */
 const WAIVER = "GHOSTLIGHT_TEST_ALLOW_ELEVATED";
@@ -46,7 +46,12 @@ try {
   const service = home.start(home.service, ["serve", "--reason", startReason.agent], { env: { [WAIVER]: "1" } });
   const status = await home.serviceUp();
   assert.ok(status.pid > 0, "the waiver lets a debug build serve");
-  assert.equal(service.exitCode, null, "the service stays up");
+  // The start relaunched itself and left; the relaunched copy is the service (ADR-0199 amendment
+  // of 2026-10-21).
+  const started = await within(service.exited, 10_000, "the start relaunches itself and exits");
+  assert.equal(started.code, 0, "the start exits quietly once it has relaunched");
+  await delay(1000);
+  assert.equal((await home.status())?.pid, status.pid, "the service stays up");
   console.log("PASS the debug-build waiver lets the journeys serve");
   console.log("elevation journey ok");
 } finally {

@@ -40,7 +40,7 @@ pub enum LaunchMode {
     /// Start the service and its backgrounded desktop for the stated reason. It never reveals a
     /// window, exits quietly when another service is running or when Quit holds the start back,
     /// and stops by itself if it stalls.
-    Serve(StartReason),
+    Serve(ServeStart),
     /// Explicit local-human intent to make the workbench visible.
     Open,
     /// The edge's relay verbs, `mcp` or a Chrome extension origin. The edge runs them itself; a
@@ -112,15 +112,36 @@ pub enum NativeHostCommand {
 const SERVE_USAGE: &str =
     "usage: ghostlight serve --reason <agent|browser|command|person|recover|update>";
 
-/// Read the arguments after `serve`: exactly `--reason` and one of the six start reasons.
-fn serve_reason(arguments: &[OsString]) -> anyhow::Result<StartReason> {
-    match arguments {
-        [option, word] if option == REASON_OPTION => word
-            .to_str()
-            .and_then(StartReason::parse)
-            .ok_or_else(|| anyhow::anyhow!("{SERVE_USAGE}")),
+/// The option a start adds when it relaunches itself, so that the copy serves instead of
+/// relaunching again (ADR-0199 amendment of 2026-10-21). It is internal to the service image:
+/// no starter passes it, and the usage does not name it.
+pub const RELAUNCHED_OPTION: &str = "--relaunched";
+
+/// A `serve` start: why the service is started, and whether this process is the copy a start
+/// relaunched.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ServeStart {
+    /// Why the service is being started.
+    pub reason: StartReason,
+    /// Whether this is the relaunched copy, which serves.
+    pub relaunched: bool,
+}
+
+/// Read the arguments after `serve`: exactly `--reason` and one of the six start reasons, and
+/// [`RELAUNCHED_OPTION`] after them in the copy a start relaunched.
+fn serve_start(arguments: &[OsString]) -> anyhow::Result<ServeStart> {
+    let (word, relaunched) = match arguments {
+        [option, word] if option == REASON_OPTION => (word, false),
+        [option, word, marker] if option == REASON_OPTION && marker == RELAUNCHED_OPTION => {
+            (word, true)
+        }
         _ => anyhow::bail!("{SERVE_USAGE}"),
-    }
+    };
+    let reason = word
+        .to_str()
+        .and_then(StartReason::parse)
+        .ok_or_else(|| anyhow::anyhow!("{SERVE_USAGE}"))?;
+    Ok(ServeStart { reason, relaunched })
 }
 
 /// How `deployment install` is used.
@@ -271,7 +292,7 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
         .first()
         .is_some_and(|argument| argument == "serve")
     {
-        Ok(LaunchMode::Serve(serve_reason(&arguments[1..])?))
+        Ok(LaunchMode::Serve(serve_start(&arguments[1..])?))
     } else if arguments.first().is_some_and(|argument| argument == "call") {
         if arguments[1..]
             .iter()
@@ -476,8 +497,8 @@ mod tests {
     use ghostlight_relay::protocol::StartReason;
 
     use super::{
-        call_help_text, help_text, launch_mode, LaunchMode, NativeHostCommand, SetupOptions,
-        SUBCOMMANDS,
+        call_help_text, help_text, launch_mode, LaunchMode, NativeHostCommand, ServeStart,
+        SetupOptions, RELAUNCHED_OPTION, SUBCOMMANDS,
     };
 
     #[test]
@@ -745,7 +766,17 @@ mod tests {
         ] {
             assert_eq!(
                 serve(&["--reason", word]).unwrap(),
-                LaunchMode::Serve(reason)
+                LaunchMode::Serve(ServeStart {
+                    reason,
+                    relaunched: false
+                })
+            );
+            assert_eq!(
+                serve(&["--reason", word, RELAUNCHED_OPTION]).unwrap(),
+                LaunchMode::Serve(ServeStart {
+                    reason,
+                    relaunched: true
+                })
             );
         }
         for refused in [
@@ -756,6 +787,9 @@ mod tests {
             &["agent"],
             &["--reason", "agent", "--now"],
             &["--now", "agent"],
+            &[RELAUNCHED_OPTION, "--reason", "agent"],
+            &["--reason", "agent", RELAUNCHED_OPTION, RELAUNCHED_OPTION],
+            &["--reason", "unknown", RELAUNCHED_OPTION],
         ] {
             let error = serve(refused).unwrap_err().to_string();
             assert!(

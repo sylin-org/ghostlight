@@ -164,6 +164,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::cli::parse::ServeStart;
     use crate::scratch::Scratch;
     use ghostlight_relay::protocol::StartReason;
 
@@ -328,7 +329,10 @@ mod tests {
         let (result, calls) = home.start(&installed, &["serve", "--reason", "agent"]);
         assert_eq!(
             result.unwrap(),
-            Start::Dispatch(LaunchMode::Serve(StartReason::Agent))
+            Start::Dispatch(LaunchMode::Serve(ServeStart {
+                reason: StartReason::Agent,
+                relaunched: false
+            }))
         );
         assert!(calls.is_empty());
     }
@@ -472,7 +476,10 @@ mod tests {
         for (arguments, mode) in [
             (
                 &["serve", "--reason", "person"][..],
-                LaunchMode::Serve(StartReason::Person),
+                LaunchMode::Serve(ServeStart {
+                    reason: StartReason::Person,
+                    relaunched: false,
+                }),
             ),
             (&["open"], LaunchMode::Open),
         ] {

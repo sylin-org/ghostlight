@@ -12,8 +12,9 @@ Statuses: `todo`, `landed` (with commits), `blocked` (with the reason).
 
 ## RESUME HERE
 
-S-D1, S-D2, SERV-7 and S-D3 have landed. S-D2 fixed the update case and S-D3 the start on demand
-after a Quit (Notes). Next: C19c-s.
+S-D1, S-D2, SERV-7, S-D3 and S-D4 have landed. S-D2 fixed the update case, S-D3 the start on demand
+after a Quit, and S-D4 the service an agent's tree kill took with it (Notes). Next: C19c-s, once C16
+has landed in service/mod.rs.
 
 ## Slices
 
@@ -25,6 +26,7 @@ In order. "After" names what a slice waits for.
 | S-D2 | fix(service): a replacement waits for the browsers of the service it replaced | - | BROW-9; the test failed before the fix | landed (9c257daa) |
 | SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | landed (0ba38fa7) |
 | S-D3 | fix(relay): a ready service wakes the edges that wait for it | - | BROW-9's open half, the owner's design (ADR-0199 amendment of 2026-10-20); relay revision 5 | landed (e4a9fade, b0290246) |
+| S-D4 | fix(cli): a start relaunches itself, so a tree kill of its starter cannot reach the service | - | leo-desktop-02's finding while proving S-D3 (ADR-0199 amendment of 2026-10-21); cross-lane `cli/parse.rs`, `cli/mod.rs`, `cli/desktop.rs`, `cli/start.rs` under test-04's hold | landed (this commit) |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
 | BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
@@ -96,3 +98,14 @@ was ready, with no second window, and `edges_woken woken=2` logged beside `servi
 Bluefin, run 2 attached the browser 27 ms after the start, with no `browser_startup_manual`. The
 Linux relay and edge tests pass. A woken browser edge exits without removing its registration,
 and the next start sweeps it (`removed=1`), as the wake module says.
+
+S-D4: proving S-D3 on leo-desktop-02, a service the Copilot CLI's edge had started died about a
+second after Copilot exited, with no `process_exited` line. The cause was neither a job object nor
+the service: `taskkill /pid <edge> /T /F` took the service and its window, and stopping the edge
+alone left both running. The service was the edge's child. Now `serve --reason R` refuses an
+elevated token, starts its own image as `serve --reason R --relaunched` and exits 0, and the copy
+serves, so the service has no living parent to be reached through. On Linux it is reparented to
+init. The starters and the relay are unchanged. Tests: `cli::desktop` (the relaunch and the elevated
+refusal before it), `cli::parse` (the relaunched form is the only extra one), and the race and
+waiver journeys, which now find the service by its image (`processesOf` in `tests/lib/home.mjs`).
+A kill-on-close job would need the relay to break away; none has been seen.

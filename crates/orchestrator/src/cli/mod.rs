@@ -292,7 +292,7 @@ pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
     match mode {
         parse::LaunchMode::DeploymentInstall(request) => deployment::run(&request),
         parse::LaunchMode::Desktop | parse::LaunchMode::Open => desktop::open_desktop(),
-        parse::LaunchMode::Serve(reason) => desktop::serve(reason),
+        parse::LaunchMode::Serve(start) => desktop::serve(start),
         parse::LaunchMode::Relay => anyhow::bail!(
             "mcp and a browser extension origin are run by the Ghostlight edge, not this program"
         ),

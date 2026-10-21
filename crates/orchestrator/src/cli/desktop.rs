@@ -9,9 +9,11 @@
 //!
 //! `serve` runs the service in this process until a quit. It has no window of its own: it binds
 //! its endpoint as soon as it has started (ADR-0199 Decision 5), and the shell that shows the
-//! window and the tray is started by presence (`service::presence`).
+//! window and the tray is started by presence (`service::presence`). A start first relaunches
+//! itself once, so the process that serves is never a living child of its starter (ADR-0199
+//! amendment of 2026-10-21).
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -23,6 +25,7 @@ use std::time::{Duration, Instant};
 use ghostlight_relay::os::session;
 use ghostlight_relay::protocol::StartReason;
 
+use crate::cli::parse::{ServeStart, RELAUNCHED_OPTION};
 use crate::install::layout::Layout;
 use crate::install::record;
 use crate::language::environment::SESSION_LISTENER_FAILED;
@@ -88,21 +91,58 @@ impl Starter for Detached {
     }
 }
 
-/// Run the service in this process, for a start made for `reason`, until a quit.
+/// Run the service for `start`, until a quit.
+///
+/// A start a starter made relaunches itself once (ADR-0199 amendment of 2026-10-21). It refuses
+/// an elevated token, so that refusal still reaches whoever ran `serve`, then starts this image
+/// again with [`RELAUNCHED_OPTION`] and exits 0. The relaunched copy serves. The service is
+/// therefore never a living child of its starter: an agent host that ends its MCP server by
+/// killing the server's process tree, as the Copilot CLI does, cannot reach it, and on Linux it
+/// belongs to init.
 ///
 /// The service shows nothing itself. It exits 0 without a word when another service already
 /// serves or when Quit holds a browser or recover start back, and it stops by itself, with a
 /// nonzero status and a diagnostics event, when it is not accepting openings in time.
-pub fn serve(reason: StartReason) -> anyhow::Result<()> {
+pub fn serve(start: ServeStart) -> anyhow::Result<()> {
     let home = ghostlight_relay::home::home()?;
-    let ended = serve_in(
-        &home,
-        reason,
-        listen_for_session_end,
-        ServiceHost::start_waiting,
-    );
+    let ended = if start.relaunched {
+        serve_in(
+            &home,
+            start.reason,
+            listen_for_session_end,
+            ServiceHost::start_waiting,
+        )
+    } else {
+        relaunch(
+            &home,
+            start.reason,
+            ghostlight_win_peer::is_elevated,
+            spawn_relaunched,
+        )
+    };
     record_start_failure(&home, &ended);
     settle_serve(ended)
+}
+
+/// Refuse an elevated token as a serving start does, then have `spawn` start the copy that
+/// serves for `reason` in `home`, and return without waiting for it.
+fn relaunch(
+    home: &Path,
+    reason: StartReason,
+    elevated: impl FnOnce() -> io::Result<bool>,
+    spawn: impl FnOnce(&Path, StartReason) -> io::Result<()>,
+) -> anyhow::Result<()> {
+    crate::service::refuse_elevated_token(elevated)?;
+    spawn(home, reason).map_err(|error| anyhow::anyhow!("relaunch the service: {error}"))
+}
+
+/// Start this image as `serve --reason <reason>` with [`RELAUNCHED_OPTION`], detached, in
+/// `home`.
+fn spawn_relaunched(home: &Path, reason: StartReason) -> io::Result<()> {
+    let image = std::env::current_exe()?;
+    let [serve, option, word] = ghostlight_relay::spawn::serve_arguments(reason);
+    let arguments = [serve, option, word, OsStr::new(RELAUNCHED_OPTION)];
+    ghostlight_relay::os::spawn_detached(&image, &arguments, home).map(drop)
 }
 
 /// Leave the reason a start failed in the home's start-failure record, where its starter reads
@@ -364,6 +404,48 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::scratch::Scratch;
+
+    #[test]
+    fn a_start_relaunches_itself_for_its_reason_and_the_copy_serves() {
+        let home = Scratch::named("relaunch");
+        let mut relaunched = None;
+        relaunch(
+            home.path(),
+            StartReason::Agent,
+            || Ok(false),
+            |directory, reason| {
+                relaunched = Some((directory.to_path_buf(), reason));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            relaunched,
+            Some((home.path().to_path_buf(), StartReason::Agent))
+        );
+    }
+
+    #[test]
+    fn an_elevated_start_is_refused_before_it_relaunches() {
+        let home = Scratch::named("relaunch-elevated");
+        let mut relaunched = false;
+        let refused = relaunch(
+            home.path(),
+            StartReason::Agent,
+            || Ok(true),
+            |_, _| {
+                relaunched = true;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{refused:#}"),
+            crate::language::environment::ELEVATED_SERVICE
+        );
+        assert!(!relaunched, "nothing was started");
+    }
     use crate::workbench::{
         PageAddress, WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
     };

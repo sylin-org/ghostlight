@@ -7,7 +7,7 @@
 // from the user and the home path. Every closed word comes from tests/golden/relay4/vocabulary.json,
 // the same file the Rust goldens bind.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -358,6 +358,33 @@ export function imagePath(pid) {
   }
 }
 
+/**
+ * The ids of the running processes whose executable is one of `images`. A start relaunches
+ * itself (ADR-0199 amendment of 2026-10-21), so the process that serves is not the one a journey
+ * started; this finds it by its image.
+ */
+export function processesOf(images) {
+  const wanted = [...images];
+  if (process.platform === "win32") {
+    const names = [...new Set(wanted.map((image) => basename(image).replace(/\.exe$/i, "")))];
+    const command = "Get-Process -Name " + names.map((name) => "'" + name + "'").join(",") +
+      " -ErrorAction SilentlyContinue | ForEach-Object { '{0}|{1}' -f $_.Id, $_.Path }";
+    const printed = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command],
+      { encoding: "utf8", windowsHide: true });
+    return printed.split(/\r?\n/).filter(Boolean).map((line) => line.split("|"))
+      .filter(([, path]) => path && wanted.some((image) => samePath(image, path)))
+      .map(([pid]) => Number(pid));
+  }
+  return readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).filter((pid) => {
+    try {
+      const image = readlinkSync(`/proc/${pid}/exe`);
+      return wanted.some((own) => samePath(own, image));
+    } catch {
+      return false;
+    }
+  }).map(Number);
+}
+
 /** Whether two paths name one file. */
 export function samePath(left, right) {
   const key = (path) => {
@@ -432,6 +459,11 @@ export class JourneyHome {
     this.children = [];
     this.programs = [];
     this.serviceImages = new Set([this.service]);
+  }
+
+  /** The ids of the running processes of this home's service image. */
+  serviceProcesses() {
+    return processesOf(this.serviceImages);
   }
 
   /** Copy the built executables into the home's `bin`. */

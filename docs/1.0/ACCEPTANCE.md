@@ -134,6 +134,12 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     command and `ghostlight status` then says it is not running; on Windows over OpenSSH `status`
     reports `no_interactive_desktop` and the service exits 10 minutes after the last command; on
     the owner's desktop the service never idles out while the icon is shown.
+23. A service an agent started outlives that agent. An agent host that ends its MCP server by
+    killing the server's process tree, as the Copilot CLI does on Windows, leaves the service, its
+    window and its browsers running: a start relaunches itself once, so the service is never a
+    living child of the edge that started it (ADR-0199 amendment of 2026-10-21). The ten racing
+    starts of `tests/process-journey.mjs` and the waiver run of `tests/elevation-journey.mjs` find
+    the service by its image for that reason.
 
 ## Executor and truth gates
 
