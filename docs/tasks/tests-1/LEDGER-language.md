@@ -18,7 +18,7 @@ found by that classification, landed first. Then cut it file by file.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `language/` | 349 | 55 | 55 |
-| `workbench/` | 252 | 35 | 92 |
+| `workbench/` | 252 | 35 | 88 |
 
 ## Slices
 
@@ -51,7 +51,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL22 | test(language): setup.rs words join the shared words test, and the listing URL is built from the id | 11 | 8 | 4 promise, 3 contract, 1 defect | landed (4d3eae13) |
 | TL23 | test(language): readiness.rs folds the sentence into the precedence table | 2 | 1 | 1 promise | landed (7fea1702) |
 | TW1 | test(workbench): the loopback server keeps the 14 tests of its promises and gates | 105 | 14 | 5 promise, 5 contract, 4 defect | landed (debcc8df) |
-| TW2 | test(workbench): the facade keeps the 14 tests of what the window shows | 83 | 14 | 10 promise, 3 contract, 1 defect | landed (this commit) |
+| TW2 | test(workbench): the facade keeps the 14 tests of what the window shows | 83 | 14 | 10 promise, 3 contract, 1 defect | landed (e5f0438a) |
+| TW3 | test(workbench): history.rs keeps the two grouped-history promises | 6 | 2 | 2 promise | landed (this commit) |
 
 ## Notes
 

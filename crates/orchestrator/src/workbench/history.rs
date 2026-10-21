@@ -194,11 +194,14 @@ pub(super) fn operations(items: &[HistoryItem]) -> Vec<&HistoryItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audit::AuditSink;
     use crate::governance::Decision;
     use crate::language::composition::{CompositionProgress, StepCounts};
-    use crate::language::history::{CompositionKind, StepReceipt};
+    use crate::language::history::StepReceipt;
     use crate::language::outcome::Outcome;
+    use crate::workbench::{WorkbenchProjection, HISTORY_LIMIT};
+
+    /// How many steps the flow these tests record has.
+    const STEPS: usize = 4;
 
     fn child(position: usize) -> AuditRecord {
         let mut record = AuditRecord::now(
@@ -220,138 +223,64 @@ mod tests {
         record.step = Some(StepReceipt {
             parent: CompositionKind::Flow,
             position,
-            total: 4,
+            total: STEPS,
             preparation_failed: false,
         });
         record
     }
 
+    /// Protects Grouped history 3 and 4 (ACCEPTANCE, ADR-0156) and ARCHITECTURE's grouped
+    /// history: a child receipt updates its group while the parent stays live and unsettled; a
+    /// repeated receipt adds nothing; a restored or finished group says its completion was not
+    /// recorded, marks a missing receipt unconfirmed and only the parent's own count as never
+    /// run, so missing evidence never becomes a no-effect claim; and a policy preview counts only
+    /// the recorded operations.
     #[test]
-    fn live_group_claims_stay_in_memory_while_restored_receipts_keep_connection_evidence() {
-        use crate::intake::session::IntakeChannel;
-        use crate::provenance::ConnectionEvidence;
-        use crate::workbench::WorkbenchProjection;
-        let connection =
-            ConnectionEvidence::claimed("PRIVATE_REPORTED_APPLICATION", IntakeChannel::Mcp);
-        let first = child(1).with_provenance(Some(connection.attribution()));
-        let mut parent = first.clone();
-        parent.step = None;
-        parent.tool = "browser_flow".into();
+    fn a_group_shows_its_children_as_they_arrive_and_never_guesses_missing_execution() {
         let projection = WorkbenchProjection::default();
-        projection.record_with_provenance(
-            &first,
-            crate::language::audit_health::Storage::Saved,
-            Some(connection.details()),
-        );
-        projection.record_with_provenance(
-            &parent,
-            crate::language::audit_health::Storage::Saved,
-            Some(connection.details()),
-        );
+        projection.react(&crate::events::DomainEvent::WorkStarted {
+            provenance: crate::provenance::ConnectionEvidence::claimed(
+                "test",
+                crate::intake::session::IntakeChannel::Mcp,
+            )
+            .details(),
+            invocation: "parent".into(),
+            workspace: "workspace".into(),
+            tool: "browser_flow".into(),
+            activity: crate::browser::adapter::PresentationActivity::Quiet,
+            capabilities: CapabilitySet::EMPTY,
+            received_at_ms: 1,
+        });
+        projection.record(&child(1), crate::language::audit_health::Storage::Saved);
+        assert_eq!(projection.operations().len(), 1, "the parent stays live");
         let live = projection.history();
-        assert_eq!(
-            live[0]
-                .provenance
-                .as_ref()
-                .unwrap()
-                .reported_application
-                .as_deref(),
-            Some("PRIVATE_REPORTED_APPLICATION")
+        assert_eq!(live.len(), 1);
+        assert!(
+            !live[0].complete,
+            "a child receipt does not settle its parent"
         );
-        assert_eq!(
-            live[0].steps[0].record.as_ref().unwrap().provenance,
-            live[0].provenance
-        );
-        let bytes = format!(
-            "{}\n{}\n",
-            serde_json::to_string(&first).unwrap(),
-            serde_json::to_string(&parent).unwrap()
-        );
-        assert!(!bytes.contains("PRIVATE_REPORTED_APPLICATION"));
-        let path = crate::scratch::Scratch::file("history.jsonl");
-        std::fs::write(&path, bytes).unwrap();
-        let restored = WorkbenchProjection::default();
-        let loaded = restored.load_history(&path);
-        drop(path);
-        loaded.unwrap();
-        let history = restored.history();
-        let details = history[0].provenance.as_ref().unwrap();
-        assert_eq!(details.reported_application, None);
-        assert_eq!(details.channel, IntakeChannel::Mcp);
-        assert_eq!(
-            details.connection_id,
-            connection.attribution().connection_id
-        );
-        assert_eq!(
-            history[0].steps[0]
-                .record
-                .as_ref()
-                .unwrap()
-                .provenance
-                .as_ref(),
-            Some(details)
-        );
-    }
 
-    #[test]
-    fn connection_details_explain_each_case_in_one_sentence() {
-        use crate::intake::session::IntakeChannel;
-        use crate::provenance::ConnectionEvidence;
-
-        let mcp = ConnectionEvidence::claimed("codex-mcp-client", IntakeChannel::Mcp);
-        let cli = ConnectionEvidence::claimed("ghostlight call", IntakeChannel::Cli);
-        let from_mcp = HistoryItem::from(child(1).with_provenance(Some(mcp.attribution())));
-        let from_cli = HistoryItem::from(child(1).with_provenance(Some(cli.attribution())));
-        let mut unidentified = child(1);
-        unidentified.channel = Some(IntakeChannel::Cli);
-        let from_history = HistoryItem::from(unidentified);
-
-        let mcp_details = from_mcp.provenance.unwrap();
-        let cli_details = from_cli.provenance.unwrap();
-        let old_details = from_history.provenance.unwrap();
-        assert_eq!(mcp_details.channel, IntakeChannel::Mcp);
-        assert_eq!(cli_details.channel, IntakeChannel::Cli);
-        assert_eq!(old_details.channel, IntakeChannel::Cli);
-        assert_eq!(mcp_details.connection_id, mcp.attribution().connection_id);
-        assert_eq!(cli_details.connection_id, cli.attribution().connection_id);
-        assert_eq!(old_details.connection_id, None);
-        let sentences = [
-            &mcp_details.explanation,
-            &cli_details.explanation,
-            &old_details.explanation,
-        ];
-        for sentence in sentences {
-            assert!(!sentence.is_empty());
-        }
-        assert_ne!(sentences[0], sentences[1]);
-        assert_ne!(sentences[0], sentences[2]);
-        assert_ne!(sentences[1], sentences[2]);
-        assert!(mcp_details.explanation.contains("its own claim"));
-        assert!(cli_details.explanation.contains("local program"));
-    }
-
-    #[test]
-    fn groups_preserve_incremental_evidence_and_never_guess_missing_execution() {
         let mut history = VecDeque::new();
         let record = child(1);
         let item = merge(&mut history, &record, true);
         assert!(!item.complete);
-        assert_eq!(item.summary, "Completed 1 of 4 steps.");
+        assert_eq!(item.summary, composition::running_summary(1, STEPS));
         assert_eq!(item.steps[1].state, StepHistoryState::Pending);
         merge(&mut history, &record, true);
-        assert_eq!(history.len(), 1);
+        assert_eq!(history.len(), 1, "a repeated receipt adds no group");
         assert_eq!(
             operations(&history.iter().cloned().collect::<Vec<_>>()).len(),
             1
         );
-        // Dry-run and historical wrappers can have no child/progress metadata at all.
+        // Dry-run and historical wrappers can have no child or progress metadata at all.
         let mut dry_run = item.clone();
         dry_run.steps.clear();
         dry_run.complete = true;
         assert!(operations(&[dry_run]).is_empty());
+
         let mut restored = VecDeque::new();
         let item = merge(&mut restored, &record, false);
-        assert_eq!(item.summary, "Completion was not recorded.");
+        assert_eq!(item.summary, composition::UNRECORDED_SUMMARY);
         assert_eq!(item.steps[1].state, StepHistoryState::Unconfirmed);
         let mut preparation = child(2);
         preparation.step.as_mut().unwrap().preparation_failed = true;
@@ -359,7 +288,7 @@ mod tests {
         merge(&mut restored, &preparation, false);
         let progress = CompositionProgress {
             counts: StepCounts {
-                total: 4,
+                total: STEPS,
                 succeeded: 1,
                 not_started: 1,
                 failed: 1,
@@ -380,7 +309,7 @@ mod tests {
             "none",
             &Outcome::CompositionRan(progress)
                 .audit()
-                .with_tools(["browser_read"; 4]),
+                .with_tools(["browser_read"; STEPS]),
             30,
         );
         let item = merge(&mut restored, &parent, false);
@@ -389,85 +318,34 @@ mod tests {
         assert_eq!(
             item.steps[2].state,
             StepHistoryState::Unconfirmed,
-            "missing failed receipt is not an unrun operation"
+            "a missing failed receipt is not an unrun operation"
         );
-        assert_eq!(item.steps[3].state, StepHistoryState::NotRun);
         assert!(item.steps[2].record.is_none());
+        assert_eq!(item.steps[3].state, StepHistoryState::NotRun);
         assert_eq!(
             operations(&[item]).len(),
             1,
-            "preview excludes wrapper, preparation, and missing rows"
+            "a preview counts no wrapper, preparation or missing row"
         );
     }
 
+    /// Protects Grouped history 4 ("History retains at most 500 whole groups"): history holds at
+    /// most `HISTORY_LIMIT` whole groups, evicting the oldest, a repeated receipt never grows a
+    /// group, and the window keeps as many recorded actions as the service holds (`HISTORY_HELD`
+    /// in `ui/lib/words.js`, a limit on both sides).
     #[test]
-    fn child_receipt_updates_do_not_settle_parent_or_notify_and_reload_equally() {
-        let projection = super::super::WorkbenchProjection::default();
-        projection.react(&crate::events::DomainEvent::WorkStarted {
-            provenance: crate::provenance::ConnectionEvidence::claimed(
-                "test",
-                crate::intake::session::IntakeChannel::Mcp,
-            )
-            .details(),
-            invocation: "parent".into(),
-            workspace: "workspace".into(),
-            tool: "browser_flow".into(),
-            activity: crate::browser::adapter::PresentationActivity::Quiet,
-            capabilities: CapabilitySet::EMPTY,
-            received_at_ms: crate::audit::unix_ms(),
-        });
-        let receipt = child(1);
-        projection.record(&receipt, crate::language::audit_health::Storage::Saved);
-        assert_eq!(projection.operations().len(), 1);
-        assert_eq!(projection.history().len(), 1);
-        assert!(projection.lock().notified.is_empty());
-        let path = crate::scratch::Scratch::file("history-steps.jsonl");
-        let sink = crate::audit::JsonlAuditSink::open(&path).unwrap();
-        sink.record(&receipt).unwrap();
-        drop(sink);
-        let restored = super::super::WorkbenchProjection::default();
-        restored.load_history(&path).unwrap();
-        drop(path);
-        assert_eq!(
-            restored.history()[0].steps[0].record,
-            projection.history()[0].steps[0].record
-        );
-        assert_eq!(
-            restored.history()[0].steps[1].state,
-            StepHistoryState::Unconfirmed
-        );
-    }
-
-    #[test]
-    fn history_limit_evicts_whole_groups_and_duplicate_receipts_do_not_expand_them() {
+    fn history_holds_at_most_the_limit_in_whole_groups_and_the_window_as_many() {
         let mut history = VecDeque::new();
-        for index in 0..=super::super::HISTORY_LIMIT {
+        for index in 0..=HISTORY_LIMIT {
             let mut record = child(1);
             record.invocation = format!("parent-{index}");
             merge(&mut history, &record, false);
             merge(&mut history, &record, false);
         }
-        assert_eq!(history.len(), super::super::HISTORY_LIMIT);
+        assert_eq!(history.len(), HISTORY_LIMIT);
         assert_eq!(history.front().unwrap().invocation, "parent-1");
-        assert!(history.iter().all(|item| item.steps.len() == 4));
-    }
-
-    #[test]
-    fn saved_parent_never_upgrades_an_unconfirmed_child_receipt() {
-        use crate::language::audit_health::Storage;
-        let mut history = VecDeque::new();
-        let first = child(1);
-        merge_stored(&mut history, &first, true, Storage::Unconfirmed, None);
-        let mut parent = first.clone();
-        parent.step = None;
-        parent.tool = "browser_flow".into();
-        parent.unconfirmed_history_steps = 1;
-        let item = merge_stored(&mut history, &parent, false, Storage::Saved, None);
-        assert_eq!(item.storage, Storage::Saved);
-        assert!(item.storage_detail.contains("Some step history"));
-        let child = item.steps[0].record.as_ref().unwrap();
-        assert_eq!(child.storage, Storage::Unconfirmed);
-        assert_eq!(child.status, "succeeded");
-        assert!(child.storage_detail.contains("storage was not confirmed"));
+        assert!(history.iter().all(|item| item.steps.len() == STEPS));
+        assert!(include_str!("../../ui/lib/words.js")
+            .contains(&format!("const HISTORY_HELD = {HISTORY_LIMIT};")));
     }
 }
