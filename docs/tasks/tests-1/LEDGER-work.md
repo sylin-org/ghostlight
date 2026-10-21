@@ -18,7 +18,7 @@ added there in the commit that deletes it. `governance/` moved to the language l
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 373 | 55 | 306 |
+| `work/` and `workspace/` | 373 | 55 | 291 |
 | `governance/` | 136 | 40 | moved to the language lane (2026-10-21) |
 
 ## Slices
@@ -38,7 +38,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | W7 | `tests/catalog_authority.rs`: four variant tests are one RAWX test, now also refusing then admitting each call in one session (control.rs's refusal test) with every listed control in a repeated row that never reaches audit or history (controls.rs's row test); two recording-save tests are one; control.rs's publication test is a row of the person's-control test | 331 | 324 | promise 2 (Gov 3, 10, 13; ADR-0158 4) | landed (5df9f077) |
 | W8 | `tests/documents.rs`: nine document tests are one over ADR-0158; the two settle-budget tests are one, for ACCEPTANCE Bounded preparation (ADR-0195, 2513f862), which no other test held, until the execution.rs waits test takes it; an effect-unknown script row goes (execution.rs's typed-refusal test) | 324 | 315 | promise 1 (ADR-0158 1-3, 5); 1 left to fold | landed (37f5225f) |
 | W9 | `tests/presentation.rs`: four feedback and notice tests are one, where feedback lands and what a refusal draws; the per-step receipt count goes (execution.rs keeps one receipt per step) | 315 | 312 | promise 3 (Presentation 1, 2, 3, 5) | landed (cc8f6580) |
-| W10 | `tests/findings.rs`: five record tests are one, each record holds only what its frame reached; three flow-step tests are one, each step now compared with the same call made alone | 312 | 306 | 2 (ADR-0202 D9-13; 77952a37, b0436754, b411e6ad, 0c9bb755) | landed |
+| W10 | `tests/findings.rs`: five record tests are one, each record holds only what its frame reached; three flow-step tests are one, each step now compared with the same call made alone | 312 | 306 | 2 (ADR-0202 D9-13; 77952a37, b0436754, b411e6ad, 0c9bb755) | landed (6926865b) |
+| W11 | `tests/replacement.rs`: sixteen tests are one, every sentence and step now read from `WorkspaceReason::StaleTarget` instead of literals | 306 | 291 | promise 1 (Exec 6, LANGUAGE stale handles; 43eff032) | landed |
 
 ## Notes
 

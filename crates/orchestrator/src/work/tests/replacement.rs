@@ -2,12 +2,11 @@
 //! the failing call, the candidates the service registers as handles under read authority, and
 //! the repeat step that appears only when the page proved exactly one control is the same.
 
-use super::execution::{workspace_with_a_target, PICK_STEP, REMOVED_STEP};
+use super::execution::workspace_with_a_target;
 use super::*;
 use crate::browser::adapter::PhysicalSemantic;
 use crate::browser::adapter::{StaleCandidate, StaleLookup};
-
-const REPLACEMENT_SUMMARY: &str = "That target is no longer on the page. One control on the page has the same role, name and row.";
+use crate::language::outcome::{StaleHelp, WorkspaceReason};
 
 /// One control a page found again, with its row context.
 fn candidate(locator: &str, context: &str, nth: Option<u32>, same: bool) -> StaleCandidate {
@@ -68,51 +67,6 @@ fn queried(browser: &FakeBrowser) -> usize {
         .count()
 }
 
-#[test]
-fn a_same_document_re_render_names_the_one_trusted_replacement_and_nothing_is_sent_twice() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    let before = browser.calls().len();
-    browser.push(Err(removed(one_same())));
-
-    let refused = click(&executor, &workspace, &tab_handle, &target);
-
-    assert_eq!(refused.status, Status::Failed);
-    assert_eq!(refused.effect, Effect::None);
-    assert!(refused.repeat_safe);
-    assert_eq!(refused.summary, REPLACEMENT_SUMMARY);
-    assert_eq!(refused.facts["reason"], "stale_target");
-    assert_eq!(refused.facts["stale"], "removed");
-    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
-    assert_eq!(candidates.len(), 3);
-    let replacement = refused.facts["replacement"].as_str().unwrap();
-    assert_eq!(candidates[1]["target"], replacement);
-    assert_ne!(replacement, target);
-    assert_eq!(candidates[1]["context"], "Beta");
-    assert_eq!(candidates[1]["name"], "Delete");
-    assert_eq!(candidates[1]["role"], "button");
-    assert_eq!(
-        refused.next_steps,
-        vec![format!("Repeat browser_click with target {replacement}.")]
-    );
-    assert!(
-        !refused.facts.to_string().contains("same"),
-        "the verdict stays in the service"
-    );
-    assert_eq!(
-        browser.calls().len() - before,
-        1,
-        "the click was dispatched once"
-    );
-    assert_eq!(queried(&browser), 0, "the page's own answer is the lookup");
-
-    let repeated = delete_click_with(&executor, &browser, &workspace, &tab_handle, replacement);
-    assert_eq!(
-        repeated.status,
-        Status::Succeeded,
-        "the replacement is a working handle"
-    );
-}
-
 /// A click that succeeds, for a handle of the test's choosing.
 fn delete_click_with(
     executor: &ApplicationExecutor,
@@ -131,312 +85,6 @@ fn delete_click_with(
         }),
     }));
     click(executor, workspace, tab_handle, target)
-}
-
-#[test]
-fn every_single_target_tool_repeats_with_the_replacement() {
-    for (tool, input, repeat) in [
-        ("browser_hover", json!({}), "browser_hover"),
-        (
-            "browser_type_text",
-            json!({"text":"hello"}),
-            "browser_type_text",
-        ),
-        (
-            "browser_press_key",
-            json!({"key":"Enter"}),
-            "browser_press_key",
-        ),
-        ("browser_scroll", json!({}), "browser_scroll"),
-    ] {
-        let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-        browser.push(Err(removed(one_same())));
-        let mut arguments = input;
-        arguments["tab"] = json!(tab_handle);
-        arguments["target"] = json!(target);
-
-        let refused = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
-
-        let replacement = refused.facts["replacement"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{tool}: {:?}", refused.facts));
-        assert_eq!(
-            refused.next_steps,
-            vec![format!("Repeat {repeat} with target {replacement}.")],
-            "{tool}"
-        );
-    }
-}
-
-#[test]
-fn rows_the_page_could_not_prove_give_candidates_and_the_pick_step() {
-    let cases = [
-        (
-            "no control is the same",
-            StaleLookup {
-                matched: 2,
-                same_count: 0,
-                truncated: false,
-                candidates: vec![
-                    candidate("one", "Neon Rain", Some(1), false),
-                    candidate("two", "Neon Rain", Some(2), false),
-                ],
-            },
-        ),
-        (
-            "two controls are the same",
-            StaleLookup {
-                matched: 2,
-                same_count: 2,
-                truncated: false,
-                candidates: vec![
-                    candidate("one", "Neon Rain", Some(1), true),
-                    candidate("two", "Neon Rain", Some(2), true),
-                ],
-            },
-        ),
-        (
-            "the lookup was cut short",
-            StaleLookup {
-                truncated: true,
-                ..one_same()
-            },
-        ),
-    ];
-    for (what, lookup) in cases {
-        let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-        browser.push(Err(removed(lookup)));
-
-        let refused = click(&executor, &workspace, &tab_handle, &target);
-
-        assert_eq!(
-            refused.summary, "That target is no longer on the page.",
-            "{what}"
-        );
-        assert_eq!(refused.next_steps, vec![PICK_STEP], "{what}");
-        assert!(refused.facts.get("replacement").is_none(), "{what}");
-        let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
-        assert!(!candidates.is_empty(), "{what}");
-        assert!(candidates
-            .iter()
-            .all(|entry| entry["target"].as_str().unwrap().starts_with("target_")));
-    }
-}
-
-#[test]
-fn the_nth_of_a_repeated_row_reaches_the_model() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(removed(StaleLookup {
-        matched: 2,
-        same_count: 0,
-        truncated: false,
-        candidates: vec![
-            candidate("one", "Neon Rain", Some(1), false),
-            candidate("two", "Neon Rain", Some(2), false),
-        ],
-    })));
-
-    let refused = click(&executor, &workspace, &tab_handle, &target);
-
-    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
-    assert_eq!(candidates[0]["context"], "Neon Rain");
-    assert_eq!(candidates[0]["nth"], 1);
-    assert_eq!(candidates[1]["nth"], 2);
-}
-
-#[test]
-fn candidates_are_listed_in_the_order_of_their_nth() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(removed(StaleLookup {
-        matched: 3,
-        same_count: 0,
-        truncated: false,
-        candidates: vec![
-            candidate("two", "Neon Rain", Some(2), false),
-            candidate("none", "Other", None, false),
-            candidate("one", "Neon Rain", Some(1), false),
-        ],
-    })));
-
-    let refused = click(&executor, &workspace, &tab_handle, &target);
-
-    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
-    assert_eq!(candidates[0]["nth"], 1);
-    assert_eq!(candidates[1]["nth"], 2);
-    assert!(
-        candidates[2].get("nth").is_none(),
-        "a candidate with no place among repeats comes last"
-    );
-}
-
-#[test]
-fn a_replacement_stays_the_proven_control_when_the_candidates_are_listed_by_nth() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(removed(StaleLookup {
-        matched: 2,
-        same_count: 1,
-        truncated: false,
-        candidates: vec![
-            candidate("two", "Neon Rain", Some(2), true),
-            candidate("one", "Neon Rain", Some(1), false),
-        ],
-    })));
-
-    let refused = click(&executor, &workspace, &tab_handle, &target);
-
-    let replacement = refused.facts["replacement"].as_str().unwrap();
-    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
-    let named = candidates
-        .iter()
-        .find(|entry| entry["target"] == replacement)
-        .expect("the replacement is among the candidates");
-    assert_eq!(named["nth"], 2, "the proven control is the one with nth 2");
-}
-
-#[test]
-fn a_lookup_with_nothing_found_leaves_the_plain_refusal() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(removed(StaleLookup::default())));
-
-    let refused = click(&executor, &workspace, &tab_handle, &target);
-
-    assert_eq!(refused.summary, "That target is no longer on the page.");
-    assert_eq!(refused.next_steps, vec![REMOVED_STEP]);
-    assert!(refused.facts.get("replacement").is_none());
-    assert!(refused.facts.get("recovery_candidates").is_none());
-}
-
-#[test]
-fn a_fill_names_no_replacement_because_it_names_several_targets() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(removed(one_same())));
-
-    let refused = executor.execute(
-        &workspace,
-        "browser_fill_form",
-        json!({"tab":tab_handle,"fields":[{"target":target,"value":"x"}]}),
-        &CancellationToken::default(),
-    );
-
-    assert_eq!(refused.facts["reason"], "stale_target");
-    assert!(
-        refused.facts.get("replacement").is_none(),
-        "{:?}",
-        refused.facts
-    );
-    assert!(
-        refused
-            .next_steps
-            .iter()
-            .all(|step| !step.starts_with("Repeat")),
-        "{:?}",
-        refused.next_steps
-    );
-}
-
-#[test]
-fn a_drag_names_no_replacement_because_it_names_two_targets() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(removed(one_same())));
-
-    let refused = executor.execute(
-        &workspace,
-        "browser_drag",
-        json!({"tab":tab_handle,"source_target":target,"destination_target":target}),
-        &CancellationToken::default(),
-    );
-
-    assert_eq!(refused.facts["reason"], "stale_target");
-    assert!(
-        refused.facts.get("replacement").is_none(),
-        "{:?}",
-        refused.facts
-    );
-    assert!(
-        refused
-            .next_steps
-            .iter()
-            .all(|step| !step.starts_with("Repeat")),
-        "{:?}",
-        refused.next_steps
-    );
-}
-
-#[test]
-fn the_tombstoned_second_use_lists_candidates_but_never_a_replacement() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(removed(one_same())));
-    click(&executor, &workspace, &tab_handle, &target);
-    browser.push(Ok(BrowserOutcome::targets(
-        7,
-        vec![ObservedTarget {
-            locator: "delete-2".into(),
-            role: "button".into(),
-            name: "Delete".into(),
-            ..Default::default()
-        }],
-    )));
-
-    let again = click(&executor, &workspace, &tab_handle, &target);
-
-    assert_eq!(again.facts["stale"], "removed");
-    assert!(again.facts.get("replacement").is_none());
-    assert_eq!(again.next_steps, vec![PICK_STEP]);
-    assert_eq!(
-        again.facts["recovery_candidates"].as_array().unwrap().len(),
-        1
-    );
-}
-
-#[test]
-fn after_a_navigation_the_step_is_browser_inspect_with_candidates_as_handles() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Ok(BrowserOutcome::Navigated {
-        tab: tab(7, "https://example.com/next"),
-        committed_urls: vec![],
-    }));
-    executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com/next","tab":tab_handle}),
-        &CancellationToken::default(),
-    );
-    browser.push(Ok(BrowserOutcome::targets(
-        7,
-        vec![ObservedTarget {
-            locator: "delete-next".into(),
-            role: "button".into(),
-            name: "Delete".into(),
-            context: Some("Next row".into()),
-            ..Default::default()
-        }],
-    )));
-    let before = browser.calls().len();
-
-    let refused = click(&executor, &workspace, &tab_handle, &target);
-
-    assert_eq!(refused.facts["stale"], "navigated");
-    assert_eq!(
-        refused.next_steps,
-        vec!["Call browser_inspect to obtain current target handles."]
-    );
-    assert!(refused.facts.get("replacement").is_none());
-    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
-    assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0]["context"], "Next row");
-    let handle = candidates[0]["target"].as_str().unwrap().to_owned();
-    assert_eq!(
-        browser.calls().len() - before,
-        1,
-        "only the candidate search crossed"
-    );
-
-    let clicked = delete_click_with(&executor, &browser, &workspace, &tab_handle, &handle);
-    assert_eq!(
-        clicked.status,
-        Status::Succeeded,
-        "a candidate is a working handle"
-    );
 }
 
 /// A workspace under a policy that withholds target names, holding one inspected button, with
@@ -494,8 +142,306 @@ fn workspace_without_target_names(
     (executor, browser, workspace, tab_handle, target, policy)
 }
 
+/// What the model is told of a stale handle: its sentence and its next steps.
+fn told(reason: StaleReason, help: StaleHelp) -> (String, Vec<String>) {
+    let refusal = WorkspaceReason::StaleTarget { reason, help };
+    (refusal.summary(), refusal.next_steps())
+}
+
+/// The sentence and next steps of `result`.
+fn heard(result: &crate::work::result::InvocationResult) -> (String, Vec<String>) {
+    (result.summary.clone(), result.next_steps.clone())
+}
+
+/// A page that found two rows like the removed one, proving neither the same, listed out of
+/// order and with a third control that has no place among repeats.
+fn none_same() -> StaleLookup {
+    StaleLookup {
+        matched: 3,
+        same_count: 0,
+        truncated: false,
+        candidates: vec![
+            candidate("two", "Neon Rain", Some(2), false),
+            candidate("none", "Other", None, false),
+            candidate("one", "Neon Rain", Some(1), false),
+        ],
+    }
+}
+
+/// ACCEPTANCE Executor 6, LANGUAGE stale handles and ADR-0198 Decision 28 (43eff032): a removed
+/// handle names a replacement only when the page proved one, the tool takes one, and governance
+/// reveals it.
+///
+/// - Proven: the failing call's own lookup names exactly one control the same; the refusal names
+///   it among the candidates, each a working handle, keeps the verdict in the service, sends
+///   nothing twice, and the repeat step names the call's own tool, for every single-target tool.
+///   Listing candidates by their place among repeats never changes which one was proven.
+/// - Not proven (no control the same, two the same, or a lookup cut short): candidates and the
+///   pick step, in the order of their place. Nothing found: the plain refusal.
+/// - A fill or a drag names several targets and is offered no replacement; nor is a handle's
+///   second use after it was marked removed, nor a call that began an effect.
+/// - After a navigation the step is browser_inspect, with candidates as working handles.
+/// - Without target names the replacement is still named, the candidates carry only role and
+///   place, and the pick step asks for nothing nobody sent; without Read there are no
+///   candidates at all.
+/// - The audit holds no handle, row or candidate.
 #[test]
-fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_or_contexts() {
+fn a_removed_handle_names_a_replacement_only_when_the_page_proved_one() {
+    // Proven: one trusted replacement, and nothing sent twice.
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    let before = browser.calls().len();
+    browser.push(Err(removed(one_same())));
+    let refused = click(&executor, &workspace, &tab_handle, &target);
+    assert_eq!(refused.status, Status::Failed);
+    assert_eq!(refused.effect, Effect::None);
+    assert!(refused.repeat_safe);
+    assert_eq!(refused.facts["reason"], "stale_target");
+    assert_eq!(refused.facts["stale"], "removed");
+    let replacement = refused.facts["replacement"].as_str().unwrap().to_owned();
+    assert_ne!(replacement, target);
+    assert_eq!(
+        heard(&refused),
+        told(
+            StaleReason::Removed,
+            StaleHelp::Replacement {
+                tool: "browser_click",
+                target: replacement.clone()
+            }
+        )
+    );
+    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 3);
+    assert_eq!(candidates[1]["target"], replacement.as_str());
+    assert_eq!(
+        (
+            &candidates[1]["context"],
+            &candidates[1]["name"],
+            &candidates[1]["role"]
+        ),
+        (&json!("Beta"), &json!("Delete"), &json!("button"))
+    );
+    assert!(
+        !refused.facts.to_string().contains("same"),
+        "the verdict stays in the service"
+    );
+    assert_eq!(
+        browser.calls().len() - before,
+        1,
+        "the click was dispatched once"
+    );
+    assert_eq!(queried(&browser), 0, "the page's own answer is the lookup");
+    let repeated = delete_click_with(&executor, &browser, &workspace, &tab_handle, &replacement);
+    assert_eq!(repeated.status, Status::Succeeded, "the replacement works");
+
+    // Every single-target tool repeats with the replacement.
+    for (tool, input) in [
+        ("browser_hover", json!({})),
+        ("browser_type_text", json!({"text":"hello"})),
+        ("browser_press_key", json!({"key":"Enter"})),
+        ("browser_scroll", json!({})),
+    ] {
+        let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+        browser.push(Err(removed(one_same())));
+        let mut arguments = input;
+        arguments["tab"] = json!(tab_handle);
+        arguments["target"] = json!(target);
+        let refused = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
+        let replacement = refused.facts["replacement"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{tool}: {:?}", refused.facts))
+            .to_owned();
+        assert_eq!(
+            heard(&refused),
+            told(
+                StaleReason::Removed,
+                StaleHelp::Replacement {
+                    tool,
+                    target: replacement
+                }
+            ),
+            "{tool}"
+        );
+    }
+
+    // Listed by place, the proven control stays the replacement.
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(removed(StaleLookup {
+        matched: 2,
+        same_count: 1,
+        truncated: false,
+        candidates: vec![
+            candidate("two", "Neon Rain", Some(2), true),
+            candidate("one", "Neon Rain", Some(1), false),
+        ],
+    })));
+    let refused = click(&executor, &workspace, &tab_handle, &target);
+    let replacement = refused.facts["replacement"].as_str().unwrap();
+    let named = refused.facts["recovery_candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["target"] == replacement)
+        .expect("the replacement is among the candidates");
+    assert_eq!(named["nth"], 2, "the proven control is the one with nth 2");
+
+    // Not proven: candidates in the order of their place, and the pick step.
+    let mut two_same = none_same();
+    two_same.same_count = 2;
+    for entry in &mut two_same.candidates {
+        entry.same = entry.target.context.as_deref() == Some("Neon Rain");
+    }
+    for (what, lookup) in [
+        ("no control is the same", none_same()),
+        ("two controls are the same", two_same),
+        (
+            "the lookup was cut short",
+            StaleLookup {
+                truncated: true,
+                ..one_same()
+            },
+        ),
+    ] {
+        let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+        browser.push(Err(removed(lookup)));
+        let refused = click(&executor, &workspace, &tab_handle, &target);
+        assert_eq!(
+            heard(&refused),
+            told(StaleReason::Removed, StaleHelp::Candidates { named: true }),
+            "{what}"
+        );
+        assert!(refused.facts.get("replacement").is_none(), "{what}");
+        let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
+        assert!(candidates
+            .iter()
+            .all(|entry| entry["target"].as_str().unwrap().starts_with("target_")));
+        if what == "no control is the same" {
+            let places: Vec<_> = candidates.iter().map(|entry| entry.get("nth")).collect();
+            assert_eq!(places, [Some(&json!(1)), Some(&json!(2)), None], "{what}");
+            assert_eq!(candidates[0]["context"], "Neon Rain");
+        }
+    }
+
+    // Nothing found: the plain refusal.
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(removed(StaleLookup::default())));
+    let refused = click(&executor, &workspace, &tab_handle, &target);
+    assert_eq!(heard(&refused), told(StaleReason::Removed, StaleHelp::None));
+    assert!(refused.facts.get("replacement").is_none());
+    assert!(refused.facts.get("recovery_candidates").is_none());
+
+    // Several targets, a second use, or a begun effect: no replacement.
+    for (tool, arguments) in [
+        (
+            "browser_fill_form",
+            json!({"fields":[{"target":"TARGET","value":"x"}]}),
+        ),
+        (
+            "browser_drag",
+            json!({"source_target":"TARGET","destination_target":"TARGET"}),
+        ),
+    ] {
+        let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+        browser.push(Err(removed(one_same())));
+        let mut arguments: serde_json::Value =
+            serde_json::from_str(&arguments.to_string().replace("TARGET", &target)).unwrap();
+        arguments["tab"] = json!(tab_handle);
+        let refused = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
+        assert_eq!(refused.facts["reason"], "stale_target", "{tool}");
+        assert!(refused.facts.get("replacement").is_none(), "{tool}");
+        assert_ne!(
+            refused.next_steps,
+            told(
+                StaleReason::Removed,
+                StaleHelp::Replacement {
+                    tool,
+                    target: target.clone()
+                }
+            )
+            .1
+        );
+    }
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(removed(one_same())));
+    click(&executor, &workspace, &tab_handle, &target);
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
+            locator: "delete-2".into(),
+            role: "button".into(),
+            name: "Delete".into(),
+            ..Default::default()
+        }],
+    )));
+    let again = click(&executor, &workspace, &tab_handle, &target);
+    assert_eq!(again.facts["stale"], "removed");
+    assert!(again.facts.get("replacement").is_none());
+    assert_eq!(
+        again.next_steps,
+        told(StaleReason::Removed, StaleHelp::Candidates { named: true }).1
+    );
+    assert_eq!(
+        again.facts["recovery_candidates"].as_array().unwrap().len(),
+        1
+    );
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    // The link restates any failure after a started effect as an unknown effect, so a stale
+    // lookup can only arrive here before one. The help still refuses to name a replacement for
+    // a failure the call reports after acting.
+    browser.push(Err(BrowserError::EffectUnknown("x".into())));
+    let refused = click(&executor, &workspace, &tab_handle, &target);
+    assert!(refused.facts.get("replacement").is_none());
+
+    // After a navigation: browser_inspect, with candidates as working handles.
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Ok(BrowserOutcome::Navigated {
+        tab: tab(7, "https://example.com/next"),
+        committed_urls: vec![],
+    }));
+    executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/next","tab":tab_handle}),
+        &CancellationToken::default(),
+    );
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
+            locator: "delete-next".into(),
+            role: "button".into(),
+            name: "Delete".into(),
+            context: Some("Next row".into()),
+            ..Default::default()
+        }],
+    )));
+    let before = browser.calls().len();
+    let refused = click(&executor, &workspace, &tab_handle, &target);
+    assert_eq!(refused.facts["stale"], "navigated");
+    assert_eq!(
+        refused.next_steps,
+        told(
+            StaleReason::Navigated,
+            StaleHelp::Candidates { named: true }
+        )
+        .1
+    );
+    assert!(refused.facts.get("replacement").is_none());
+    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0]["context"], "Next row");
+    let handle = candidates[0]["target"].as_str().unwrap().to_owned();
+    assert_eq!(
+        browser.calls().len() - before,
+        1,
+        "only the candidate search crossed"
+    );
+    let clicked = delete_click_with(&executor, &browser, &workspace, &tab_handle, &handle);
+    assert_eq!(
+        clicked.status,
+        Status::Succeeded,
+        "a candidate is a working handle"
+    );
+
+    // Without target names: the replacement is named, the candidates carry role and place only.
     let (executor, browser, workspace, tab_handle, target, _policy) =
         workspace_without_target_names("replacement-no-names");
     let mut lookup = one_same();
@@ -504,18 +450,24 @@ fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_o
     }
     lookup.candidates[0].target.nth = Some(1);
     browser.push(Err(removed(lookup)));
-
     let refused = click(&executor, &workspace, &tab_handle, &target);
-
-    let replacement = refused.facts["replacement"].as_str().unwrap();
+    let replacement = refused.facts["replacement"].as_str().unwrap().to_owned();
     assert_eq!(
-        refused.next_steps,
-        vec![format!("Repeat browser_click with target {replacement}.")]
+        heard(&refused),
+        told(
+            StaleReason::Removed,
+            StaleHelp::Replacement {
+                tool: "browser_click",
+                target: replacement
+            }
+        )
     );
     let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
     for entry in candidates {
-        assert!(entry.get("name").is_none(), "{entry}");
-        assert!(entry.get("context").is_none(), "{entry}");
+        assert!(
+            entry.get("name").is_none() && entry.get("context").is_none(),
+            "{entry}"
+        );
         assert_eq!(entry["role"], "button");
     }
     assert_eq!(
@@ -530,39 +482,23 @@ fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_o
         !shown.contains("Delete patient") && !shown.contains("Beta"),
         "{shown}"
     );
-}
-
-#[test]
-fn without_target_names_the_pick_step_does_not_ask_for_a_context_nobody_sent() {
     let (executor, browser, workspace, tab_handle, target, _policy) =
         workspace_without_target_names("pick-no-names");
-    browser.push(Err(removed(StaleLookup {
-        matched: 2,
-        same_count: 0,
-        truncated: false,
-        candidates: vec![
-            candidate("two", "Neon Rain", Some(2), false),
-            candidate("one", "Neon Rain", Some(1), false),
-        ],
-    })));
-
+    browser.push(Err(removed(none_same())));
     let refused = click(&executor, &workspace, &tab_handle, &target);
-
     assert!(refused.facts.get("replacement").is_none());
     assert_eq!(
-        refused.next_steps,
-        vec!["Pick a target from recovery_candidates by its role and nth, or call browser_find for current target handles."]
+        heard(&refused),
+        told(StaleReason::Removed, StaleHelp::Candidates { named: false })
     );
-    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
-    assert_eq!(candidates.len(), 2);
-    for entry in candidates {
-        assert!(entry.get("name").is_none(), "{entry}");
-        assert!(entry.get("context").is_none(), "{entry}");
+    for entry in refused.facts["recovery_candidates"].as_array().unwrap() {
+        assert!(
+            entry.get("name").is_none() && entry.get("context").is_none(),
+            "{entry}"
+        );
     }
-}
 
-#[test]
-fn without_read_authorization_there_is_no_replacement_and_no_candidates() {
+    // Without Read: no replacement and no candidates.
     let policy = temporary_policy("replacement-no-read");
     fs::write(
         &policy,
@@ -581,10 +517,7 @@ fn without_read_authorization_there_is_no_replacement_and_no_candidates() {
         json!({"url":"https://example.com"}),
         &CancellationToken::default(),
     );
-    let tab_handle = opened.facts["tab"]
-        .as_str()
-        .unwrap_or_else(|| panic!("{:?} {:?}", opened.summary, opened.facts))
-        .to_owned();
+    let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
     let lease = workspaces.acquire(&workspace).unwrap();
     let selected = lease.select_tab(Some(&tab_handle)).unwrap();
     let registered = lease
@@ -606,18 +539,13 @@ fn without_read_authorization_there_is_no_replacement_and_no_candidates() {
         .unwrap();
     drop(lease);
     browser.push(Err(removed(one_same())));
-
     let refused = click(&executor, &workspace, &tab_handle, &target);
-
     assert_eq!(refused.facts["stale"], "removed", "{:?}", refused.facts);
     assert!(refused.facts.get("replacement").is_none());
     assert!(refused.facts.get("recovery_candidates").is_none());
-    assert_eq!(refused.next_steps, vec![REMOVED_STEP]);
-    assert_eq!(refused.summary, "That target is no longer on the page.");
-}
+    assert_eq!(heard(&refused), told(StaleReason::Removed, StaleHelp::None));
 
-#[test]
-fn the_audit_and_the_history_hold_no_handle_context_or_candidate() {
+    // The audit holds no handle, row or candidate.
     let (executor, browser, _, workspace, audit) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
@@ -651,9 +579,7 @@ fn the_audit_and_the_history_hold_no_handle_context_or_candidate() {
         .unwrap()
         .to_owned();
     browser.push(Err(removed(one_same())));
-
     let refused = click(&executor, &workspace, &tab_handle, &target);
-
     let replacement = refused.facts["replacement"].as_str().unwrap().to_owned();
     let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
     assert!(encoded.contains("removed"), "{encoded}");
@@ -668,21 +594,4 @@ fn the_audit_and_the_history_hold_no_handle_context_or_candidate() {
     ] {
         assert!(!encoded.contains(secret), "{secret} in {encoded}");
     }
-}
-
-#[test]
-fn the_replacement_is_not_offered_after_an_effect_began() {
-    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    // The link restates any failure after a started effect as an unknown effect, so a stale
-    // lookup can only arrive here before one. The help still refuses to name a replacement for
-    // a failure the call reports after acting.
-    browser.push(Err(BrowserError::EffectUnknown("x".into())));
-
-    let refused = click(&executor, &workspace, &tab_handle, &target);
-
-    assert!(refused.facts.get("replacement").is_none());
-    assert!(refused
-        .next_steps
-        .iter()
-        .all(|step| !step.starts_with("Repeat browser_click with target")));
 }
