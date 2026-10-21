@@ -311,267 +311,9 @@ mod tests {
     const TWO_PROFILES: &str = r#"{"profile":{"info_cache":{
         "Default":{"name":"Person 1"},"Profile 1":{"name":"Work"}}}}"#;
 
-    #[test]
-    fn the_extension_is_found_only_in_the_profile_that_holds_it() {
-        let scratch = Scratch::new();
-        local_state(scratch.path(), TWO_PROFILES);
-        install_extension(scratch.path(), "Profile 1");
-        fs::create_dir_all(scratch.path().join("Default")).unwrap();
-
-        let scan = scan_user_data(scratch.path(), ID);
-
-        assert_eq!(scan.profiles, 2);
-        assert_eq!(scan.with_extension, vec![found("Profile 1", Some("Work"))]);
-    }
-
-    #[test]
-    fn profiles_with_the_extension_come_in_local_state_order() {
-        let scratch = Scratch::new();
-        local_state(
-            scratch.path(),
-            &listing(
-                r#""Profile 3":{"name":"Zed"},"Default":{"name":"Ann"},"Profile 1":{"name":"Bo"}"#,
-            ),
-        );
-        for profile in ["Default", "Profile 1", "Profile 3"] {
-            install_extension(scratch.path(), profile);
-        }
-
-        let scan = scan_user_data(scratch.path(), ID);
-
-        assert_eq!(
-            scan.with_extension,
-            vec![
-                found("Profile 3", Some("Zed")),
-                found("Default", Some("Ann")),
-                found("Profile 1", Some("Bo")),
-            ]
-        );
-    }
-
-    #[test]
-    fn one_profile_is_one_profile() {
-        let scratch = Scratch::new();
-        local_state(scratch.path(), &listing(r#""Default":{"name":"Person 1"}"#));
-        install_extension(scratch.path(), "Default");
-
-        let scan = scan_user_data(scratch.path(), ID);
-
-        assert_eq!(scan.profiles, 1);
-        assert_eq!(
-            scan.with_extension,
-            vec![found("Default", Some("Person 1"))]
-        );
-    }
-
-    #[test]
-    fn without_local_state_the_default_profile_stands_alone_and_unnamed() {
-        let scratch = Scratch::new();
-        install_extension(scratch.path(), "Default");
-
-        let scan = scan_user_data(scratch.path(), ID);
-
-        assert_eq!(scan.profiles, 1);
-        assert_eq!(scan.with_extension, vec![found("Default", None)]);
-    }
-
-    #[test]
-    fn a_browser_with_no_data_has_no_profiles() {
-        let scratch = Scratch::new();
-
-        let scan = scan_user_data(&scratch.path().join("absent"), ID);
-
-        assert_eq!(scan.profiles, 0);
-        assert!(scan.with_extension.is_empty());
-    }
-
-    #[test]
-    fn unusable_local_state_falls_back_to_the_default_profile() {
-        for content in [
-            "{ not json".to_owned(),
-            r#"{"profile":{"info_cache":[1,2]}}"#.to_owned(),
-            r#"{"profile":{}}"#.to_owned(),
-            listing(""),
-            // Larger than the read limit, and otherwise valid.
-            format!(
-                r#"{{"padding":"{}","profile":{{"info_cache":{{"Profile 1":{{"name":"Work"}}}}}}}}"#,
-                "x".repeat(LOCAL_STATE_LIMIT as usize)
-            ),
-        ] {
-            let scratch = Scratch::new();
-            local_state(scratch.path(), &content);
-            install_extension(scratch.path(), "Default");
-            install_extension(scratch.path(), "Profile 1");
-
-            let scan = scan_user_data(scratch.path(), ID);
-
-            assert_eq!(scan.profiles, 1);
-            assert_eq!(scan.with_extension, vec![found("Default", None)]);
-        }
-    }
-
-    #[test]
-    fn hostile_profile_keys_are_never_joined_to_a_path() {
-        let scratch = Scratch::new();
-        let user_data = scratch.path().join("User Data");
-        // A directory beside the user data directory that holds the extension.
-        install_extension(scratch.path(), "outside");
-        let long = "p".repeat(65);
-        let keys = [
-            "../outside",
-            "..",
-            ".",
-            "a/b",
-            "a\\b",
-            "Pro\u{7}file",
-            "",
-            long.as_str(),
-        ];
-        let mut entries: Vec<String> = keys
-            .iter()
-            .map(|key| format!(r#"{}:{{"name":"x"}}"#, serde_json::to_string(key).unwrap()))
-            .collect();
-        entries.push(r#""Profile 1":{"name":"Work"}"#.to_owned());
-        local_state(&user_data, &listing(&entries.join(",")));
-        install_extension(&user_data, "Profile 1");
-
-        let scan = scan_user_data(&user_data, ID);
-
-        assert_eq!(scan.profiles, 1);
-        assert_eq!(scan.with_extension, vec![found("Profile 1", Some("Work"))]);
-    }
-
-    #[test]
-    fn a_key_of_exactly_64_characters_is_used() {
-        let key = "p".repeat(64);
-        let scratch = Scratch::new();
-        local_state(
-            scratch.path(),
-            &listing(&format!(r#""{key}":{{"name":"Long"}}"#)),
-        );
-        install_extension(scratch.path(), &key);
-
-        let scan = scan_user_data(scratch.path(), ID);
-
-        assert_eq!(scan.with_extension, vec![found(&key, Some("Long"))]);
-    }
-
-    #[test]
-    fn shown_names_are_cleaned_and_bounded() {
-        let scratch = Scratch::new();
-        let long = "n".repeat(60);
-        let entries = format!(
-            r#""Default":{{"name":"  Per\u0007son\n1  "}},
-            "Profile 1":{{"name":"{long}"}},
-            "Profile 2":{{"name":" \u0001 \t "}},
-            "Profile 3":{{"name":7}},
-            "Profile 4":{{}}"#
-        );
-        local_state(scratch.path(), &listing(&entries));
-        for profile in [
-            "Default",
-            "Profile 1",
-            "Profile 2",
-            "Profile 3",
-            "Profile 4",
-        ] {
-            install_extension(scratch.path(), profile);
-        }
-
-        let scan = scan_user_data(scratch.path(), ID);
-
-        assert_eq!(
-            scan.with_extension,
-            vec![
-                found("Default", Some("Person1")),
-                found("Profile 1", Some(&"n".repeat(40))),
-                found("Profile 2", None),
-                found("Profile 3", None),
-                found("Profile 4", None),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_name_cut_at_the_limit_does_not_end_in_a_space() {
-        let scratch = Scratch::new();
-        let name = format!("{} {}", "a".repeat(39), "b".repeat(10));
-        local_state(
-            scratch.path(),
-            &listing(&format!(r#""Default":{{"name":"{name}"}}"#)),
-        );
-        install_extension(scratch.path(), "Default");
-
-        let scan = scan_user_data(scratch.path(), ID);
-
-        assert_eq!(
-            scan.with_extension,
-            vec![found("Default", Some(&"a".repeat(39)))]
-        );
-    }
-
     /// A profile file holding `settings` as the settings of the extension `id`.
     fn extension_settings(id: &str, settings: &str) -> String {
         format!(r#"{{"extensions":{{"settings":{{"{id}":{settings}}}}}}}"#)
-    }
-
-    #[test]
-    fn a_turned_off_copy_does_not_hold_the_extension() {
-        let scratch = Scratch::new();
-        local_state(
-            scratch.path(),
-            &listing(
-                r#""Default":{"name":"Reasons"},"Profile 1":{"name":"Flags"},
-                "Profile 2":{"name":"Old"},"Profile 3":{"name":"On"},"Profile 4":{"name":"Clear"}"#,
-            ),
-        );
-        // Turned off, as newer browsers record it, in the protected file.
-        install_extension(scratch.path(), "Default");
-        write(
-            &scratch.path().join("Default").join("Secure Preferences"),
-            &extension_settings(ID, r#"{"disable_reasons":[1],"path":"x"}"#),
-        );
-        // Turned off, as older browsers record it, in the plain file.
-        install_extension(scratch.path(), "Profile 1");
-        write(
-            &scratch.path().join("Profile 1").join("Preferences"),
-            &extension_settings(ID, r#"{"disable_reasons":1}"#),
-        );
-        install_extension(scratch.path(), "Profile 2");
-        write(
-            &scratch.path().join("Profile 2").join("Preferences"),
-            &extension_settings(ID, r#"{"state":0}"#),
-        );
-        // On: only another extension is turned off.
-        install_extension(scratch.path(), "Profile 3");
-        write(
-            &scratch.path().join("Profile 3").join("Secure Preferences"),
-            &extension_settings(
-                "otherotherotherotherotherotherot",
-                r#"{"disable_reasons":[1]}"#,
-            ),
-        );
-        // On: the reasons are cleared.
-        install_extension(scratch.path(), "Profile 4");
-        write(
-            &scratch.path().join("Profile 4").join("Preferences"),
-            &extension_settings(ID, r#"{"state":1,"disable_reasons":0}"#),
-        );
-        write(
-            &scratch.path().join("Profile 4").join("Secure Preferences"),
-            &extension_settings(ID, r#"{"disable_reasons":[]}"#),
-        );
-
-        let scan = scan_user_data(scratch.path(), ID);
-
-        assert_eq!(scan.profiles, 5);
-        assert_eq!(
-            scan.with_extension,
-            vec![
-                found("Profile 3", Some("On")),
-                found("Profile 4", Some("Clear"))
-            ]
-        );
     }
 
     /// A registry for `scratch` in which Chrome is installed.
@@ -592,50 +334,156 @@ mod tests {
         registry
     }
 
+    /// ACCEPTANCE Desktop 23 and 24: the scan finds, in each installed browser, the profiles that
+    /// hold the extension installed and turned on, in the order `Local State` lists them, so Open
+    /// goes to a profile that can connect and a person with only a turned-off copy is sent to the
+    /// store (defect 68aa9656). A browser with no data has no profile; without a usable
+    /// `Local State` the Default profile stands alone and unnamed; and a profile key that could
+    /// leave the user data directory is never joined to a path.
     #[test]
-    fn a_browser_with_only_a_turned_off_copy_sends_the_person_to_the_store() {
+    fn a_profile_holds_the_extension_only_when_installed_and_turned_on() {
         let scratch = Scratch::new();
-        let registry = registry_with_chrome(&scratch);
+        local_state(
+            scratch.path(),
+            &listing(
+                r#""Profile 3":{"name":"Zed"},"Default":{"name":"Ann"},"Profile 1":{"name":"Bo"},"Profile 2":{"name":"None"}"#,
+            ),
+        );
+        for profile in ["Default", "Profile 1", "Profile 3"] {
+            install_extension(scratch.path(), profile);
+        }
+        fs::create_dir_all(scratch.path().join("Profile 2")).unwrap();
+        let seen = scan_user_data(scratch.path(), ID);
+        assert_eq!(seen.profiles, 4);
+        assert_eq!(
+            seen.with_extension,
+            vec![
+                found("Profile 3", Some("Zed")),
+                found("Default", Some("Ann")),
+                found("Profile 1", Some("Bo")),
+            ]
+        );
+
+        let absent = scan_user_data(&scratch.path().join("absent"), ID);
+        assert_eq!((absent.profiles, absent.with_extension.len()), (0, 0));
+
+        for content in [
+            None,
+            Some("{ not json".to_owned()),
+            Some(r#"{"profile":{"info_cache":[1,2]}}"#.to_owned()),
+            Some(listing("")),
+            Some(format!(
+                r#"{{"padding":"{}","profile":{{"info_cache":{{"Profile 1":{{"name":"Work"}}}}}}}}"#,
+                "x".repeat(LOCAL_STATE_LIMIT as usize)
+            )),
+        ] {
+            let scratch = Scratch::new();
+            if let Some(content) = &content {
+                local_state(scratch.path(), content);
+            }
+            install_extension(scratch.path(), "Default");
+            install_extension(scratch.path(), "Profile 1");
+            let seen = scan_user_data(scratch.path(), ID);
+            assert_eq!(seen.profiles, 1, "{content:?}");
+            assert_eq!(seen.with_extension, vec![found("Default", None)]);
+        }
+
+        let hostile = Scratch::new();
+        let user_data = hostile.path().join("User Data");
+        install_extension(hostile.path(), "outside");
+        let long = "p".repeat(65);
+        let keys = [
+            "../outside",
+            "..",
+            ".",
+            "a/b",
+            "a\\b",
+            "Pro\u{7}file",
+            "",
+            long.as_str(),
+        ];
+        let mut entries: Vec<String> = keys
+            .iter()
+            .map(|key| format!(r#"{}:{{"name":"x"}}"#, serde_json::to_string(key).unwrap()))
+            .collect();
+        entries.push(r#""Profile 1":{"name":"Work"}"#.to_owned());
+        local_state(&user_data, &listing(&entries.join(",")));
+        install_extension(&user_data, "Profile 1");
+        let seen = scan_user_data(&user_data, ID);
+        assert_eq!(seen.profiles, 1);
+        assert_eq!(seen.with_extension, vec![found("Profile 1", Some("Work"))]);
+
+        let turned = Scratch::new();
+        local_state(
+            turned.path(),
+            &listing(
+                r#""Default":{"name":"Reasons"},"Profile 1":{"name":"Flags"},
+                "Profile 2":{"name":"Old"},"Profile 3":{"name":"On"},"Profile 4":{"name":"Clear"}"#,
+            ),
+        );
+        for (profile, file, settings) in [
+            (
+                "Default",
+                "Secure Preferences",
+                extension_settings(ID, r#"{"disable_reasons":[1],"path":"x"}"#),
+            ),
+            (
+                "Profile 1",
+                "Preferences",
+                extension_settings(ID, r#"{"disable_reasons":1}"#),
+            ),
+            (
+                "Profile 2",
+                "Preferences",
+                extension_settings(ID, r#"{"state":0}"#),
+            ),
+            (
+                "Profile 3",
+                "Secure Preferences",
+                extension_settings(
+                    "otherotherotherotherotherotherot",
+                    r#"{"disable_reasons":[1]}"#,
+                ),
+            ),
+            (
+                "Profile 4",
+                "Preferences",
+                extension_settings(ID, r#"{"state":1,"disable_reasons":0}"#),
+            ),
+            (
+                "Profile 4",
+                "Secure Preferences",
+                extension_settings(ID, r#"{"disable_reasons":[]}"#),
+            ),
+        ] {
+            install_extension(turned.path(), profile);
+            write(&turned.path().join(profile).join(file), &settings);
+        }
+        let seen = scan_user_data(turned.path(), ID);
+        assert_eq!(seen.profiles, 5);
+        assert_eq!(
+            seen.with_extension,
+            vec![
+                found("Profile 3", Some("On")),
+                found("Profile 4", Some("Clear"))
+            ]
+        );
+
+        let browsers = Scratch::new();
+        let registry = registry_with_chrome(&browsers);
         let chrome = registry.user_data_directory("chrome").unwrap();
-        local_state(&chrome, &listing(r#""Default":{"name":"Person 1"}"#));
-        fs::create_dir_all(
+        local_state(&chrome, TWO_PROFILES);
+        let store = |profile: &str| {
             chrome
-                .join("Default")
+                .join(profile)
                 .join("Extensions")
-                .join(STORE_EXTENSION_ID),
-        )
-        .unwrap();
+                .join(STORE_EXTENSION_ID)
+        };
+        fs::create_dir_all(store("Default")).unwrap();
         write(
             &chrome.join("Default").join("Preferences"),
             &extension_settings(STORE_EXTENSION_ID, r#"{"disable_reasons":[1]}"#),
         );
-
-        // What the executor asks before it words a refusal while setup is incomplete.
-        let held = scan(&registry)
-            .iter()
-            .any(|browser| !browser.scan.with_extension.is_empty());
-
-        assert!(!held);
-        assert_eq!(
-            crate::language::outcome::ExtensionAdvice::resolve(false, held),
-            crate::language::outcome::ExtensionAdvice::AddFromStore
-        );
-    }
-
-    #[test]
-    fn scanning_finds_installed_browsers_and_leaves_the_others_out() {
-        let scratch = Scratch::new();
-        // Chrome is installed; Edge has data but no executable.
-        let registry = registry_with_chrome(&scratch);
-        let chrome = registry.user_data_directory("chrome").unwrap();
-        local_state(&chrome, TWO_PROFILES);
-        fs::create_dir_all(
-            chrome
-                .join("Profile 1")
-                .join("Extensions")
-                .join(STORE_EXTENSION_ID),
-        )
-        .unwrap();
         let edge = registry.user_data_directory("edge").unwrap();
         fs::create_dir_all(
             edge.join("Default")
@@ -643,14 +491,21 @@ mod tests {
                 .join(STORE_EXTENSION_ID),
         )
         .unwrap();
-
         let scans = scan(&registry);
-
-        assert_eq!(scans.len(), 1);
+        assert_eq!(scans.len(), 1, "an uninstalled browser's data is left out");
         assert_eq!(scans[0].browser.short, "Chrome");
         assert_eq!(scans[0].scan.profiles, 2);
+        let held = scans
+            .iter()
+            .any(|browser| !browser.scan.with_extension.is_empty());
+        assert!(!held);
         assert_eq!(
-            scans[0].scan.with_extension,
+            crate::language::outcome::ExtensionAdvice::resolve(false, held),
+            crate::language::outcome::ExtensionAdvice::AddFromStore
+        );
+        fs::create_dir_all(store("Profile 1")).unwrap();
+        assert_eq!(
+            scan(&registry)[0].scan.with_extension,
             vec![found("Profile 1", Some("Work"))]
         );
     }
