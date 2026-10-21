@@ -6,8 +6,9 @@
 //! edge (ADR-0199 Decisions 1 and 4). The service is a console-subsystem program. On MSVC targets
 //! it embeds the edge's application manifest, whose `consoleAllocationPolicy` is `detached`, so
 //! on Windows 11 24H2 and later a start that has no console to join shows none. The service's
-//! needs are exactly the edge's (only that one setting), and the edge is frozen, so the manifest
-//! is read from the edge crate by path instead of copied. Other targets embed nothing.
+//! needs are exactly the edge's (only that one setting), and the edge is frozen, so the build
+//! reads the edge crate's manifest instead of keeping a second one in the tree. Other targets
+//! embed nothing.
 
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 compile_error!("Ghostlight supports Windows and Linux only.");
@@ -20,6 +21,9 @@ const ICON_PNG: &str = "../../extension/icons/icon128.png";
 
 /// The application manifest the service shares with the edge, relative to this crate.
 const MANIFEST: &str = "../edge/manifest.xml";
+
+/// The name of the manifest's copy in the build output directory.
+const MANIFEST_COPY: &str = "manifest.xml";
 
 /// The Cargo target operating system the resources are for.
 const TARGET_OS_WINDOWS: &str = "windows";
@@ -35,13 +39,16 @@ fn main() {
         return;
     }
     if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok(TARGET_ENV_MSVC) {
-        let directory = PathBuf::from(
-            env::var_os("CARGO_MANIFEST_DIR").expect("Cargo supplies CARGO_MANIFEST_DIR"),
-        );
+        // The linker reads the manifest's copy in the output directory. Cargo keeps this script's
+        // output when the same crate builds from another checkout of the tree, so a path into the
+        // checkout that last ran it would outlive that checkout, and the link would fail.
+        let manifest = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo supplies OUT_DIR"))
+            .join(MANIFEST_COPY);
+        std::fs::copy(MANIFEST, &manifest).expect("copy the application manifest");
         println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
         println!(
             "cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}",
-            directory.join(MANIFEST).display()
+            manifest.display()
         );
     }
     embed_resources();

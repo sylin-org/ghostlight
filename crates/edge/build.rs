@@ -26,13 +26,16 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok(TARGET_ENV_MSVC) {
         return;
     }
-    let directory = PathBuf::from(
-        env::var_os("CARGO_MANIFEST_DIR").expect("Cargo supplies CARGO_MANIFEST_DIR"),
-    );
+    // The linker reads the manifest's copy in the output directory. Cargo keeps this script's
+    // output when the same crate builds from another checkout of the tree, so a path into the
+    // checkout that last ran it would outlive that checkout, and the link would fail.
+    let manifest =
+        PathBuf::from(env::var_os("OUT_DIR").expect("Cargo supplies OUT_DIR")).join(MANIFEST);
+    std::fs::copy(MANIFEST, &manifest).expect("copy the application manifest");
     println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
     println!(
         "cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}",
-        directory.join(MANIFEST).display()
+        manifest.display()
     );
     embed_version();
 }
