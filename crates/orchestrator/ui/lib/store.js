@@ -281,8 +281,13 @@
         switch (change.kind) {
           case "audit_health_changed": return "refresh";
           case "document_coverage_changed": {
+            // Coverage is drawn for feed rows, so it is kept for the rows the feed holds, whatever
+            // their age: after Clear the feed holds older rows than the newest coverage.
             if (state.snapshot) {
-              state.snapshot.document_coverage = [change.details, ...(state.snapshot.document_coverage ?? []).filter((item) => item.invocation !== change.details.invocation)].slice(0, FEED_LIMIT);
+              const held = new Set(state.feed.map((item) => item.invocation));
+              const kept = (state.snapshot.document_coverage ?? [])
+                .filter((item) => item.invocation !== change.details.invocation && held.has(item.invocation));
+              state.snapshot.document_coverage = [change.details, ...kept];
             }
             const entry = state.feed.find((item) => item.invocation === change.details.invocation);
             if (entry) emit(state.feed[0] === entry ? CHANGE.Hero : CHANGE.Row, { entry });

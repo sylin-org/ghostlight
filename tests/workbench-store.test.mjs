@@ -148,6 +148,21 @@ test("each published change moves the cache it names", () => {
   assert.deepEqual(store.snapshot().controls, { you: { context: "control" } });
   assert.equal(apply(6, PUBLISHED[0]), "refresh");
   assert.equal(apply(7, PUBLISHED[10]), "hinted");
+
+  // Coverage: after Clear the rebuilt feed holds rows older than the newest 200 coverage details,
+  // and a live coverage change keeps theirs (defect U-D2).
+  const records = Array.from({ length: 250 }, (_, index) => ({
+    ...snapshotAt(0).history[0], invocation: `r${index}`, timestamp_ms: 1_000 - index
+  }));
+  const coverage = records.map((item) => ({ invocation: item.invocation, summary: "Read the page." }));
+  const cleared = latched({ history: records, document_coverage: coverage }).store;
+  assert.equal(cleared.clearCompleted(), 200);
+  cleared.applySnapshot({ ...snapshotAt(5), history: records, document_coverage: coverage }, true);
+  cleared.applyChange({ seq: 6, change: { kind: "document_coverage_changed", details: { invocation: "new", summary: "Read." } } });
+  const kept = new Set(cleared.snapshot().document_coverage.map((item) => item.invocation));
+  assert.ok(kept.has("new"));
+  assert.ok(kept.has("r249"), "the oldest row the feed holds keeps its coverage");
+  assert.equal(kept.size, 51);
 });
 
 test("the no-browser line follows the connections part, and goes when a browser connects", () => {

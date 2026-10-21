@@ -121,7 +121,7 @@ C3c), then the rows below.
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | U-D1 | fix(workbench): a policy draft near the limit gets the policy-size sentence | - | SURF-5's size defect; one web test; test-01 | landed (this commit) |
-| U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | todo |
+| U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | landed (this commit) |
 | U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | todo |
 | U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first; test-01 | landed (this commit) |
 | U-D5 | fix(workbench): a window with the bearer always finds room among the workbench's connections | - | found by test-01's tests-1 classification, 2026-10-21 (Notes, second sweep); test-01 took it first in `workbench/` | landed (9db6e896) |
@@ -177,3 +177,9 @@ C3c), then the rows below.
   (`unavailable-window-failed.json`, `tray-model-window-fails.json`), which the shell decodes. The
   ADR's suggested test name is not added as a separate test. ARCHITECTURE's unavailable reasons
   get `window_failed` in D2, as LEDGER-docs plans.
+- U-D2 as landed: a live `document_coverage_changed` no longer cuts the page's coverage list to
+  the newest 200 (`FEED_LIMIT`). It keeps the new details and those of every row the feed holds,
+  whatever their age, so after Clear the rebuilt feed's older rows keep their Coverage details;
+  details for rows the feed does not hold go, which also bounds the list. The proof is a block of
+  rows in the kept store test "each published change moves the cache it names": 250 records,
+  Clear, a rebuild, one live change, and the oldest held row still has its coverage (51 kept).
