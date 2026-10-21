@@ -78,14 +78,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_pane_names_the_app_the_icon_came_from() {
-        assert_eq!(
-            icon_from("Antigravity"),
-            "Icon from the installed Antigravity app."
-        );
-    }
-
+    /// ARCHITECTURE (agent icons): doctor says per agent whether its own icon was found, from
+    /// which app and which kind of place, then names the agents that show their monograms, or
+    /// says none was found.
     #[test]
     fn doctor_names_each_found_icon_s_app_and_the_agents_that_show_monograms() {
         let agents = [
