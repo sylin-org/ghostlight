@@ -18,7 +18,7 @@ use ghostlight_relay::endpoint::Connection as RelayConnection;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::link::{Line, RecordingIndex};
+use super::link::Line;
 use super::wire;
 use crate::browser::adapter::BrowserEvent;
 use crate::browser::transport::{SocketReader, SocketWriter};
@@ -160,7 +160,6 @@ pub(crate) fn attach(
             line: Line {
                 writer: Arc::clone(&writer),
                 receipts,
-                recordings: Arc::new(RecordingIndex::default()),
             },
             adapter_version: hello.adapter_version,
             browser_id: tag.browser_id.clone(),

@@ -8,12 +8,13 @@ use crate::browser::adapter::{
 use crate::intake::session::ServiceContent;
 use serde_json::json;
 
+use crate::browser::BrowserError;
 use crate::governance::{Capability, CapabilitySet, Decision};
 use crate::language::{
     outcome::{Outcome, Refusal, SavedTo},
     Record, RecordAction,
 };
-use crate::workspace::WorkspaceLease;
+use crate::workspace::{HeldRecording, WorkspaceLease};
 
 use super::{
     bounded, observed_host, readiness, recording_delivery_name, recording_facts,
@@ -57,7 +58,18 @@ impl ApplicationExecutor {
                 if !decision.allowed {
                     return self.blocked(context, decision, None, Effect::None, true, json!({}));
                 }
-                match self.dispatch(context, BrowserCommand::StatusRecording) {
+                let held = match self.held_recording(context) {
+                    Ok(held) => held,
+                    Err(terminal) => return *terminal,
+                };
+                let outcome = self.dispatch(
+                    context,
+                    BrowserCommand::StatusRecording {
+                        recording_id: held.id,
+                    },
+                );
+                self.note_recording(context, &outcome);
+                match outcome {
                     Ok(BrowserOutcome::RecordingStatus { summary }) => {
                         self.recording_observed(context, decision, &summary)
                     }
@@ -92,35 +104,25 @@ impl ApplicationExecutor {
                 json!({}),
             );
         }
+        if let Some(answer) = self.held_answer(context, decision, &selected) {
+            return answer;
+        }
         match self.dispatch(
             context,
             BrowserCommand::StartRecording {
                 tab_id: selected.physical_id,
             },
         ) {
-            Ok(BrowserOutcome::RecordingStarted { summary, existing })
-                if summary.tab_id == selected.physical_id =>
-            {
-                let mut facts = recording_facts(&summary);
-                if let Some(object) = facts.as_object_mut() {
-                    object.insert("tab".into(), json!(selected.handle.as_str()));
+            Ok(BrowserOutcome::RecordingStarted {
+                recording_id,
+                summary,
+                existing,
+            }) if summary.tab_id == selected.physical_id => {
+                if let Some(browser) = self.workspaces.browser_of(context.workspace.as_str()) {
+                    self.workspaces
+                        .hold_recording(context.workspace, &browser, &recording_id);
                 }
-                self.succeeded(
-                    context,
-                    decision,
-                    Some(selected.physical_id),
-                    if existing {
-                        Effect::None
-                    } else {
-                        Effect::Applied
-                    },
-                    readiness(selected.readiness),
-                    existing,
-                    Outcome::RecordingStarted {
-                        host: observed_host(&selected.url),
-                    },
-                    facts,
-                )
+                self.recording_started(context, decision, &selected, &summary, existing)
             }
             Ok(outcome @ BrowserOutcome::RecordingHeld) => {
                 self.recording_selection_failure(context, outcome)
@@ -132,6 +134,130 @@ impl ApplicationExecutor {
         }
     }
 
+    /// The answer the recording this workspace already holds gives a start, if it gives one
+    /// (ADR-0203 Decision 6.7).
+    ///
+    /// A workspace holds one recording. The tab it is still capturing answers with that recording,
+    /// and any other start is held while the recording is unsaved. A stopped recording a save
+    /// delivered is discarded so the start can replace it, and one the browser no longer has is
+    /// forgotten. Either way the start goes ahead, and this answers nothing.
+    fn held_answer(
+        &self,
+        context: &InvocationContext<'_>,
+        decision: Decision,
+        selected: &crate::workspace::SelectedTab,
+    ) -> Option<Terminal> {
+        let held = self.workspaces.recording(context.workspace)?;
+        let status = self.dispatch(
+            context,
+            BrowserCommand::StatusRecording {
+                recording_id: held.id.clone(),
+            },
+        );
+        self.note_recording(context, &status);
+        match status {
+            Ok(BrowserOutcome::RecordingNotFound) => None,
+            Ok(BrowserOutcome::RecordingStatus { summary })
+                if summary.state == RecordingState::Recording
+                    && summary.tab_id == selected.physical_id =>
+            {
+                Some(self.recording_started(context, decision, selected, &summary, true))
+            }
+            Ok(BrowserOutcome::RecordingStatus { summary })
+                if summary.state != RecordingState::Recording && held.saved =>
+            {
+                let discarded = self.dispatch(
+                    context,
+                    BrowserCommand::DiscardRecording {
+                        recording_id: held.id,
+                    },
+                );
+                self.note_recording(context, &discarded);
+                match discarded {
+                    Ok(
+                        BrowserOutcome::RecordingDiscarded { .. }
+                        | BrowserOutcome::RecordingNotFound,
+                    ) => None,
+                    Ok(_) => {
+                        Some(self.protocol_failure(context, decision, Some(selected.physical_id)))
+                    }
+                    Err(error) => Some(self.browser_failure(
+                        context,
+                        decision,
+                        error,
+                        Some(selected.physical_id),
+                    )),
+                }
+            }
+            Ok(BrowserOutcome::RecordingStatus { .. }) => {
+                Some(self.recording_selection_failure(context, BrowserOutcome::RecordingHeld))
+            }
+            Ok(_) => Some(self.protocol_failure(context, decision, Some(selected.physical_id))),
+            Err(error) => {
+                Some(self.browser_failure(context, decision, error, Some(selected.physical_id)))
+            }
+        }
+    }
+
+    /// The result of a started recording, or of a start that found the tab's recording running.
+    fn recording_started(
+        &self,
+        context: &InvocationContext<'_>,
+        decision: Decision,
+        selected: &crate::workspace::SelectedTab,
+        summary: &PhysicalRecordingSummary,
+        existing: bool,
+    ) -> Terminal {
+        let mut facts = recording_facts(summary);
+        if let Some(object) = facts.as_object_mut() {
+            object.insert("tab".into(), json!(selected.handle.as_str()));
+        }
+        self.succeeded(
+            context,
+            decision,
+            Some(selected.physical_id),
+            if existing {
+                Effect::None
+            } else {
+                Effect::Applied
+            },
+            readiness(selected.readiness),
+            existing,
+            Outcome::RecordingStarted {
+                host: observed_host(&selected.url),
+            },
+            facts,
+        )
+    }
+
+    /// The recording this workspace holds, or the refusal that says it holds none.
+    fn held_recording(
+        &self,
+        context: &InvocationContext<'_>,
+    ) -> Result<HeldRecording, Box<Terminal>> {
+        self.workspaces.recording(context.workspace).ok_or_else(|| {
+            Box::new(self.recording_selection_failure(context, BrowserOutcome::RecordingNotFound))
+        })
+    }
+
+    /// Keep the workspace's recording in step with what its browser reported: a delivered save is
+    /// marked, and a discarded recording, or one the browser no longer has, is forgotten.
+    fn note_recording(
+        &self,
+        context: &InvocationContext<'_>,
+        outcome: &Result<BrowserOutcome, BrowserError>,
+    ) {
+        match outcome {
+            Ok(BrowserOutcome::RecordingExported { .. }) => {
+                self.workspaces.mark_recording_saved(context.workspace);
+            }
+            Ok(BrowserOutcome::RecordingDiscarded { .. } | BrowserOutcome::RecordingNotFound) => {
+                self.workspaces.forget_recording(context.workspace);
+            }
+            _ => {}
+        }
+    }
+
     fn stop_recording(&self, context: &InvocationContext<'_>) -> Terminal {
         // Needs no capability, but every operation that reaches the browser still crosses the
         // runtime pause gate, so a paused session cannot have its recording stopped from
@@ -140,7 +266,18 @@ impl ApplicationExecutor {
         if !decision.allowed {
             return self.blocked(context, decision, None, Effect::None, true, json!({}));
         }
-        match self.dispatch(context, BrowserCommand::StopRecording) {
+        let held = match self.held_recording(context) {
+            Ok(held) => held,
+            Err(terminal) => return *terminal,
+        };
+        let outcome = self.dispatch(
+            context,
+            BrowserCommand::StopRecording {
+                recording_id: held.id,
+            },
+        );
+        self.note_recording(context, &outcome);
+        match outcome {
             Ok(BrowserOutcome::RecordingStopped { summary, changed }) => self.succeeded(
                 context,
                 decision,
@@ -165,8 +302,16 @@ impl ApplicationExecutor {
     fn ensure_recording_stopped(
         &self,
         context: &InvocationContext<'_>,
+        recording_id: &str,
     ) -> Result<PhysicalRecordingSummary, Box<Terminal>> {
-        match self.dispatch(context, BrowserCommand::StopRecording) {
+        let outcome = self.dispatch(
+            context,
+            BrowserCommand::StopRecording {
+                recording_id: recording_id.to_owned(),
+            },
+        );
+        self.note_recording(context, &outcome);
+        match outcome {
             Ok(BrowserOutcome::RecordingStopped { summary, .. }) => Ok(summary),
             Ok(outcome) => Err(Box::new(self.recording_selection_failure(context, outcome))),
             Err(error) => Err(Box::new(self.browser_failure(
@@ -195,7 +340,11 @@ impl ApplicationExecutor {
         if !decision.allowed {
             return self.blocked(context, decision, None, Effect::None, true, json!({}));
         }
-        let stopped = match self.ensure_recording_stopped(context) {
+        let held = match self.held_recording(context) {
+            Ok(held) => held,
+            Err(terminal) => return *terminal,
+        };
+        let stopped = match self.ensure_recording_stopped(context, &held.id) {
             Ok(summary) => summary,
             Err(terminal) => return *terminal,
         };
@@ -219,13 +368,16 @@ impl ApplicationExecutor {
             },
             ..*context
         };
-        match self.dispatch(
+        let outcome = self.dispatch(
             &delivery_context,
             BrowserCommand::ExportRecording {
+                recording_id: held.id,
                 destination,
                 max_output_bytes: budget,
             },
-        ) {
+        );
+        self.note_recording(context, &outcome);
+        match outcome {
             Ok(BrowserOutcome::RecordingExported {
                 summary,
                 encoded,
@@ -451,7 +603,18 @@ impl ApplicationExecutor {
         if !decision.allowed {
             return self.blocked(context, decision, None, Effect::None, true, json!({}));
         }
-        match self.dispatch(context, BrowserCommand::DiscardRecording) {
+        let held = match self.held_recording(context) {
+            Ok(held) => held,
+            Err(terminal) => return *terminal,
+        };
+        let outcome = self.dispatch(
+            context,
+            BrowserCommand::DiscardRecording {
+                recording_id: held.id,
+            },
+        );
+        self.note_recording(context, &outcome);
+        match outcome {
             Ok(BrowserOutcome::RecordingDiscarded { released_bytes }) => self.succeeded(
                 context,
                 decision,

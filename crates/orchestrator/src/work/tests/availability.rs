@@ -1070,7 +1070,6 @@ fn an_empty_session_opens_in_the_browser_its_list_named() {
 fn recording_status_in_an_empty_session_binds_no_browser() {
     let (executor, browser, workspaces, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
-    browser.push(Ok(BrowserOutcome::RecordingNotFound));
 
     let status = executor.execute(
         &workspace,
@@ -1079,7 +1078,8 @@ fn recording_status_in_an_empty_session_binds_no_browser() {
         &CancellationToken::default(),
     );
     assert_eq!(status.facts["reason"], "not_found", "{}", status.summary);
-    assert_eq!(browser.routed(), vec![FAKE_BROWSER]);
+    // A session that holds no recording has nothing to ask a browser about.
+    assert!(browser.routed().is_empty());
     assert_eq!(workspaces.browser_of(workspace.as_str()), None);
 }
 

@@ -1,9 +1,8 @@
 //! Diagnostics and recordings: buffers the extension keeps for the service.
 //!
-//! The extension keeps recordings without knowing workspaces. A workspace holds at most one, and
-//! the service finds it through the connection's
-//! [`RecordingIndex`](super::super::link::RecordingIndex), so a workspace reaches only the
-//! recording it started and never names it.
+//! The extension keeps recordings without knowing workspaces, and every recording command names its
+//! recording. Which recording a workspace holds, and whether a save has delivered it, is the
+//! workspace's own fact (ADR-0203 Decision 6.7), so a relay restart does not lose it.
 //!
 //! A diagnostics read under a watching scope is bound to the documents the authority admitted:
 //! the extension resets a tab's retained entries when the binding changes, so entries gathered
@@ -75,52 +74,19 @@ pub fn binding(scope: &Scope) -> String {
     sha256_hex(scope.allowed_ids().join(ID_SEPARATOR).as_bytes())
 }
 
-/// Start the workspace's recording of one tab. Under a scope that watches its documents, the
-/// recording stops when they change. The workspace learns the recording's id.
-///
-/// A workspace holds one recording. Asking again for the tab it is still capturing answers with
-/// that recording. A stopped recording that was never saved answers
-/// [`BrowserOutcome::RecordingHeld`] until it is saved or discarded, and nothing is started. A
-/// stopped recording that was saved is discarded in the browser and replaced, so a save releases
-/// the slot at the next start while it can still be repeated until then. A held recording the
-/// extension no longer has is forgotten, and the start goes ahead.
+/// Start a recording of one tab. Under a scope that watches its documents, the recording stops when
+/// they change. Asking again for the tab a recording is still capturing answers with that
+/// recording.
 ///
 /// # Errors
 ///
 /// Returns the primitive's failure.
 pub fn start(l: &mut Link<'_>, scope: &Scope, tab_id: u64) -> Result<BrowserOutcome, BrowserError> {
-    if let Some(held) = l.recordings().id(l.workspace()) {
-        match l.send(wire::RecordingOp::Status {
-            recording_id: held.clone(),
-        })? {
-            wire::RecordingFacts::NotFound => l.recordings().forget(l.workspace()),
-            wire::RecordingFacts::Status { summary }
-                if summary.state == wire::RecordingState::Recording && summary.tab_id == tab_id =>
-            {
-                return Ok(BrowserOutcome::RecordingStarted {
-                    summary: summary
-                        .try_into()
-                        .map_err(|_| BrowserError::Protocol(UNREADABLE_RECORDING.into()))?,
-                    existing: true,
-                });
-            }
-            wire::RecordingFacts::Status { summary }
-                if matches!(
-                    summary.state,
-                    wire::RecordingState::Frozen | wire::RecordingState::Interrupted
-                ) && l.recordings().is_saved(l.workspace()) =>
-            {
-                l.send(wire::RecordingOp::Discard { recording_id: held })?;
-                l.recordings().forget(l.workspace());
-            }
-            _ => return Ok(BrowserOutcome::RecordingHeld),
-        }
-    }
     let facts = l.send(wire::RecordingOp::Start {
         tab_id,
         watch: scope.watch(),
     })?;
-    recorded(l, facts)
+    recorded(facts)
 }
 
 /// Erase the diagnostics retained for some tabs.
@@ -138,39 +104,40 @@ pub fn clear_diagnostics(
     })
 }
 
-/// Report the workspace's recording state.
+/// Report the state of the recording `recording_id` names.
 ///
 /// # Errors
 ///
 /// Returns the primitive's failure.
-pub fn status(l: &mut Link<'_>) -> Result<BrowserOutcome, BrowserError> {
-    with_recording(l, |recording_id| wire::RecordingOp::Status { recording_id })
+pub fn status(l: &mut Link<'_>, recording_id: String) -> Result<BrowserOutcome, BrowserError> {
+    recorded(l.send(wire::RecordingOp::Status { recording_id })?)
 }
 
-/// Stop capturing the workspace's recording.
+/// Stop capturing the recording `recording_id` names.
 ///
 /// # Errors
 ///
 /// Returns the primitive's failure.
-pub fn stop(l: &mut Link<'_>) -> Result<BrowserOutcome, BrowserError> {
-    with_recording(l, |recording_id| wire::RecordingOp::Stop { recording_id })
+pub fn stop(l: &mut Link<'_>, recording_id: String) -> Result<BrowserOutcome, BrowserError> {
+    recorded(l.send(wire::RecordingOp::Stop { recording_id })?)
 }
 
-/// Encode the workspace's recording and deliver it to `destination`.
+/// Encode the recording `recording_id` names and deliver it to `destination`.
 ///
 /// # Errors
 ///
 /// Returns the primitive's failure.
 pub fn export(
     l: &mut Link<'_>,
+    recording_id: String,
     destination: wire::RecordingTarget,
     max_output_bytes: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
-    with_recording(l, |recording_id| wire::RecordingOp::Export {
+    recorded(l.send(wire::RecordingOp::Export {
         recording_id,
         destination,
         max_output_bytes,
-    })
+    })?)
 }
 
 /// Where an export attaches a recording in a page.
@@ -184,7 +151,7 @@ pub struct PageExport<'a> {
     pub file_name: &'a str,
 }
 
-/// Encode the workspace's recording and attach it to a file input of a page.
+/// Encode the recording `recording_id` names and attach it to a file input of a page.
 ///
 /// The extension runs the attach call with the GIF as its attachment, after checking the guard,
 /// so the GIF never passes through this service. The call goes through the scope like any other
@@ -197,6 +164,7 @@ pub struct PageExport<'a> {
 pub fn export_to_page(
     l: &mut Link<'_>,
     scope: &Scope,
+    recording_id: String,
     page: PageExport<'_>,
     max_output_bytes: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
@@ -207,6 +175,7 @@ pub fn export_to_page(
     )?;
     export(
         l,
+        recording_id,
         wire::RecordingTarget::Page {
             tab_id: page.tab_id,
             call: plan.call,
@@ -216,46 +185,28 @@ pub fn export_to_page(
     )
 }
 
-/// Erase the workspace's recording.
+/// Erase the recording `recording_id` names.
 ///
 /// # Errors
 ///
 /// Returns the primitive's failure.
-pub fn discard(l: &mut Link<'_>) -> Result<BrowserOutcome, BrowserError> {
-    with_recording(l, |recording_id| wire::RecordingOp::Discard {
-        recording_id,
-    })
+pub fn discard(l: &mut Link<'_>, recording_id: String) -> Result<BrowserOutcome, BrowserError> {
+    recorded(l.send(wire::RecordingOp::Discard { recording_id })?)
 }
 
-/// Run one operation on the recording the workspace holds. With none there is nothing to find,
-/// and nothing is sent.
-fn with_recording(
-    l: &mut Link<'_>,
-    op: impl FnOnce(String) -> wire::RecordingOp,
-) -> Result<BrowserOutcome, BrowserError> {
-    let Some(recording_id) = l.recordings().id(l.workspace()) else {
-        return Ok(BrowserOutcome::RecordingNotFound);
-    };
-    let facts = l.send(op(recording_id))?;
-    recorded(l, facts)
-}
-
-/// The outcome a recording operation reported, keeping the workspace's index current: a started
-/// recording is learned, a saved one is marked, and a discarded or missing one is forgotten.
+/// The outcome a recording operation reported.
 ///
 /// # Errors
 ///
 /// Returns [`BrowserError::Protocol`] for facts this service cannot read.
-pub fn recorded(l: &Link<'_>, facts: wire::RecordingFacts) -> Result<BrowserOutcome, BrowserError> {
+pub fn recorded(facts: wire::RecordingFacts) -> Result<BrowserOutcome, BrowserError> {
     let unknown = |_| BrowserError::Protocol(UNREADABLE_RECORDING.into());
     Ok(match facts {
-        wire::RecordingFacts::Started { summary, existing } => {
-            l.recordings().learn(l.workspace(), &summary.recording_id);
-            BrowserOutcome::RecordingStarted {
-                summary: summary.try_into().map_err(unknown)?,
-                existing,
-            }
-        }
+        wire::RecordingFacts::Started { summary, existing } => BrowserOutcome::RecordingStarted {
+            recording_id: summary.recording_id.clone(),
+            summary: summary.try_into().map_err(unknown)?,
+            existing,
+        },
         wire::RecordingFacts::Status { summary } => BrowserOutcome::RecordingStatus {
             summary: summary.try_into().map_err(unknown)?,
         },
@@ -267,26 +218,19 @@ pub fn recorded(l: &Link<'_>, facts: wire::RecordingFacts) -> Result<BrowserOutc
             summary,
             encoded,
             delivery,
-        } => {
-            l.recordings().mark_saved(l.workspace());
-            BrowserOutcome::RecordingExported {
-                summary: summary.try_into().map_err(unknown)?,
-                encoded: encoded.into(),
-                delivery: delivery.try_into().map_err(unknown)?,
-            }
-        }
+        } => BrowserOutcome::RecordingExported {
+            summary: summary.try_into().map_err(unknown)?,
+            encoded: encoded.into(),
+            delivery: delivery.try_into().map_err(unknown)?,
+        },
         wire::RecordingFacts::ExportFailed { reason } => BrowserOutcome::RecordingExportFailed {
             page_refused: reason == wire::PAGE_REFUSED_REPLAY,
             reason,
         },
         wire::RecordingFacts::Discarded { released_bytes, .. } => {
-            l.recordings().forget(l.workspace());
             BrowserOutcome::RecordingDiscarded { released_bytes }
         }
-        wire::RecordingFacts::NotFound => {
-            l.recordings().forget(l.workspace());
-            BrowserOutcome::RecordingNotFound
-        }
+        wire::RecordingFacts::NotFound => BrowserOutcome::RecordingNotFound,
         wire::RecordingFacts::Unknown => {
             return Err(BrowserError::Protocol(UNREADABLE_RECORDING.into()))
         }

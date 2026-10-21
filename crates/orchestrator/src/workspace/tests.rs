@@ -2077,3 +2077,23 @@ fn acquire_until_synchronizes_contention_via_condvar() {
         "waiter successfully acquired lease after notification"
     );
 }
+
+/// A workspace's recording is its own fact, so it goes with the workspace (ADR-0203 Decision 6.7).
+#[test]
+fn a_released_workspace_forgets_its_recording() {
+    let store = WorkspaceStore::default();
+    let workspace = admit_test(&store);
+    store.hold_recording(&workspace, "browser_test", "recording_1");
+    assert_eq!(
+        store.recording(&workspace).map(|held| held.id),
+        Some("recording_1".to_owned())
+    );
+    store.release(&workspace);
+    assert_eq!(store.recording(&workspace), None);
+    let next = admit_test(&store);
+    assert_eq!(
+        store.recording(&next),
+        None,
+        "a new workspace holds no recording"
+    );
+}

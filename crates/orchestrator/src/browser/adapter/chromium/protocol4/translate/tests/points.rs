@@ -942,6 +942,7 @@ fn a_dropped_image_is_delivered_inside_the_document_under_the_point() {
 
 fn export_to(locator: &str) -> BrowserCommand {
     BrowserCommand::ExportRecording {
+        recording_id: "recording_1".into(),
         destination: RecordingDestination::Target {
             tab_id: 12,
             locator: locator.into(),

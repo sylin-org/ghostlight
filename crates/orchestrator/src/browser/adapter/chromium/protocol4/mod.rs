@@ -197,21 +197,30 @@ fn translate(
         BrowserCommand::ReadDiagnostics(read) => records::read_diagnostics(l, reach(scope)?, read),
         BrowserCommand::ClearDiagnostics { tab_ids } => records::clear_diagnostics(l, tab_ids),
         BrowserCommand::StartRecording { tab_id } => records::start(l, reach(scope)?, tab_id),
-        BrowserCommand::StatusRecording => records::status(l),
-        BrowserCommand::StopRecording => records::stop(l),
+        BrowserCommand::StatusRecording { recording_id } => records::status(l, recording_id),
+        BrowserCommand::StopRecording { recording_id } => records::stop(l, recording_id),
         BrowserCommand::ExportRecording {
+            recording_id,
             destination: RecordingDestination::Download { file_name },
             max_output_bytes,
         } => records::export(
             l,
+            recording_id,
             wire::RecordingTarget::Download { file_name },
             max_output_bytes,
         ),
         BrowserCommand::ExportRecording {
+            recording_id,
             destination: RecordingDestination::Client,
             max_output_bytes,
-        } => records::export(l, wire::RecordingTarget::Client, max_output_bytes),
+        } => records::export(
+            l,
+            recording_id,
+            wire::RecordingTarget::Client,
+            max_output_bytes,
+        ),
         BrowserCommand::ExportRecording {
+            recording_id,
             destination:
                 RecordingDestination::Target {
                     tab_id,
@@ -222,6 +231,7 @@ fn translate(
         } => records::export_to_page(
             l,
             reach(scope)?,
+            recording_id,
             PageExport {
                 tab_id,
                 locator: &locator,
@@ -229,7 +239,7 @@ fn translate(
             },
             max_output_bytes,
         ),
-        BrowserCommand::DiscardRecording => records::discard(l),
+        BrowserCommand::DiscardRecording { recording_id } => records::discard(l, recording_id),
         BrowserCommand::Present { signal } => present::present(l, signal),
         BrowserCommand::Screenshot {
             tab_id,

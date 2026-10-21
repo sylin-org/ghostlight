@@ -171,10 +171,10 @@ impl RequestScope {
             | BrowserCommand::CloseTab { .. }
             | BrowserCommand::ResizeWindow { .. }
             | BrowserCommand::ClearDiagnostics { .. }
-            | BrowserCommand::StatusRecording
-            | BrowserCommand::StopRecording
+            | BrowserCommand::StatusRecording { .. }
+            | BrowserCommand::StopRecording { .. }
             | BrowserCommand::ExportRecording { .. }
-            | BrowserCommand::DiscardRecording
+            | BrowserCommand::DiscardRecording { .. }
             | BrowserCommand::Present { .. }
             | BrowserCommand::DescribeDocuments { .. }
             | BrowserCommand::InDocuments { .. }

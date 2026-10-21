@@ -592,6 +592,9 @@ struct WorkspaceState {
     views: HashMap<ViewHandle, ViewState>,
     snapshots: HashMap<SnapshotHandle, SnapshotState>,
     images: HashMap<ImageHandle, ImageState>,
+    /// The one recording this workspace holds (ADR-0203 Decision 6.7). It outlives a relay restart
+    /// and goes with the workspace.
+    recording: Option<HeldRecording>,
 }
 
 impl WorkspaceState {
@@ -846,6 +849,22 @@ impl AggregateState {
     }
 }
 
+/// The one recording a workspace holds, kept until it is discarded, its browser no longer has it,
+/// or the workspace is released (ADR-0203 Decision 6.7).
+///
+/// The browser keeps recordings without knowing workspaces, so the workspace remembers which one
+/// is its own and names it on every recording command.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeldRecording {
+    /// The browser that holds the recording.
+    pub browser: String,
+    /// The recording's id in that browser.
+    pub id: String,
+    /// Whether a save has delivered it. A saved recording may be replaced by the next start; one
+    /// never saved holds the workspace's slot until it is saved or discarded.
+    pub saved: bool,
+}
+
 /// Thread-safe entry to the single workspace aggregate.
 #[derive(Clone, Debug, Default)]
 pub struct WorkspaceStore {
@@ -910,6 +929,7 @@ impl WorkspaceStore {
                 views: HashMap::new(),
                 snapshots: HashMap::new(),
                 images: HashMap::new(),
+                recording: None,
             },
         );
         id
@@ -1311,6 +1331,51 @@ impl WorkspaceStore {
             .workspaces
             .get(workspace)
             .and_then(|state| state.browser.clone())
+    }
+
+    /// The recording `workspace` holds in its browser, if any.
+    ///
+    /// A workspace lives in one browser, so a recording another browser held is not this
+    /// workspace's to reach any more and reads as none.
+    #[must_use]
+    pub fn recording(&self, workspace: &WorkspaceId) -> Option<HeldRecording> {
+        let state = self.lock();
+        let held = state.workspaces.get(workspace)?;
+        held.recording.clone().filter(|recording| {
+            held.browser
+                .as_deref()
+                .is_none_or(|browser| browser == recording.browser)
+        })
+    }
+
+    /// Remember that `workspace` holds the recording `id` in `browser`, not yet saved.
+    pub fn hold_recording(&self, workspace: &WorkspaceId, browser: &str, id: &str) {
+        if let Some(held) = self.lock().workspaces.get_mut(workspace) {
+            held.recording = Some(HeldRecording {
+                browser: browser.to_owned(),
+                id: id.to_owned(),
+                saved: false,
+            });
+        }
+    }
+
+    /// Remember that a save delivered the recording `workspace` holds.
+    pub fn mark_recording_saved(&self, workspace: &WorkspaceId) {
+        if let Some(recording) = self
+            .lock()
+            .workspaces
+            .get_mut(workspace)
+            .and_then(|held| held.recording.as_mut())
+        {
+            recording.saved = true;
+        }
+    }
+
+    /// Forget the recording `workspace` held: it was discarded, or its browser no longer has it.
+    pub fn forget_recording(&self, workspace: &WorkspaceId) {
+        if let Some(held) = self.lock().workspaces.get_mut(workspace) {
+            held.recording = None;
+        }
     }
 
     /// The physical ids of the tabs this workspace controls, in ascending order.

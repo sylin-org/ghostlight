@@ -25,8 +25,8 @@ In order. "After" names what a slice waits for.
 | W-D3 | fix(work): a selector wait gives the readiness fact the other waits give | - | WORK-13; a deliberate model-visible change | landed (f6d9fdc3) |
 | C19c | refactor(work): the completion path's leftovers go | - | ADR-0203 C19c, moved from core; WORK-7's `CompletionGate`; the service half is core-service's | landed (244875d3) |
 | C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | landed (616bfffa) |
-| C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | todo |
-| C12b-2 | refactor(work): the typed refusal builds its result (the work half) | C12b-1 | ADR-0203 C12b; WORK-4, WORK-2 and WORK-3's refusal sites | landed |
+| C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | first commit landed; the port's workspace parameter next |
+| C12b-2 | refactor(work): the typed refusal builds its result (the work half) | C12b-1 | ADR-0203 C12b; WORK-4, WORK-2 and WORK-3's refusal sites | landed (c1603722) |
 | WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | todo |
 | WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | todo |
 | WORK-10 | refactor(work): timings and limits are named | - | WORK-10 | todo |
@@ -119,3 +119,18 @@ recording save the page did not take, or could not make, carries `recording_not_
 sentence it already showed. The unreachable selector let-else is an `expect`. Left for later rows:
 the inline-ceiling recheck and the 7,000,000 cap (WORK-1), and the recovered and already-closed
 tabs (Decision 4.5, WORK-3).
+
+C16, first commit (Decision 6.7, cross-lane with the adapter's files under test-02's hold):
+`WorkspaceState` keeps `recording: Option<HeldRecording { browser, id, saved }>`, and the store
+reads, holds, marks and forgets it, since recording status, stop, save and discard run without the
+lease. `work/recording.rs` runs the held-until-saved rule that `translate/records.rs` ran: the tab
+still recording answers with its recording, a stopped one a save delivered is discarded and
+replaced, one the browser lost is forgotten, and any other start is held. Every recording command
+carries its id, `RecordingStarted` carries the new id, and the adapter keeps no index:
+`RecordingIndex`, `Line.recordings` and `Link::recordings` are gone, and the wire is unchanged. A
+session holding no recording is refused without asking a browser. Proofs:
+`a_relay_restart_keeps_the_workspaces_recording_saveable`, `a_released_workspace_forgets_its_recording`,
+the held start in `a_session_holds_one_recording_and_never_names_it` (nothing is started), and the
+discard naming the saved recording in `a_session_starts_a_new_recording_after_saving_one`. The
+adapter's three index tests moved to those executor tests, and
+`each_recording_command_names_its_recording` pins the ids on the wire.

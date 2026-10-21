@@ -7,10 +7,9 @@
 //! failure is plain and safe to retry; after one it is reported as an unknown effect, because
 //! the browser may already have acted.
 
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -26,7 +25,6 @@ use crate::browser::transport::{SocketWriter, DELIVERY_TIMEOUT};
 use crate::browser::{BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
 use crate::install::icons::sha256_hex;
 use crate::language::outcome::PrimitiveCause;
-use crate::sync::lock;
 use crate::workspace::StaleReason;
 
 /// How long a cancelled primitive may take to report what it did.
@@ -344,65 +342,6 @@ impl<'p> CallRequest<'p> {
     }
 }
 
-/// The recording each workspace holds on one connection.
-///
-/// The extension keeps recordings without knowing workspaces, and a workspace holds at most one.
-/// The service remembers which recording is whose, so a workspace reaches only its own and never
-/// has to name it. It also remembers whether the recording has been saved, because a saved
-/// recording may be replaced by the next start while a recording never saved may not.
-#[derive(Debug, Default)]
-pub struct RecordingIndex {
-    by_workspace: Mutex<HashMap<String, HeldRecording>>,
-}
-
-/// One workspace's recording and whether a save has delivered it.
-#[derive(Debug)]
-struct HeldRecording {
-    id: String,
-    saved: bool,
-}
-
-impl RecordingIndex {
-    /// Remember that `workspace` holds `recording_id`, not yet saved.
-    pub fn learn(&self, workspace: &str, recording_id: &str) {
-        lock(&self.by_workspace).insert(
-            workspace.to_owned(),
-            HeldRecording {
-                id: recording_id.to_owned(),
-                saved: false,
-            },
-        );
-    }
-
-    /// Remember that a save delivered the recording `workspace` holds.
-    pub fn mark_saved(&self, workspace: &str) {
-        if let Some(held) = lock(&self.by_workspace).get_mut(workspace) {
-            held.saved = true;
-        }
-    }
-
-    /// Forget the recording `workspace` held.
-    pub fn forget(&self, workspace: &str) {
-        lock(&self.by_workspace).remove(workspace);
-    }
-
-    /// The recording `workspace` holds, if any.
-    #[must_use]
-    pub fn id(&self, workspace: &str) -> Option<String> {
-        lock(&self.by_workspace)
-            .get(workspace)
-            .map(|held| held.id.clone())
-    }
-
-    /// Whether a save has delivered the recording `workspace` holds.
-    #[must_use]
-    pub fn is_saved(&self, workspace: &str) -> bool {
-        lock(&self.by_workspace)
-            .get(workspace)
-            .is_some_and(|held| held.saved)
-    }
-}
-
 /// What a protocol-4 connection lends each command it carries.
 #[derive(Clone, Debug)]
 pub struct Line {
@@ -410,8 +349,6 @@ pub struct Line {
     pub writer: Arc<SocketWriter>,
     /// The calls awaiting receipts on the connection.
     pub receipts: Arc<Receipts>,
-    /// The recording each workspace holds on the connection.
-    pub recordings: Arc<RecordingIndex>,
 }
 
 /// One command's primitives over one connection, and the facts their receipts reported.
@@ -465,12 +402,6 @@ impl<'a> Link<'a> {
     #[must_use]
     pub const fn workspace(&self) -> &str {
         self.workspace
-    }
-
-    /// The recording each workspace holds on this connection.
-    #[must_use]
-    pub fn recordings(&self) -> &RecordingIndex {
-        &self.line.recordings
     }
 
     /// Every top-frame URL the command's receipts reported committed, in order, each once.

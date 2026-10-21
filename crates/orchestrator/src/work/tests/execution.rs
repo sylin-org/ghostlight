@@ -1893,6 +1893,7 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
     let handle = opened.facts["tab"].as_str().unwrap().to_owned();
 
     browser.push(Ok(BrowserOutcome::RecordingStarted {
+        recording_id: "recording_1".into(),
         summary: recording_summary(RecordingState::Recording, "https://example.com/"),
         existing: false,
     }));
@@ -1942,9 +1943,9 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
         calls[1],
         BrowserCommand::StartRecording { tab_id: 7 }
     ));
-    assert!(matches!(calls[2], BrowserCommand::StatusRecording));
-    assert!(matches!(calls[3], BrowserCommand::StopRecording));
-    assert!(matches!(calls[4], BrowserCommand::DiscardRecording));
+    assert!(matches!(calls[2], BrowserCommand::StatusRecording { .. }));
+    assert!(matches!(calls[3], BrowserCommand::StopRecording { .. }));
+    assert!(matches!(calls[4], BrowserCommand::DiscardRecording { .. }));
     assert!(!calls
         .iter()
         .any(|call| matches!(call, BrowserCommand::ExportRecording { .. })));
@@ -1985,6 +1986,7 @@ fn a_paused_runtime_refuses_recording_status_stop_and_discard() {
 #[test]
 fn a_save_asks_the_browser_for_one_finished_replay() {
     let (executor, browser, _, workspace, _) = fixture();
+    holding_recording(&executor, &workspace);
     browser.push(Ok(BrowserOutcome::RecordingStopped {
         summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
         changed: true,
@@ -2014,7 +2016,7 @@ fn a_save_asks_the_browser_for_one_finished_replay() {
 
     // Stop, then export. Nothing in between: the frames never come here to be encoded.
     let calls = browser.calls();
-    assert!(matches!(calls[0], BrowserCommand::StopRecording));
+    assert!(matches!(calls[0], BrowserCommand::StopRecording { .. }));
     assert!(matches!(
         calls[1],
         BrowserCommand::ExportRecording {
@@ -2039,6 +2041,7 @@ fn a_save_asks_the_browser_for_one_finished_replay() {
 #[test]
 fn a_download_save_never_returns_the_replay_bytes() {
     let (executor, browser, _, workspace, _) = fixture();
+    holding_recording(&executor, &workspace);
     browser.push(Ok(BrowserOutcome::RecordingStopped {
         summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
         changed: true,
@@ -2091,6 +2094,7 @@ fn client_save_authorizes_source_before_recording_bytes_cross() {
     document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
     fs::write(&policy.0, serde_json::to_vec(&document).unwrap()).unwrap();
     let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
+    holding_recording(&executor, &workspace);
     browser.push(Ok(BrowserOutcome::RecordingStopped {
         summary: recording_summary(RecordingState::Frozen, "http://127.0.0.1/private"),
         changed: true,
@@ -2106,7 +2110,7 @@ fn client_save_authorizes_source_before_recording_bytes_cross() {
     assert_eq!(result.status, Status::Blocked);
     assert!(matches!(
         browser.calls().as_slice(),
-        [BrowserCommand::StopRecording]
+        [BrowserCommand::StopRecording { .. }]
     ));
 }
 
@@ -4403,7 +4407,12 @@ fn a_point_outside_the_image_gives_the_image_size() {
 fn a_session_holds_one_recording_and_never_names_it() {
     let (executor, browser, _, workspace, tab_handle, _) = workspace_with_a_target();
 
-    browser.push(Ok(BrowserOutcome::RecordingHeld));
+    // A stopped recording no save delivered holds the slot: the start asks its status and stops.
+    holding_recording(&executor, &workspace);
+    browser.push(Ok(BrowserOutcome::RecordingStatus {
+        summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
+    }));
+    let calls_before = browser.calls().len();
     let held = executor.execute(
         &workspace,
         "browser_record",
@@ -4413,6 +4422,12 @@ fn a_session_holds_one_recording_and_never_names_it() {
     assert_eq!(held.status, Status::Failed);
     assert_eq!(held.summary, "This session already has a recording.");
     assert_eq!(held.facts["reason"], "held");
+    assert!(
+        browser.calls()[calls_before..]
+            .iter()
+            .all(|call| !matches!(call, BrowserCommand::StartRecording { .. })),
+        "a held recording starts nothing"
+    );
     assert_eq!(
         held.next_steps,
         vec!["Call browser_record with action save or discard to finish the current recording, then start again."]
@@ -4428,6 +4443,7 @@ fn a_session_holds_one_recording_and_never_names_it() {
     assert_eq!(missing.summary, "This session has no recording.");
     assert_eq!(missing.facts["reason"], "not_found");
 
+    holding_recording(&executor, &workspace);
     browser.push(Ok(BrowserOutcome::RecordingStatus {
         summary: recording_summary(RecordingState::Recording, "https://example.com/"),
     }));
@@ -4465,6 +4481,7 @@ fn a_session_starts_a_new_recording_after_saving_one() {
     let url = "https://example.com/";
     let started = |executor: &ApplicationExecutor| {
         browser.push(Ok(BrowserOutcome::RecordingStarted {
+            recording_id: "recording_1".into(),
             summary: recording_summary(RecordingState::Recording, url),
             existing: false,
         }));
@@ -4502,9 +4519,20 @@ fn a_session_starts_a_new_recording_after_saving_one() {
     );
     assert_eq!(saved.status, Status::Succeeded);
 
+    // The saved recording is discarded so the next start can replace it.
+    browser.push(Ok(BrowserOutcome::RecordingStatus {
+        summary: recording_summary(RecordingState::Frozen, url),
+    }));
+    browser.push(Ok(BrowserOutcome::RecordingDiscarded {
+        released_bytes: 10,
+    }));
     let again = started(&executor);
     assert_eq!(again.status, Status::Succeeded);
     assert_eq!(again.effect, Effect::Applied);
+    assert!(browser.calls().iter().any(|call| matches!(
+        call,
+        BrowserCommand::DiscardRecording { recording_id } if recording_id == "recording_1"
+    )));
 }
 
 /// What the browser says in answer to a dialog call corrects the record of the tab's dialog, so
@@ -4897,4 +4925,55 @@ fn a_dialog_answer_with_none_open_names_no_dialog_visible() {
     assert_eq!(result.status, Status::Failed, "{result:?}");
     assert_eq!(result.facts["reason"], "no_dialog_visible");
     assert_eq!(result.facts["handled"], false);
+}
+
+/// A relay restart gives the service a new browser connection that remembers nothing, and the
+/// recording a workspace started stays its own: the save still names it (ADR-0203 Decision 6.7).
+#[test]
+fn a_relay_restart_keeps_the_workspaces_recording_saveable() {
+    let (mut executor, browser, _, workspace, tab_handle, _) = workspace_with_a_target();
+    let url = "https://example.com/";
+    browser.push(Ok(BrowserOutcome::RecordingStarted {
+        recording_id: "recording_7".into(),
+        summary: recording_summary(RecordingState::Recording, url),
+        existing: false,
+    }));
+    let started = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"start","tab":tab_handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(started.status, Status::Succeeded);
+
+    let reconnected = Arc::new(FakeBrowser::default());
+    reconnected.connect(vec![summary(FAKE_BROWSER, true)]);
+    executor.browser = reconnected.clone();
+    reconnected.push(Ok(BrowserOutcome::RecordingStopped {
+        summary: recording_summary(RecordingState::Frozen, url),
+        changed: true,
+    }));
+    reconnected.push(Ok(BrowserOutcome::RecordingExported {
+        summary: recording_summary(RecordingState::Frozen, url),
+        encoded: EncodedRecording {
+            frame_count: 3,
+            captured_frame_count: 3,
+            duration_ms: 900,
+            width: 640,
+            height: 400,
+            byte_count: 2_048,
+        },
+        delivery: RecordingDelivery::Downloaded,
+    }));
+    let saved = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"save","download":true}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(saved.status, Status::Succeeded, "{saved:?}");
+    assert!(reconnected.calls().iter().any(|call| matches!(
+        call,
+        BrowserCommand::ExportRecording { recording_id, .. } if recording_id == "recording_7"
+    )));
 }

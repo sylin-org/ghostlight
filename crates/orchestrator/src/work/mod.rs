@@ -3333,6 +3333,19 @@ mod tests {
         fixture_with_governance(GovernanceFacade::new(None))
     }
 
+    /// Let `workspace` hold the recording the fake browser's recording replies describe, as a
+    /// start would have left it.
+    fn holding_recording(
+        executor: &ApplicationExecutor,
+        workspace: &crate::workspace::WorkspaceId,
+    ) {
+        executor.workspaces.hold_recording(
+            workspace,
+            crate::browser::testing::FAKE_BROWSER,
+            "recording_1",
+        );
+    }
+
     fn temporary_policy(name: &str) -> Scratch {
         Scratch::file(&format!("work-{name}.json"))
     }

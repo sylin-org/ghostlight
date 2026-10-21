@@ -451,6 +451,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         &["read"],
         json!({"action":"start"}),
         vec![BrowserOutcome::RecordingStarted {
+            recording_id: "recording_1".into(),
             summary: recording_summary(RecordingState::Recording, PAGE),
             existing: false,
         }],
@@ -625,6 +626,9 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
                     fixture_with_governance(policy.facade());
                 let (tab_handle, target, button) = established(&executor, &browser, &workspace);
                 let case = cases(&target, &button, &tab_handle).swap_remove(index);
+                if case.tool == "browser_record" && case.variant != Some("start") {
+                    holding_recording(&executor, &workspace);
+                }
                 let permitted = restriction_index < 2;
                 for reply in case.replies.clone() {
                     browser.push(Ok(reply));
@@ -719,6 +723,9 @@ fn independent_configured_grants_admit_every_catalog_variant_and_its_flow_child(
             let (mut executor, browser, _, workspace, audit) = fixture();
             let (tab_handle, target, button) = established(&executor, &browser, &workspace);
             let case = cases(&target, &button, &tab_handle).swap_remove(index);
+            if case.tool == "browser_record" && case.variant != Some("start") {
+                holding_recording(&executor, &workspace);
+            }
             let policy = temporary_policy("catalog-independent-authority");
             let grants = if case.required.is_empty() {
                 json!([])
@@ -811,6 +818,9 @@ fn observation_variants_reject_missing_configured_capabilities_before_browser_ef
                 let (mut executor, browser, _, workspace, audit) = fixture();
                 let (tab_handle, target, button) = established(&executor, &browser, &workspace);
                 let case = cases(&target, &button, &tab_handle).swap_remove(index);
+                if case.tool == "browser_record" && case.variant != Some("start") {
+                    holding_recording(&executor, &workspace);
+                }
                 let permitted: Vec<_> = case
                     .required
                     .iter()
@@ -888,6 +898,7 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
         for composed in [false, true] {
             let (mut executor, browser, _, workspace, audit) = fixture();
             let (tab_handle, target, button) = established(&executor, &browser, &workspace);
+            holding_recording(&executor, &workspace);
             let policy = temporary_policy("recording-distinct-source-and-target");
             fs::write(&policy, serde_json::to_vec(&json!({
                 "schema":4,"name":"Separate source and destination","version":"1","grants":[
@@ -954,7 +965,7 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                 );
                 assert!(matches!(
                     commands.last().unwrap(),
-                    BrowserCommand::StopRecording
+                    BrowserCommand::StopRecording { .. }
                 ));
                 assert_eq!(result.effect, Effect::None);
             }
@@ -988,6 +999,9 @@ fn every_single_stage_tool_is_admitted_against_its_classified_requirements() {
             let (executor, browser, _, workspace, audit) = fixture();
             let (tab_handle, target, button) = established(&executor, &browser, &workspace);
             let case = cases(&target, &button, &tab_handle).swap_remove(index);
+            if case.tool == "browser_record" && case.variant != Some("start") {
+                holding_recording(&executor, &workspace);
+            }
             let classified = crate::language::capability_map::requirements(
                 &crate::language::decode(case.tool, case.arguments.clone()).unwrap(),
             );
@@ -1035,6 +1049,7 @@ fn every_single_stage_tool_is_admitted_against_its_classified_requirements() {
 fn a_refused_recording_save_records_its_deciding_check() {
     let (mut executor, browser, _, workspace, audit) = fixture();
     let (tab_handle, target, button) = established(&executor, &browser, &workspace);
+    holding_recording(&executor, &workspace);
     let policy = temporary_policy("recording-refused-source");
     fs::write(
         &policy,

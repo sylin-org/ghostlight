@@ -483,6 +483,7 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
         let path = policy_file(false);
         let (executor, browser, _, workspace, _) =
             fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
+        holding_recording(&executor, &workspace);
         open(&executor, &browser, &workspace);
         let mut summary = recording_summary(RecordingState::Frozen, "https://example.com/");
         summary

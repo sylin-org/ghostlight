@@ -820,20 +820,22 @@ pub enum BrowserCommand {
     ReadDiagnostics(PhysicalDiagnosticsRead),
     /// Erase volatile diagnostics for tabs released by the owning workspace.
     ClearDiagnostics { tab_ids: Vec<u64> },
-    /// Start the workspace's one bounded recording on a physical tab.
+    /// Start one bounded recording on a physical tab. The browser names the recording; the
+    /// workspace keeps that id (ADR-0203 Decision 6.7).
     StartRecording { tab_id: u64 },
-    /// Return the workspace's recording summary.
-    StatusRecording,
-    /// Capture a final screenshot and freeze the workspace's recording.
-    StopRecording,
-    /// Encode the workspace's recording as an animated GIF and deliver it.
+    /// Return the summary of the recording `recording_id` names.
+    StatusRecording { recording_id: String },
+    /// Capture a final screenshot and freeze the recording `recording_id` names.
+    StopRecording { recording_id: String },
+    /// Encode the recording `recording_id` names as an animated GIF and deliver it.
     ExportRecording {
+        recording_id: String,
         destination: RecordingDestination,
         /// Output budget the browser meets by trading fidelity, never coverage.
         max_output_bytes: usize,
     },
-    /// Erase the workspace's recording immediately.
-    DiscardRecording,
+    /// Erase the recording `recording_id` names immediately.
+    DiscardRecording { recording_id: String },
     /// Render content-free feedback.
     Present { signal: PresentationSignal },
 }
@@ -1334,6 +1336,8 @@ pub enum BrowserOutcome {
     DiagnosticsCleared { cleared_count: usize },
     /// Chromium started one extension-owned recording.
     RecordingStarted {
+        /// The browser's id for the recording, which every later recording command names.
+        recording_id: String,
         summary: PhysicalRecordingSummary,
         existing: bool,
     },
@@ -1465,6 +1469,7 @@ mod tests {
         });
         assert_eq!(drag.sole_locator(), None);
         let into_page = BrowserCommand::ExportRecording {
+            recording_id: "recording_1".into(),
             destination: RecordingDestination::Target {
                 tab_id: 1,
                 locator: "F:L:locator_a_2".into(),
@@ -1474,6 +1479,7 @@ mod tests {
         };
         assert_eq!(into_page.sole_locator(), Some("F:L:locator_a_2"));
         let download = BrowserCommand::ExportRecording {
+            recording_id: "recording_1".into(),
             destination: RecordingDestination::Download {
                 file_name: "flow.gif".into(),
             },

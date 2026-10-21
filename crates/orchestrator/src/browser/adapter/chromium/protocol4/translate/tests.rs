@@ -867,6 +867,7 @@ fn a_content_command_without_a_scope_is_a_protocol_error() {
         read_console(),
         BrowserCommand::StartRecording { tab_id: 12 },
         BrowserCommand::ExportRecording {
+            recording_id: "recording_1".into(),
             destination: RecordingDestination::Target {
                 tab_id: 12,
                 locator: locator.into(),

@@ -171,10 +171,10 @@ pub fn addressed_tab(command: &Work) -> Option<u64> {
         Work::ListTabs
         | Work::OpenTab { .. }
         | Work::ClearDiagnostics { .. }
-        | Work::StatusRecording
-        | Work::StopRecording
+        | Work::StatusRecording { .. }
+        | Work::StopRecording { .. }
         | Work::ExportRecording { .. }
-        | Work::DiscardRecording
+        | Work::DiscardRecording { .. }
         | Work::Present { .. } => None,
     }
 }
