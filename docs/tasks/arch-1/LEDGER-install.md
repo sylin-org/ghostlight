@@ -403,7 +403,7 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | I-D1 | fix(install): an empty `XDG_CONFIG_HOME`, `APPDATA` or `CODEX_HOME` counts as unset | - | INST-4's defect | landed (this commit); see Notes, second sweep |
-| I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | todo |
+| I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | landed (this commit); see Notes, second sweep |
 | I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | todo |
 | INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | todo |
 | INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | todo |
@@ -439,3 +439,9 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
   `user_dirs.rs` is the seed INST-4 grows into `UserDirs`. The migration's own 1.x rule
   (absolute only) and `workbench/parts.rs` (surface) are left as they are. Regression tests: the
   reader's own, the harness roots and the native-host roots with empty variables.
+- I-D2: `UNINSTALL_QUIT_WAIT` is now `QUIT_GRACE + END_LIMIT` plus a named 2 s
+  `QUIT_RELEASE_MARGIN` for the host's join and the lock's release, so 17 s where it was 10 s.
+  The loop still returns as soon as the lock is free. The regression test fails at the old 10 s.
+  SERV-2's three prose-only ties (`SHOW_PATIENCE`, `UPDATE_LOCK_WAIT`, `SERVICE_READY_TIMEOUT`)
+  are core-service's and cli/desktop.rs's refactor, not this defect; the "did not stop" line's
+  tray-icon advice is surface's `language/setup.rs`.

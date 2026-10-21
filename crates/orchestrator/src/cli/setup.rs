@@ -44,6 +44,7 @@ use crate::language::setup::{
     UninstallFacts,
 };
 use crate::language::workbench as stray_words;
+use crate::service::lifetime::{END_LIMIT, QUIT_GRACE};
 use crate::service::lock::ServiceLock;
 
 /// Registrations an install left unwritten because the app container it ran in keeps them private.
@@ -115,8 +116,16 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// How long a whole uninstall waits for the running service to say goodbye and leave.
-const UNINSTALL_QUIT_WAIT: Duration = Duration::from_secs(10);
+/// How long, after its end, a quitting service may take to join its host and free the service
+/// lock.
+const QUIT_RELEASE_MARGIN: Duration = Duration::from_secs(2);
+
+/// How long a whole uninstall waits for the running service to say goodbye and leave: the
+/// longest a quit may drain ([`QUIT_GRACE`]) and end ([`END_LIMIT`]), and the release after it.
+/// A shorter wait reports a service that is still leaving as one that did not stop.
+const UNINSTALL_QUIT_WAIT: Duration = QUIT_GRACE
+    .saturating_add(END_LIMIT)
+    .saturating_add(QUIT_RELEASE_MARGIN);
 
 /// How often that wait looks at the service lock.
 const UNINSTALL_QUIT_POLL: Duration = Duration::from_millis(50);
@@ -1090,6 +1099,12 @@ mod tests {
     };
     use crate::install::{HarnessAction, HarnessActionResult, HarnessState, HarnessSummary};
     use crate::language::setup::{BrowserFact, BrowserForm, InstallAgent};
+    use crate::service::lifetime::{END_LIMIT, QUIT_GRACE};
+
+    #[test]
+    fn an_uninstall_outwaits_the_longest_quit() {
+        assert!(super::UNINSTALL_QUIT_WAIT > QUIT_GRACE + END_LIMIT);
+    }
 
     fn browser(id: &str, package: BrowserPackage) -> BrowserRegistration {
         BrowserRegistration {
