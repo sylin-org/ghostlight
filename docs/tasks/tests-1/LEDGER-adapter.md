@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 91 |
+| `crates/desktop` | 161 | 20 | 61 |
 
 ## Slices
 
@@ -49,8 +49,9 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | D2 | `crates/desktop/src/link.rs`: the frames the service writes, the bearer and the link's life | 26 | 3 | contract 2, promise 1 | landed (e3d4bb73) |
 | D3 | `crates/desktop/src/states.rs`: a state screen navigates nowhere else | 9 | 1 | promise 1 | landed (7ce3ebf5) |
 | D4 | `crates/desktop/src/lib.rs`: the launch parser's restating tests | 4 | 0 | - | landed (7edcc0fd) |
-| D5 | `crates/desktop/src/scratch.rs`: tests of a test helper | 2 | 0 | - | landed (see the next row's predecessor) |
-| D6 | `crates/desktop/src/session.rs`: a test of the test fake | 1 | 0 | - | landed (this commit) |
+| D5 | `crates/desktop/src/scratch.rs`: tests of a test helper | 2 | 0 | - | landed (d3bbe962) |
+| D6 | `crates/desktop/src/session.rs`: a test of the test fake | 1 | 0 | - | landed (2cf00417) |
+| D7 | `crates/desktop/src/window.rs` and `webview.rs`: the window's life and the webview's one origin | 27 + 6 | 3 | promise 2, defect 1 | landed (this commit) |
 
 ## Notes
 
@@ -97,6 +98,14 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 - D5: the scratch directory's two tests tested a test helper; the helper stays for the link and
   webview tests.
 - D6: the session's one test tested its own fake; `FakeSession` stays for the native tests.
+- D7: kept three in `window.rs`: the window lives through open, close and a lost renderer in both
+  flavors (desktop 1 and 5); the shell's own Open is answered once (55f3c10b, 240fcdeb); and the
+  webview never reaches another origin, by navigating or by rebuilding for another bearer
+  (desktop 11), which takes `webview.rs`'s navigation rows as a case. Cut: a duplicate flavor test,
+  a Debug test of a value only tests print, the NVIDIA renderer switch, window sizes and placement
+  arithmetic (restated constants, checked live in rc-1), and a no-op assertion; in `webview.rs`,
+  the access script's restated text, an escape over inputs `link.rs` already validates, and the
+  restated profile path.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against

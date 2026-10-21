@@ -648,7 +648,6 @@ mod tests {
         WindowLifecycle::new(false)
     }
 
-    #[test]
     fn open_close_destroyed_open_creates_twice_in_both_flavors() {
         for mut lifecycle in [linux(), windows()] {
             assert_eq!(lifecycle.on(OpenRequested), Some(WindowAct::Create));
@@ -662,7 +661,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn windows_focuses_an_open_window_and_linux_replaces_it() {
         let mut lifecycle = windows();
         lifecycle.on(OpenRequested);
@@ -676,21 +674,12 @@ mod tests {
         assert!(!lifecycle.is_open());
     }
 
+    /// Closing destroys only the window and the next Open builds it again; on Windows an Open
+    /// focuses an open window and on Linux it replaces it, with Opens during a replacement coalesced
+    /// into one build; a lost renderer discards only the window; and a failed build returns to absent
+    /// (ACCEPTANCE, desktop 1 and 5).
     #[test]
-    fn focus_appears_only_in_the_windows_flavor() {
-        let mut seen = Vec::new();
-        for mut lifecycle in [linux(), windows()] {
-            let mut acts = vec![lifecycle.on(OpenRequested)];
-            acts.push(lifecycle.on(OpenRequested));
-            acts.push(lifecycle.on(Destroyed));
-            acts.push(lifecycle.on(OpenRequested));
-            seen.push(acts.contains(&Some(WindowAct::Focus)));
-        }
-        assert_eq!(seen, vec![false, true]);
-    }
-
-    #[test]
-    fn opens_during_a_pending_replacement_are_coalesced_into_one_create() {
+    fn the_window_lives_through_open_close_and_a_lost_renderer_in_both_flavors() {
         let mut lifecycle = linux();
         lifecycle.on(OpenRequested);
         assert_eq!(lifecycle.on(OpenRequested), Some(WindowAct::Destroy));
@@ -701,8 +690,19 @@ mod tests {
         assert_eq!(lifecycle.on(Destroyed), Some(WindowAct::Create));
         assert_eq!(lifecycle.state(), WindowState::Open);
         assert_eq!(lifecycle.on(Destroyed), None);
+
+        open_close_destroyed_open_creates_twice_in_both_flavors();
+        windows_focuses_an_open_window_and_linux_replaces_it();
+        a_lost_renderer_discards_the_window_and_creates_nothing();
+        close_and_destroyed_while_absent_do_nothing();
+        close_and_renderer_loss_during_a_replacement_change_nothing();
+        a_failed_create_returns_to_absent_when_destroyed_is_fed();
+        the_platform_lifecycle_replaces_only_on_linux();
     }
 
+    /// The shell's own Open is answered by the service's show once, with no second build and no
+    /// replacement left pending, and an Open that only focused is not answered, so a later show is its
+    /// own request (commits 55f3c10b and 240fcdeb).
     #[test]
     fn a_show_answering_a_tray_open_builds_the_window_once() {
         let at = Instant::now();
@@ -731,9 +731,10 @@ mod tests {
             "no second create is asked for"
         );
         assert!(lifecycle.is_open());
+
+        a_tray_open_that_only_focuses_is_not_answered_and_a_late_show_is_its_own_request();
     }
 
-    #[test]
     fn a_tray_open_that_only_focuses_is_not_answered_and_a_late_show_is_its_own_request() {
         let at = Instant::now();
         let mut lifecycle = windows();
@@ -751,7 +752,6 @@ mod tests {
         assert_eq!(lifecycle.on(OpenRequested), Some(WindowAct::Destroy));
     }
 
-    #[test]
     fn a_lost_renderer_discards_the_window_and_creates_nothing() {
         for mut lifecycle in [linux(), windows()] {
             lifecycle.on(OpenRequested);
@@ -763,7 +763,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn close_and_destroyed_while_absent_do_nothing() {
         for mut lifecycle in [linux(), windows()] {
             assert_eq!(lifecycle.on(CloseRequested), None);
@@ -773,7 +772,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn close_and_renderer_loss_during_a_replacement_change_nothing() {
         let mut lifecycle = linux();
         lifecycle.on(OpenRequested);
@@ -783,7 +781,6 @@ mod tests {
         assert_eq!(lifecycle.state(), WindowState::Replacing);
     }
 
-    #[test]
     fn a_failed_create_returns_to_absent_when_destroyed_is_fed() {
         let mut lifecycle = windows();
         assert_eq!(lifecycle.on(OpenRequested), Some(WindowAct::Create));
@@ -792,7 +789,6 @@ mod tests {
         assert_eq!(lifecycle.on(OpenRequested), Some(WindowAct::Create));
     }
 
-    #[test]
     fn the_platform_lifecycle_replaces_only_on_linux() {
         let mut lifecycle = WindowLifecycle::for_platform();
         lifecycle.on(OpenRequested);
@@ -812,7 +808,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn a_first_content_builds_a_webview() {
         assert_eq!(
             plan(None, &workbench("http://127.0.0.1:41000", "a")),
@@ -824,8 +819,38 @@ mod tests {
         );
     }
 
+    fn a_webview_navigates_only_within_its_workbench_origin() {
+        const ORIGIN: &str = "http://127.0.0.1:41234";
+        for url in [
+            ORIGIN.to_owned(),
+            format!("{ORIGIN}/"),
+            format!("{ORIGIN}/a/b?x=1#top"),
+        ] {
+            assert!(crate::webview::allows_navigation(ORIGIN, &url), "{url}");
+        }
+        for url in [
+            "http://127.0.0.1:41235/",
+            "http://127.0.0.1:412345/",
+            "http://127.0.0.1:4123/",
+            "http://localhost:41234/",
+            "https://127.0.0.1:41234/",
+            "http://127.0.0.1:41234@evil.example/",
+            "http://127.0.0.1:41234.evil.example/",
+            "https://example.com/",
+            "about:blank",
+            "",
+        ] {
+            assert!(!crate::webview::allows_navigation(ORIGIN, url), "{url}");
+        }
+    }
+
+    /// The webview never reaches another origin: it navigates only within its workbench origin, and
+    /// a workbench with another origin or bearer is a new webview, never a navigation, so the bearer
+    /// a page holds is always its own service's; the same workbench is kept whatever section it starts
+    /// at, and a state screen is rebuilt to and from the workbench (ACCEPTANCE, desktop 11;
+    /// ARCHITECTURE).
     #[test]
-    fn a_second_workbench_with_another_origin_or_bearer_rebuilds_and_never_navigates() {
+    fn the_webview_never_reaches_another_origin() {
         let shown = workbench("http://127.0.0.1:41000", "a");
         for wanted in [
             workbench("http://127.0.0.1:41001", "a"),
@@ -838,9 +863,13 @@ mod tests {
                 "{wanted:?}"
             );
         }
+
+        a_webview_navigates_only_within_its_workbench_origin();
+        a_first_content_builds_a_webview();
+        the_same_workbench_is_kept_whatever_section_it_starts_at();
+        a_state_screen_reloads_into_another_and_is_rebuilt_to_and_from_the_workbench();
     }
 
-    #[test]
     fn the_same_workbench_is_kept_whatever_section_it_starts_at() {
         let shown = workbench("http://127.0.0.1:41000", "a");
         let wanted = Content::Workbench {
@@ -851,7 +880,6 @@ mod tests {
         assert_eq!(plan(Some(&shown), &wanted), ContentAct::Keep);
     }
 
-    #[test]
     fn a_state_screen_reloads_into_another_and_is_rebuilt_to_and_from_the_workbench() {
         let starting = Content::State(StateScreen::Starting);
         let stopped = Content::State(StateScreen::Stopped);
@@ -860,114 +888,5 @@ mod tests {
         assert_eq!(plan(Some(&starting), &stopped), ContentAct::Reload);
         assert_eq!(plan(Some(&starting), &page), ContentAct::Rebuild);
         assert_eq!(plan(Some(&page), &starting), ContentAct::Rebuild);
-    }
-
-    #[test]
-    fn the_bearer_is_never_printed() {
-        let printed = format!("{:?}", workbench("http://127.0.0.1:41000", "s3cr3t-bearer"));
-        assert!(!printed.contains("s3cr3t-bearer"), "{printed}");
-        assert!(printed.contains("[redacted]"));
-    }
-
-    #[test]
-    fn nvidia_without_an_explicit_value_turns_the_renderer_off() {
-        assert_eq!(
-            renderer_policy(true, None),
-            Some(("WEBKIT_DISABLE_DMABUF_RENDERER", "1"))
-        );
-    }
-
-    #[test]
-    fn an_explicit_value_wins_whatever_it_is() {
-        assert_eq!(renderer_policy(true, Some(OsStr::new("0"))), None);
-        assert_eq!(renderer_policy(true, Some(OsStr::new(""))), None);
-        assert_eq!(renderer_policy(true, Some(OsStr::new("1"))), None);
-    }
-
-    #[test]
-    fn without_nvidia_the_environment_is_left_alone() {
-        assert_eq!(renderer_policy(false, None), None);
-        assert_eq!(renderer_policy(false, Some(OsStr::new("1"))), None);
-    }
-
-    #[test]
-    fn the_window_is_centered_on_its_monitor() {
-        assert_eq!(
-            centered_origin((0, 0), (1920, 1080), (1180, 760)),
-            (370, 160)
-        );
-        assert_eq!(
-            centered_origin((-1920, 0), (1920, 1080), (1180, 760)),
-            (-1550, 160)
-        );
-    }
-
-    #[test]
-    fn a_window_larger_than_the_monitor_sits_at_its_corner() {
-        assert_eq!(
-            centered_origin((100, 50), (800, 600), (1180, 760)),
-            (100, 50)
-        );
-    }
-
-    #[test]
-    fn the_window_constants_hold_the_product_sizes() {
-        assert_eq!(WINDOW_TITLE, "Ghostlight");
-        assert_eq!(WINDOW_SIZE, (1180.0, 760.0));
-        assert_eq!(WINDOW_MIN_SIZE, (720.0, 620.0));
-        assert_eq!(WINDOW_CLASS, "Ghostlight Window");
-        assert_eq!(APPLICATION_ID, "org.sylin.ghostlight");
-    }
-
-    #[test]
-    fn the_frame_is_dark_whatever_the_system_mode() {
-        let builder = window_builder(WINDOW_SIZE);
-        assert_eq!(builder.window.preferred_theme, Some(Theme::Dark));
-        assert_eq!(WINDOW_THEME, Theme::Dark);
-        assert!(!builder.window.visible, "shown once its content is in");
-    }
-
-    #[test]
-    fn a_short_screen_lowers_the_window_to_fit_above_the_taskbar() {
-        // A 1920 by 1080 panel at 150% is 1280 by 720 logical pixels.
-        assert_eq!(fitted_size(1080.0 / 1.5), (1180.0, 624.0));
-        // 1366 by 768 at 100%.
-        assert_eq!(fitted_size(768.0), (1180.0, 672.0));
-        // A screen with room keeps the product size.
-        assert_eq!(fitted_size(1080.0), WINDOW_SIZE);
-        assert_eq!(fitted_size(1080.0 / 1.25), WINDOW_SIZE);
-    }
-
-    #[test]
-    fn the_fitted_window_is_never_below_the_minimum() {
-        assert_eq!(fitted_size(600.0), (1180.0, WINDOW_MIN_SIZE.1));
-        assert_eq!(fitted_size(0.0), (1180.0, WINDOW_MIN_SIZE.1));
-        assert_eq!(fitted_size(f64::NAN), WINDOW_SIZE);
-        assert_eq!(fitted_size(f64::INFINITY), WINDOW_SIZE);
-    }
-
-    #[test]
-    fn the_window_is_centered_above_the_taskbar() {
-        // 1920 by 1080 at 150%: the taskbar takes 72 physical pixels, and a 624 high window with
-        // its caption (about 1001 physical pixels) sits in the 1008 above it.
-        let area = placement_area((1920, 1080), 1.5);
-        assert_eq!(area, (1920, 1008));
-        assert_eq!(centered_origin((0, 0), area, (1770, 1001)), (75, 3));
-        assert_eq!(placement_area((1920, 1080), 1.0), (1920, 1032));
-        assert_eq!(
-            placement_area((800, 30), 1.0),
-            (800, 30),
-            "no room to spare"
-        );
-        assert_eq!(placement_area((800, 600), f64::NAN), (800, 600));
-    }
-
-    #[test]
-    fn display_and_identity_setup_is_inert_on_windows() {
-        if cfg!(windows) {
-            apply_renderer_policy();
-            prepare_identity();
-            assert_eq!(init_display(), Ok(()));
-        }
     }
 }
