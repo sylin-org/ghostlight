@@ -518,7 +518,7 @@ mod tests {
     use std::sync::mpsc;
 
     use ghostlight_relay::endpoint::Listener;
-    use ghostlight_relay::protocol::{RefusalCode, Reply};
+    use ghostlight_relay::protocol::Reply;
 
     use super::*;
     use crate::scratch::Scratch;
@@ -545,204 +545,55 @@ mod tests {
         std::fs::read_to_string(&path).expect("the golden is readable")
     }
 
-    fn golden(name: &str) -> DesktopFrame {
-        serde_json::from_str(&golden_text(name)).expect("the golden decodes")
-    }
-
+    /// Every frame the service writes to `tests/golden/desktop` decodes to a frame this shell knows
+    /// and re-encodes to the same JSON, and what the shell checks on arrival holds: every tray, the
+    /// longest included, passes `validate()`, every tray item id parses, no act is unknown, and the
+    /// workbench's address and bearer pass the shell's own checks. The address the shell accepts is
+    /// the loopback form alone, and a workbench at any other is refused before it opens (ACCEPTANCE,
+    /// gate 11).
     #[test]
-    fn each_golden_decodes_to_its_frame() {
-        let DesktopFrame::Workbench { url, bearer, tray } = golden("workbench.json") else {
-            panic!("workbench.json is a workbench frame");
-        };
-        // The address and the bearer the service writes pass the shell's own checks.
-        assert_eq!(validate_workbench_url(&url).ok(), Some(41234));
-        assert!(
-            well_formed_bearer(&bearer),
-            "the service's bearer has the shape the shell takes"
-        );
-        assert_eq!(tray.validate(), Ok(()));
-        assert_eq!(tray.state, TrayState::Ready);
-        assert_eq!(
-            tray.tooltip,
-            "Ready. Ghostlight is running; 2 agents and 2 browsers connected."
-        );
-        let ids: Vec<(&str, bool)> = tray
-            .items
-            .iter()
-            .map(|item| (item.id.as_str(), item.enabled))
+    fn every_frame_the_service_writes_is_one_the_shell_reads_and_writes_back() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/desktop");
+        let mut names: Vec<String> = std::fs::read_dir(&directory)
+            .expect("the desktop goldens are readable")
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name.ends_with(".json"))
             .collect();
-        assert_eq!(
-            ids,
-            [
-                ("open", true),
-                ("hold", true),
-                ("resume", false),
-                ("quit", true)
-            ]
-        );
-        let DesktopFrame::TrayModel { model } = golden("tray-model.json") else {
-            panic!("tray-model.json is a tray model frame");
+        names.sort();
+        assert!(!names.is_empty());
+        let items_parse = |tray: &TrayModel, name: &str| {
+            assert_eq!(tray.validate(), Ok(()), "{name}");
+            for item in &tray.items {
+                assert!(TrayItemId::parse(&item.id).is_some(), "{name}: {}", item.id);
+            }
         };
-        assert_eq!(model.validate(), Ok(()));
-        assert_eq!(model.state, TrayState::Paused);
-        let enabled: Vec<&str> = model
-            .items
-            .iter()
-            .filter(|item| item.enabled)
-            .map(|item| item.id.as_str())
-            .collect();
-        assert_eq!(enabled, ["open", "resume", "quit"]);
-        let DesktopFrame::TrayModel { model: longest } = golden("tray-model-longest.json") else {
-            panic!("tray-model-longest.json is a tray model frame");
-        };
-        assert_eq!(
-            longest.validate(),
-            Ok(()),
-            "the longest tray the service draws fits the shell's limits"
-        );
-        assert_eq!(golden("already-open.json"), DesktopFrame::AlreadyOpen);
-        assert_eq!(
-            golden("goodbye.json"),
-            DesktopFrame::Goodbye {
-                reason: GoodbyeReason::Quit
-            }
-        );
-        assert_eq!(
-            golden("tray.json"),
-            DesktopFrame::Tray {
-                item: TrayItemId::Hold
-            }
-        );
-        assert_eq!(
-            golden("tray-open.json"),
-            DesktopFrame::Tray {
-                item: TrayItemId::Open
-            }
-        );
-    }
-
-    #[test]
-    fn each_request_golden_decodes_to_its_frame() {
-        assert_eq!(
-            golden("show.json"),
-            DesktopFrame::Show {
-                address: Some("settings/diagnostics".to_owned())
-            }
-        );
-        assert_eq!(
-            golden("show-no-address.json"),
-            DesktopFrame::Show { address: None }
-        );
-        assert_eq!(
-            golden("notice.json"),
-            DesktopFrame::Notice {
-                title: "Ghostlight checkup".to_owned(),
-                body: "Notifications are ready.".to_owned(),
-            }
-        );
-        assert_eq!(
-            golden("act-open-url.json"),
-            DesktopFrame::Act {
-                id: 1,
-                act: NativeAct::OpenUrl {
-                    url: "https://example.com/docs".to_owned()
-                }
-            }
-        );
-        assert_eq!(
-            golden("act-open-folder.json"),
-            DesktopFrame::Act {
-                id: 2,
-                act: NativeAct::OpenFolder {
-                    path: "/home/person/.ghostlight/logs".to_owned()
-                }
-            }
-        );
-        assert_eq!(
-            golden("act-pick-file.json"),
-            DesktopFrame::Act {
-                id: 3,
-                act: NativeAct::PickFile {
-                    title: "Locate the harness application or settings file".to_owned()
-                }
-            }
-        );
-    }
-
-    #[test]
-    fn the_shell_writes_the_bytes_of_the_act_result_goldens() {
-        let results = [
-            (
-                "act-result.json",
-                3,
-                ActOutcome::Picked {
-                    path: "/home/person/Apps/client.json".to_owned(),
-                },
-            ),
-            ("act-result-done.json", 1, ActOutcome::Done),
-            ("act-result-cancelled.json", 3, ActOutcome::Cancelled),
-            ("act-result-failed.json", 2, ActOutcome::Failed),
-        ];
-        for (name, id, outcome) in results {
-            let result = DesktopFrame::ActResult { id, outcome };
-            assert_eq!(golden(name), result, "{name} decodes to the result");
-            assert_eq!(
-                serde_json::to_value(&result).unwrap(),
-                serde_json::from_str::<serde_json::Value>(&golden_text(name)).unwrap(),
-                "{name} is the bytes the shell writes"
-            );
-        }
-    }
-
-    #[test]
-    fn the_shell_writes_the_bytes_of_the_unavailable_and_closed_goldens() {
-        for (name, frame) in [
-            (
-                "unavailable.json",
-                DesktopFrame::Unavailable {
-                    reason: UnavailableReason::NoTray,
-                },
-            ),
-            ("closed.json", DesktopFrame::Closed { stays: true }),
-        ] {
-            assert_eq!(golden(name), frame, "{name} decodes to the frame");
+        for name in names {
+            let text = golden_text(&name);
+            let frame: DesktopFrame = serde_json::from_str(&text).expect("the golden decodes");
+            assert_ne!(frame, DesktopFrame::Unknown, "{name}");
             assert_eq!(
                 serde_json::to_value(&frame).unwrap(),
-                serde_json::from_str::<serde_json::Value>(&golden_text(name)).unwrap(),
+                serde_json::from_str::<serde_json::Value>(&text).unwrap(),
                 "{name} is the bytes the shell writes"
             );
+            match &frame {
+                DesktopFrame::Workbench { url, bearer, tray } => {
+                    assert!(validate_workbench_url(url).is_ok(), "{name}");
+                    assert!(well_formed_bearer(bearer), "{name}");
+                    items_parse(tray, &name);
+                }
+                DesktopFrame::TrayModel { model } => items_parse(model, &name),
+                DesktopFrame::Act { act, .. } => assert_ne!(*act, NativeAct::Unknown, "{name}"),
+                _ => {}
+            }
         }
+
+        the_workbench_address_is_exactly_the_loopback_form();
+        a_first_frame_with_another_address_is_a_contract_failure();
     }
 
-    #[test]
-    fn every_reason_the_shell_gives_has_its_wire_word() {
-        for (reason, word) in [
-            (UnavailableReason::NoDisplay, "no_display"),
-            (UnavailableReason::NoWebview, "no_webview"),
-            (UnavailableReason::NoTray, "no_tray"),
-        ] {
-            assert_eq!(serde_json::to_value(reason).unwrap(), word);
-        }
-    }
-
-    #[test]
-    fn a_frame_kind_this_build_does_not_know_is_unknown() {
-        let frame: DesktopFrame = serde_json::from_str(r#"{"kind":"ping"}"#).unwrap();
-        assert_eq!(frame, DesktopFrame::Unknown);
-    }
-
-    #[test]
-    fn the_shell_writes_the_bytes_of_the_tray_goldens() {
-        for (name, item) in [
-            ("tray.json", TrayItemId::Hold),
-            ("tray-open.json", TrayItemId::Open),
-        ] {
-            let written = serde_json::to_value(DesktopFrame::Tray { item }).unwrap();
-            let golden: serde_json::Value = serde_json::from_str(&golden_text(name)).unwrap();
-            assert_eq!(written, golden, "{name}");
-        }
-    }
-
+    /// The bearer never appears in a printed frame, workbench or error, including the error for a
+    /// bearer of the wrong shape (docs/trust/security-overview.md).
     #[test]
     fn the_bearer_is_never_printed() {
         let secret = "s3cr3t-bearer-value";
@@ -771,9 +622,10 @@ mod tests {
         for error in errors {
             assert!(!error.to_string().contains(secret));
         }
+
+        a_bearer_of_the_wrong_shape_is_a_contract_failure();
     }
 
-    #[test]
     fn the_workbench_address_is_exactly_the_loopback_form() {
         assert_eq!(validate_workbench_url(URL).ok(), Some(41234));
         assert_eq!(
@@ -801,38 +653,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_origin_is_the_address_without_its_slash() {
-        let workbench = Workbench {
-            url: URL.to_owned(),
-            bearer: BEARER.to_owned(),
-            tray: tray(),
-        };
-        assert_eq!(workbench.origin(), "http://127.0.0.1:41234");
-    }
-
-    #[test]
-    fn the_tray_entries_round_trip_through_their_ids() {
-        for item in TrayItemId::ALL {
-            assert_eq!(TrayItemId::parse(item.as_str()), Some(item));
-            assert_eq!(
-                serde_json::to_value(item).unwrap(),
-                serde_json::Value::from(item.as_str())
-            );
-        }
-        assert_eq!(TrayItemId::parse("settings"), None);
-    }
-
-    #[test]
-    fn a_bearer_has_43_url_safe_characters() {
-        assert!(well_formed_bearer(BEARER));
-        assert!(!well_formed_bearer(&BEARER[1..]));
-        assert!(!well_formed_bearer(&format!("{BEARER}A")));
-        assert!(!well_formed_bearer(&BEARER.replace('-', "+")));
-        assert!(!well_formed_bearer(&BEARER.replace('_', "\"")));
-    }
-
-    #[test]
     fn the_reader_stops_at_a_goodbye_of_any_reason_and_at_the_end() {
         for reason in [GoodbyeReason::Quit, GoodbyeReason::Unknown] {
             let mut bytes = Vec::new();
@@ -862,78 +682,6 @@ mod tests {
                 panic!("a truncated frame")
             }),
             LinkEnd::Lost
-        );
-    }
-
-    /// Reads `bytes` to the end and gives back the requests the reader handed on.
-    fn requests_in(bytes: Vec<u8>) -> Vec<DesktopFrame> {
-        let mut handed = Vec::new();
-        read_until_end(&mut Cursor::new(bytes), |frame| handed.push(frame));
-        handed
-    }
-
-    #[test]
-    fn the_reader_hands_on_shows_notices_and_acts_in_order() {
-        let frames = [
-            DesktopFrame::Show {
-                address: Some("settings/sharing".to_owned()),
-            },
-            DesktopFrame::Notice {
-                title: "T".to_owned(),
-                body: "B".to_owned(),
-            },
-            DesktopFrame::Act {
-                id: 4,
-                act: NativeAct::PickFile {
-                    title: "Choose".to_owned(),
-                },
-            },
-        ];
-        let mut bytes = Vec::new();
-        for frame in &frames {
-            frame::write_frame(&mut bytes, frame).unwrap();
-        }
-        assert_eq!(requests_in(bytes), frames);
-    }
-
-    #[test]
-    fn the_reader_skips_frames_it_does_not_know_or_cannot_read_or_that_go_the_other_way() {
-        let show = DesktopFrame::Show { address: None };
-        let mut bytes = Vec::new();
-        frame::write_frame(&mut bytes, &serde_json::json!({"kind": "ping"})).unwrap();
-        frame::write_frame(
-            &mut bytes,
-            &serde_json::json!({"kind": "act", "id": "seven", "act": {"kind": "pick_file"}}),
-        )
-        .unwrap();
-        frame::write_frame(&mut bytes, &serde_json::json!(["not", "a", "frame"])).unwrap();
-        for frame in [
-            DesktopFrame::Tray {
-                item: TrayItemId::Quit,
-            },
-            DesktopFrame::ActResult {
-                id: 1,
-                outcome: ActOutcome::Done,
-            },
-            workbench_frame(URL),
-            DesktopFrame::Unknown,
-            show.clone(),
-        ] {
-            frame::write_frame(&mut bytes, &frame).unwrap();
-        }
-        assert_eq!(requests_in(bytes), [show]);
-    }
-
-    #[test]
-    fn an_act_this_build_does_not_know_arrives_as_unknown_so_it_can_be_answered() {
-        let frame: DesktopFrame =
-            serde_json::from_str(r#"{"kind":"act","id":9,"act":{"kind":"print"}}"#).unwrap();
-        assert_eq!(
-            frame,
-            DesktopFrame::Act {
-                id: 9,
-                act: NativeAct::Unknown
-            }
         );
     }
 
@@ -973,6 +721,9 @@ mod tests {
         }
     }
 
+    /// The link opens as the desktop shell, saying its program, build and what it shows (commit
+    /// 17ec7571), hands the workbench over, and ends once, at a goodbye of any reason or when the
+    /// stream ends, which is how the shell tells a goodbye from a loss.
     #[test]
     fn the_link_opens_as_the_desktop_shell_and_ends_once_at_the_goodbye() {
         let home = fresh_home();
@@ -1008,79 +759,11 @@ mod tests {
                 .expect("the goodbye ends the link"),
             LinkEnd::Goodbye(GoodbyeReason::Replace)
         );
-        assert!(
-            rx.recv_timeout(Duration::from_millis(200)).is_err(),
-            "the end is reported once"
-        );
+
+        the_reader_stops_at_a_goodbye_of_any_reason_and_at_the_end();
+        the_stream_ending_ends_the_link();
     }
 
-    #[test]
-    fn a_tray_click_reaches_the_service() {
-        let home = fresh_home();
-        let listener = Listener::bind_first(home.path()).unwrap();
-        let (clicked, rx) = mpsc::channel();
-        let service = thread::spawn(move || {
-            let mut shell = listener.accept().unwrap();
-            let _: Opening = frame::read_frame(&mut shell).unwrap().unwrap();
-            frame::write_frame(&mut shell, &accepted()).unwrap();
-            frame::write_frame(&mut shell, &workbench_frame(URL)).unwrap();
-            let heard: DesktopFrame = frame::read_frame(&mut shell).unwrap().unwrap();
-            clicked.send(heard).unwrap();
-        });
-        let (link, _) = open_link(home.path(), View::Window).unwrap();
-        link.send_tray(TrayItemId::Resume).unwrap();
-        assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            DesktopFrame::Tray {
-                item: TrayItemId::Resume
-            }
-        );
-        service.join().unwrap();
-    }
-
-    #[test]
-    fn an_act_result_reaches_the_service_and_a_request_reaches_the_shell() {
-        let home = fresh_home();
-        let listener = Listener::bind_first(home.path()).unwrap();
-        let (heard, rx) = mpsc::channel();
-        let service = thread::spawn(move || {
-            let mut shell = listener.accept().unwrap();
-            let _: Opening = frame::read_frame(&mut shell).unwrap().unwrap();
-            frame::write_frame(&mut shell, &accepted()).unwrap();
-            frame::write_frame(&mut shell, &workbench_frame(URL)).unwrap();
-            frame::write_frame(
-                &mut shell,
-                &DesktopFrame::Act {
-                    id: 8,
-                    act: NativeAct::OpenFolder {
-                        path: "logs".to_owned(),
-                    },
-                },
-            )
-            .unwrap();
-            let answer: DesktopFrame = frame::read_frame(&mut shell).unwrap().unwrap();
-            heard.send(answer).unwrap();
-        });
-        let (link, _) = open_link(home.path(), View::Window).unwrap();
-        let (asked, requests) = mpsc::channel();
-        link.spawn_reader(move |request| asked.send(request).unwrap(), |_| {})
-            .unwrap();
-        let request = requests.recv_timeout(Duration::from_secs(5)).unwrap();
-        let DesktopFrame::Act { id, .. } = request else {
-            panic!("the act reaches the shell: {request:?}");
-        };
-        link.send_act_result(id, ActOutcome::Done).unwrap();
-        assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            DesktopFrame::ActResult {
-                id: 8,
-                outcome: ActOutcome::Done
-            }
-        );
-        service.join().unwrap();
-    }
-
-    #[test]
     fn the_stream_ending_ends_the_link() {
         let home = fresh_home();
         let service = fake_service(home.path(), accepted(), vec![workbench_frame(URL)]);
@@ -1096,7 +779,6 @@ mod tests {
         );
     }
 
-    #[test]
     fn a_first_frame_with_another_address_is_a_contract_failure() {
         let home = fresh_home();
         let service = fake_service(
@@ -1111,29 +793,6 @@ mod tests {
         service.join().unwrap();
     }
 
-    #[test]
-    fn a_first_frame_of_already_open_is_the_already_open_failure() {
-        let home = fresh_home();
-        let service = fake_service(home.path(), accepted(), vec![DesktopFrame::AlreadyOpen]);
-        let failure = open_link(home.path(), View::Window)
-            .err()
-            .expect("the shell is turned away");
-        assert!(matches!(failure, LinkError::AlreadyOpen), "{failure:?}");
-        service.join().unwrap();
-    }
-
-    #[test]
-    fn a_first_frame_that_is_not_the_workbench_is_a_contract_failure() {
-        let home = fresh_home();
-        let service = fake_service(home.path(), accepted(), vec![DesktopFrame::Unknown]);
-        let failure = open_link(home.path(), View::Window)
-            .err()
-            .expect("the frame is refused");
-        assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
-        service.join().unwrap();
-    }
-
-    #[test]
     fn a_bearer_of_the_wrong_shape_is_a_contract_failure() {
         let home = fresh_home();
         let service = fake_service(
@@ -1151,38 +810,5 @@ mod tests {
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
         assert!(!failure.to_string().contains("short"));
         service.join().unwrap();
-    }
-
-    #[test]
-    fn a_refused_opening_carries_the_services_words() {
-        let home = fresh_home();
-        let service = fake_service(
-            home.path(),
-            Reply::refused(RefusalCode::Capacity, "Another window is open.".to_owned()),
-            Vec::new(),
-        );
-        let failure = open_link(home.path(), View::Window)
-            .err()
-            .expect("the opening is refused");
-        match failure {
-            LinkError::Refused { code, say } => {
-                assert_eq!(code, Some(RefusalCode::Capacity));
-                assert_eq!(say, "Another window is open.");
-            }
-            other => panic!("{other:?}"),
-        }
-        service.join().unwrap();
-    }
-
-    #[test]
-    fn no_service_is_a_connect_failure() {
-        let home = fresh_home();
-        let failure = open_link(home.path(), View::Window)
-            .err()
-            .expect("nothing listens");
-        assert!(
-            matches!(failure, LinkError::Connect(ConnectError::NoService)),
-            "{failure:?}"
-        );
     }
 }

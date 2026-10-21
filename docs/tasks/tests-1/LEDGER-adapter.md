@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 129 |
+| `crates/desktop` | 161 | 20 | 106 |
 
 ## Slices
 
@@ -46,6 +46,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A18 | `protocol4/translate/tests.rs`: no unguarded content, the diagnostics binding and a changed document | 18 | 4 | contract 1, defect 3 | landed (8be0e02c) |
 | A19 | `protocol4/tree/tests.rs`: an inventory decodes to a tree or to a refusal | 2 | 1 | contract 1 | landed (fb1b7b29) |
 | D1 | `crates/desktop/src/machine.rs`: what the shell starts and when | 37 | 5 | promise 4, defect 1 | landed (60dbba71; its ledger row came in the next commit) |
+| D2 | `crates/desktop/src/link.rs`: the frames the service writes, the bearer and the link's life | 26 | 3 | contract 2, promise 1 | landed (this commit) |
 
 ## Notes
 
@@ -70,6 +71,16 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   the restated recover count and patience name `RECOVER_TRIES` and `RECOVER_PATIENCE`. Its ledger
   row missed 60dbba71 (an edit script failed on a stale anchor while the commit still ran) and
   came in the next commit.
+- D2: kept three: every frame the service writes to `tests/golden/desktop` decodes to a frame the
+  shell knows, re-encodes to the same JSON and passes the shell's arrival checks (every tray
+  validates, the longest included, every item id parses, the workbench's address and bearer pass
+  `validate_workbench_url` and `well_formed_bearer`; the coordinator's keep), with the loopback
+  address rows and a refused other address as its cases (gate 11); the bearer is never printed,
+  in any frame, workbench or error; and the link opens as the desktop shell and ends once, at a
+  goodbye or the end of the stream (17ec7571). The golden test no longer restates the service's
+  tooltip or item lists, which earlier service changes had to edit. Cut: restated wire words, a
+  private bearer shape helper, reader internals, socket writes the goldens prove, and error
+  passthroughs. The link test's 200 ms wait for a second end goes: `on_end` is `FnOnce`.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against
