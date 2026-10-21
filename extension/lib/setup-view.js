@@ -2,11 +2,13 @@
 // and the computer it runs on to the words, the command and the three steps; no DOM, no chrome.*.
 // The words live here, once, so the page script only places them and a test can read them all.
 (function installGhostlightSetupView(root, factory) {
-  const shared = typeof module !== "undefined" && module.exports ? require("./shared.js") : root.GhostlightShared;
-  const api = factory(shared);
+  const required = typeof module !== "undefined" && module.exports;
+  const shared = required ? require("./shared.js") : root.GhostlightShared;
+  const messages = required ? require("./messages.js") : root.GhostlightMessages;
+  const api = factory(shared, messages);
   root.GhostlightSetupView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
-})(globalThis, function createGhostlightSetupView(shared) {
+})(globalThis, function createGhostlightSetupView(shared, messages) {
   "use strict";
 
   const STATE = Object.freeze({
@@ -22,7 +24,7 @@
   const PLATFORM = Object.freeze({ WIN: "win", LINUX: "linux" });
   // The one page message the met state sends. The worker answers it by asking the service to show
   // its window.
-  const SHOW_GHOSTLIGHT = "show_ghostlight";
+  const SHOW_GHOSTLIGHT = messages.PAGE.SHOW_GHOSTLIGHT;
 
   // A fallback appears only when Ghostlight still does not answer after the person had time to
   // run the command. The get script downloads three images, so a cold run is not instant.

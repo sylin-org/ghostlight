@@ -5,7 +5,7 @@
 // set of tabs Ghostlight controls, forwards browser events for those tabs only, and feeds Chrome's
 // events to the modules in lib/. It makes no policy decision: whether a tab may be touched, what a
 // page message means and what an effect was are the service's business.
-importScripts("lib/protocol.js", "lib/shared.js", "lib/state.js", "lib/connection-log.js", "lib/chunks.js",
+importScripts("lib/protocol.js", "lib/messages.js", "lib/shared.js", "lib/state.js", "lib/connection-log.js", "lib/chunks.js",
   "lib/sessions.js", "lib/arguments.js", "lib/inventory.js", "lib/world.js", "lib/input.js", "lib/tabs.js",
   "lib/capture.js", "lib/presentation-queue.js", "lib/notice.js", "lib/diagnostics.js", "lib/recording.js",
   "lib/buffers.js", "vendor/acorn.js", "lib/evaluate.js", "lib/primitives.js");
@@ -29,7 +29,6 @@ const ENGINE_VERSION = /^[0-9.]{1,32}$/;
 const ENGINE_USER_AGENT = /Chrome\/([0-9.]{1,32})/;
 const PLACEHOLDER_BRAND = /not.*a.*brand/i;
 const ENGINE_BRAND = "Chromium";
-const OFFSCREEN_TARGET = "ghostlight-offscreen";
 const CONTROLLED_KEY = "ghostlight.controlled";
 // The epoch of the service that granted the custody in CONTROLLED_KEY, kept beside it.
 const SERVICE_EPOCH_KEY = "ghostlight.service_epoch";
@@ -70,16 +69,7 @@ const EVENT = Object.freeze({
   RUNTIME_CONTROL_REQUESTED: "runtime_control_requested",
   SHOW_REQUESTED: "show_requested"
 });
-const MESSAGE = Object.freeze({
-  UI_SNAPSHOT: "ui_snapshot",
-  GET_PREFERENCES: "get_preferences",
-  SET_PREFERENCES: "set_preferences",
-  RUNTIME_CONTROL: "runtime_control",
-  SHOW_GHOSTLIGHT: "show_ghostlight",
-  RELEASE_DEBUGGER_SESSIONS: "release_debugger_sessions",
-  CONNECTION_DIAGNOSTICS: "connection_diagnostics",
-  UI_STATE_CHANGED: "ui_state_changed"
-});
+const MESSAGE = globalThis.GhostlightMessages.PAGE;
 const DEBUGGER_EVENT = Object.freeze({
   DIALOG_OPENING: "Page.javascriptDialogOpening",
   DIALOG_CLOSED: "Page.javascriptDialogClosed",
@@ -747,7 +737,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.commands.onCommand.addListener((command) => {
-  if (command !== "toggle-hold") return;
+  if (command !== globalThis.GhostlightMessages.COMMAND.TOGGLE_HOLD) return;
   try {
     requestRuntimeControl("toggle_hold");
   } catch (error) {
@@ -879,7 +869,7 @@ async function handleUiMessage(message, sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Encoder traffic belongs to the offscreen document. Answering it here would race the real
   // handler and turn a working encode into an unknown-message error.
-  if (message?.target === OFFSCREEN_TARGET) return false;
+  if (message?.target === globalThis.GhostlightMessages.OFFSCREEN.TARGET) return false;
   handleUiMessage(message, sender)
     .then((value) => sendResponse({ ok: true, value }))
     .catch((error) => sendResponse({ ok: false, error: shared.bounded(error?.message ?? error, ERROR_CHARS) }));

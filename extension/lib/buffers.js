@@ -6,6 +6,7 @@
       args: require("./arguments.js"),
       capture: require("./capture.js"),
       diagnosticsApi: require("./diagnostics.js"),
+      messages: require("./messages.js"),
       protocol: require("./protocol.js"),
       recordingApi: require("./recording.js"),
       sessions: require("./sessions.js"),
@@ -16,6 +17,7 @@
       args: root.GhostlightArguments,
       capture: root.GhostlightCapture,
       diagnosticsApi: root.GhostlightDiagnostics,
+      messages: root.GhostlightMessages,
       protocol: root.GhostlightProtocol,
       recordingApi: root.GhostlightRecording,
       sessions: root.GhostlightSessions,
@@ -27,7 +29,7 @@
 })(globalThis, function createGhostlightBuffersApi(deps) {
   "use strict";
 
-  const { args: check, capture: captureApi, diagnosticsApi, protocol, recordingApi, sessions, shared, worldApi } = deps;
+  const { args: check, capture: captureApi, diagnosticsApi, messages, protocol, recordingApi, sessions, shared, worldApi } = deps;
   const { CDP } = sessions;
 
   // The `diagnostics` and `recording` primitives. Both keep volatile, bounded state inside the
@@ -67,12 +69,9 @@
   const FRAME_KIND = Object.freeze({ SEED: "seed", SCREENCAST: "screencast", FINAL: "final" });
   const FAILURE = Object.freeze({ DOCUMENT_CHANGED: "document_changed" });
   const ENCODER_DOCUMENT = "offscreen.html";
-  const ENCODER_TARGET = "ghostlight-offscreen";
-  const ENCODE_KIND = "encode_recording";
-  const RELEASE_KIND = "release_recording";
   const ENCODER_REASON = "BLOBS";
   const ENCODER_JUSTIFICATION = "Decode recording frames and encode one animated GIF away from the service worker.";
-  const TRANSFER = Object.freeze({ OBJECT_URL: "object_url", BASE64: "base64" });
+  const { OFFSCREEN, TRANSFER } = messages;
   const DOWNLOAD_SETTLE_MS = 30_000;
   const PAGE_DELIVERY_MS = 30_000;
   const REASON_CHARS = 200;
@@ -369,7 +368,7 @@
 
     async function askEncoder(message) {
       await ensureEncoder();
-      const response = await chromeApi.runtime.sendMessage({ target: ENCODER_TARGET, ...message });
+      const response = await chromeApi.runtime.sendMessage({ target: OFFSCREEN.TARGET, ...message });
       if (!response?.ok) throw new Error(response?.reason || "recording encoding failed");
       return response;
     }
@@ -448,7 +447,7 @@
       let encoded = null;
       try {
         encoded = await askEncoder({
-          kind: ENCODE_KIND,
+          kind: OFFSCREEN.ENCODE,
           frames: selected.frames,
           max_bytes: op.max_output_bytes,
           // Bytes take exactly one form, chosen by where they are going: an object URL the browser
@@ -462,7 +461,7 @@
         return { result: RESULT.EXPORT_FAILED, reason: shared.bounded(error?.message ?? error, REASON_CHARS) };
       } finally {
         if (encoded?.object_url) {
-          await chromeApi.runtime.sendMessage({ target: ENCODER_TARGET, kind: RELEASE_KIND, object_url: encoded.object_url }).catch(() => {});
+          await chromeApi.runtime.sendMessage({ target: OFFSCREEN.TARGET, kind: OFFSCREEN.RELEASE, object_url: encoded.object_url }).catch(() => {});
         }
         await closeEncoder();
       }

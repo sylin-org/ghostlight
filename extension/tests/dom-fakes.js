@@ -105,6 +105,7 @@ function runPage(script, answers) {
     chrome,
     setInterval: () => 0,
     clearInterval() {},
+    GhostlightMessages: require("../lib/messages.js"),
     GhostlightPopupView: require("../lib/popup-view.js")
   });
   vm.runInContext(readFileSync(join(ROOT, script), "utf8"), context, { filename: script });

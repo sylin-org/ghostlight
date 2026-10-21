@@ -8,11 +8,7 @@
   const shared = globalThis.GhostlightShared;
   const { STATE, STEP, LIGHT, WORDS, LINKS } = view;
 
-  const MESSAGE = Object.freeze({
-    SNAPSHOT: "ui_snapshot",
-    STATE_CHANGED: "ui_state_changed",
-    SHOW: view.SHOW_GHOSTLIGHT
-  });
+  const MESSAGE = globalThis.GhostlightMessages.PAGE;
   // Set once the meeting has played, so a later visit shows the connected page at rest.
   const SETUP_MET_KEY = "ghostlight.setup_met";
   const POLL_MS = 1500;
@@ -293,7 +289,7 @@
     const sequence = ++latestSequence;
     let snapshot;
     try {
-      snapshot = await request({ kind: MESSAGE.SNAPSHOT });
+      snapshot = await request({ kind: MESSAGE.UI_SNAPSHOT });
     } catch {
       snapshot = { connected: false, compatible: true, link_state: shared.LINK_UNREACHABLE };
     }
@@ -328,7 +324,7 @@
       metPlayed = false;
     }
     chrome.runtime.onMessage.addListener((message) => {
-      if (message?.kind === MESSAGE.STATE_CHANGED) refresh();
+      if (message?.kind === MESSAGE.UI_STATE_CHANGED) refresh();
     });
     document.addEventListener("visibilitychange", () => { if (current) renderFallback(current); });
     setInterval(refresh, POLL_MS);

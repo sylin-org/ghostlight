@@ -5,15 +5,7 @@
   "use strict";
 
   const view = globalThis.GhostlightPopupView;
-
-  const MESSAGE = Object.freeze({
-    SNAPSHOT: "ui_snapshot",
-    STATE_CHANGED: "ui_state_changed",
-    CONTROL: "runtime_control",
-    RELEASE: "release_debugger_sessions"
-  });
-  // The command whose shortcut the key cap shows; the manifest declares it.
-  const TOGGLE_COMMAND = "toggle-hold";
+  const { PAGE: MESSAGE, COMMAND } = globalThis.GhostlightMessages;
   const SETUP_PAGE = "setup.html";
   const POLL_MS = 1500;
 
@@ -98,8 +90,8 @@
 
   function pressFor(action) {
     if (action.open) return () => open(action.open);
-    if (action.release) return () => send({ kind: MESSAGE.RELEASE });
-    return () => send({ kind: MESSAGE.CONTROL, intent: action.intent });
+    if (action.release) return () => send({ kind: MESSAGE.RELEASE_DEBUGGER_SESSIONS });
+    return () => send({ kind: MESSAGE.RUNTIME_CONTROL, intent: action.intent });
   }
 
   function actionButton(action, className) {
@@ -161,7 +153,7 @@
 
   async function refresh(force = false) {
     try {
-      render(await request({ kind: MESSAGE.SNAPSHOT }), force);
+      render(await request({ kind: MESSAGE.UI_SNAPSHOT }), force);
     } catch {
       render(UNREACHABLE, force);
     }
@@ -173,7 +165,7 @@
       chrome.commands.getAll().catch(() => [])
     ]);
     platform = info?.os ?? null;
-    shortcut = commands.find((command) => command.name === TOGGLE_COMMAND)?.shortcut || null;
+    shortcut = commands.find((command) => command.name === COMMAND.TOGGLE_HOLD)?.shortcut || null;
     settings.addEventListener("click", (event) => {
       event.preventDefault();
       open(view.OPEN.OPTIONS);
@@ -182,7 +174,7 @@
     show.addEventListener("click", () => {
       if (showAction) send({ kind: showAction.kind });
     });
-    chrome.runtime.onMessage.addListener((message) => { if (message?.kind === MESSAGE.STATE_CHANGED) refresh(); });
+    chrome.runtime.onMessage.addListener((message) => { if (message?.kind === MESSAGE.UI_STATE_CHANGED) refresh(); });
     setInterval(refresh, POLL_MS);
     refresh();
   }

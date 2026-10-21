@@ -5,6 +5,7 @@
   "use strict";
 
   const view = globalThis.GhostlightPopupView;
+  const MESSAGE = globalThis.GhostlightMessages.PAGE;
   const SETUP_PAGE = "setup.html";
   const effects = document.getElementById("effects");
   const captions = document.getElementById("captions");
@@ -30,7 +31,7 @@
   document.getElementById("export-connection-log").addEventListener("click", async () => {
     const reportStatus = document.getElementById("connection-log-status");
     try {
-      const report = await request({ kind: "connection_diagnostics" });
+      const report = await request({ kind: MESSAGE.CONNECTION_DIAGNOSTICS });
       await chrome.downloads.download({
         url: `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(report, null, 2))}`,
         filename: `ghostlight-diagnostics-${Date.now()}.json`, saveAs: false
@@ -73,8 +74,8 @@
   async function load() {
     if (platform === null) platform = (await chrome.runtime.getPlatformInfo().catch(() => null))?.os ?? null;
     const [preferences, snapshot] = await Promise.all([
-      request({ kind: "get_preferences" }),
-      request({ kind: "ui_snapshot" })
+      request({ kind: MESSAGE.GET_PREFERENCES }),
+      request({ kind: MESSAGE.UI_SNAPSHOT })
     ]);
     effects.checked = preferences.effects;
     captions.checked = preferences.captions;
@@ -87,7 +88,7 @@
     status.textContent = "Saving";
     try {
       await request({
-        kind: "set_preferences",
+        kind: MESSAGE.SET_PREFERENCES,
         preferences: {
           effects: effects.checked,
           captions: captions.checked,
@@ -105,7 +106,7 @@
   captions.addEventListener("change", save);
   diagnostics.addEventListener("change", save);
   preserveTabs.addEventListener("change", save);
-  chrome.runtime.onMessage.addListener((message) => { if (message?.kind === "ui_state_changed") load(); });
+  chrome.runtime.onMessage.addListener((message) => { if (message?.kind === MESSAGE.UI_STATE_CHANGED) load(); });
   setInterval(() => load().catch(() => {}), 1500);
   load().catch((error) => { status.textContent = String(error?.message ?? error); });
 })();

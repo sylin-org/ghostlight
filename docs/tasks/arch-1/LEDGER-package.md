@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15 and EXT-9 have landed; EXT-10 is next.
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9 and EXT-10 have landed; EXT-11 is next.
 
 ## Slices
 
@@ -85,7 +85,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15 and EXT-9 have landed; EXT-10 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9 and EXT-10 have landed; EXT-11 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -95,7 +95,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15 and E
 | EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | landed (this commit) |
 | EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | landed (this commit) |
 | EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | landed (this commit) |
-| EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | todo |
+| EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | landed (this commit) |
 | EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | todo |
 | EXT-13 | refactor(extension): `script-evaluator.js` folds into `evaluate.js` | - | EXT-13 | landed (this commit) |
 | EXT-14 | refactor(extension): `withLease` and `withHidden` | - | EXT-14 | landed (this commit) |
@@ -206,3 +206,13 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15 and E
   The service reads both alike today, as the skeptic found. The coded failure it also needed
   (`dialog_open` thrown inside the world setup) landed in P-D1. Proof: the `mapCallError` table
   test in `world.test.js`, which reads `other` for both texts before this change.
+- EXT-10: `lib/messages.js` holds the words the extension's parts send each other and nothing
+  else: the page-to-worker kinds and the one broadcast (`PAGE`), the offscreen document's target
+  and kinds (`OFFSCREEN`), the two forms an encoded GIF comes back in (`TRANSFER`) and the
+  keyboard command (`COMMAND`). The worker, `popup.js`, `setup.js`, `options.js` (whose bare
+  literals go), `offscreen.js`, `lib/buffers.js` and `lib/setup-view.js` read it, and the four
+  pages and the worker load it. `manifest.json` cannot import it and keeps its one copy of
+  `toggle-hold`; "the manifest declares the commands messages.js names" ties the two. "every page
+  whose script reads GhostlightMessages loads messages.js before it" fails when a page drops the
+  tag (checked against `popup.html`). The `toggle_hold` intent the worker sends the service is a
+  protocol word, not one of these, so it waits for EXT-5's names in `protocol.js`.

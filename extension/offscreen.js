@@ -6,6 +6,7 @@
 // finished GIF, and it forgets.
 "use strict";
 
+const { OFFSCREEN, TRANSFER } = globalThis.GhostlightMessages;
 const OBJECT_URLS = new Set();
 
 /** Decode one base64 JPEG frame into raw RGBA pixels. */
@@ -40,7 +41,7 @@ function encodeBase64(bytes) {
 // The GIF materializes in exactly one form per destination: an object URL the browser can
 // download without anyone reading the bytes, or base64 for a caller that must receive them.
 function deliverable(encoded, transfer) {
-  if (transfer === "object_url") {
+  if (transfer === TRANSFER.OBJECT_URL) {
     const url = URL.createObjectURL(new Blob([encoded.bytes], { type: encoded.mime_type }));
     OBJECT_URLS.add(url);
     return { object_url: url };
@@ -55,12 +56,12 @@ function release(url) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-  if (message?.target !== "ghostlight-offscreen") return false;
-  if (message.kind === "release_recording") {
+  if (message?.target !== OFFSCREEN.TARGET) return false;
+  if (message.kind === OFFSCREEN.RELEASE) {
     respond({ ok: true, released: release(message.object_url) });
     return false;
   }
-  if (message.kind !== "encode_recording") {
+  if (message.kind !== OFFSCREEN.ENCODE) {
     respond({ ok: false, reason: `unsupported offscreen request ${message.kind}` });
     return false;
   }

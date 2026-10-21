@@ -113,3 +113,30 @@ test("the options page's Open Ghostlight link sends show_ghostlight while connec
   await settle();
   assert.equal(away.byId("show-window").hidden, true);
 });
+
+test("the manifest declares the commands messages.js names", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const messages = require("../lib/messages.js");
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
+  assert.deepEqual(Object.keys(manifest.commands).sort(), Object.values(messages.COMMAND).sort());
+});
+
+test("every page whose script reads GhostlightMessages loads messages.js before it", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const extension = path.join(__dirname, "..");
+  const pages = fs.readdirSync(extension).filter((name) => name.endsWith(".html"));
+  const readers = [];
+  for (const page of pages) {
+    const scripts = [...fs.readFileSync(path.join(extension, page), "utf8").matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
+    const reader = scripts.findIndex((script) => script !== "lib/messages.js"
+      && fs.readFileSync(path.join(extension, script), "utf8").includes("GhostlightMessages"));
+    if (reader === -1) continue;
+    readers.push(page);
+    const loaded = scripts.indexOf("lib/messages.js");
+    assert.ok(loaded !== -1 && loaded < reader, `${page} loads lib/messages.js before ${scripts[reader]}`);
+  }
+  assert.deepEqual(readers.sort(), ["offscreen.html", "options.html", "popup.html", "setup.html"]);
+});
+
