@@ -220,57 +220,52 @@ mod tests {
         fs::set_permissions(path, permissions).unwrap();
     }
 
+    /// ACCEPTANCE Desktop 16: a Linux browser is told apart by how it is packaged, and only a
+    /// native one can start Ghostlight's native host. A native executable on `PATH` wins over the
+    /// sandboxed forms; a Snap, a Flatpak and both together each read as their own form; a launcher
+    /// script that runs the Snap is the Snap; and a file on `PATH` that cannot run (defect 8ac06f75)
+    /// is no native browser.
     #[test]
-    fn package_forms_are_closed_and_native_wins() {
-        let (_root, context) = context("forms");
-        assert_eq!(inspect(&context, SPEC), BrowserPackage::NotDetected);
-
-        touch(&context.snap_bin.join("chromium"), b"snap");
-        assert_eq!(inspect(&context, SPEC), BrowserPackage::Snap);
-
+    fn package_forms_are_told_apart_and_native_wins() {
+        let (_root, forms) = context("forms");
+        assert_eq!(inspect(&forms, SPEC), BrowserPackage::NotDetected);
+        touch(&forms.snap_bin.join("chromium"), b"snap");
+        assert_eq!(inspect(&forms, SPEC), BrowserPackage::Snap);
         touch(
-            &context
+            &forms
                 .user_flatpak_applications
                 .join("org.chromium.Chromium.desktop"),
             b"flatpak",
         );
-        assert_eq!(inspect(&context, SPEC), BrowserPackage::MultipleSandboxes);
-
-        let native = context.path_entries[0].join("chromium");
+        assert_eq!(inspect(&forms, SPEC), BrowserPackage::MultipleSandboxes);
+        let native = forms.path_entries[0].join("chromium");
         touch(&native, b"native binary");
         #[cfg(unix)]
         make_executable(&native);
-        assert_eq!(inspect(&context, SPEC), BrowserPackage::Native);
-    }
+        assert_eq!(inspect(&forms, SPEC), BrowserPackage::Native);
 
-    #[cfg(unix)]
-    #[test]
-    fn non_executable_path_entry_is_not_a_native_browser() {
-        let (_root, context) = context("non-executable");
-        touch(&context.path_entries[0].join("chromium"), b"not executable");
-        assert_eq!(inspect(&context, SPEC), BrowserPackage::NotDetected);
-    }
-
-    #[test]
-    fn snap_wrappers_do_not_masquerade_as_native_packages() {
-        let (_root, context) = context("wrapper");
+        let (_root, flatpak) = context("flatpak");
         touch(
-            &context.path_entries[0].join("chromium-browser"),
-            b"#!/bin/sh\nexec snap run chromium \"$@\"\n",
-        );
-        touch(&context.snap_bin.join("chromium"), b"snap");
-        assert_eq!(inspect(&context, SPEC), BrowserPackage::Snap);
-    }
-
-    #[test]
-    fn flatpak_only_is_distinct() {
-        let (_root, context) = context("flatpak");
-        touch(
-            &context
+            &flatpak
                 .system_flatpak_applications
                 .join("org.chromium.Chromium.desktop"),
             b"flatpak",
         );
-        assert_eq!(inspect(&context, SPEC), BrowserPackage::Flatpak);
+        assert_eq!(inspect(&flatpak, SPEC), BrowserPackage::Flatpak);
+
+        let (_root, wrapper) = context("wrapper");
+        touch(
+            &wrapper.path_entries[0].join("chromium-browser"),
+            b"#!/bin/sh\nexec snap run chromium \"$@\"\n",
+        );
+        touch(&wrapper.snap_bin.join("chromium"), b"snap");
+        assert_eq!(inspect(&wrapper, SPEC), BrowserPackage::Snap);
+
+        #[cfg(unix)]
+        {
+            let (_root, stub) = context("non-executable");
+            touch(&stub.path_entries[0].join("chromium"), b"not executable");
+            assert_eq!(inspect(&stub, SPEC), BrowserPackage::NotDetected);
+        }
     }
 }
