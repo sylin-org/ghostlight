@@ -6,19 +6,16 @@ Machine: the coordinator, on the owner's machine. Paths without a crate are unde
 
 ## RESUME HERE
 
-T1 and T2 landed on 2026-10-21: `service/mod.rs` keeps 29 of 133, and intake, browser outside the
-adapter, presentation, audit and the top-level files keep 32 of 211. The area holds 113 against a
-budget of 60, because the plan left out `service/`'s other modules (52 tests: presence, idle,
-lifetime, the lock, the shell and the rest), which the pilot leans on for the rules it no longer
-proves end to end. Next: those modules (T3), cut against what the pilot kept, then `crates/relay`
-and `crates/edge`, then the guard. The coordinator moves budget from the reserve or other lanes
-only with the owner's leave.
+T1, T2 and T3 landed on 2026-10-21. The area holds 69 tests, its budget of 60 and the 9 the owner
+granted from the reserve: `service/mod.rs` 30, the rest of `service/` 7, and intake, browser outside
+the adapter, presentation, audit and the top-level files 32. Next: `crates/relay` (157 tests, budget
+35) and `crates/edge` (66, budget 20), then the guard.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `service/`, `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, top-level files, `crates/orchestrator/tests` | 396 | 69 (60, and 9 from the reserve) | 113 |
+| `service/`, `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, top-level files, `crates/orchestrator/tests` | 396 | 69 (60, and 9 from the reserve) | 69 |
 | `crates/relay` | 157 | 35 | 157 |
 | `crates/edge` | 66 | 20 | 66 |
 
@@ -30,11 +27,23 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | Slice | Subject | Before | After | Kept for | Status |
 | --- | --- | --- | --- | --- | --- |
 | T1 | test(service): `service/mod.rs` keeps the 29 tests that protect something | 133 | 29 | 15 promise, 11 defect, 3 contract | landed (5e9ec53d) |
-| T2 | test(intake, browser, audit): the rest of the area outside `service/` keeps 32 | 211 | 32 | 17 promise, 7 contract, 8 defect | landed (this commit) |
+| T2 | test(intake, browser, audit): the rest of the area outside `service/` keeps 32 | 211 | 32 | 17 promise, 7 contract, 8 defect | landed (c8dbb1af) |
+| T3 | test(service): `service/`'s other modules keep the 8 that are a rule's last proof | 52 | 8 | 7 promise, 1 defect | landed (this commit) |
 | G | test(guards): the Rust test ceiling, `tests/guards/test-budget.test.mjs` (ADR-0204 Decision 4) | - | - | - | todo, after every area is under its budget |
 
 ## Notes
 
+- T3: of `service/`'s 52 tests outside `mod.rs`, 8 stay, each the last proof of a rule the pilot left
+  to these modules: a call holds its bytes and counts as work in flight until it completes, the
+  shell's reported view, the relaunch policy (at most three in two minutes, until a person acts),
+  a shell's own reason holding launches, the launch preconditions, the Linux display variables, and
+  a missing window program. The tray hint's once-per-home rule moves to a service-level test in
+  `mod.rs` that also proves only a close that keeps the icon shows it. Two rules fold into kept
+  `mod.rs` tests at no count (a stalled start stops by itself; a replaced browser connection counts
+  once), the session-ended cancel cause joins the quit-call table, and the update start's longer
+  lock wait becomes a compile-time assertion. Product code: `ReadyWatch::arm_by` folds into `arm`,
+  `Presence::with_patience` into `new`, and `SESSION_WORK` turns private. Dropped: a check that the
+  ready limit never fires early, which only a fixed 600 ms wait could make.
 - T1, the pilot. An analysis read all 133 tests against ADR-0204 and found the overlap the owner
   suspected: the quit latch was proven 4 times, the goodbye 8, the idle limit 7 and the resume
   confirmation 6. 41 tests were deleted outright (they restated construction or literals, tested a

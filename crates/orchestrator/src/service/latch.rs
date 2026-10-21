@@ -30,39 +30,3 @@ pub fn clear(path: &Path) -> io::Result<()> {
         _ => Ok(()),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::scratch::Scratch;
-
-    #[test]
-    fn setting_creates_the_latch_and_clearing_removes_it() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("state").join("quit");
-        assert!(!is_set(&path));
-        set(&path).unwrap();
-        assert!(is_set(&path));
-        set(&path).unwrap();
-        clear(&path).unwrap();
-        assert!(!is_set(&path));
-    }
-
-    #[test]
-    fn clearing_a_latch_that_is_not_set_is_not_an_error() {
-        let scratch = Scratch::new();
-        clear(&scratch.path().join("state").join("quit")).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_latch_is_private_to_the_user() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let scratch = Scratch::new();
-        let path = scratch.path().join("state").join("quit");
-        set(&path).unwrap();
-        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
-    }
-}

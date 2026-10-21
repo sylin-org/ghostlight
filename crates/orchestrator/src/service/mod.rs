@@ -4536,13 +4536,17 @@ mod tests {
         (result, records)
     }
 
+    /// One call the service ended before it started: the tool result its client received, when a
+    /// client was there to receive it, and the audit lines of its invocation.
+    type EndedCall = (Option<Value>, Vec<Value>);
+
     /// The tool results and audit lines of two calls made during a quit for `reason`: one while
     /// the quit drains work in flight, and one after its end stopped the session's queue.
     ///
     /// Each step waits on what it needs: the session is open once its first call is answered,
     /// the drain refuses work once `begin` returns, and the end has run once the quit signal is
     /// made. The answers are written by the thread that reads the stream, so nothing races them.
-    fn calls_during_a_quit(reason: QuitReason) -> Vec<(Value, Vec<Value>)> {
+    fn calls_during_a_quit(reason: QuitReason) -> Vec<EndedCall> {
         let home = TestHome::new("quit-calls");
         let served = serve_fake(&home);
         let mut socket = open_mcp(None);
@@ -4559,44 +4563,125 @@ mod tests {
             .recv_timeout(PATIENCE)
             .expect("the quit ends once its work in flight finishes");
         let ended = listed_with_audit(&home, &mut socket, 4);
-        vec![draining, ended]
+        [draining, ended]
+            .into_iter()
+            .map(|(result, records)| (Some(result), records))
+            .collect()
     }
 
-    /// Defect C11 (8c216920, finding E-03), ACCEPTANCE B27 and ADR-0203 Decision 4.2: a call during
-    /// a quit is a cancelled tool result with one audit line, worded for the quit's cause, so only
-    /// the causes after which a call repeated in a moment is served say to try again.
+    /// The audit lines of two calls that wait behind a workspace the test holds when their client
+    /// goes away, so their session's end cancels them before they start, with no client left to
+    /// hear it.
+    ///
+    /// The service reads both calls, and queues them, before the end of the stream it then reads,
+    /// and the session's end has run once both calls have an audit line.
+    fn calls_queued_when_their_session_ends() -> Vec<EndedCall> {
+        const CALLS: usize = 2;
+
+        let home = TestHome::new("session-end-calls");
+        let served = serve_fake(&home);
+        // The calls join a declared session whose workspace the test holds, so they wait for it.
+        let marker = SessionMarker::Declared {
+            key: "session-end-calls".into(),
+        };
+        let workspace = served.intake.workspaces.connect(
+            Arc::new(ConnectionEvidence::claimed("holder", IntakeChannel::Cli)),
+            Some(marker.clone()),
+        );
+        let _held = served.intake.workspaces.acquire(&workspace).unwrap();
+        let mut opening = mcp_opening(None);
+        opening.session = Some(serde_json::to_value(marker).unwrap());
+        let (mut socket, reply) = dial(&opening);
+        assert!(reply.accepted, "{reply:?}");
+        initialize(&mut socket);
+        for id in 2..2 + CALLS {
+            send_line(
+                &mut socket,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "browser_tabs",
+                        "arguments": {
+                            "action": "list",
+                            "timeout_ms": crate::language::MAX_TIMEOUT_MS
+                        }
+                    }
+                }),
+            );
+        }
+        drop(socket);
+        eventually(|| audit_lines(&home).len() >= CALLS);
+        let mut calls: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        for record in audit_lines(&home) {
+            let invocation = record["invocation"].as_str().unwrap_or_default().to_owned();
+            calls.entry(invocation).or_default().push(record);
+        }
+        assert_eq!(calls.len(), CALLS, "{calls:?}");
+        calls.into_values().map(|records| (None, records)).collect()
+    }
+
+    /// Defect C11 (8c216920, finding E-03), ACCEPTANCE B27 and ADR-0203 Decision 4.2: a call the
+    /// service ends before it starts, because Ghostlight quits or because the call's session ends,
+    /// is cancelled with one audit line worded for that cause, and a client still there to hear it
+    /// gets a cancelled tool result that says to try again only when a call repeated in a moment
+    /// is served.
     #[test]
-    fn a_call_during_a_quit_is_cancelled_with_an_audit_line_and_a_next_step_for_its_reason() {
-        for (reason, cause) in [
-            (QuitReason::Quit, QuitCause::Quit),
-            (QuitReason::Replace, QuitCause::Replace),
-            (QuitReason::Unknown, QuitCause::Unknown),
-            (QuitReason::Uninstall, QuitCause::Uninstall),
+    fn a_call_ended_before_it_starts_is_cancelled_with_one_audit_line_worded_for_its_cause() {
+        for (cause, calls) in [
+            (
+                CancelCause::Quit(QuitCause::Quit),
+                calls_during_a_quit(QuitReason::Quit),
+            ),
+            (
+                CancelCause::Quit(QuitCause::Replace),
+                calls_during_a_quit(QuitReason::Replace),
+            ),
+            (
+                CancelCause::Quit(QuitCause::Unknown),
+                calls_during_a_quit(QuitReason::Unknown),
+            ),
+            (
+                CancelCause::Quit(QuitCause::Uninstall),
+                calls_during_a_quit(QuitReason::Uninstall),
+            ),
+            (
+                CancelCause::SessionEnded,
+                calls_queued_when_their_session_ends(),
+            ),
         ] {
-            let refusal = Refusal::CancelledBeforeStart {
-                by: CancelCause::Quit(cause),
-            };
+            let refusal = Refusal::CancelledBeforeStart { by: cause };
             let steps = refusal.next_steps();
-            for (result, records) in calls_during_a_quit(reason) {
-                assert_eq!(
-                    result["status"],
-                    json!(Status::Cancelled),
-                    "{reason:?}: {result}"
-                );
-                assert_eq!(result["effect"], json!(Effect::None), "{result}");
-                assert_eq!(result["repeat_safe"], true, "{result}");
-                assert_eq!(result["summary"], refusal.summary(), "{reason:?}");
-                if steps.is_empty() {
-                    assert!(result.get("next_steps").is_none(), "{reason:?}: {result}");
-                } else {
-                    assert_eq!(result["next_steps"], json!(steps), "{reason:?}");
-                }
-                assert_eq!(records.len(), 1, "{reason:?}: {records:?}");
+            for (result, records) in calls {
+                assert_eq!(records.len(), 1, "{cause:?}: {records:?}");
                 assert_eq!(
                     records[0]["status"],
                     Status::Cancelled.stored_name(),
                     "{records:?}"
                 );
+                assert_eq!(
+                    records[0]["effect"],
+                    Effect::None.stored_name(),
+                    "{records:?}"
+                );
+                assert_eq!(records[0]["summary"], refusal.summary(), "{cause:?}");
+                let Some(result) = result else {
+                    continue;
+                };
+                assert_eq!(
+                    result["status"],
+                    json!(Status::Cancelled),
+                    "{cause:?}: {result}"
+                );
+                assert_eq!(result["effect"], json!(Effect::None), "{result}");
+                assert_eq!(result["repeat_safe"], true, "{result}");
+                assert_eq!(result["summary"], refusal.summary(), "{cause:?}");
+                if steps.is_empty() {
+                    assert!(result.get("next_steps").is_none(), "{cause:?}: {result}");
+                } else {
+                    assert_eq!(result["next_steps"], json!(steps), "{cause:?}");
+                }
             }
         }
     }
@@ -5027,7 +5112,20 @@ mod tests {
     /// ADR-0199 Decision 9 step 6: a start that does not accept openings in time stops by itself,
     /// and becoming ready settles that limit, so a ready service never stops for it.
     #[test]
-    fn becoming_ready_cancels_the_stop_of_a_stalled_start() {
+    fn a_stalled_start_stops_by_itself_and_becoming_ready_cancels_the_stop() {
+        // A start whose limit passes before it accepts openings stops.
+        let stalled_home = temp_home("ready-stalled");
+        let stalled = ServiceHost::start(&stalled_home).unwrap();
+        let (stopped, stop) = mpsc::channel::<()>();
+        stalled
+            .expect_ready_by(Instant::now(), move || {
+                let _ = stopped.send(());
+            })
+            .unwrap();
+        stop.recv_timeout(PATIENCE)
+            .expect("a start that is not ready by its limit stops");
+        drop(stalled);
+
         let directory = temp_home("ready-published");
         let host = ServiceHost::start(&directory).unwrap();
         let (expired, fired) = mpsc::channel::<()>();
@@ -5469,6 +5567,86 @@ mod tests {
         drop(host);
     }
 
+    /// Write `sent` to the shell's stream, then a click on the tray entry `item`, and return the
+    /// frames the shell hears before the tray model that answers the click. The service reads a
+    /// shell's frames in order and the click changes the tray, so whatever `sent` made the
+    /// service write comes first.
+    fn heard_before_a_click(
+        stream: &mut Connection,
+        sent: &DesktopFrame,
+        item: TrayItemId,
+    ) -> Vec<DesktopFrame> {
+        frame::write_frame(stream, sent).unwrap();
+        frame::write_frame(stream, &DesktopFrame::Tray { item }).unwrap();
+        let mut heard = Vec::new();
+        loop {
+            match next_frame(stream) {
+                DesktopFrame::TrayModel { .. } => return heard,
+                other => heard.push(other),
+            }
+        }
+    }
+
+    /// ADR-0199's shell milestone 2 amendment and docs/trust/data-flows.md: the hint that
+    /// Ghostlight keeps running follows only a person's close that keeps the icon, once per home.
+    /// An update's goodbye, a shell that vanishes and a close that leaves no icon say nothing and
+    /// leave the hint to that first close, which writes `state/tray-hint` before it is said.
+    #[test]
+    fn only_the_first_close_that_keeps_the_icon_says_that_ghostlight_keeps_running() {
+        use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
+
+        let home = TestHome::new("tray-hint");
+        let marker = Layout::new(home.path()).tray_hint();
+        let hint = DesktopFrame::Notice {
+            title: TRAY_HINT_TITLE.to_owned(),
+            body: TRAY_HINT_BODY.to_owned(),
+        };
+        let stays = DesktopFrame::Closed { stays: true };
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+
+        // An update's goodbye and a shell that vanishes leave the hint unused.
+        let mut updated = attached_shell(&host);
+        host.quit.shells().say_goodbye(GoodbyeReason::Replace);
+        assert_eq!(desktop_goodbye(&mut updated), GoodbyeReason::Replace);
+        drop(updated);
+        eventually(|| host.quit.shells().attached() == 0);
+        drop(attached_shell(&host));
+        eventually(|| host.quit.shells().attached() == 0);
+        assert!(
+            !marker.exists(),
+            "neither an update nor a crash uses up the hint"
+        );
+
+        // A close that leaves no icon says nothing; the first close that keeps it says it, once.
+        let mut shell = attached_shell(&host);
+        let heard = heard_before_a_click(
+            &mut shell,
+            &DesktopFrame::Closed { stays: false },
+            TrayItemId::Hold,
+        );
+        assert!(heard.is_empty(), "{heard:?}");
+        assert!(!marker.exists());
+        let heard = heard_before_a_click(&mut shell, &stays, TrayItemId::Resume);
+        assert_eq!(heard, [hint]);
+        assert!(
+            marker.is_file(),
+            "the marker is written before the hint is said"
+        );
+        let heard = heard_before_a_click(&mut shell, &stays, TrayItemId::Hold);
+        assert!(heard.is_empty(), "{heard:?}");
+        drop(shell);
+        drop(host);
+
+        // The next service of the home, which starts with its agents active, says it no more.
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut shell = attached_shell(&host);
+        let heard = heard_before_a_click(&mut shell, &stays, TrayItemId::Hold);
+        assert!(heard.is_empty(), "{heard:?}");
+        drop(host);
+    }
+
     /// ADR-0199 Decision 7 and its shell milestone 2 amendment (079727e9): every native act the
     /// service asks of the shell gets one answer, the person's choice or the shell's failure, or
     /// unavailable once the shell or the service goes, and no open dialog holds a quit.
@@ -5728,7 +5906,14 @@ mod tests {
     #[test]
     fn the_idle_exit_waits_for_every_stream_and_work_and_leaves_quietly() {
         use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
-        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
+        use crate::browser::adapter::chromium::protocol4::fake::{Reply as FakeReply, Script};
+
+        // A browser that answers every request with an empty tab list.
+        let listing = || -> Script {
+            Box::new(|correlation, _| {
+                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
+            })
+        };
 
         // An open MCP stream holds the service, and the last close arms the limit again.
         {
@@ -5769,7 +5954,9 @@ mod tests {
             idling.leaves_past_the_limit("the service leaves a limit after the work finished");
         }
 
-        // A browser stream opened through the intake holds the service until it ends.
+        // A browser stream opened through the intake holds the service until it ends, and a
+        // connection that replaces it for the same browser is still that one stream (the browser
+        // port reports the replacement as an attach and never the retired connection's end).
         {
             let idling = idling_host("idle-browser", &Arc::default());
             let host = &idling.host;
@@ -5788,13 +5975,8 @@ mod tests {
                 // The extension is gone: end the stream the service holds as the edge would.
                 to_service.1.shutdown();
             });
-            let fake = FakeExtension::connect(
-                extension,
-                &FakeExtension::hello("browser_idle"),
-                Box::new(|correlation, _| {
-                    FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
-                }),
-            );
+            let fake =
+                FakeExtension::connect(extension, &FakeExtension::hello("browser_idle"), listing());
             drop(fake.wait(|seen| !seen.frames.is_empty()));
             eventually(|| {
                 host.browser
@@ -5806,9 +5988,22 @@ mod tests {
             // holds the service.
             eventually(|| host.intake.streams.open() == 1);
             idling.stays_past_the_limit("an attached browser holds the service");
+
+            let (service, extension) = pair().unwrap();
+            let again =
+                FakeExtension::connect(extension, &FakeExtension::hello("browser_idle"), listing());
+            host.browser.attach(service).unwrap();
+            assert_eq!(
+                host.intake.streams.open(),
+                1,
+                "a connection that replaces another for the same browser is the same stream"
+            );
+            idling.stays_past_the_limit("the browser holds the service on its new connection");
+            again.close();
+            drop(again);
+            idling.leaves_past_the_limit("the service leaves once the browser has gone");
             fake.close();
             drop(fake);
-            idling.leaves_past_the_limit("the service leaves once the browser has gone");
             let _ = carrier.join();
         }
 

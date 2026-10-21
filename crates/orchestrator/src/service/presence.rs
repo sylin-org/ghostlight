@@ -9,7 +9,7 @@
 //!
 //! [`Presence`] is the rules and holds the state; the world it acts on comes through [`Outside`]
 //! (the clock, the display probe, the launcher and whether the session is ending), so every rule
-//! is a unit test with no process and no wait. The rules:
+//! can be tested with no process and no wait. The rules:
 //!
 //! - A shell is launched with `--tray` 2 s after the service is ready and 2 s after the last shell
 //!   stream ended with no goodbye. A `--tray` shell shows only the icon (owner answer, 2026-10-15).
@@ -136,24 +136,16 @@ pub struct Presence {
     outside: Box<dyn Outside>,
     state: Mutex<State>,
     changed: Condvar,
-    patience: Duration,
 }
 
 impl Presence {
     /// Presence over `outside`, whose requests to show the window wait [`SHOW_PATIENCE`].
     #[must_use]
     pub fn new(outside: Box<dyn Outside>) -> Self {
-        Self::with_patience(outside, SHOW_PATIENCE)
-    }
-
-    /// Like [`Presence::new`], with the wait of a request to show the window spelled out.
-    #[must_use]
-    pub fn with_patience(outside: Box<dyn Outside>, patience: Duration) -> Self {
         Self {
             outside,
             state: Mutex::new(State::default()),
             changed: Condvar::new(),
-            patience,
         }
     }
 
@@ -265,7 +257,7 @@ impl Presence {
                 return Err(reason);
             }
         }
-        let deadline = Instant::now() + self.patience;
+        let deadline = Instant::now() + SHOW_PATIENCE;
         while !state.attached {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -575,22 +567,18 @@ pub(crate) mod testing {
 mod tests {
     use super::testing::Fake;
     use super::*;
+    use crate::scratch::Scratch;
 
     fn presence() -> (Presence, Arc<Fake>) {
-        presence_with(Duration::from_millis(80))
-    }
-
-    /// How long a request to show the window waits in a test that attaches a shell for it. Only a
-    /// failure waits it out, so a loaded machine cannot time the request out before the attach.
-    const DELIVERY_PATIENCE: Duration = Duration::from_secs(10);
-
-    fn presence_with(patience: Duration) -> (Presence, Arc<Fake>) {
         let fake = Arc::new(Fake::default());
-        let presence = Presence::with_patience(fake.world(), patience);
+        let presence = Presence::new(fake.world());
         (presence, fake)
     }
 
     const SECOND: Duration = Duration::from_secs(1);
+
+    /// How long a test waits for what it expects. Only a failure waits it out.
+    const PATIENCE: Duration = Duration::from_secs(10);
 
     /// Run presence for `seconds` seconds, ticking each second.
     fn run(presence: &Presence, fake: &Fake, seconds: u64) {
@@ -600,32 +588,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_tray_shell_is_launched_two_seconds_after_the_service_is_ready() {
-        let (presence, fake) = presence();
-        presence.published();
-        presence.tick();
-        assert!(fake.launches().is_empty(), "nothing before the delay");
-        fake.advance(LAUNCH_DELAY);
-        presence.tick();
-        assert_eq!(fake.launches(), [true]);
+    /// Wait until `condition` holds, and fail once the patience is spent.
+    fn eventually(condition: impl Fn() -> bool) {
+        let until = Instant::now() + PATIENCE;
+        while !condition() {
+            assert!(Instant::now() < until, "the condition never held");
+            thread::sleep(Duration::from_millis(2));
+        }
     }
 
-    #[test]
-    fn nothing_is_launched_when_a_shell_is_attached() {
-        let (presence, fake) = presence();
-        presence.published();
-        presence.attached(None);
-        fake.advance(LAUNCH_DELAY * 2);
-        presence.tick();
-        assert!(fake.launches().is_empty());
-        assert_eq!(presence.window_reason(), Some(WindowReason::Shown));
-    }
-
+    /// Defect 17ec7571: the window is what the shell says it shows when it attaches, whoever
+    /// launched it, so status after a crash or an update names the window as it is.
     #[test]
     fn the_window_is_what_the_shell_says_it_shows_whoever_launched_it() {
-        // A shell that comes back with its window open while presence's own tray launch is
-        // pending, the shell a crash left, still has its window open.
+        // The shell a crash left comes back with its window open while presence's own tray
+        // launch is pending: its window is open.
         let (crashed, fake) = presence();
         crashed.published();
         run(&crashed, &fake, 2);
@@ -643,126 +620,53 @@ mod tests {
         assert_eq!(iconic.window_reason(), Some(WindowReason::Tray));
     }
 
+    /// ACCEPTANCE desktop gates 13 and 1 and ADR-0199 Decision 11: a shell that vanished without
+    /// a goodbye is brought back 2 s later, and again each time a launch does not attach, at most
+    /// three times in two minutes; then nothing launches until a person acts. A person's request
+    /// for the window, inside those two minutes, starts a shell with no argument, which is handed
+    /// the request, and from then on a shell that vanishes is brought back again.
     #[test]
-    fn a_shell_whose_stream_ended_without_goodbye_is_launched_again_after_two_seconds() {
+    fn a_vanished_shell_is_relaunched_at_most_three_times_in_two_minutes_until_a_person_acts() {
         let (presence, fake) = presence();
-        presence.attached(None);
-        presence.detached();
-        fake.advance(SECOND);
-        presence.tick();
-        assert!(fake.launches().is_empty());
-        fake.advance(SECOND);
-        presence.tick();
-        assert_eq!(fake.launches(), [true]);
-    }
-
-    #[test]
-    fn a_pending_launch_blocks_the_next_one_for_fifteen_seconds() {
-        let (presence, fake) = presence();
+        let presence = Arc::new(presence);
         presence.published();
         run(&presence, &fake, 2);
         assert_eq!(fake.launches(), [true]);
-        run(&presence, &fake, 14);
+        presence.attached(None);
+        presence.detached();
+        run(&presence, &fake, 1);
+        assert_eq!(fake.launches(), [true], "nothing before 2 s");
+        run(&presence, &fake, 1);
         assert_eq!(
             fake.launches(),
-            [true],
-            "still pending after 16 s from ready"
+            [true, true],
+            "brought back 2 s after it vanished"
         );
-        run(&presence, &fake, 2);
-        assert_eq!(fake.launches(), [true, true], "pending ended with no shell");
-    }
 
-    #[test]
-    fn three_launches_in_two_minutes_latch_did_not_stay_until_a_person_acts() {
-        let (presence, fake) = presence();
-        presence.published();
-        run(&presence, &fake, 100);
-        assert_eq!(fake.launches().len(), BUDGET_LAUNCHES);
+        // The shells it starts never attach, so it starts another each time it gives one up,
+        // until three launches inside two minutes have spent the budget; then nothing more.
+        run(&presence, &fake, 60);
+        assert_eq!(fake.launches(), [true; BUDGET_LAUNCHES]);
         assert_eq!(presence.window_reason(), Some(WindowReason::DidNotStay));
-        run(&presence, &fake, 600);
-        assert_eq!(
-            fake.launches().len(),
-            BUDGET_LAUNCHES,
-            "nothing more launches"
-        );
-        // A shell attaching with no launch of presence's own pending is a person's start.
-        presence.attached(None);
-        presence.detached();
-        run(&presence, &fake, 3);
-        assert_eq!(fake.launches().len(), BUDGET_LAUNCHES + 1);
-    }
 
-    #[test]
-    fn asking_to_show_the_window_clears_the_latch_and_launches_without_the_tray_argument() {
-        let (presence, fake) = presence();
-        presence.unavailable(WindowReason::NoWebview);
-        presence.published();
-        run(&presence, &fake, 10);
-        assert!(fake.launches().is_empty(), "latched until a person acts");
-        assert_eq!(presence.window_reason(), Some(WindowReason::NoWebview));
-        let asked = presence.request_show(Some(PageAddress::About));
-        assert_eq!(asked, Err(None), "no shell attached in time");
-        assert_eq!(fake.launches(), [false]);
-        assert_eq!(presence.window_reason(), None);
-    }
-
-    #[test]
-    fn a_shell_that_attaches_during_a_request_to_show_is_handed_the_address() {
-        let (presence, fake) = presence_with(DELIVERY_PATIENCE);
-        let presence = Arc::new(presence);
-        let waiting = {
+        let asked = {
             let presence = Arc::clone(&presence);
-            thread::spawn(move || presence.request_show(Some(PageAddress::Policy)))
+            thread::spawn(move || presence.request_show(None))
         };
-        while fake.launches().is_empty() {
-            thread::sleep(Duration::from_millis(2));
-        }
-        let wanted = presence.attached(None);
-        assert_eq!(
-            wanted,
-            Some(Wanted {
-                address: Some(PageAddress::Policy)
-            })
-        );
-        assert_eq!(waiting.join().unwrap(), Ok(Shown::Delivered));
+        eventually(|| fake.launches().len() > BUDGET_LAUNCHES);
+        assert_eq!(fake.launches()[BUDGET_LAUNCHES..], [false]);
+        assert_eq!(presence.attached(None), Some(Wanted { address: None }));
+        assert_eq!(asked.join().unwrap(), Ok(Shown::Delivered));
         assert_eq!(presence.window_reason(), Some(WindowReason::Shown));
+        presence.detached();
+        run(&presence, &fake, 2);
+        assert_eq!(fake.launches()[BUDGET_LAUNCHES..], [false, true]);
     }
 
-    #[test]
-    fn a_second_request_while_a_launch_is_pending_only_updates_the_address() {
-        let (presence, fake) = presence_with(DELIVERY_PATIENCE);
-        let presence = Arc::new(presence);
-        let first = {
-            let presence = Arc::clone(&presence);
-            thread::spawn(move || presence.request_show(Some(PageAddress::About)))
-        };
-        while fake.launches().is_empty() {
-            thread::sleep(Duration::from_millis(2));
-        }
-        let second = {
-            let presence = Arc::clone(&presence);
-            thread::spawn(move || presence.request_show(Some(PageAddress::Status)))
-        };
-        let status = Some(Wanted {
-            address: Some(PageAddress::Status),
-        });
-        while lock(&presence.state).wanted != status {
-            thread::sleep(Duration::from_millis(2));
-        }
-        assert_eq!(fake.launches(), [false], "one launch for both");
-        assert_eq!(presence.attached(None), status);
-        assert_eq!(first.join().unwrap(), Ok(Shown::Delivered));
-        assert_eq!(second.join().unwrap(), Ok(Shown::Delivered));
-    }
-
-    #[test]
-    fn a_request_to_show_finds_the_attached_shell() {
-        let (presence, fake) = presence();
-        presence.attached(None);
-        assert_eq!(presence.request_show(None), Ok(Shown::Attached));
-        assert!(fake.launches().is_empty());
-    }
-
+    /// ACCEPTANCE desktop gate 13 and ADR-0199 Decision 11: a shell that said it cannot show a
+    /// window, or that closed with no tray to stay in, is not brought back when it goes and
+    /// spends no launch budget, and its reason stays the window's reason, so status says why,
+    /// until a person acts.
     #[test]
     fn unavailable_and_a_close_with_no_tray_spend_no_budget_and_block_until_a_person_acts() {
         for (blocked, expected) in [
@@ -790,40 +694,9 @@ mod tests {
         assert_eq!(presence.window_reason(), Some(WindowReason::NoTray));
     }
 
-    #[test]
-    fn a_close_that_stays_leaves_the_icon_and_the_shell_running() {
-        let (presence, _fake) = presence();
-        presence.attached(None);
-        presence.window_shown();
-        assert_eq!(presence.window_reason(), Some(WindowReason::Shown));
-        presence.closed(true);
-        assert_eq!(presence.window_reason(), Some(WindowReason::Tray));
-    }
-
-    #[test]
-    fn a_reason_the_attached_shell_gave_is_the_window_reason_until_a_person_acts() {
-        let (presence, _fake) = presence();
-        presence.attached(None);
-        presence.window_shown();
-        presence.unavailable(WindowReason::NoWebview);
-        assert_eq!(presence.window_reason(), Some(WindowReason::NoWebview));
-        // A show the shell is asked for is a person's act, then the window is shown.
-        presence.person_acted();
-        presence.window_shown();
-        assert_eq!(presence.window_reason(), Some(WindowReason::Shown));
-    }
-
-    #[test]
-    fn a_tray_launch_that_attaches_has_a_tray_and_no_window_until_one_is_shown() {
-        let (presence, fake) = presence();
-        presence.published();
-        run(&presence, &fake, 2);
-        presence.attached(None);
-        assert_eq!(presence.window_reason(), Some(WindowReason::Tray));
-        presence.window_shown();
-        assert_eq!(presence.window_reason(), Some(WindowReason::Shown));
-    }
-
+    /// ACCEPTANCE desktop gates 13, 20 and 1: with no display, no desktop a person can see or no
+    /// shell file, presence launches nothing and names the reason, and once the session is ending
+    /// it launches nothing at all.
     #[test]
     fn no_display_no_desktop_no_file_and_an_ending_session_launch_nothing() {
         for (display, refusal, ending, expected) in [
@@ -858,18 +731,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_missing_shell_file_is_not_a_launch_that_spent_the_budget() {
-        let (presence, fake) = presence();
-        fake.set_refusal(Some(LaunchRefusal::NoShellFile));
-        presence.published();
-        run(&presence, &fake, 30);
-        fake.set_refusal(None);
-        presence.person_acted();
-        assert_eq!(presence.request_show(None), Err(None));
-        assert_eq!(fake.launches(), [false]);
-    }
-
+    /// ACCEPTANCE desktop gate 20 and defect 56c49dc4: on Linux a window can be seen only where
+    /// `DISPLAY` or `WAYLAND_DISPLAY` names a display server, so with both unset or empty the
+    /// service says `no_display` and `ghostlight open` over SSH says why at once.
     #[test]
     fn the_display_variables_name_a_display_server() {
         assert_eq!(display_named(Some(OsStr::new(":0")), None), Ok(()));
@@ -881,11 +745,19 @@ mod tests {
         );
     }
 
+    /// ACCEPTANCE desktop gate 13: in an installation without the window program the launcher
+    /// that presence and `ghostlight open` share says so, rather than reporting a start that
+    /// failed, and starts nothing.
     #[test]
-    fn a_test_home_with_no_shell_spawns_nothing() {
-        let home = crate::service::test_home::TestHome::new("presence-no-shell");
-        let system = System::new(Layout::new(home.path()), Arc::new(|| false));
-        assert_eq!(system.launch(true), Err(LaunchRefusal::NoShellFile));
-        assert_eq!(system.launch(false), Err(LaunchRefusal::NoShellFile));
+    fn an_installation_without_the_window_program_says_so_and_starts_nothing() {
+        let home = Scratch::new();
+        let layout = Layout::new(home.path());
+        for tray in [true, false] {
+            assert_eq!(
+                start_shell(&layout, tray),
+                Err(LaunchRefusal::NoShellFile),
+                "tray {tray}"
+            );
+        }
     }
 }

@@ -5,8 +5,7 @@
 //! waits a few seconds, so it also outlasts a service that is leaving, and gives way to a service
 //! that stays. A quit refuses new work, lets what is in flight finish within
 //! a bound, and then asks the desktop to exit. A start that never becomes ready stops by itself.
-//! Each is a small state machine with no knowledge of the executor, the sockets or the desktop,
-//! so each is tested alone.
+//! Each is a small state machine with no knowledge of the executor, the sockets or the desktop.
 
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -28,6 +27,9 @@ pub const END_LIMIT: Duration = Duration::from_secs(5);
 /// How long an update start waits for the previous service to release `run/service.lock`: the
 /// installer's quit lets the old service drain first.
 pub const UPDATE_LOCK_WAIT: Duration = Duration::from_secs(30);
+
+// An update start outwaits the service it replaces: that service's drain and end fit in its wait.
+const _: () = assert!(QUIT_GRACE.as_secs() + END_LIMIT.as_secs() < UPDATE_LOCK_WAIT.as_secs());
 
 /// How long any other start waits for a held `run/service.lock`.
 ///
@@ -73,7 +75,7 @@ pub fn replaces_a_service(reason: StartReason) -> bool {
     matches!(reason, StartReason::Update | StartReason::Recover)
 }
 
-/// The source of the current time for the ready watch and the idle watch.
+/// The source of the current time for the idle watch.
 pub trait Clock: Send + Sync + 'static {
     /// The current instant.
     fn now(&self) -> Instant;
@@ -220,24 +222,14 @@ impl ReadyWatch {
         deadline: Instant,
         on_expiry: impl FnOnce() + Send + 'static,
     ) -> std::io::Result<()> {
-        self.arm_by(Arc::new(SystemClock), deadline, on_expiry)
-    }
-
-    /// Like [`ReadyWatch::arm`], with the deadline judged by `clock`.
-    pub fn arm_by(
-        self: &Arc<Self>,
-        clock: Arc<dyn Clock>,
-        deadline: Instant,
-        on_expiry: impl FnOnce() + Send + 'static,
-    ) -> std::io::Result<()> {
         let watch = Arc::clone(self);
         thread::Builder::new()
             .name("ghostlight-ready-limit".into())
             .spawn(move || {
                 let mut settled = lock(&watch.settled);
-                while !*settled && clock.now() < deadline {
+                while !*settled && Instant::now() < deadline {
                     let wait = deadline
-                        .saturating_duration_since(clock.now())
+                        .saturating_duration_since(Instant::now())
                         .min(READY_POLL);
                     settled = watch
                         .changed
@@ -251,174 +243,5 @@ impl ReadyWatch {
                 }
             })
             .map(drop)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::mpsc;
-
-    use super::*;
-
-    #[test]
-    fn a_quit_refuses_new_work_and_waits_for_work_in_flight() {
-        let drain = Arc::new(Drain::default());
-        let running = drain.admit().unwrap();
-        assert!(drain.begin_quit(QuitCause::Replace));
-        assert!(
-            !drain.begin_quit(QuitCause::Uninstall),
-            "only the first quit begins the drain"
-        );
-        assert_eq!(
-            drain.admit().err(),
-            Some(ShuttingDown(QuitCause::Replace)),
-            "the drain keeps the cause its quit began with"
-        );
-        assert_eq!(drain.cause(), Some(QuitCause::Replace));
-
-        let started = Instant::now();
-        assert!(!drain.wait_idle(Duration::from_millis(100)));
-        assert!(started.elapsed() >= Duration::from_millis(100));
-
-        let finisher = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(50));
-            drop(running);
-        });
-        assert!(drain.wait_idle(Duration::from_secs(5)));
-        finisher.join().unwrap();
-        assert_eq!(drain.in_flight(), 0);
-    }
-
-    #[test]
-    fn an_idle_drain_is_empty_at_once() {
-        let drain = Arc::new(Drain::default());
-        drain.begin_quit(QuitCause::Quit);
-        let started = Instant::now();
-        assert!(drain.wait_idle(Duration::from_secs(5)));
-        assert!(started.elapsed() < Duration::from_secs(1));
-    }
-
-    #[test]
-    fn the_deadline_fires_when_the_service_is_never_ready() {
-        let watch = Arc::new(ReadyWatch::default());
-        let (expired, fired) = mpsc::channel();
-        watch
-            .arm(Instant::now() + Duration::from_millis(50), move || {
-                expired.send(()).unwrap();
-            })
-            .unwrap();
-        assert!(fired.recv_timeout(Duration::from_secs(5)).is_ok());
-    }
-
-    #[test]
-    fn the_deadline_does_not_fire_after_the_service_is_ready() {
-        let watch = Arc::new(ReadyWatch::default());
-        let (expired, fired) = mpsc::channel();
-        watch
-            .arm(Instant::now() + Duration::from_millis(150), move || {
-                let _ = expired.send(());
-            })
-            .unwrap();
-        watch.settle();
-        assert!(fired.recv_timeout(Duration::from_millis(500)).is_err());
-    }
-
-    #[test]
-    fn a_watch_settled_before_it_is_armed_never_fires() {
-        let watch = Arc::new(ReadyWatch::default());
-        watch.settle();
-        let (expired, fired) = mpsc::channel();
-        watch
-            .arm(Instant::now(), move || {
-                let _ = expired.send(());
-            })
-            .unwrap();
-        assert!(fired.recv_timeout(Duration::from_millis(300)).is_err());
-    }
-
-    #[test]
-    fn a_service_that_is_not_ready_within_the_limit_of_taking_the_lock_stops() {
-        let clock = HandClock::default();
-        let taken = clock.now();
-        let watch = Arc::new(ReadyWatch::default());
-        let (expired, fired) = mpsc::channel();
-        watch
-            .arm_by(Arc::new(clock.clone()), taken + READY_LIMIT, move || {
-                let _ = expired.send(());
-            })
-            .unwrap();
-
-        clock.advance(READY_LIMIT - Duration::from_secs(1));
-        assert!(
-            fired.recv_timeout(Duration::from_millis(600)).is_err(),
-            "one second inside the limit"
-        );
-        clock.advance(Duration::from_secs(1));
-        assert!(
-            fired.recv_timeout(Duration::from_secs(5)).is_ok(),
-            "the limit is reached"
-        );
-    }
-
-    #[test]
-    fn a_service_that_is_ready_inside_the_limit_is_left_alone() {
-        let clock = HandClock::default();
-        let taken = clock.now();
-        let watch = Arc::new(ReadyWatch::default());
-        let (expired, fired) = mpsc::channel();
-        watch
-            .arm_by(Arc::new(clock.clone()), taken + READY_LIMIT, move || {
-                let _ = expired.send(());
-            })
-            .unwrap();
-        clock.advance(READY_LIMIT - Duration::from_secs(1));
-        watch.settle();
-        clock.advance(READY_LIMIT);
-        assert!(fired.recv_timeout(Duration::from_millis(600)).is_err());
-    }
-
-    #[test]
-    fn an_update_start_waits_longest_for_a_held_lock_and_every_other_start_a_few_seconds() {
-        assert_eq!(lock_wait(StartReason::Update), UPDATE_LOCK_WAIT);
-        for reason in [
-            StartReason::Agent,
-            StartReason::Browser,
-            StartReason::Command,
-            StartReason::Person,
-            StartReason::Recover,
-        ] {
-            assert_eq!(lock_wait(reason), LEAVING_LOCK_WAIT, "{reason:?}");
-        }
-    }
-
-    #[test]
-    fn only_a_browser_or_recover_start_is_refused_by_the_quit_latch() {
-        for reason in [StartReason::Browser, StartReason::Recover] {
-            assert!(refused_by_quit_latch(reason), "{reason:?}");
-        }
-        for reason in [
-            StartReason::Agent,
-            StartReason::Command,
-            StartReason::Person,
-            StartReason::Update,
-        ] {
-            assert!(!refused_by_quit_latch(reason), "{reason:?}");
-        }
-    }
-
-    #[test]
-    fn only_an_update_or_recover_start_replaces_a_service() {
-        for reason in [StartReason::Update, StartReason::Recover] {
-            assert!(replaces_a_service(reason), "{reason:?}");
-        }
-        for reason in [
-            StartReason::Agent,
-            StartReason::Browser,
-            StartReason::Command,
-            StartReason::Person,
-            StartReason::Unknown,
-        ] {
-            assert!(!replaces_a_service(reason), "{reason:?}");
-        }
     }
 }

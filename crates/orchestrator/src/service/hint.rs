@@ -20,19 +20,3 @@ pub fn first_close(marker: &Path) -> io::Result<bool> {
     record::atomic_replace(marker, b"")?;
     Ok(true)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::scratch::Scratch;
-
-    #[test]
-    fn only_the_first_close_is_the_first() {
-        let scratch = Scratch::new();
-        let marker = scratch.path().join("state").join("tray-hint");
-        assert!(first_close(&marker).unwrap());
-        assert!(marker.is_file());
-        assert!(!first_close(&marker).unwrap());
-        assert!(!first_close(&marker).unwrap());
-    }
-}
