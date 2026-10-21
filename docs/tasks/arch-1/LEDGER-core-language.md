@@ -10,11 +10,9 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-Every slice up to LANG-3 has landed, LANG-8 included. Next are LANG-10 (the pure move of
-`mod.rs`), then LANG-5; C20 waits for I9b. The coordinator also gave this lane LANG-12b (the
-environment probe into `cli/`, test-04 holds `cli/doctor.rs` and `cli/setup.rs`) and the docs
-lane's owed lines under D3. A slice's hash is filled in by the next slice's commit, since a
-rebase before the push changes it.
+Every slice in this ledger has landed, C20 included. What remains for the lane is whatever the
+coordinator hands it, and the live check at the lane's close. A slice's hash is filled in by the
+next slice's commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -34,14 +32,14 @@ In order. "After" names what a slice waits for.
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | landed (01cc55e6) |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | landed (d15f5ba5) |
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | landed (move 4f692e1e, rest a6b8d686) |
-| LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | landed |
+| LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | landed (1a114340, 57737b58) |
 | LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed (ec0166d5) |
 | LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | landed (6b5f619e) |
 | LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | landed (0b6c3817) |
 | LANG-11 | docs(language): the item docs match the code | - | LANG-11 | landed (df9e4cac) |
 | LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | landed (fb359bf5) |
 | LANG-12b | refactor(cli): the command line reads the machine, and language/ does no I/O | LANG-12 | LANG-12's environment part, given by the coordinator; cross-lane into `cli/` | landed (e91c5518) |
-| C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | todo |
+| C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | landed |
 
 ## Notes
 
@@ -211,3 +209,7 @@ In order. "After" names what a slice waits for.
   forbidden list name tools through it. The directory keeps its own order, so `ghostlight
   policy` prints the same table. The serde timeout defaults per struct stay, held equal to
   `Tool::default_timeout_ms` by the existing test.
+- LANG-5's follow-up (57737b58): C10c's private `SCREENSHOT_TOOL` reads `Tool::Screenshot`.
+- C20: `the_plugin_skill_names_only_catalog_tools_and_fields` reads the plugin skill's body after
+  its YAML front matter through the hints checker and needs no violation; a field the catalog
+  does not advertise, appended, must fail it. The body passes as I9b left it.

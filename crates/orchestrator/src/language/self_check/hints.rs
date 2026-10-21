@@ -1191,6 +1191,32 @@ fn every_next_step_names_real_tools_and_their_fields() {
     }
 }
 
+/// The plugin skill an agent loads beside the tools.
+const PLUGIN_SKILL: &str = "packaging/plugin/ghostlight/skills/control-browser/SKILL.md";
+
+/// The plugin skill names only tools and fields the catalog advertises (ADR-0203 C20). Its YAML
+/// front matter is not a hint, so the body after it is read.
+#[test]
+fn the_plugin_skill_names_only_catalog_tools_and_fields() {
+    let advertised = Advertised::read();
+    let text = std::fs::read_to_string(super::golden::repository_path(PLUGIN_SKILL))
+        .expect("the plugin skill exists");
+    let body = text
+        .strip_prefix("---")
+        .and_then(|rest| rest.split_once("\n---\n"))
+        .map_or(text.as_str(), |(_, body)| body);
+    assert!(body.contains("browser_find"), "the skill body was not read");
+    let found = hint_violations(body, &advertised);
+    assert!(found.is_empty(), "{PLUGIN_SKILL}: {found:?}");
+    let drifted = format!("{body}\nCall browser_read with `max_result_chars` set higher.");
+    assert!(
+        hint_violations(&drifted, &advertised)
+            .iter()
+            .any(|violation| violation.contains("max_result_chars")),
+        "a field the catalog does not advertise must fail the skill"
+    );
+}
+
 /// Negative control: hints that ask for what the catalog does not offer are caught.
 #[test]
 fn the_hint_checker_catches_calls_the_decoder_would_reject() {
