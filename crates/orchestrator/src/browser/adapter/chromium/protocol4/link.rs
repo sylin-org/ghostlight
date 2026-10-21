@@ -8,7 +8,6 @@
 //! the browser may already have acted.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -17,7 +16,6 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use ghostlight_relay::frame::{write_frame, write_frame_raw, FrameError};
 use serde::de::DeserializeOwned;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::connection::{ReceiptResult, Receipts};
@@ -25,8 +23,10 @@ use super::scope::{PlannedCall, Scope};
 use super::wire::{self, PrimitiveName};
 use super::world::{self, EffectClass};
 use crate::browser::transport::{SocketWriter, DELIVERY_TIMEOUT};
-use crate::browser::{lock, BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
+use crate::browser::{BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
+use crate::install::icons::sha256_hex;
 use crate::language::outcome::PrimitiveCause;
+use crate::sync::lock;
 use crate::workspace::StaleReason;
 
 /// How long a cancelled primitive may take to report what it did.
@@ -931,10 +931,7 @@ fn input_acted(done: &wire::InputDone, precondition: EffectClass) -> bool {
 
 /// A failure code as the wire spells it, for a failure that came without a message.
 fn failure_code(failure: wire::Failure) -> String {
-    serde_json::to_value(failure)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .unwrap_or_default()
+    wire::name_of(&failure)
 }
 
 #[cfg(test)]
@@ -965,10 +962,7 @@ fn write_request_payload(
     }
     let total_bytes = u32::try_from(payload.len()).map_err(|_| FrameError::TooLarge)?;
     let transfer_id = format!("{TRANSFER_PREFIX}{}", Uuid::new_v4().simple());
-    let mut sha256 = String::with_capacity(64);
-    for byte in Sha256::digest(payload) {
-        write!(&mut sha256, "{byte:02x}").expect("writing to a string cannot fail");
-    }
+    let sha256 = sha256_hex(payload);
     for (index, chunk) in payload.chunks(wire::CHUNK_PAYLOAD_BYTES).enumerate() {
         write_frame(
             writer,

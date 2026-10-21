@@ -12,10 +12,6 @@
 //! to keep entries from, and an iframe that reloads leaves the tab's history in place. A
 //! recording started under a watching scope stops when the admitted documents change.
 
-use std::fmt::Write as _;
-
-use sha2::{Digest, Sha256};
-
 use super::super::link::Link;
 use super::super::locator::Locator;
 use super::super::scope::Scope;
@@ -23,6 +19,7 @@ use super::super::wire;
 use super::super::world;
 use crate::browser::adapter::{BrowserOutcome, PhysicalDiagnosticsRead};
 use crate::browser::BrowserError;
+use crate::install::icons::sha256_hex;
 
 /// The protocol failure of recording facts this service cannot read.
 const UNREADABLE_RECORDING: &str = "recording facts carry a value this service does not know";
@@ -75,12 +72,7 @@ pub fn read_diagnostics(
 /// line.
 #[must_use]
 pub fn binding(scope: &Scope) -> String {
-    let digest = Sha256::digest(scope.allowed_ids().join(ID_SEPARATOR).as_bytes());
-    let mut key = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(&mut key, "{byte:02x}").expect("writing to a string cannot fail");
-    }
-    key
+    sha256_hex(scope.allowed_ids().join(ID_SEPARATOR).as_bytes())
 }
 
 /// Start the workspace's recording of one tab. Under a scope that watches its documents, the

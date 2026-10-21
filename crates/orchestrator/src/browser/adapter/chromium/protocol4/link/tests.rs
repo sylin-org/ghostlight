@@ -17,9 +17,10 @@ use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, PhysicalTab,
     PresentationActivity, PresentationKind, PresentationSignal, RecordingDestination,
 };
-use crate::browser::{lock, BrowserDispatch, BrowserError, BrowserPort, RelayBrowserPort};
+use crate::browser::{BrowserDispatch, BrowserError, BrowserPort, RelayBrowserPort};
 use crate::governance::ReasonCode;
 use crate::language::outcome::PrimitiveCause;
+use crate::sync::lock;
 use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";

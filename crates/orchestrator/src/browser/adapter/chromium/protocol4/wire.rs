@@ -135,6 +135,16 @@ impl PrimitiveName {
     }
 }
 
+/// The word serde writes for a closed wire value, such as a failure code, or empty for a value
+/// that is not a word.
+#[must_use]
+pub fn name_of(value: &impl Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
 // ---- frames, extension to service ----
 
 /// A frame the extension sends to the service.

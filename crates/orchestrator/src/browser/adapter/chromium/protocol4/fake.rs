@@ -16,6 +16,7 @@ use ghostlight_relay::frame::{read_frame, write_frame};
 use serde_json::{json, Value};
 
 use super::wire;
+use crate::sync::lock;
 
 /// How long a test waits for the fake to see what it expects.
 const PATIENCE: Duration = Duration::from_secs(5);
@@ -274,10 +275,4 @@ impl Reading {
         change(&mut lock(seen));
         changed.notify_all();
     }
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

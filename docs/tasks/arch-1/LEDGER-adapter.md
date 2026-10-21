@@ -10,7 +10,8 @@ A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset 
 Notes).
 
 The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7,
-BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52 and D52(c) have landed; BROW-12a is next.
+BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52, D52(c) and BROW-12a have landed; BROW-3a is
+next.
 
 ## Slices
 
@@ -139,7 +140,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52 and D52(c) have landed; BROW-12a is next.
+with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15, D52, D52(c) and BROW-12a have landed; BROW-3a is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -149,7 +150,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | landed (this commit) |
 | BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | landed (this commit) |
 | BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | landed (this commit) |
-| BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | todo |
+| BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | landed (this commit) |
 | BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | landed (this commit) |
 | BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | todo |
 | BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | landed (this commit) |
@@ -288,3 +289,14 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   ADR's names, in `work/tests/execution.rs`:
   `a_debugger_refusal_reads_its_own_sentence_and_keeps_the_browser_text_in_detail` (both causes)
   and `a_capture_over_the_budget_says_capture_too_large_with_its_step`.
+- BROW-12a: `protocol4/fake.rs` drops its copy of the poison-tolerant lock for SERV-7's
+  `crate::sync::lock`, which `link.rs` and its tests now import directly instead of through
+  `crate::browser`. The four SHA-256 hex loops (the asset id in `assets.rs`, the transfer hash in
+  `link.rs`, the diagnostics binding in `translate/records.rs` and the group key in
+  `translate/tabs.rs`) call the crate's one `install::icons::sha256_hex`, which `agent/image.rs`
+  already uses; the output is byte-identical, as the pinned asset id, the group-key and binding
+  tests show. `failure_code` in `link.rs` and `wire_name` in `translate/mod.rs` were one function
+  and are `wire::name_of`, beside the vocabulary whose words it reads. The helper's home in
+  `install/icons.rs` is a reuse, not a move: the other lanes' hex copies (governance,
+  `workbench/parts.rs`, `workspace/mod.rs`) are theirs, and a crate-level digest module would be
+  core-service's `lib.rs`.

@@ -8,10 +8,9 @@
 //! written as LF. A checkout that converts text files to CRLF therefore ships the same source and
 //! the same id as a clean one.
 
-use std::fmt::Write as _;
 use std::sync::{Arc, OnceLock};
 
-use sha2::{Digest, Sha256};
+use crate::install::icons::sha256_hex;
 
 use super::wire::Assets;
 
@@ -49,7 +48,7 @@ pub fn page_assets() -> Arc<Assets> {
             .expect("world.js holds one include marker naming compiled-in page sources")
             .replace("\r\n", "\n");
         Arc::new(Assets {
-            id: sha256_hex(&source),
+            id: sha256_hex(source.as_bytes()),
             source,
         })
     }))
@@ -74,15 +73,6 @@ fn expand(world: &str, sources: &[(&str, &str)]) -> Option<String> {
     Some(format!("{}{body}{rest}", &world[..start]))
 }
 
-/// Lowercase hex SHA-256 of `text`.
-fn sha256_hex(text: &str) -> String {
-    let mut hex = String::with_capacity(64);
-    for byte in Sha256::digest(text.as_bytes()) {
-        write!(&mut hex, "{byte:02x}").expect("writing to a string cannot fail");
-    }
-    hex
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,7 +90,7 @@ mod tests {
     fn the_asset_id_is_the_pinned_hash_of_the_expanded_source() {
         let assets = page_assets();
         assert_eq!(assets.id, PINNED_ID.trim());
-        assert_eq!(assets.id, sha256_hex(&assets.source));
+        assert_eq!(assets.id, sha256_hex(assets.source.as_bytes()));
         assert!(!assets.source.contains(INCLUDE_OPEN));
         assert!(!assets.source.contains('\r'));
     }

@@ -1,13 +1,10 @@
 //! Tabs, windows, navigation and dialogs: work the browser does natively, one primitive each.
 
-use std::fmt::Write as _;
-
-use sha2::{Digest, Sha256};
-
 use super::super::link::{FocusTab, Link};
 use super::super::wire;
 use crate::browser::adapter::BrowserOutcome;
 use crate::browser::BrowserError;
+use crate::install::icons::sha256_hex;
 
 /// The longest wait for an opened or navigated tab to become ready, in milliseconds.
 pub const READY_TIMEOUT_MS: u64 = 8_000;
@@ -249,10 +246,7 @@ pub fn handle_dialog(
 /// title's SHA-256.
 #[must_use]
 pub fn group_key(group_title: &str) -> String {
-    let mut key = String::from(GROUP_KEY_PREFIX);
-    for byte in Sha256::digest(group_title.as_bytes()) {
-        write!(&mut key, "{byte:02x}").expect("writing to a string cannot fail");
-    }
+    let mut key = format!("{GROUP_KEY_PREFIX}{}", sha256_hex(group_title.as_bytes()));
     key.truncate(GROUP_KEY_PREFIX.len() + GROUP_KEY_HEX_CHARS);
     key
 }
