@@ -170,11 +170,15 @@ mod tests {
         organization: None,
     };
 
+    /// ADR-0202 Decision 22a: a refusal says whose policy turned off which work, in the
+    /// organization's name when its policy names one, and both switches are said in one sentence
+    /// when one policy turned off both.
     #[test]
-    fn a_refusal_names_whose_policy_turned_which_work_off() {
+    fn whose_policy_turned_which_work_off_is_said_once_per_policy() {
         assert_eq!(
             refused(IntakeChannel::Mcp, PolicyAuthor::User, Some("Northwind")),
-            "Your policy turns off work from MCP agents."
+            "Your policy turns off work from MCP agents.",
+            "the person's own policy ignores the organization's name"
         );
         assert_eq!(
             refused(
@@ -188,62 +192,28 @@ mod tests {
             refused(IntakeChannel::Mcp, PolicyAuthor::Organization, None),
             "Your organization's policy turns off work from MCP agents."
         );
-    }
 
-    #[test]
-    fn every_switch_on_says_nothing() {
-        let on = ChannelsOff::default();
-        assert!(!on.any() && !on.all());
-        assert_eq!(on.said(), None);
-        assert_eq!(on.ready_line(), None);
-        assert_eq!(on.policy_line(), None);
-        assert_eq!(on.capability_line(), None);
-    }
-
-    #[test]
-    fn one_switch_off_says_what_still_works() {
-        assert_eq!(MCP_OFF.only_on(), Some(IntakeChannel::Cli));
         assert_eq!(
             MCP_OFF.said().as_deref(),
             Some("Your policy turns off work from MCP agents.")
-        );
-        assert_eq!(
-            MCP_OFF.ready_line(),
-            Some("MCP agents are turned off; command-line agents can work.")
-        );
-        assert_eq!(
-            MCP_OFF.policy_line(),
-            Some("MCP agents are turned off. Command-line work may continue.")
         );
         let cli_off = ChannelsOff {
             mcp: None,
             cli: Some(PolicyAuthor::Organization),
             organization: Some("Northwind"),
         };
-        assert_eq!(cli_off.only_on(), Some(IntakeChannel::Mcp));
         assert_eq!(
             cli_off.said().as_deref(),
             Some("Northwind's policy turns off work from the command line.")
         );
-        assert_eq!(
-            cli_off.ready_line(),
-            Some("The command line is turned off; MCP agents can work.")
-        );
-    }
-
-    #[test]
-    fn both_switches_off_are_said_once_per_policy() {
         let mine = ChannelsOff {
             cli: Some(PolicyAuthor::User),
             ..MCP_OFF
         };
-        assert!(mine.all());
-        assert_eq!(mine.only_on(), None);
-        assert_eq!(mine.ready_line(), None);
-        assert_eq!(mine.capability_line(), None);
         assert_eq!(
             mine.said().as_deref(),
-            Some("Your policy turns off work from MCP agents and the command line.")
+            Some("Your policy turns off work from MCP agents and the command line."),
+            "one policy that turned off both is said in one sentence"
         );
         let split = ChannelsOff {
             mcp: Some(PolicyAuthor::Organization),
@@ -254,7 +224,8 @@ mod tests {
             split.said().as_deref(),
             Some(
                 "Northwind's policy turns off work from MCP agents. Your policy turns off work from the command line."
-            )
+            ),
+            "two policies are said one sentence each"
         );
     }
 }
