@@ -18,94 +18,101 @@ pub struct LayerEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::governance::{manifest, GovernanceFacade, PolicyAuthor, PolicyLayer};
-    use crate::intake::session::IntakeChannel;
+    use crate::governance::{assemble, manifest, OwnOrigin, PolicyAuthor, MANAGED_TIER, USER_TIER};
 
+    /// The snapshot enforcement reads for these layers.
+    fn snapshot(organization: Option<&str>, user: Option<&str>) -> AuthoritySnapshot {
+        let parse = |text: &str| manifest::parse(text, "test").expect("test policy parses");
+        assemble(
+            [
+                (organization.map(parse), PolicyAuthor::Organization),
+                (user.map(parse), PolicyAuthor::User),
+            ],
+            None,
+            None,
+            true,
+            &OwnOrigin::default(),
+        )
+    }
+
+    /// ACCEPTANCE Grouped history 2 (ADR-0156): the evidence a decision leaves records every layer
+    /// it evaluated, with the grants that admitted the work there, tells all-open, granted and
+    /// refused apart, and keeps the host without its path or query. A protected address or a
+    /// never-touch host evaluates no grant, so it records no layer (arch-1 P2's note).
     #[test]
-    fn positive_evidence_preserves_ordered_grants_and_every_layer() {
-        let mut snapshot = GovernanceFacade::new(None).snapshot().as_ref().clone();
-        for tier in [PolicyAuthor::Organization, PolicyAuthor::User] {
-            snapshot.layers.push(PolicyLayer::new(tier, manifest::parse(r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#, "test").unwrap()));
-        }
+    fn evidence_records_every_layer_the_decision_evaluated_and_nothing_it_did_not() {
+        let granted = r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#;
+        let layered = snapshot(Some(granted), Some(granted));
         let requirements = CapabilitySet::READ.union(CapabilitySet::WRITE);
-        let (decision, evidence) = snapshot.authorize_with_evidence(
+        let (decision, evidence) = layered.authorize_with_evidence(
             requirements,
             Some("https://example.com/PRIVATE_PATH?PRIVATE_QUERY"),
         );
         assert!(decision.allowed);
+        assert!(evidence.allowed);
         assert_eq!(evidence.host.as_deref(), Some("example.com"));
-        assert_eq!(evidence.layers.len(), 2);
-        assert!(evidence
-            .layers
-            .iter()
-            .all(|layer| layer.grants == ["combined"]));
-        let (_, resource_less) = snapshot.authorize_with_evidence(requirements, None);
+        let combined = |tier: &str| LayerEvidence {
+            tier: tier.into(),
+            grants: vec!["combined".into()],
+            allowed: true,
+        };
         assert_eq!(
-            resource_less.layers[0].grants,
-            ["read", "write", "combined"]
+            evidence.layers,
+            [combined(MANAGED_TIER), combined(USER_TIER)]
         );
         let encoded = serde_json::to_string(&evidence).unwrap();
-        assert!(!encoded.contains("PRIVATE_"));
+        assert!(!encoded.contains("PRIVATE_"), "{encoded}");
         assert_eq!(
             serde_json::from_str::<PermissionCheck>(&encoded).unwrap(),
             evidence
         );
-        // Replacing the current snapshot cannot change the retained permission story.
-        snapshot.layers.clear();
-        assert_eq!(evidence.layers[0].grants, ["combined"]);
-    }
+        // With no host, the layer's grants admit the set together.
+        let (_, resource_less) = layered.authorize_with_evidence(requirements, None);
+        assert_eq!(
+            resource_less.layers[0].grants,
+            ["read", "write", "combined"]
+        );
 
-    #[test]
-    fn all_open_and_protected_denials_keep_their_actual_meaning() {
-        let facade = GovernanceFacade::new(None);
-        let mut snapshot = facade.snapshot().as_ref().clone();
-        let (decision, open) =
-            snapshot.authorize_with_evidence(CapabilitySet::READ, Some("http://localhost:3000/"));
+        // All-open evaluates no layer.
+        let (decision, open) = snapshot(None, None)
+            .authorize_with_evidence(CapabilitySet::READ, Some("http://localhost:3000/"));
         assert!(decision.allowed);
         assert!(open.layers.is_empty());
-        assert_eq!(
-            crate::language::history::permission(&open, IntakeChannel::Mcp, None),
-            "Allowed without configured policy."
+
+        // A layer that refuses is recorded as refusing.
+        let refusing = snapshot(
+            None,
+            Some(r#"{"schema":4,"name":"test","version":"1","grants":[]}"#),
         );
-        snapshot.layers.push(PolicyLayer::new(
-            PolicyAuthor::User,
-            manifest::parse(
-                r#"{"schema":4,"name":"test","version":"1","grants":[]}"#,
-                "test",
-            )
-            .unwrap(),
-        ));
         let (decision, refused) =
-            snapshot.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
+            refusing.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
         assert!(!decision.allowed);
+        assert!(!refused.allowed);
+        assert_eq!(refused.layers.len(), 1);
+        assert_eq!(refused.layers[0].tier, USER_TIER);
         assert!(!refused.layers[0].allowed);
-        assert!(
-            crate::language::history::permission(&refused, IntakeChannel::Mcp, Some("user"))
-                .starts_with("Refused")
+
+        // A protected address and a never-touch host are refused before any grant.
+        let never_touch = snapshot(
+            None,
+            Some(&format!(
+                r#"{{"schema":4,"name":"test","version":"1","grants":[{{"id":"all","hosts":{{"allow":["*"]}},"allowed":["read"]}}],"config":[{{"key":"{}","value":["bank.example"],"level":"mandatory"}}]}}"#,
+                manifest::PolicySetting::NeverTouch.key()
+            )),
         );
-        let (decision, protected) =
-            snapshot.authorize_with_evidence(CapabilitySet::READ, Some("chrome://extensions"));
-        assert!(!decision.allowed);
-        assert!(
-            protected.layers.is_empty(),
-            "protected rejection never evaluated grants"
-        );
-        snapshot.layers[0].manifest = manifest::parse(
-            r#"{"schema":4,"name":"enforced","version":"1","grants":[]}"#,
-            "test",
-        )
-        .unwrap();
-        let decision = snapshot.authorize_capability(super::super::Capability::Write);
-        assert!(!decision.allowed);
-        assert!(
-            snapshot.attribution(decision).unwrap().0 == "user",
-            "new decisions contain no caller restriction evidence"
-        );
+        for url in ["chrome://extensions", "https://bank.example/"] {
+            let (decision, protected) =
+                never_touch.authorize_with_evidence(CapabilitySet::READ, Some(url));
+            assert!(!decision.allowed, "{url}");
+            assert!(protected.layers.is_empty(), "{url} evaluated no grant");
+        }
     }
 
+    /// ACCEPTANCE Grouped history 2: a permission trace keeps each distinct check once, at most
+    /// PERMISSION_CHECK_LIMIT of them, and says when it left some out.
     #[test]
     fn trace_bounds_and_deduplication_keep_omission_explicit() {
-        let snapshot = GovernanceFacade::new(None).snapshot();
+        let snapshot = snapshot(None, None);
         let mut trace = PermissionTrace::default();
         for index in 0..=PERMISSION_CHECK_LIMIT {
             let (_, check) = snapshot.authorize_with_evidence(

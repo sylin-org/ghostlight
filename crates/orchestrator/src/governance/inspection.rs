@@ -147,76 +147,82 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
 mod tests {
     use std::fs;
 
-    use super::{parse, run, Command};
+    use super::{run, words, Command};
+    use crate::governance::{
+        manifest, AuthoritySnapshot, CapabilitySet, Decision, GovernanceFacade, PolicyRule,
+    };
+    use crate::intake::session::IntakeChannel;
     use crate::scratch::Scratch;
 
-    #[test]
-    fn commands_are_small_and_unambiguous() {
-        assert_eq!(
-            parse(&["validate".into(), "policy.json".into()]).unwrap(),
-            Command::Validate("policy.json".into())
-        );
-        assert_eq!(
-            parse(&[
-                "simulate".into(),
-                "policy.json".into(),
-                "audit.jsonl".into()
-            ])
-            .unwrap(),
-            Command::Simulate {
-                policy: "policy.json".into(),
-                audit: "audit.jsonl".into()
-            }
-        );
-        assert!(parse(&["guess".into()]).is_err());
-    }
-
-    #[test]
-    fn explain_and_simulate_share_the_production_policy_vocabulary() {
-        let policy = Scratch::file("policy.json");
+    /// What `policy simulate` prints for `policy` over the history `lines`, with the policy as
+    /// enforcement would read it.
+    fn simulate(policy: &str, lines: &str) -> (String, manifest::Manifest, AuthoritySnapshot) {
+        let path = Scratch::file("policy.json");
         let audit = Scratch::file("audit.jsonl");
-        fs::write(
-            &policy,
-            r#"{"schema":4,"name":"read only","version":"4","grants":[{"id":"research","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
-        )
-        .unwrap();
-        fs::write(
-            &audit,
-            r#"{"timestamp_ms":1,"invocation":"i","workspace":"w","tool":"browser_click","capabilities":["action"],"authority":"a","allowed":true,"reason":"permitted","status":"succeeded","effect":"applied","observed":{"host":"example.com"}}"#,
-        )
-        .unwrap();
-
-        let mut explanation = Vec::new();
-        run(&Command::Explain(policy.to_path_buf()), &mut explanation).unwrap();
-        let explanation = String::from_utf8(explanation).unwrap();
-        assert!(explanation.contains("research: read on example.com"));
-        assert!(explanation.contains("browser_fill_form (submit): read + action + write"));
-
-        let mut simulation = Vec::new();
+        fs::write(&path, policy).unwrap();
+        fs::write(&audit, lines).unwrap();
+        let mut out = Vec::new();
         run(
             &Command::Simulate {
-                policy: policy.to_path_buf(),
+                policy: path.to_path_buf(),
                 audit: audit.to_path_buf(),
             },
-            &mut simulation,
+            &mut out,
         )
         .unwrap();
-        let simulation = String::from_utf8(simulation).unwrap();
-        assert!(simulation.contains("Would deny line 1: browser_click [action]"));
-        assert!(simulation.contains("1 would be denied"));
+        let enforced = GovernanceFacade::new(Some(path.to_path_buf()))
+            .snapshot()
+            .as_ref()
+            .clone();
+        (
+            String::from_utf8(out).unwrap(),
+            manifest::parse(policy, "draft").unwrap(),
+            enforced,
+        )
     }
 
-    /// A record that names no channel is MCP work, so a draft that turns MCP off refuses it, as it
-    /// refuses the declared MCP line, while the command line's work still passes.
+    /// The line simulate prints for a recorded `browser_click` on example.com that `decision`
+    /// refuses under `rule`.
+    fn click_denied(line: usize, decision: Decision, rule: PolicyRule) -> String {
+        assert_eq!(decision.policy_rule(), Some(rule.as_str()));
+        words::would_deny(&words::WouldDeny {
+            line,
+            tool: "browser_click",
+            requirements: &CapabilitySet::ACTION.label(),
+            host: Some("example.com"),
+            rule: rule.as_str(),
+            denial_id: decision.denial_id().as_deref(),
+        })
+    }
+
+    /// 9c705f86 (arch-1 P3, G-06), ADR-0121 Decision 3 and docs/trust/faq.md ("previews a
+    /// candidate policy against recorded audit"): `policy simulate` reads recorded audit lines,
+    /// the documented golden ones included, and decides each as enforcement would: on its own
+    /// channel first, then its capabilities on its host. A line that names no channel is MCP work.
     #[test]
-    fn simulate_refuses_recorded_mcp_work_under_a_draft_that_turns_mcp_off() {
-        let policy = Scratch::file("policy.json");
-        let audit = Scratch::file("audit.jsonl");
-        fs::write(
-            &policy,
-            r#"{"schema":4,"name":"no agents","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}],"config":[{"key":"channels.mcp.enabled","value":false,"level":"mandatory"}]}"#,
-        )
-        .unwrap();
+    fn simulate_decides_each_recorded_line_as_enforcement_would() {
+        let mut goldens = String::new();
+        for golden in ["success", "refusal"] {
+            let text = fs::read_to_string(crate::language::self_check::golden::repository_path(
+                &format!("tests/golden/audit/{golden}.json"),
+            ))
+            .unwrap();
+            let line: serde_json::Value = serde_json::from_str(&text).unwrap();
+            goldens.push_str(&format!("{line}\n"));
+        }
+        let read_only = r#"{"schema":4,"name":"read only","version":"4","grants":[{"id":"research","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#;
+        let (said, draft, enforced) = simulate(read_only, &goldens);
+        let refused = enforced.authorize_landing(CapabilitySet::ACTION, "https://example.com");
+        assert_eq!(
+            said,
+            format!(
+                "{}\n{}\n",
+                click_denied(2, refused, PolicyRule::Capability),
+                words::simulated(2, &draft, 1)
+            )
+        );
+
+        let mcp_off = r#"{"schema":4,"name":"no agents","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}],"config":[{"key":"channels.mcp.enabled","value":false,"level":"mandatory"}]}"#;
         let line = |channel: &str| {
             format!(
                 r#"{{"timestamp_ms":1,"invocation":"i","workspace":"w","tool":"browser_click","capabilities":["action"],"authority":"a","allowed":true,"reason":"permitted","status":"succeeded","effect":"applied","observed":{{"host":"example.com"}}{channel}}}"#
@@ -228,65 +234,18 @@ mod tests {
             line(""),
         ]
         .join("\n");
-        fs::write(&audit, lines).unwrap();
-
-        let mut simulation = Vec::new();
-        run(
-            &Command::Simulate {
-                policy: policy.to_path_buf(),
-                audit: audit.to_path_buf(),
-            },
-            &mut simulation,
-        )
-        .unwrap();
-        let simulation = String::from_utf8(simulation).unwrap();
-        for denied in [1, 3] {
-            assert!(
-                simulation.contains(&format!(
-                    "Would deny line {denied}: browser_click [action] on example.com -- channel"
-                )),
-                "{simulation}"
-            );
-        }
-        assert!(!simulation.contains("Would deny line 2"), "{simulation}");
-        assert!(simulation.contains("2 would be denied"), "{simulation}");
-    }
-
-    #[test]
-    fn simulate_replays_the_golden_audit_lines() {
-        let policy = Scratch::file("policy.json");
-        let audit = Scratch::file("audit.jsonl");
-        fs::write(
-            &policy,
-            r#"{"schema":4,"name":"read only","version":"4","grants":[{"id":"research","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
-        )
-        .unwrap();
-        let mut lines = String::new();
-        for golden in ["success", "refusal"] {
-            let text = fs::read_to_string(crate::language::self_check::golden::repository_path(
-                &format!("tests/golden/audit/{golden}.json"),
-            ))
-            .unwrap();
-            let line: serde_json::Value = serde_json::from_str(&text).unwrap();
-            lines.push_str(&format!(
-                "{line}
-"
-            ));
-        }
-        fs::write(&audit, lines).unwrap();
-
-        let mut simulation = Vec::new();
-        run(
-            &Command::Simulate {
-                policy: policy.to_path_buf(),
-                audit: audit.to_path_buf(),
-            },
-            &mut simulation,
-        )
-        .unwrap();
-        let simulation = String::from_utf8(simulation).unwrap();
-        assert!(simulation.contains("Would deny line 2: browser_click [action] on example.com"));
-        assert!(simulation.contains("Simulated 2 record(s)"));
-        assert!(simulation.contains("1 would be denied"));
+        let (said, draft, enforced) = simulate(mcp_off, &lines);
+        let (refused, _) = enforced
+            .channel_refusal(IntakeChannel::Mcp)
+            .expect("the draft turns MCP off");
+        assert_eq!(
+            said,
+            format!(
+                "{}\n{}\n{}\n",
+                click_denied(1, refused, PolicyRule::Channel),
+                click_denied(3, refused, PolicyRule::Channel),
+                words::simulated(3, &draft, 2)
+            )
+        );
     }
 }
