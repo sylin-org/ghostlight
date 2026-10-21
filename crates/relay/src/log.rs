@@ -113,6 +113,20 @@ fn try_record(component: Component, event: Event, detail: &str) -> io::Result<()
     )
 }
 
+/// The one place the edge's diagnostics line is built: what `record` appends, and what the
+/// service's `diagnostics show` reads as a `ghostlight_bridge::diagnostics::Record`.
+#[must_use]
+pub fn line(ts_ms: u64, component: Component, event: Event, detail: &str) -> serde_json::Value {
+    json!({
+        "ts_ms": ts_ms,
+        "component": component.as_str(),
+        "relay": RELAY,
+        "pid": std::process::id(),
+        "event": event.as_str(),
+        "detail": detail.chars().take(MAX_DETAIL_CHARS).collect::<String>(),
+    })
+}
+
 /// Append one line to `directory/<component>.jsonl` when `marker` exists and the file has room.
 fn append(
     marker: &Path,
@@ -130,15 +144,8 @@ fn append(
     if fs::metadata(&path).is_ok_and(|metadata| metadata.len() >= MAX_FILE_BYTES) {
         return Ok(());
     }
-    let mut line = serde_json::to_vec(&json!({
-        "ts_ms": ts_ms,
-        "component": component.as_str(),
-        "relay": RELAY,
-        "pid": std::process::id(),
-        "event": event.as_str(),
-        "detail": detail.chars().take(MAX_DETAIL_CHARS).collect::<String>(),
-    }))
-    .map_err(io::Error::other)?;
+    let mut line =
+        serde_json::to_vec(&line(ts_ms, component, event, detail)).map_err(io::Error::other)?;
     line.push(b'\n');
     private::file_options()
         .create(true)

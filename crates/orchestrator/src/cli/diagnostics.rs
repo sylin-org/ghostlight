@@ -6,7 +6,8 @@
 
 use anyhow::bail;
 use ghostlight_bridge::diagnostics::{
-    marker_path, prune_directory, resolve, set_marker, Activation, Component, EDGE_LOGS, ENV_DIR,
+    marker_path, prune_directory, resolve, set_marker, Activation, Component, Record, EDGE_LOGS,
+    ENV_DIR,
 };
 use std::path::{Path, PathBuf};
 
@@ -196,7 +197,8 @@ fn run_show(
             .as_millis();
         now.saturating_sub(window)
     });
-    let mut records: Vec<serde_json::Value> = Vec::new();
+    // Each line typed for filtering and display, and as written for `--json`, which prints it whole.
+    let mut records: Vec<(Record, serde_json::Value)> = Vec::new();
     let mut malformed = 0usize;
     let entries = std::fs::read_dir(&directory)?;
     for entry in entries.flatten() {
@@ -210,40 +212,33 @@ fn run_show(
             Err(_) => continue,
         };
         for line in content.lines() {
-            let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            let Some((record, written)) = serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|written| {
+                    serde_json::from_value::<Record>(written.clone())
+                        .ok()
+                        .map(|record| (record, written))
+                })
+            else {
                 malformed += 1;
                 continue;
             };
-            if let Some(cutoff) = cutoff {
-                let ts = record
-                    .get("ts_ms")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
-                if (ts as u128) < cutoff {
-                    continue;
-                }
+            if cutoff.is_some_and(|cutoff| u128::from(record.ts_ms) < cutoff) {
+                continue;
             }
-            if let Some(component) = component {
-                if record.get("component").and_then(serde_json::Value::as_str) != Some(component) {
-                    continue;
-                }
+            if component.is_some_and(|component| record.component != component) {
+                continue;
             }
-            if let Some(op) = op {
-                if record.get("op").and_then(serde_json::Value::as_str) != Some(op) {
-                    continue;
-                }
+            if op.is_some_and(|op| record.op.as_deref() != Some(op)) {
+                continue;
             }
-            records.push(record);
+            records.push((record, written));
         }
     }
-    records.sort_by_key(|record| {
-        record
-            .get("ts_ms")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0)
-    });
+    records.sort_by_key(|(record, _)| record.ts_ms);
     if json {
-        println!("{}", serde_json::to_string_pretty(&records)?);
+        let written: Vec<&serde_json::Value> = records.iter().map(|(_, written)| written).collect();
+        println!("{}", serde_json::to_string_pretty(&written)?);
         return Ok(());
     }
     if records.is_empty() {
@@ -251,14 +246,11 @@ fn run_show(
         return Ok(());
     }
     let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
-    for record in &records {
-        let ts = record
-            .get("ts_ms")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let moment = time::OffsetDateTime::from_unix_timestamp_nanos((ts as i128) * 1_000_000)
-            .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
-            .to_offset(offset);
+    for (record, _) in &records {
+        let moment =
+            time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(record.ts_ms) * 1_000_000)
+                .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+                .to_offset(offset);
         println!(
             "{:02}-{:02} {:02}:{:02}:{:02}.{:03} {:<17} {:5} {:28} {}",
             moment.month() as u8,
@@ -267,28 +259,10 @@ fn run_show(
             moment.minute(),
             moment.second(),
             moment.millisecond(),
-            record
-                .get("component")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("?"),
-            record
-                .get("level")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default(),
-            record
-                .get("event")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("?"),
-            op_and_detail(
-                record
-                    .get("op")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-                record
-                    .get("detail")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-            ),
+            or_unknown(&record.component),
+            record.level.as_deref().unwrap_or_default(),
+            or_unknown(&record.event),
+            op_and_detail(record.op.as_deref().unwrap_or(""), &record.detail),
         );
     }
     if malformed > 0 {
@@ -297,9 +271,9 @@ fn run_show(
     // A component the filter left out is absent by request, not because its diagnostics were off.
     let wanted = component;
     for component in writers().filter(|known| wanted.is_none_or(|wanted| wanted == *known)) {
-        let present = records.iter().any(|record| {
-            record.get("component").and_then(serde_json::Value::as_str) == Some(component)
-        });
+        let present = records
+            .iter()
+            .any(|(record, _)| record.component == component);
         if !present {
             println!("No {component} records in range; its diagnostics were probably off.");
         }
@@ -312,6 +286,15 @@ fn run_show(
 fn writers() -> impl Iterator<Item = &'static str> {
     std::iter::once(Component::Orchestrator.as_str())
         .chain(EDGE_LOGS.into_iter().map(|log| log.as_str()))
+}
+
+/// A name a line left out shows as "?".
+fn or_unknown(name: &str) -> &str {
+    if name.is_empty() {
+        "?"
+    } else {
+        name
+    }
 }
 
 /// The end of a shown line: the operation, then the detail, with a space between when there are

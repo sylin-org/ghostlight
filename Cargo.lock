@@ -880,6 +880,7 @@ version = "2.0.1"
 dependencies = [
  "ghostlight-relay",
  "notify",
+ "serde",
  "serde_json",
 ]
 

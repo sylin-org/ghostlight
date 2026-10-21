@@ -11,7 +11,7 @@ read with its skeptic's corrections, or its entry in
 ## RESUME HERE
 
 Every slice of core-language's own has landed. Two core-service slices moved here on
-2026-10-21: SERV-6 has landed; BROW-2 waits for test-03's C16. A slice's hash is filled in by
+2026-10-21, then SERV-12: SERV-6 and SERV-12 have landed; BROW-2 waits for test-03's C16. A slice's hash is filled in by
 the next slice's commit, since a rebase before the push changes it.
 
 ## Slices
@@ -40,7 +40,8 @@ In order. "After" names what a slice waits for.
 | LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | landed (fb359bf5) |
 | LANG-12b | refactor(cli): the command line reads the machine, and language/ does no I/O | LANG-12 | LANG-12's environment part, given by the coordinator; cross-lane into `cli/` | landed (e91c5518) |
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | landed (6f37117f) |
-| SERV-6 | refactor(cli): the command line reads the service's own vocabulary | - | SERV-6 with its skeptic's correction, moved from core-service; cross-lane into `cli/` and `intake/mcp.rs` | landed |
+| SERV-6 | refactor(cli): the command line reads the service's own vocabulary | - | SERV-6 with its skeptic's correction, moved from core-service; cross-lane into `cli/` and `intake/mcp.rs` | landed (15b38451) |
+| SERV-12 | refactor(diagnostics): one typed record, written by the service and read by `diagnostics show`, with the edge's line pinned | - | SERV-12 with its skeptic's correction, moved from core-service; cross-lane into `crates/bridge`, `cli/diagnostics.rs` and `crates/relay/src/log.rs` (coordinator's go) | landed |
 | BROW-2 | refactor(browser): the dead recovery decisions go | test-03's C16 | BROW-2, moved from core-service; cross-lane into `browser/recovery.rs` and `work/mod.rs` | todo |
 
 ## Notes
@@ -221,3 +222,12 @@ In order. "After" names what a slice waits for.
   `work::result::Status` and matches it exhaustively, a word this build does not know still
   exiting as unknown; `SUPPORTED_REVISIONS` names `STRUCTURED_CONTENT_REVISION`. Cross-lane, under
   test-04's hold: `cli/client.rs` and `cli/mod.rs`; `work/result.rs` needed no edit.
+- SERV-12: `ghostlight_bridge::diagnostics::Record` is the one diagnostics line, its fields in
+  alphabetical order (serde_json writes `json!` keys that way) with the sink-only `run_id`,
+  `level`, `op` and the edge-only `relay`, `pid` optional; the sink writes through it
+  (`a_sink_record_writes_the_bytes_the_sink_always_wrote`), and `diagnostics show` decodes it
+  while `--json` still prints each line as written. `ghostlight_relay::log::line` is now the one
+  place the edge builds its line (bytes unchanged, the coordinator's go, revision 5 unpublished),
+  and `an_edge_line_reads_as_a_record` pins it. On test-01's real diagnostics directory the old
+  and new `diagnostics show`, plain and `--json`, printed identical output (304 and 2,589 lines).
+  `crates/bridge` gains its `serde` dependency; the connectors guard passes.

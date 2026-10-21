@@ -21,6 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ghostlight_relay::log::{Component as EdgeLog, MAX_FILE_BYTES as EDGE_LOG_FULL_BYTES};
 use ghostlight_relay::private;
 use notify::Watcher as _;
+use serde::{Deserialize, Serialize};
 
 /// The environment variable that turns diagnostics on and names the directory.
 pub const ENV_DIR: &str = "GHOSTLIGHT_DIAGNOSTICS_DIR";
@@ -28,6 +29,40 @@ pub const ENV_DIR: &str = "GHOSTLIGHT_DIAGNOSTICS_DIR";
 pub const MARKER_FILE_NAME: &str = ghostlight_relay::home::DIAGNOSTICS_MARKER_NAME;
 /// The header record's schema marker.
 pub const SCHEMA: &str = "ghostlight-diagnostics-1";
+
+/// One line of a diagnostics log: what the service's sink writes, what an edge log writes
+/// (`ghostlight_relay::log`), and what `diagnostics show` reads.
+///
+/// The sink writes `run_id`, `level` and `op`, `op` as null when it has none; an edge log writes
+/// `relay` and `pid` and none of those three. The fields are declared in alphabetical order,
+/// the order `serde_json` gives object keys, so a line written from this type is byte-identical
+/// to the lines already on disk.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct Record {
+    /// The component that wrote the line.
+    pub component: String,
+    /// The bounded, content-free detail.
+    pub detail: String,
+    /// The event's closed name.
+    pub event: String,
+    /// The sink's level word.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    /// The operation the line belongs to; the sink writes null when there is none.
+    pub op: Option<String>,
+    /// The edge process that wrote the line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    /// The relay revision of the edge that wrote the line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay: Option<u16>,
+    /// The sink run the line belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    /// When the line was written, in milliseconds since the Unix epoch.
+    pub ts_ms: u64,
+}
 /// Log files kept per component after pruning.
 const KEEP_PER_COMPONENT: usize = 8;
 /// The total byte ceiling across all diagnostics files in the directory.
@@ -474,15 +509,20 @@ impl Sink {
         operation: Option<&str>,
         detail: &str,
     ) {
-        let record = serde_json::json!({
-            "ts_ms": unix_ms(),
-            "run_id": sink.run_id,
-            "component": sink.component.as_str(),
-            "event": event,
-            "level": level.as_str(),
-            "op": operation,
-            "detail": clip(detail),
-        });
+        let record = Record {
+            component: sink.component.as_str().into(),
+            detail: clip(detail).into(),
+            event: event.into(),
+            level: Some(level.as_str().into()),
+            op: operation.map(str::to_owned),
+            pid: None,
+            relay: None,
+            run_id: Some(sink.run_id.clone()),
+            ts_ms: u64::try_from(unix_ms()).unwrap_or(u64::MAX),
+        };
+        let Ok(record) = serde_json::to_value(&record) else {
+            return;
+        };
         if let Some((_, file)) = state.open.as_mut() {
             if append_line(file, &record).is_err() {
                 state.open = None;
@@ -740,6 +780,69 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
+
+    /// A sink line written from `Record` is byte-identical to the line the sink wrote with
+    /// `json!` before the type existed, with and without an operation.
+    #[test]
+    fn a_sink_record_writes_the_bytes_the_sink_always_wrote() {
+        for op in [None, Some("invocation_0123")] {
+            let record = Record {
+                component: "service".into(),
+                detail: "activation on (marker)".into(),
+                event: "sink_opened".into(),
+                level: Some("info".into()),
+                op: op.map(str::to_owned),
+                run_id: Some("run-1".into()),
+                ts_ms: 1_700_000_000_123,
+                ..Record::default()
+            };
+            let before = serde_json::json!({
+                "ts_ms": 1_700_000_000_123_u64,
+                "run_id": "run-1",
+                "component": "service",
+                "event": "sink_opened",
+                "level": "info",
+                "op": op,
+                "detail": "activation on (marker)",
+            });
+            assert_eq!(
+                serde_json::to_value(&record).unwrap().to_string(),
+                before.to_string()
+            );
+        }
+    }
+
+    /// The edge's line, built by `ghostlight_relay::log::line`, reads as a `Record` with every
+    /// field it carries, and nothing the edge does not write.
+    #[test]
+    fn an_edge_line_reads_as_a_record() {
+        let line = ghostlight_relay::log::line(
+            1_700_000_000_456,
+            EdgeLog::EdgeBrowser,
+            ghostlight_relay::log::Event::ProcessStarted,
+            "started",
+        );
+        let record: Record = serde_json::from_value(line.clone()).unwrap();
+        assert_eq!(
+            record,
+            Record {
+                component: EdgeLog::EdgeBrowser.as_str().into(),
+                detail: "started".into(),
+                event: ghostlight_relay::log::Event::ProcessStarted.as_str().into(),
+                level: None,
+                op: None,
+                pid: Some(std::process::id()),
+                relay: Some(ghostlight_relay::RELAY),
+                run_id: None,
+                ts_ms: 1_700_000_000_456,
+            }
+        );
+        let keys: Vec<&String> = line.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            ["component", "detail", "event", "pid", "relay", "ts_ms"]
+        );
+    }
 
     fn temp_root(name: &str) -> Scratch {
         Scratch::named(&format!("diagnostics-{name}"))
