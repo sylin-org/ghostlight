@@ -406,46 +406,6 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
 
-    #[test]
-    fn a_start_relaunches_itself_for_its_reason_and_the_copy_serves() {
-        let home = Scratch::named("relaunch");
-        let mut relaunched = None;
-        relaunch(
-            home.path(),
-            StartReason::Agent,
-            || Ok(false),
-            |directory, reason| {
-                relaunched = Some((directory.to_path_buf(), reason));
-                Ok(())
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            relaunched,
-            Some((home.path().to_path_buf(), StartReason::Agent))
-        );
-    }
-
-    #[test]
-    fn an_elevated_start_is_refused_before_it_relaunches() {
-        let home = Scratch::named("relaunch-elevated");
-        let mut relaunched = false;
-        let refused = relaunch(
-            home.path(),
-            StartReason::Agent,
-            || Ok(true),
-            |_, _| {
-                relaunched = true;
-                Ok(())
-            },
-        )
-        .unwrap_err();
-        assert_eq!(
-            format!("{refused:#}"),
-            crate::language::environment::ELEVATED_SERVICE
-        );
-        assert!(!relaunched, "nothing was started");
-    }
     use crate::workbench::{
         PageAddress, WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
     };
@@ -462,145 +422,6 @@ mod tests {
             use std::os::unix::ffi::OsStringExt;
             OsString::from_vec(vec![0xFF])
         }
-    }
-
-    #[test]
-    fn call_arguments_are_the_words_after_call() {
-        let arguments = ["ghostlight", "call", "browser_tabs", "{}"].map(OsString::from);
-        assert_eq!(
-            call_arguments(arguments),
-            Ok(vec!["browser_tabs".to_owned(), "{}".to_owned()])
-        );
-    }
-
-    #[test]
-    fn a_call_argument_that_is_not_utf8_is_a_usage_error() {
-        let arguments = vec![
-            OsString::from("ghostlight"),
-            OsString::from("call"),
-            not_utf8(),
-        ];
-        assert_eq!(
-            call_arguments(arguments),
-            Err(CALL_ARGUMENTS_NOT_UTF8.to_owned())
-        );
-    }
-
-    #[test]
-    fn the_session_listener_is_installed_before_the_service_starts_and_the_endpoint_binds_after() {
-        use crate::cli::client::control_at;
-        use ghostlight_relay::protocol::{Control, QuitReason};
-
-        let home = crate::service::test_home::TestHome::new("serve-order");
-        let order = std::sync::Mutex::new(Vec::<&str>::new());
-        let path = home.path().to_path_buf();
-        let probe = path.clone();
-        let quitter = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(20);
-            while Instant::now() < deadline {
-                if control_at(
-                    &probe,
-                    Control::Quit {
-                        reason: QuitReason::Replace,
-                    },
-                )
-                .is_ok()
-                {
-                    return true;
-                }
-                thread::sleep(Duration::from_millis(20));
-            }
-            false
-        });
-        let served = serve_in(
-            &path,
-            StartReason::Agent,
-            |_| {
-                order.lock().unwrap().push("listener");
-                assert!(
-                    control_at(&path, Control::Readiness).is_err(),
-                    "nothing is bound before the listener is installed"
-                );
-                Ok(())
-            },
-            |home, _| {
-                order.lock().unwrap().push("start");
-                ServiceHost::start(home)
-            },
-        );
-        assert!(quitter.join().unwrap(), "the endpoint was bound and quit");
-        served.unwrap();
-        assert_eq!(*order.lock().unwrap(), ["listener", "start"]);
-    }
-
-    #[test]
-    fn serve_settles_a_refusal_to_start_as_success_and_any_other_failure_as_failure() {
-        assert!(settle_serve(Err(crate::service::AuthorityAlreadyRunning.into())).is_ok());
-        assert!(settle_serve(Err(crate::service::QuitLatched.into())).is_ok());
-        assert!(settle_serve(Err(anyhow::anyhow!("the endpoint could not be bound"))).is_err());
-        assert!(settle_serve(Ok(())).is_ok());
-    }
-
-    #[test]
-    fn a_failed_start_leaves_its_reason_and_a_refusal_to_start_leaves_none() {
-        let home = crate::service::test_home::TestHome::new("start-failure");
-        let record = Layout::new(home.path()).start_failure();
-        record_start_failure(
-            home.path(),
-            &Err(crate::service::AuthorityAlreadyRunning.into()),
-        );
-        record_start_failure(home.path(), &Err(crate::service::QuitLatched.into()));
-        record_start_failure(home.path(), &Ok(()));
-        assert!(!record.exists());
-        let failed =
-            Err(anyhow::anyhow!("path must be shorter than SUN_LEN")
-                .context("bind the relay endpoint"));
-        record_start_failure(home.path(), &failed);
-        assert_eq!(
-            fs::read_to_string(&record).unwrap(),
-            "bind the relay endpoint: path must be shorter than SUN_LEN\n"
-        );
-    }
-
-    #[test]
-    fn a_service_that_publishes_removes_the_reason_an_earlier_start_left() {
-        let home = crate::service::test_home::TestHome::new("start-failure-cleared");
-        let path = home.path().to_path_buf();
-        let record = Layout::new(&path).start_failure();
-        fs::create_dir_all(record.parent().unwrap()).unwrap();
-        fs::write(&record, "an earlier reason\n").unwrap();
-        // The service answers once its listener runs, which can be before `serve_in` removes the
-        // record, so the record is looked at only after `serve_in` returns: it removes the record
-        // before it waits for the quit.
-        let probe = path.clone();
-        let quitter = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(20);
-            while Instant::now() < deadline {
-                if crate::cli::client::status_at(&probe).is_ok() {
-                    let _ = crate::cli::client::control_at(
-                        &probe,
-                        ghostlight_relay::protocol::Control::Quit {
-                            reason: ghostlight_relay::protocol::QuitReason::Replace,
-                        },
-                    );
-                    return true;
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
-            false
-        });
-        serve_in(
-            &path,
-            StartReason::Command,
-            |_| Ok(()),
-            |home, _| ServiceHost::start(home),
-        )
-        .unwrap();
-        assert!(quitter.join().unwrap(), "the service answered");
-        assert!(
-            !record.exists(),
-            "a service that published removed the earlier start's reason"
-        );
     }
 
     /// A starter that starts a real service in the test home and remembers why it was asked.
@@ -652,55 +473,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn open_starts_the_shell_where_the_person_is_when_the_service_reaches_no_display() {
-        assert_eq!(
-            after_no_window(Some(WindowReason::NoDisplay), true),
-            NoWindow::StartShellHere
-        );
-        assert_eq!(
-            after_no_window(Some(WindowReason::NoDisplay), false),
-            NoWindow::Refuse("No Ghostlight window: no display is reachable from the service.")
-        );
-        // Any other reason, or none yet, is a window the service is bringing up.
-        for reason in [
-            None,
-            Some(WindowReason::Tray),
-            Some(WindowReason::DidNotStay),
-            Some(WindowReason::NoShellFile),
-        ] {
-            assert_eq!(after_no_window(reason, true), NoWindow::Wait);
-        }
-    }
-
-    #[test]
-    fn open_with_no_service_starts_one_for_a_person_and_shows_it() {
-        let home = crate::service::test_home::TestHome::new("open-starts");
-        let starter = StartsAService::new(&home);
-        open_with(&starter).unwrap();
-        assert_eq!(*starter.reasons.borrow(), [StartReason::Person]);
-        assert_eq!(starter.reveals.0.load(Ordering::SeqCst), 1);
-
-        // With a service already answering, open starts nothing and shows it again.
-        open_with(&starter).unwrap();
-        assert_eq!(*starter.reasons.borrow(), [StartReason::Person]);
-        assert_eq!(starter.reveals.0.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn a_call_with_no_service_starts_one_as_a_command_start() {
-        let home = crate::service::test_home::TestHome::new("call-starts");
-        let starter = StartsAService::new(&home);
-        reach_service(&starter).unwrap();
-        assert_eq!(*starter.reasons.borrow(), [StartReason::Command]);
-        reach_service(&starter).unwrap();
-        assert_eq!(
-            *starter.reasons.borrow(),
-            [StartReason::Command],
-            "a service that answers is not started again"
-        );
-    }
-
     /// A starter whose process is elevated, and which fails the test if asked to start anything.
     struct Elevated(RefCell<usize>);
 
@@ -715,70 +487,290 @@ mod tests {
         }
     }
 
+    /// Protects the service's start lifecycle and defect bd29366c: a start relaunches itself
+    /// for its reason and the copy serves, an elevated start is refused before it relaunches, the
+    /// session listener is installed before the service starts and the endpoint binds after, a refusal
+    /// to start settles as success and any other failure as failure, and a failed start leaves its
+    /// reason for the installer while a service that publishes removes the one an earlier start left.
     #[test]
-    fn an_elevated_open_or_call_starts_nothing_and_says_why_at_once() {
-        let home = crate::service::test_home::TestHome::new("elevated-start");
-        let starter = Elevated(RefCell::new(0));
-        let began = Instant::now();
-        let opened = open_with(&starter).unwrap_err();
-        assert_eq!(
-            opened.to_string(),
-            crate::language::environment::ELEVATED_SERVICE
-        );
-        let called = reach_service(&starter).unwrap_err();
-        assert_eq!(
-            called.to_string(),
-            crate::language::environment::ELEVATED_SERVICE
-        );
-        assert_eq!(*starter.0.borrow(), 0, "no service was started");
-        assert!(began.elapsed() < Duration::from_secs(5), "no waiting");
-        drop(home);
+    fn a_service_start_relaunches_for_its_reason_and_leaves_why_it_ended() {
+        {
+            let home = Scratch::named("relaunch");
+            let mut relaunched = None;
+            relaunch(
+                home.path(),
+                StartReason::Agent,
+                || Ok(false),
+                |directory, reason| {
+                    relaunched = Some((directory.to_path_buf(), reason));
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                relaunched,
+                Some((home.path().to_path_buf(), StartReason::Agent))
+            );
+        }
+        {
+            let home = Scratch::named("relaunch-elevated");
+            let mut relaunched = false;
+            let refused = relaunch(
+                home.path(),
+                StartReason::Agent,
+                || Ok(true),
+                |_, _| {
+                    relaunched = true;
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+            assert_eq!(
+                format!("{refused:#}"),
+                crate::language::environment::ELEVATED_SERVICE
+            );
+            assert!(!relaunched, "nothing was started");
+        }
+        {
+            use crate::cli::client::control_at;
+            use ghostlight_relay::protocol::{Control, QuitReason};
+
+            let home = crate::service::test_home::TestHome::new("serve-order");
+            let order = std::sync::Mutex::new(Vec::<&str>::new());
+            let path = home.path().to_path_buf();
+            let probe = path.clone();
+            let quitter = thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while Instant::now() < deadline {
+                    if control_at(
+                        &probe,
+                        Control::Quit {
+                            reason: QuitReason::Replace,
+                        },
+                    )
+                    .is_ok()
+                    {
+                        return true;
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                }
+                false
+            });
+            let served = serve_in(
+                &path,
+                StartReason::Agent,
+                |_| {
+                    order.lock().unwrap().push("listener");
+                    assert!(
+                        control_at(&path, Control::Readiness).is_err(),
+                        "nothing is bound before the listener is installed"
+                    );
+                    Ok(())
+                },
+                |home, _| {
+                    order.lock().unwrap().push("start");
+                    ServiceHost::start(home)
+                },
+            );
+            assert!(quitter.join().unwrap(), "the endpoint was bound and quit");
+            served.unwrap();
+            assert_eq!(*order.lock().unwrap(), ["listener", "start"]);
+        }
+        {
+            assert!(settle_serve(Err(crate::service::AuthorityAlreadyRunning.into())).is_ok());
+            assert!(settle_serve(Err(crate::service::QuitLatched.into())).is_ok());
+            assert!(settle_serve(Err(anyhow::anyhow!("the endpoint could not be bound"))).is_err());
+            assert!(settle_serve(Ok(())).is_ok());
+        }
+        {
+            let home = crate::service::test_home::TestHome::new("start-failure");
+            let record = Layout::new(home.path()).start_failure();
+            record_start_failure(
+                home.path(),
+                &Err(crate::service::AuthorityAlreadyRunning.into()),
+            );
+            record_start_failure(home.path(), &Err(crate::service::QuitLatched.into()));
+            record_start_failure(home.path(), &Ok(()));
+            assert!(!record.exists());
+            let failed = Err(anyhow::anyhow!("path must be shorter than SUN_LEN")
+                .context("bind the relay endpoint"));
+            record_start_failure(home.path(), &failed);
+            assert_eq!(
+                fs::read_to_string(&record).unwrap(),
+                "bind the relay endpoint: path must be shorter than SUN_LEN\n"
+            );
+        }
+        {
+            let home = crate::service::test_home::TestHome::new("start-failure-cleared");
+            let path = home.path().to_path_buf();
+            let record = Layout::new(&path).start_failure();
+            fs::create_dir_all(record.parent().unwrap()).unwrap();
+            fs::write(&record, "an earlier reason\n").unwrap();
+            // The service answers once its listener runs, which can be before `serve_in` removes the
+            // record, so the record is looked at only after `serve_in` returns: it removes the record
+            // before it waits for the quit.
+            let probe = path.clone();
+            let quitter = thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while Instant::now() < deadline {
+                    if crate::cli::client::status_at(&probe).is_ok() {
+                        let _ = crate::cli::client::control_at(
+                            &probe,
+                            ghostlight_relay::protocol::Control::Quit {
+                                reason: ghostlight_relay::protocol::QuitReason::Replace,
+                            },
+                        );
+                        return true;
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+                false
+            });
+            serve_in(
+                &path,
+                StartReason::Command,
+                |_| Ok(()),
+                |home, _| ServiceHost::start(home),
+            )
+            .unwrap();
+            assert!(quitter.join().unwrap(), "the service answered");
+            assert!(
+                !record.exists(),
+                "a service that published removed the earlier start's reason"
+            );
+        }
     }
 
+    /// Protects ACCEPTANCE's open and call journeys: call takes the words after `call` and refuses an
+    /// argument that is not UTF-8; open starts the shell where the person is when the service reaches
+    /// no display; open with no service starts one for a person and shows it, and call starts one as a
+    /// command start; an elevated open or call starts nothing and says why at once; and open waits for
+    /// a shell still starting and reveals the window once.
     #[test]
-    fn open_waits_for_delayed_native_presentation_and_reveals_once() {
-        struct DelayedPresentation(AtomicUsize);
-
-        impl WorkbenchPresentationPort for DelayedPresentation {
-            fn reveal(
-                &self,
-                _address: Option<PageAddress>,
-            ) -> Result<(), WorkbenchPresentationError> {
-                self.0.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            }
-
-            fn notify(&self, _: WorkbenchNotification) -> Result<(), WorkbenchPresentationError> {
-                Ok(())
+    fn open_and_call_start_a_service_for_the_person_and_reveal_the_window_once() {
+        {
+            let arguments = ["ghostlight", "call", "browser_tabs", "{}"].map(OsString::from);
+            assert_eq!(
+                call_arguments(arguments),
+                Ok(vec!["browser_tabs".to_owned(), "{}".to_owned()])
+            );
+        }
+        {
+            let arguments = vec![
+                OsString::from("ghostlight"),
+                OsString::from("call"),
+                not_utf8(),
+            ];
+            assert_eq!(
+                call_arguments(arguments),
+                Err(CALL_ARGUMENTS_NOT_UTF8.to_owned())
+            );
+        }
+        {
+            assert_eq!(
+                after_no_window(Some(WindowReason::NoDisplay), true),
+                NoWindow::StartShellHere
+            );
+            assert_eq!(
+                after_no_window(Some(WindowReason::NoDisplay), false),
+                NoWindow::Refuse("No Ghostlight window: no display is reachable from the service.")
+            );
+            // Any other reason, or none yet, is a window the service is bringing up.
+            for reason in [
+                None,
+                Some(WindowReason::Tray),
+                Some(WindowReason::DidNotStay),
+                Some(WindowReason::NoShellFile),
+            ] {
+                assert_eq!(after_no_window(reason, true), NoWindow::Wait);
             }
         }
+        {
+            let home = crate::service::test_home::TestHome::new("open-starts");
+            let starter = StartsAService::new(&home);
+            open_with(&starter).unwrap();
+            assert_eq!(*starter.reasons.borrow(), [StartReason::Person]);
+            assert_eq!(starter.reveals.0.load(Ordering::SeqCst), 1);
 
-        let home = crate::service::test_home::TestHome::new("delayed-presentation");
-        let host = crate::service::ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        assert!(!crate::cli::client::activate_workbench().unwrap());
-        let timeout_started = std::time::Instant::now();
-        let timeout =
-            wait_for_workbench_activation_until(timeout_started + Duration::from_millis(100));
-        assert_eq!(timeout, ActivationState::Unavailable);
-        assert!(timeout_started.elapsed() < Duration::from_secs(1));
-        let message = finish_activation(timeout).unwrap_err().to_string();
-        assert!(message.contains("did not open in time"));
-        assert!(message.contains("ghostlight open"));
-        assert!(!message.contains("stop"));
-        let presentation = Arc::new(DelayedPresentation(AtomicUsize::new(0)));
-        let delayed_presentation = presentation.clone();
-        let workbench = host.workbench.clone();
-        let ready = std::thread::spawn(move || {
-            // A cold shell can take more than a second to attach.
-            std::thread::sleep(Duration::from_secs(2));
-            workbench.attach_presentation(delayed_presentation);
-        });
-        let result = wait_for_workbench_activation();
-        ready.join().unwrap();
-        drop(host);
-        drop(home);
-        assert_eq!(result, ActivationState::Activated);
-        assert_eq!(presentation.0.load(Ordering::SeqCst), 1);
+            // With a service already answering, open starts nothing and shows it again.
+            open_with(&starter).unwrap();
+            assert_eq!(*starter.reasons.borrow(), [StartReason::Person]);
+            assert_eq!(starter.reveals.0.load(Ordering::SeqCst), 2);
+        }
+        {
+            let home = crate::service::test_home::TestHome::new("call-starts");
+            let starter = StartsAService::new(&home);
+            reach_service(&starter).unwrap();
+            assert_eq!(*starter.reasons.borrow(), [StartReason::Command]);
+            reach_service(&starter).unwrap();
+            assert_eq!(
+                *starter.reasons.borrow(),
+                [StartReason::Command],
+                "a service that answers is not started again"
+            );
+        }
+        {
+            let home = crate::service::test_home::TestHome::new("elevated-start");
+            let starter = Elevated(RefCell::new(0));
+            let began = Instant::now();
+            let opened = open_with(&starter).unwrap_err();
+            assert_eq!(
+                opened.to_string(),
+                crate::language::environment::ELEVATED_SERVICE
+            );
+            let called = reach_service(&starter).unwrap_err();
+            assert_eq!(
+                called.to_string(),
+                crate::language::environment::ELEVATED_SERVICE
+            );
+            assert_eq!(*starter.0.borrow(), 0, "no service was started");
+            assert!(began.elapsed() < Duration::from_secs(5), "no waiting");
+            drop(home);
+        }
+        {
+            /// A shell still starting: it refuses the first reveal and carries out every later one.
+            struct DelayedPresentation(AtomicUsize);
+
+            impl WorkbenchPresentationPort for DelayedPresentation {
+                fn reveal(
+                    &self,
+                    _address: Option<PageAddress>,
+                ) -> Result<(), WorkbenchPresentationError> {
+                    match self.0.fetch_add(1, Ordering::SeqCst) {
+                        0 => Err(WorkbenchPresentationError::Unavailable),
+                        _ => Ok(()),
+                    }
+                }
+
+                fn notify(
+                    &self,
+                    _: WorkbenchNotification,
+                ) -> Result<(), WorkbenchPresentationError> {
+                    Ok(())
+                }
+            }
+
+            let home = crate::service::test_home::TestHome::new("delayed-presentation");
+            let host = crate::service::ServiceHost::start(home.path()).unwrap();
+            host.publish_ready().unwrap();
+            assert!(!crate::cli::client::activate_workbench().unwrap());
+            let timeout_started = std::time::Instant::now();
+            let timeout =
+                wait_for_workbench_activation_until(timeout_started + Duration::from_millis(100));
+            assert_eq!(timeout, ActivationState::Unavailable);
+            assert!(timeout_started.elapsed() < Duration::from_secs(1));
+            let message = finish_activation(timeout).unwrap_err().to_string();
+            assert!(message.contains("did not open in time"));
+            assert!(message.contains("ghostlight open"));
+            assert!(!message.contains("stop"));
+            let presentation = Arc::new(DelayedPresentation(AtomicUsize::new(0)));
+            host.workbench.attach_presentation(presentation.clone());
+            let result = wait_for_workbench_activation();
+            drop(host);
+            drop(home);
+            assert_eq!(result, ActivationState::Activated);
+            // One refused while the shell started, then the one reveal: the wait stops there.
+            assert_eq!(presentation.0.load(Ordering::SeqCst), 2);
+        }
     }
 }

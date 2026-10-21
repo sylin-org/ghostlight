@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 189 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 178 |
 | `crates/desktop` | 161 | 20 | moved to the adapter lane (2026-10-21) |
 
 ## Slices
@@ -49,6 +49,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I25 | `install/deployment.rs`: the real stray test starts the test binary again as its stand-in (an ignored test), since the copied system sleeper of T-I20 never showed as a stray on the Ubuntu runner even after 5b30a4c4 made BusyBox run it (cause not found; Ubuntu 24.04 in WSL runs the copy fine). The slot is to be made back elsewhere | 214 | 215 | defects 31f2c835, a663e83d (the real stop) | landed (this commit) |
 | T-I26 | `cli/session.rs`: seventeen tests fold into one: a session is keyed on the caller's agent app or its terminal, with every climbing, folding, recycled-pid, bound and explicit-key rule as a case | 215 | 199 | ADR-0106 and its 2026-10-21 amendment (I-D4) | landed (this commit) |
 | T-I27 | `cli/parse.rs`: thirteen tests become three: the command line takes each form it documents and refuses the rest; completions, help and the manual match the parser and the catalog; and the first reserve test, `deployment install`'s grammar, which now also reads get.ps1, get.sh, dev-loop.ps1 and the npm and mcpb launchers and parses each form they run. The `serve` literal becomes `ghostlight_relay::spawn::SERVE_ARGUMENT` (coordinator) | 199 | 189 | the command-line grammar; reserve 1 of 3 | landed (this commit) |
+| T-I28 | `cli/desktop.rs`: thirteen tests fold into two: a service start relaunches for its reason and leaves why it ended; open and call start a service for the person and reveal the window once. The open-reveal test no longer sleeps 2 s for a cold shell: its presentation refuses the first reveal and carries out the next, which proves the wait by order (service-lane note) | 189 | 178 | the start lifecycle, defect bd29366c, the open and call journeys | landed (this commit) |
 
 ## Notes
 
