@@ -4251,6 +4251,27 @@ mod tests {
         }
     }
 
+    /// The resume token that restores exactly `owned`: the first of `earlier`, the tokens read on
+    /// the way to a call's answer, that does, or else the next one on the stream that does. The
+    /// worker publishes after the answer and the session watch can publish during the call, so the
+    /// token can come on either side of the answer.
+    fn token_restoring(
+        socket: &mut Connection,
+        earlier: &[String],
+        owned: &[crate::intake::mcp::OwnedTab],
+    ) -> ResumeState {
+        earlier
+            .iter()
+            .map(|token| ResumeState::decode(token).unwrap())
+            .find(|state| state.owned_tabs == owned)
+            .unwrap_or_else(|| loop {
+                let state = next_resume(socket);
+                if state.owned_tabs == owned {
+                    break state;
+                }
+            })
+    }
+
     /// Send one `tools/call` and read its structured result.
     fn call_tool(socket: &mut Connection, id: u64, name: &str, arguments: Value) -> Value {
         send_line(
@@ -4331,12 +4352,18 @@ mod tests {
         };
         served.browser.push(live());
         served.browser.push(live());
-        let listed = call_tool(&mut socket, 10, "browser_tabs", json!({"action": "list"}));
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 10, "method": "tools/call",
+                "params": {"name": "browser_tabs", "arguments": {"action": "list"}}}),
+        );
+        let (called, tokens) = response(&mut socket, 10);
+        let listed = &called["result"]["structuredContent"];
         assert_eq!(listed["status"], "succeeded", "{listed}");
         let tabs = listed["facts"]["tabs"].as_array().unwrap();
         assert_eq!(tabs.len(), 1, "{listed}");
         assert_eq!(tabs[0]["tab"], "tab_kept");
-        assert_eq!(next_resume(&mut socket).owned_tabs, vec![kept]);
+        token_restoring(&mut socket, &tokens, &[kept]);
         // One listing confirms the tabs and the list's own reads them; nothing reaches a tab.
         assert_eq!(
             served.browser.calls()[..2],
