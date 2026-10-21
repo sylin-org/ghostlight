@@ -48,6 +48,19 @@ const BEARER_BYTES: usize = 32;
 /// The most connections served at once. A connection beyond that is closed at once.
 const MAX_CONNECTIONS: usize = 32;
 
+/// How many short requests without the bearer may be served beside a full set of watchers' streams,
+/// so the next watcher is told why it cannot watch rather than dropped.
+const SHORT_REQUESTS_WITHOUT_BEARER: usize = 4;
+
+/// How many connections may be without this start's bearer: a watcher, a stranger, or a peer that
+/// has not sent its request yet. The other 20 stay for the window, so peers that only hold
+/// connections open never lock it out (U-D5).
+const MAX_WITHOUT_BEARER: usize = events::MAX_WATCH_STREAMS + SHORT_REQUESTS_WITHOUT_BEARER;
+
+/// How long a peer let in past [`MAX_WITHOUT_BEARER`] has to send a request that carries the
+/// bearer. One that does not is closed unanswered.
+const BEARER_DEADLINE: Duration = Duration::from_secs(1);
+
 /// How long the accept loop rests after a failed accept.
 const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 
@@ -182,6 +195,7 @@ impl PendingWorkbench {
             watching,
             port: self.address.port,
             limits: limits::Limits::default(),
+            places: Arc::default(),
             #[cfg(test)]
             wrong_keys: AtomicU64::new(0),
         });
@@ -205,6 +219,7 @@ struct Shared {
     watching: Arc<Watching>,
     port: u16,
     limits: limits::Limits,
+    places: Arc<Places>,
     /// Requests that carried a bearer that was not this start's, counted for tests.
     #[cfg(test)]
     wrong_keys: AtomicU64,
@@ -298,22 +313,61 @@ impl Drop for WorkbenchServer {
     }
 }
 
-/// Counts the connections being served, and frees a place when one ends.
-struct Place(Arc<AtomicUsize>);
+/// The connections being served, and how many of them are without the bearer.
+#[derive(Debug, Default)]
+struct Places {
+    served: AtomicUsize,
+    without_bearer: AtomicUsize,
+}
+
+/// One connection's place, freed when the connection ends. A peer starts without the bearer, in
+/// the share [`MAX_WITHOUT_BEARER`] bounds while it has room; past it, the peer must show the
+/// bearer within [`BEARER_DEADLINE`].
+struct Place {
+    places: Arc<Places>,
+    without_bearer: bool,
+}
 
 impl Place {
-    fn take(count: &Arc<AtomicUsize>) -> Option<Self> {
-        if count.fetch_add(1, Ordering::AcqRel) >= MAX_CONNECTIONS {
-            count.fetch_sub(1, Ordering::AcqRel);
+    fn take(places: &Arc<Places>) -> Option<Self> {
+        if places.served.fetch_add(1, Ordering::AcqRel) >= MAX_CONNECTIONS {
+            places.served.fetch_sub(1, Ordering::AcqRel);
             return None;
         }
-        Some(Self(Arc::clone(count)))
+        let without_bearer =
+            places.without_bearer.fetch_add(1, Ordering::AcqRel) < MAX_WITHOUT_BEARER;
+        if !without_bearer {
+            places.without_bearer.fetch_sub(1, Ordering::AcqRel);
+        }
+        Some(Self {
+            places: Arc::clone(places),
+            without_bearer,
+        })
+    }
+
+    /// How long the peer has to send its request.
+    const fn deadline(&self) -> Duration {
+        if self.without_bearer {
+            http::READ_DEADLINE
+        } else {
+            BEARER_DEADLINE
+        }
+    }
+
+    /// The peer showed the bearer: its place leaves the share without one.
+    fn bearer_shown(&mut self) {
+        if std::mem::take(&mut self.without_bearer) {
+            self.places.without_bearer.fetch_sub(1, Ordering::AcqRel);
+        }
     }
 }
 
 impl Drop for Place {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
+        if self.without_bearer {
+            self.places.without_bearer.fetch_sub(1, Ordering::AcqRel);
+        }
+        self.places.served.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -325,7 +379,6 @@ fn spawn_accept(
     thread::Builder::new()
         .name("ghostlight-workbench-listener".into())
         .spawn(move || {
-            let connections = Arc::new(AtomicUsize::new(0));
             for stream in listener.incoming() {
                 if stop.load(Ordering::SeqCst) {
                     break;
@@ -337,16 +390,13 @@ fn spawn_accept(
                 if !from_loopback(&stream) {
                     continue;
                 }
-                let Some(place) = Place::take(&connections) else {
+                let Some(mut place) = Place::take(&shared.places) else {
                     continue;
                 };
                 let shared = Arc::clone(&shared);
                 let _ = thread::Builder::new()
                     .name("ghostlight-workbench-connection".into())
-                    .spawn(move || {
-                        let _place = place;
-                        serve_connection(&shared, stream);
-                    });
+                    .spawn(move || serve_connection(&shared, stream, &mut place));
             }
         })
         .ok()
@@ -359,9 +409,15 @@ fn from_loopback(stream: &TcpStream) -> bool {
         .is_ok_and(|peer: SocketAddr| peer.ip().is_loopback())
 }
 
-fn serve_connection(shared: &Shared, stream: TcpStream) {
+fn serve_connection(shared: &Shared, stream: TcpStream, place: &mut Place) {
     let _ = stream.set_nodelay(true);
-    let (mut incoming, head) = http::Incoming::read_head(stream);
+    let (mut incoming, head) = http::Incoming::read_head(stream, place.deadline());
+    if matches!(&head, Ok(head) if routes::carries_bearer(shared, head)) {
+        place.bearer_shown();
+    } else if !place.without_bearer {
+        // Let in past the share without a bearer, it did not show one in time (U-D5).
+        return;
+    }
     let mut response = match head {
         // A HEAD answer carries no body, a refusal's included (RFC 9110 9.3.2; U-D6): every
         // route answers it as it answers a read, and only the headers go out.

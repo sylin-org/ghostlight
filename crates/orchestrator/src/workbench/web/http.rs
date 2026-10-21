@@ -189,18 +189,18 @@ pub struct Incoming {
 }
 
 impl Incoming {
-    /// Read one request's line and headers.
-    pub fn read_head(stream: TcpStream) -> (Self, Result<Head, ReadError>) {
+    /// Read one request's line and headers, which must arrive within `within`.
+    pub fn read_head(stream: TcpStream, within: Duration) -> (Self, Result<Head, ReadError>) {
         let mut incoming = Self {
             stream,
             buffered: Vec::new(),
         };
-        let head = incoming.head();
+        let head = incoming.head(within);
         (incoming, head)
     }
 
-    fn head(&mut self) -> Result<Head, ReadError> {
-        let deadline = Instant::now() + READ_DEADLINE;
+    fn head(&mut self, within: Duration) -> Result<Head, ReadError> {
+        let deadline = Instant::now() + within;
         let mut chunk = [0_u8; 2048];
         let end = loop {
             if let Some(end) = find_head_end(&self.buffered) {

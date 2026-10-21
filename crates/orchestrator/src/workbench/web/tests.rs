@@ -1708,28 +1708,46 @@ fn a_request_head_over_sixteen_kibibytes_is_refused() {
     assert_eq!(raw(fixture.port(), &long).status, 400);
 }
 
+/// U-D5: peers that only hold connections open never lock the window out. Idle peers fill the
+/// share without a bearer; past it, a request without the bearer is closed unanswered while the
+/// window's is answered, and once the idle peers go a tab is let in again.
 #[test]
-fn a_thirty_third_connection_is_closed_without_an_answer() {
+fn idle_peers_never_lock_the_window_out() {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+
     let fixture = Fixture::start();
     let port = fixture.port();
-    let idle: Vec<TcpStream> = (0..super::MAX_CONNECTIONS)
+    let places = Arc::clone(&fixture.server.shared.places);
+    let settled = |served: usize, without_bearer: usize| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while places.served.load(Ordering::Acquire) != served
+            || places.without_bearer.load(Ordering::Acquire) != without_bearer
+        {
+            assert!(Instant::now() < deadline, "{places:?}");
+            std::thread::yield_now();
+        }
+    };
+    let idle: Vec<TcpStream> = (0..super::MAX_WITHOUT_BEARER)
         .map(|_| TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap())
         .collect();
-    // Let the listener give each idle connection its place.
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let mut extra = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-    extra
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+    settled(super::MAX_WITHOUT_BEARER, super::MAX_WITHOUT_BEARER);
+
+    let mut stranger = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+    stranger
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    let _ = extra.write_all(
+    let _ = stranger.write_all(
         format!("GET /api/context HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").as_bytes(),
     );
     let mut answer = Vec::new();
-    let _ = extra.read_to_end(&mut answer);
+    let _ = stranger.read_to_end(&mut answer);
     assert!(answer.is_empty(), "{}", String::from_utf8_lossy(&answer));
+
+    assert_eq!(fixture.control(get("/api/context")).status, 200);
     drop(idle);
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    assert_eq!(get("/api/context").send(port).status, 200);
+    settled(0, 0);
+    assert_eq!(fixture.watch(get("/api/context")).status, 200);
 }
 
 /// One block of a stream: the parts of an event, or a comment.

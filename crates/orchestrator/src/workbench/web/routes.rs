@@ -550,6 +550,13 @@ fn method_not_allowed(allowed: &[Method]) -> Response {
     .with_header(header::ALLOW, list.join(", "))
 }
 
+/// Whether a request carries this start's bearer.
+pub(super) fn carries_bearer(shared: &Shared, head: &Head) -> bool {
+    head.header(header::AUTHORIZATION)
+        .and_then(|value| value.strip_prefix(BEARER_PREFIX))
+        .is_some_and(|token| same_secret(token.as_bytes(), shared.bearer.as_bytes()))
+}
+
 /// The context of a request: the bearer makes it Control; none makes it Watch or Closed.
 fn context_of(shared: &Shared, head: &Head) -> Result<WebContext, Response> {
     match head.header(header::AUTHORIZATION) {
