@@ -13,6 +13,8 @@ use crate::browser::adapter::{
 
 /// The longest document url the executor accepts from an adapter.
 const URL_LIMIT: usize = 8192;
+/// The longest document id, in bytes, an inventory may carry.
+const DOCUMENT_ID_LIMIT: usize = 160;
 
 struct RequestScope {
     tab: u64,
@@ -496,7 +498,7 @@ fn validate_inventory(inventory: &DocumentInventory) -> Result<(), BrowserError>
         || inventory.subjects.len() > DOCUMENT_LIMIT
         || inventory.documents.iter().any(|document| {
             document.id.is_empty()
-                || document.id.len() > 160
+                || document.id.len() > DOCUMENT_ID_LIMIT
                 || document.url.len() > URL_LIMIT
                 || !ids.insert(document.id.as_str())
         })

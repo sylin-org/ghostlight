@@ -22,6 +22,9 @@ use super::{
     RECORDING_FILE_NAME,
 };
 
+/// The most of a failed export's own reason a result repeats.
+const EXPORT_REASON_CHARS: usize = 160;
+
 /// Where a governed save puts its replay, and what the save learned on the way there.
 struct SaveDestination {
     /// Where the browser delivers the replay.
@@ -688,7 +691,7 @@ impl ApplicationExecutor {
             } else {
                 Refusal::RecordingExportFailed
             },
-            json!({"detail":bounded(reason, 160)}),
+            json!({"detail":bounded(reason, EXPORT_REASON_CHARS)}),
         )
     }
 }

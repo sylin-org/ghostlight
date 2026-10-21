@@ -40,7 +40,7 @@ const HANDLE_ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 pub const TAB_URL_CHARS: usize = 8192;
 
 /// The most characters of a tab title a binding keeps.
-const TAB_TITLE_CHARS: usize = 500;
+pub(crate) const TAB_TITLE_CHARS: usize = 500;
 
 /// How many hexadecimal characters a [`UrlDigest`] has: one SHA-256 digest.
 const URL_DIGEST_CHARS: usize = 64;
@@ -1166,9 +1166,7 @@ impl WorkspaceStore {
             if now >= deadline {
                 return Err(WorkspaceError::Busy);
             }
-            let wait = deadline
-                .saturating_duration_since(now)
-                .min(Duration::from_millis(50));
+            let wait = deadline.saturating_duration_since(now).min(LEASE_RECHECK);
             let (next_state, _) = self
                 .leased
                 .wait_timeout(state, wait)
@@ -2309,9 +2307,13 @@ fn selected(handle: &TabHandle, tab: &TabState) -> SelectedTab {
     }
 }
 
-fn bounded(value: &str, maximum: usize) -> String {
+/// `value` cut to its first `maximum` characters.
+pub(crate) fn bounded(value: &str, maximum: usize) -> String {
     value.chars().take(maximum).collect()
 }
+
+/// How often a call waiting for a busy lease looks again, besides being woken by its release.
+const LEASE_RECHECK: Duration = Duration::from_millis(50);
 
 /// Workspace invariant or recovery failure.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]

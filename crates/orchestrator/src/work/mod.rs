@@ -66,7 +66,7 @@ use crate::presentation::PresentationReactor;
 use crate::provenance::ConnectionEvidence;
 use crate::workbench::WorkbenchProjection;
 use crate::workspace::{
-    SelectedTab, SelectedTarget, SelectedView, StaleReason, StaleTargetContext, TabHold,
+    bounded, SelectedTab, SelectedTarget, SelectedView, StaleReason, StaleTargetContext, TabHold,
     WorkspaceError, WorkspaceId, WorkspaceLease, WorkspaceStore,
 };
 use findings::{Findings, Frame, FrameFindings, StaleOffer};
@@ -311,7 +311,7 @@ impl ApplicationExecutor {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if stage.running_or_finished
             || stage.waiting_reported
-            || prepared.received.elapsed() < Duration::from_millis(500)
+            || prepared.received.elapsed() < WAITING_SHOWN_AFTER
         {
             return;
         }
@@ -965,9 +965,7 @@ impl ApplicationExecutor {
             return applied;
         }
         let remaining = context.deadline.saturating_duration_since(Instant::now());
-        let budget = remaining
-            .min(std::time::Duration::from_millis(2_000))
-            .as_millis() as u64;
+        let budget = remaining.min(EXPECTATION_OBSERVE_BUDGET).as_millis() as u64;
         let (cause, decision) = match self.dispatch(
             context,
             BrowserCommand::Observe(PhysicalWait {
@@ -1635,7 +1633,7 @@ impl ApplicationExecutor {
             return CloseCompensation::Retained;
         }
         let cancelled = AtomicBool::new(false);
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + CLOSE_COMPENSATION_BUDGET;
         // The tab exists, so the workspace is already bound to the browser holding it. Undoing an
         // effect is never the moment to choose a browser.
         let Some(browser) = self.workspaces.browser_of(context.workspace.as_str()) else {
@@ -3011,7 +3009,7 @@ fn load_physical_files(paths: &[String]) -> Result<(Vec<PhysicalFile>, u64), Fil
             .filter(|value| !value.is_empty())
             .ok_or(FileProblem::InvalidName)?;
         files.push(PhysicalFile {
-            name: bounded(name, 255),
+            name: bounded(name, crate::language::FILE_NAME_CHARS),
             media_type: media_type(path).into(),
             data: BASE64.encode(bytes),
             size: before.len(),
@@ -3192,9 +3190,14 @@ fn word_count(text: &str) -> usize {
     text.split_whitespace().count()
 }
 
-fn bounded(value: &str, maximum: usize) -> String {
-    value.chars().take(maximum).collect()
-}
+/// How long a call waits for its lease before the window shows it as waiting.
+const WAITING_SHOWN_AFTER: Duration = Duration::from_millis(500);
+
+/// The most an applied action spends observing whether its expectation came true.
+const EXPECTATION_OBSERVE_BUDGET: Duration = Duration::from_secs(2);
+
+/// The most a compensating close of a refused landing may take.
+const CLOSE_COMPENSATION_BUDGET: Duration = Duration::from_secs(2);
 
 #[cfg(test)]
 mod tests {

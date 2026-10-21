@@ -69,7 +69,7 @@ impl ApplicationExecutor {
                                 words,
                                 host: observed_host(&url),
                             },
-                            json!({"tab":selected.handle.as_str(),"url":url,"title":bounded(&title,500),"text":bounded(&text,max_chars),"truncated":truncated || text.chars().count() > max_chars,"document_generation":selected.generation}),
+                            json!({"tab":selected.handle.as_str(),"url":url,"title":bounded(&title,crate::workspace::TAB_TITLE_CHARS),"text":bounded(&text,max_chars),"truncated":truncated || text.chars().count() > max_chars,"document_generation":selected.generation}),
                         )
                     }
                     Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),

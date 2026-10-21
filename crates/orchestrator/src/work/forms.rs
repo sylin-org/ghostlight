@@ -34,6 +34,9 @@ use crate::browser::adapter::{
 /// How often a duration wait looks for a cancellation while it sleeps.
 const DURATION_POLL: Duration = Duration::from_millis(20);
 
+/// How often a selector wait asks the page again.
+const SELECTOR_POLL: Duration = Duration::from_millis(100);
+
 impl ApplicationExecutor {
     pub(super) fn perform_fill(
         &self,
@@ -948,7 +951,7 @@ impl ApplicationExecutor {
                             break;
                         }
                         std::thread::sleep(std::cmp::min(
-                            std::time::Duration::from_millis(100),
+                            SELECTOR_POLL,
                             context.deadline.saturating_duration_since(Instant::now()),
                         ));
                     }
@@ -1373,8 +1376,8 @@ fn decode_inline_files(
             return Err(FileProblem::UploadTooLarge);
         }
         decoded.push(PhysicalFile {
-            name: bounded(&file.name, 255),
-            media_type: bounded(&file.media_type, 100),
+            name: bounded(&file.name, crate::language::FILE_NAME_CHARS),
+            media_type: bounded(&file.media_type, crate::language::MEDIA_TYPE_CHARS),
             data: file.data_base64.clone(),
             size: bytes.len() as u64,
         });
