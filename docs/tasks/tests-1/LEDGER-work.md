@@ -6,7 +6,13 @@ Machine: test-03 (Alpine). Paths without a crate are under `crates/orchestrator/
 
 ## RESUME HERE
 
-Opened on 2026-10-21, not started. Read ADR-0204 and BOOTSTRAP.md, then finish arch-1's W-D4 in core-work's ledger, then take `work/` and `workspace/`, starting with `work/tests/execution.rs`, then `governance/`.
+arch-1's W-D4 (eac543ea) and W-D5 (39b7fe8f) landed first. Every test of `work/` and `workspace/`
+is classified (the plan below, read-only, 2026-10-21): 373 tests to 55, plus the P3 reserve test.
+Cut order: the inline modules, then `work/tests/` file by file (golden, channels, provenance,
+audit_health, credentials, controls, control, configured_authority, catalog_authority, documents,
+presentation, composition, findings, replacement, restarts, availability, protocol4, rebound,
+tabs), then `workspace/tests.rs`, then `execution.rs`. A test that folds into another file's test is
+added there in the commit that deletes it. Then `governance/`.
 
 ## Areas
 
@@ -31,3 +37,68 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   panics). The same read, drawn once and with every signal refused once, gives the same result,
   browser commands and audit line. Keep it in this lane's cut; it counts against the reserve, not
   this lane's budget.
+
+## The plan for `work/` and `workspace/` (2026-10-21)
+
+Four read-only passes read every test against ADR-0204 Decision 1. Kept tests, by file, with
+what each protects; a fold names the tests a kept one absorbs in its own doc comment when it lands.
+
+- `tests/golden.rs` (5) and `tests/channels.rs`'s golden test: the five model goldens and the audit
+  success golden. Contract, unchanged.
+- `tests/configured_authority.rs`: `policy_explain_and_its_audit_line_name_one_authority` (C10c).
+- `tests/provenance.rs`: queued refusals keep their original evidence (Connection reporting 3, 5).
+- `tests/presentation.rs`: a refusal draws its notice on the tab it kept or held (W-D2, C2, P2);
+  `fill_upload_and_scroll_name_their_targets_once_the_browser_has_acted` (f544f45c); the P3 test
+  (reserve).
+- `tests/catalog_authority.rs`: every catalog variant is admitted by exactly its RAWX set (Gov 3,
+  10, 13; ADR-0185 1-2; ADR-0156 1-2; C10b); a recording save needs Read on every source and Write
+  on its destination (ADR-0158 4; C10b).
+- `tests/control.rs`: a person's control stops the next effect and never rewrites a sent one
+  (ADR-0185 4-5, Gov 12).
+- `tests/credentials.rs`: credential input needs the user's word on each call (ADR-0185 3), with a
+  new grouped-fill row.
+- `tests/channels.rs`: a channel switch refuses only its own channel (Gov 4).
+- `tests/audit_health.rs`: an audit failure keeps the outcome and Require audit refuses later work
+  (ADR-0159 1-2).
+- `tests/documents.rs`: content and effects come only from admitted documents (ADR-0158 1-3, 5).
+- `tests/availability.rs`: a pinned browser that left is waited for or started again; a session
+  with no browser waits only while one is returning; a pinned browser that stays gone is started
+  only when Ghostlight knows it; the no-browser answers name the store only while setup is
+  incomplete; a session leaves its browser only when it is gone and the agent names another
+  (W-D5). (Contract 17, 19, 20; ADR-0196 D12; b88f3d3c.)
+- `tests/findings.rs`: each record holds only what its own frame reached (77952a37, b0436754,
+  ADR-0202 D9-13); a flow step meets what the same call meets outside a flow (b411e6ad, 0c9bb755).
+- `tests/restarts.rs`: a tab binding across a gap is confirmed before any command reaches it
+  (Contract 19, ADR-0203 D1; 1d10bf74, 8a16343f, c4e382aa), with the inert-binding rows from
+  `workspace/tests.rs`.
+- `tests/replacement.rs`: a removed handle names a replacement only when the page proved one, the
+  tool takes one and governance reveals it (Executor 6, LANGUAGE stale handles; 43eff032).
+- `tests/protocol4.rs`: a protocol-4 failure reads to the model with its true effect (contract);
+  a dialog is answered from the browser's record and authorized by the document that raised it
+  (c2df20e2, 925d573c, ADR-0158 5), with the executor's dialog rows; a fill's answer says what the
+  page did and names only what policy keeps; what the service asks the page (3e80fb91, 8256f32d).
+- `tests/rebound.rs`: every action that followed its handle says rebound (ADR-0198 D17; 3466718c,
+  259241ad).
+- `tests/tabs.rs`: default reuse takes only a kept tab of the same agent still at its address (BJ
+  25, ADR-0196 D9); a group is titled for the opener as the window names it (Ext 8); a same-document
+  route keeps targets and a commit or new origin expires them (BJ 2); a call naming no tab (Exec 6,
+  ea58ecb4); a held tab refuses with its landing's decision (ADR-0203 D2.4, D5.5); a close is
+  authorized on its own (Gov 9, 14).
+- `workspace/tests.rs`: a busy workspace waits within the deadline; a session is its opener and
+  owner and outlives its connections (ADR-0106; c78d4bd3, 10fc554a); a control keeps one handle and
+  one record per document, the book stays bounded and every handle has the decoded shape
+  (d80b64c3); a tab forgotten by any close leaves nothing its page minted (7bd0bf20).
+- `tests/execution.rs`: a browser failure renders its typed refusal with the true effect (Exec
+  3-4, L-D6, ADR-0203 D5); deadline advice; unconfirmed expectations; one executor and one receipt
+  per step; a flow under `on_error` and human directives (Exec 5); stale handles (Exec 6, d0cea694);
+  W-D4; open, read and close (BJ 1); view handles (Exec 8, 8f2241c0); waits (BJ 5, 2513f862);
+  recording save and one recording per session (BJ 17-18, 79d460c9, C16); session isolation and
+  the ownership refusal (BJ 24); the audit holds no page, caller or browser text (Gov 10, 15-17).
+- The inline modules (`item.rs`, `pending.rs`, `composition.rs`, `documents.rs`, `invocation_id.rs`,
+  `receipt.rs`, `reading.rs`) keep no test: their behaviors fold into the executor tests above.
+
+Gaps found, for the reserve or other lanes: uploads refused before any effect (Executor 9, BJ 13);
+a late receipt after a cancellation commits nothing (Executor 2); back, forward and reload under
+landing governance (BJ 9); diagnostics exclude the client's claim (Connection reporting 5, once
+`receipt.rs`'s test goes); ACCEPTANCE BJ 25 still names a removed `reuse: never` field, and
+ADR-0185 item 4's "names that action before saying why" disagrees with b97335a4.
