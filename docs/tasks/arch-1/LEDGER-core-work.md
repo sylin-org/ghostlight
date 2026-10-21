@@ -8,7 +8,7 @@ entry in [ADR-0203](../../adr/0203-one-owner-for-each-fact.md)'s Rebuild plan. S
 
 ## RESUME HERE
 
-Nothing has landed. Start with W-D1.
+W-D2 has landed. W-D1 moved to core-language (L-D5). Next: W-D3.
 
 ## Slices
 
@@ -16,8 +16,8 @@ In order. "After" names what a slice waits for.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| W-D1 | fix(work): an inline upload of exactly 5,000,000 bytes is accepted | - | WORK-1's note | todo |
-| W-D2 | fix(work): a flow step whose tab close the policy refuses shows the kept-tab notice | - | WORK-8's notice half | todo |
+| W-D1 | fix(work): an inline upload of exactly 5,000,000 bytes is accepted | - | WORK-1's note | moved to LEDGER-core-language.md (L-D5) |
+| W-D2 | fix(work): a flow step whose tab close the policy refuses shows the kept-tab notice | - | WORK-8's notice half | landed |
 | W-D3 | fix(work): a selector wait gives the readiness fact the other waits give | - | WORK-13; a deliberate model-visible change | todo |
 | C19c | refactor(work): the completion path's leftovers go | - | ADR-0203 C19c, moved from core; WORK-7's `CompletionGate`; the service half is core-service's | todo |
 | C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | todo |
@@ -39,3 +39,15 @@ In order. "After" names what a slice waits for.
 WORK-14 is not taken: browser events change leased workspaces through the store by design, and C4
 recorded the choice. WORK-8's typed coverage is not taken either; ADR-0203's audit-projection
 route stands. WORK-11 and WORK-15 are policy's (LEDGER-policy.md).
+
+W-D1 moved to core-language as L-D5 on 2026-10-20. The refusal is intake's estimate in
+`language/mod.rs` (`data.len() / 4 * 3`, padding included): 5,000,000 bytes are 6,666,668 base64
+characters, which it counts as 5,000,001, before work runs. Work's own decoder counts exactly.
+L-D5 has intake count through a public counter in `language/`; WORK-1 then points
+`work/forms.rs`'s `base64_decoded_len` at that counter.
+
+W-D2 reads the notice from the typed `Terminal` (ADR-0203 Decision 5.6): the decision's
+`TabCloseDenied` gives the kept-by-policy notice and the `LocalInterlock` audit refusal the
+kept-by-setting one, whatever the tool. A flow keeps its first refused step's decision, so a flow
+stopped by a refused tab close now shows the kept-tab notice. The four-clause WorkBlocked test in
+`complete_terminal` stays for C12b.

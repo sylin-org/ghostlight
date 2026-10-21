@@ -69,6 +69,57 @@ fn credential_guidance_finishes_visuals_without_a_denial_notice() {
 }
 
 #[test]
+fn a_tab_close_the_policy_refuses_shows_the_kept_tab_notice_in_a_flow_too() {
+    for composed in [false, true] {
+        let policy = temporary_policy("tab-close-notice");
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"browser.tabs.allow_close","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
+        let (mut executor, browser, _, workspace, _) =
+            fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
+        let signals = Arc::new(PageSignals::default());
+        executor.presentation = PresentationReactor::new(signals.clone());
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(opened.status, Status::Succeeded);
+        signals.0.lock().unwrap().clear();
+        let close = json!({"action":"close","tab":opened.facts["tab"]});
+        let (tool, input) = if composed {
+            (
+                "browser_flow",
+                json!({"steps":[{"tool":"browser_tabs","arguments":close}]}),
+            )
+        } else {
+            ("browser_tabs", close)
+        };
+        let result = executor.execute(&workspace, tool, input, &CancellationToken::default());
+        assert_eq!(result.status, Status::Blocked, "composed: {composed}");
+        let signals = signals.0.lock().unwrap();
+        let denial = signals
+            .iter()
+            .find(|signal| signal.signal == PresentationKind::Denial)
+            .unwrap_or_else(|| panic!("no denial notice, composed: {composed}"));
+        assert_eq!(
+            denial.phase, "Ghostlight kept this tab open",
+            "composed: {composed}"
+        );
+        assert_eq!(denial.tab_id, Some(7), "composed: {composed}");
+    }
+}
+
+#[test]
 fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
     let (mut executor, browser, _, workspace, audit) = fixture();
     let signals = Arc::new(PageSignals::default());

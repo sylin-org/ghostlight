@@ -2316,15 +2316,18 @@ impl ApplicationExecutor {
     }
 }
 
-fn denial_presentation(tool: &str, result: &InvocationResult) -> DenialPresentation {
-    if tool == "browser_tabs" {
-        return match result.facts.get("reason").and_then(Value::as_str) {
-            Some("tab_close_denied") => DenialPresentation::TabKeptOpenByPolicy,
-            Some("browser_local_interlock") => DenialPresentation::TabKeptOpenBySetting,
-            _ => DenialPresentation::Guardrail,
-        };
+/// The notice a refused frame shows, read from the decision and refusal it carries rather than
+/// from its tool, so a flow that a refused tab close stopped shows the kept-tab notice too.
+fn denial_presentation(terminal: &Terminal) -> DenialPresentation {
+    if terminal.decision.reason == ReasonCode::TabCloseDenied {
+        DenialPresentation::TabKeptOpenByPolicy
+    } else if terminal.audit.refusal()
+        == Some(&crate::language::audit::AuditRefusal::LocalInterlock)
+    {
+        DenialPresentation::TabKeptOpenBySetting
+    } else {
+        DenialPresentation::Guardrail
     }
-    DenialPresentation::Guardrail
 }
 
 /// What the single completion path needs to record one frame's terminal outcome.

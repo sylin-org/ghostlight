@@ -54,7 +54,7 @@ impl ApplicationExecutor {
                     invocation: terminal.result.invocation.to_string(),
                     workspace: workspace.as_str().into(),
                     physical_id: terminal.physical_id,
-                    presentation: denial_presentation(tool, &terminal.result),
+                    presentation: denial_presentation(&terminal),
                 }
             }
             _ => DomainEvent::WorkCompleted {
