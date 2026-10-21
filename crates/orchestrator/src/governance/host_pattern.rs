@@ -5,6 +5,8 @@
 //! matching, the probe set and the Policy page all ask the parsed value, so they read one grammar
 //! with one normalization.
 
+use url::Url;
+
 use super::manifest::HostRules;
 
 /// The longest hostname DNS allows, in characters.
@@ -107,6 +109,13 @@ fn is_below(host: &str, suffix: &str) -> bool {
     host.len() > suffix.len()
         && host.ends_with(suffix)
         && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.')
+}
+
+/// The host of `url`, lowercase, which is how every host pattern compares it, or none when the
+/// address has no host.
+#[must_use]
+pub fn url_host(url: &Url) -> Option<String> {
+    url.host_str().map(str::to_ascii_lowercase)
 }
 
 /// A grant's host rules, parsed.

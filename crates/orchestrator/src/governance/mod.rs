@@ -33,7 +33,7 @@ use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::PolicyAuthor;
 use crate::language::policy;
 use file_state::FileState;
-use host_pattern::{HostPattern, ParsedHosts};
+use host_pattern::{url_host, HostPattern, ParsedHosts};
 use manifest::PolicySetting;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -607,7 +607,7 @@ impl AuthoritySnapshot {
 
     /// The index of the first layer whose never-touch list matches `url`'s host.
     fn never_touch_author(&self, url: &Url) -> Option<usize> {
-        let host = url.host_str()?.to_ascii_lowercase();
+        let host = url_host(url)?;
         self.layers.iter().position(|layer| {
             layer
                 .never_touch_patterns
@@ -725,7 +725,7 @@ impl AuthoritySnapshot {
         if self.own_origin.covers(&parsed) {
             return (Decision::deny(ReasonCode::OwnWorkbench), vec![]);
         }
-        let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
+        let Some(host) = url_host(&parsed) else {
             return (Decision::deny(ReasonCode::HostDenied), vec![]);
         };
         if requirements.is_empty() {

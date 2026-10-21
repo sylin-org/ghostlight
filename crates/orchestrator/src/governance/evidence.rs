@@ -203,7 +203,7 @@ impl AuthoritySnapshot {
             requirements,
             host: url
                 .and_then(|url| url::Url::parse(url).ok())
-                .and_then(|url| url.host_str().map(str::to_ascii_lowercase)),
+                .and_then(|url| super::host_pattern::url_host(&url)),
             allowed: decision.allowed,
             reason: decision.reason,
             layers: vec![],
