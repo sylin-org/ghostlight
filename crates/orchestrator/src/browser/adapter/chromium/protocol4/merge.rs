@@ -17,6 +17,43 @@ use crate::language::area::{LeftOut, LeftOutKey};
 /// What separates the text of two documents.
 const SECTION_SEPARATOR: &str = "\n\n";
 
+/// The bytes one `call` receipt may take: the browser relay's frame bound, less room for the
+/// receipt's own fields (its tab, committed URLs and keys). A receipt over the bound would end
+/// every session's browser connection, and a 2.0.0 extension sends it whole.
+pub const CALL_BUDGET_BYTES: usize = ghostlight_relay::MAX_FRAME_BYTES - RECEIPT_ROOM_BYTES;
+/// What a receipt holds beside its answers, at most.
+const RECEIPT_ROOM_BYTES: usize = 64 * 1024;
+/// The most JSON bytes one character of a page's answer can become: a control character is
+/// written as a six-byte escape.
+pub const BYTES_PER_CHARACTER: usize = 6;
+/// What one answer's envelope and keys add to what it carries.
+const ANSWER_ROOM_BYTES: usize = 1024;
+/// The most characters one target the page lists can carry, from the page's caps on its fields
+/// (`content.js`): a 500-character name, a value list of 25 values of 80, 25 options of three
+/// 60-character parts, its limits, hint, group and context, and their keys.
+pub const TARGET_WORST_CHARS: usize = 10_000;
+/// The most characters one tree node the page lists can carry: a 120-character label, its kind
+/// and its keys.
+pub const TREE_NODE_WORST_CHARS: usize = 160;
+
+/// How many documents one `call` may ask together when each answer carries up to `characters`
+/// characters, so its receipt fits one relay frame; at least one.
+#[must_use]
+pub const fn documents_per_call(characters: usize) -> usize {
+    let answer = characters * BYTES_PER_CHARACTER + ANSWER_ROOM_BYTES;
+    let documents = CALL_BUDGET_BYTES / answer;
+    if documents == 0 {
+        1
+    } else {
+        documents
+    }
+}
+
+/// The most targets one document may be asked for, so its answer alone fits one relay frame.
+pub const TARGETS_PER_DOCUMENT: usize =
+    (CALL_BUDGET_BYTES - ANSWER_ROOM_BYTES) / (TARGET_WORST_CHARS * BYTES_PER_CHARACTER);
+const _: () = assert!(TARGETS_PER_DOCUMENT >= 1);
+
 /// The targets one document found.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DocumentTargets {

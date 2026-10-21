@@ -72,7 +72,7 @@ pub fn inspect(
         l,
         scope,
         tab_id,
-        &world::inspect(kind.as_str(), max_items),
+        |ask| world::inspect(kind.as_str(), ask),
         max_items,
     )
 }
@@ -94,7 +94,7 @@ pub fn find(
         l,
         scope,
         tab_id,
-        &world::find(text, kind.as_str(), max_results),
+        |ask| world::find(text, kind.as_str(), ask),
         max_results,
     )
 }
@@ -114,28 +114,42 @@ pub fn query_semantic(
         l,
         scope,
         selector.tab_id,
-        &world::query_semantic(
-            &selector.name,
-            selector.role.as_deref(),
-            selector.exact,
-            selector.form_scope,
-            selector.max_results,
-        ),
+        |ask| {
+            world::query_semantic(
+                &selector.name,
+                selector.role.as_deref(),
+                selector.exact,
+                selector.form_scope,
+                ask,
+            )
+        },
         selector.max_results,
     )
 }
 
 /// Ask every readable document for targets with one message, and fold what they found.
+///
+/// Each document is asked for `maximum` targets, or for fewer when its worst-case answer would
+/// not fit one relay frame, and the documents are asked in as many calls as keep every receipt
+/// within one frame. A document asked for fewer than it holds says it was cut.
 fn targets(
     l: &mut Link<'_>,
     scope: &mut Scope,
     tab_id: u64,
-    message: &Message,
+    message: impl Fn(usize) -> Message,
     maximum: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
     let docs = scope.content_docs();
-    let plans = plan_each(scope, &docs, |_| message.clone())?;
-    let answers = all(l, scope, tab_id, &plans, true)?;
+    let ask = maximum.min(merge::TARGETS_PER_DOCUMENT);
+    let plans = plan_each(scope, &docs, |_| message(ask))?;
+    let answers = within_frames(
+        l,
+        scope,
+        tab_id,
+        &plans,
+        true,
+        ask * merge::TARGET_WORST_CHARS,
+    )?;
     let found = docs.iter().zip(&answers).filter_map(|(doc, answer)| {
         value::<Targets>(answer).ok().map(|found| DocumentTargets {
             targets: rescope(doc, found.targets),
@@ -211,14 +225,21 @@ pub fn read_document(
         top_answer.clone_from(&first_text);
     }
     let mut sections = vec![first_text];
-    let remaining = merge::remaining_after(sections.iter().map(Option::as_ref), max_chars);
-    if remaining > 0 && !rest.is_empty() {
+    // The embedded documents are asked for what the bound has left, as many together as keep
+    // each receipt within one relay frame, and no more once the bound is full.
+    let mut unread = rest;
+    let mut remaining = merge::remaining_after(sections.iter().map(Option::as_ref), max_chars);
+    while remaining > 0 && !unread.is_empty() {
+        let (batch, later) =
+            unread.split_at(merge::documents_per_call(remaining).min(unread.len()));
         let message = world::read_text(None, Some(ReadMode::Visible.as_str()), remaining);
-        let plans = plan_each(scope, rest, |_| message.clone())?;
+        let plans = plan_each(scope, batch, |_| message.clone())?;
         let answers = all(l, scope, tab_id, &plans, false)?;
         sections.extend(answers.iter().map(|answer| value::<Text>(answer).ok()));
+        unread = later;
+        remaining = merge::remaining_after(sections.iter().map(Option::as_ref), max_chars);
     }
-    let skipped = remaining == 0 && !rest.is_empty();
+    let skipped = !unread.is_empty();
     let merged = merge::text_sections(sections.iter().map(Option::as_ref), max_chars, skipped);
     let (title, url) = top_answer.map_or_else(Default::default, |top| (top.title, top.url));
     Ok(BrowserOutcome::Text {
@@ -272,7 +293,14 @@ pub fn inspect_tree(
         let message = world::inspect_tree(None, plan.max_depth, plan.max_nodes);
         let plans = plan_each(scope, children, |_| message.clone())?;
         let first = root.is_none();
-        let answers = all(l, scope, tab_id, &plans, first)?;
+        let answers = within_frames(
+            l,
+            scope,
+            tab_id,
+            &plans,
+            first,
+            plan.max_nodes * merge::TREE_NODE_WORST_CHARS,
+        )?;
         subtrees.extend(answers.iter().filter_map(|answer| value(answer).ok()));
     }
     let unread = plan.is_none() && !children.is_empty();
@@ -399,6 +427,30 @@ pub(super) fn one(
         CallRequest::sequence(tab_id, &plans).guard(scope.guard()),
         Some(&mut *scope),
     )
+}
+
+/// Send planned calls in as few `call` primitives as keep each receipt within one relay frame,
+/// when each answer carries up to `characters` characters, and return every answer in plan
+/// order. Only the first call carries the scope's guard, when `guarded`.
+fn within_frames(
+    l: &mut Link<'_>,
+    scope: &mut Scope,
+    tab_id: u64,
+    plans: &[PlannedCall],
+    guarded: bool,
+    characters: usize,
+) -> Result<super::super::link::Answers, BrowserError> {
+    if plans.is_empty() {
+        return Err(BrowserError::DocumentUnavailable);
+    }
+    let mut answers = Vec::with_capacity(plans.len());
+    for (index, batch) in plans
+        .chunks(merge::documents_per_call(characters))
+        .enumerate()
+    {
+        answers.extend(all(l, scope, tab_id, batch, guarded && index == 0)?);
+    }
+    Ok(answers)
 }
 
 /// Send planned calls together, with the scope's guard when `guarded`. No calls is no

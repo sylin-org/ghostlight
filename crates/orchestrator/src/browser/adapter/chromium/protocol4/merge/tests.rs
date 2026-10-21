@@ -458,6 +458,25 @@ fn a_read_across_documents_is_one_text_under_one_ceiling() {
     assert_eq!(asks(&[Some(section("", false))], 40), 40);
     assert_eq!(asks(&[None], 40), 40);
     assert_eq!(asks(&[Some(section("12345", false))], 5), 1);
+
+    // However many documents a read, a listing or a tree asks, each call's worst-case receipt fits
+    // one relay frame, at six bytes a character, and a call asks as many as fit (A-D4).
+    for characters in [
+        1,
+        8_000,
+        50_000,
+        TARGETS_PER_DOCUMENT * TARGET_WORST_CHARS,
+        400 * TREE_NODE_WORST_CHARS,
+    ] {
+        let documents = documents_per_call(characters);
+        let answer = characters * BYTES_PER_CHARACTER + ANSWER_ROOM_BYTES;
+        assert!(documents >= 1, "{characters}");
+        assert!(documents * answer <= CALL_BUDGET_BYTES, "{characters}");
+        assert!(
+            (documents + 1) * answer > CALL_BUDGET_BYTES,
+            "{characters}: as many as fit"
+        );
+    }
 }
 
 /// The page tree, embedded documents included, stays under one node bound: the embedded trees

@@ -162,6 +162,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | A-D1 | fix(assets): a page text cut never splits a character and counts characters as the service does | - | the coordinator's page-asset classification, 2026-10-21 (Notes, second sweep) | landed (this commit) |
 | A-D2 | fix(assets): an image input reads as a button, as fill already treats it | - | the same classification (Notes, second sweep) | todo |
 | A-D3 | fix(assets): a visual-settle wait on a target that is gone refuses it as stale | - | the same classification, lower confidence: confirm first (Notes, second sweep) | todo |
+| A-D4 | fix(adapter): a read, a listing or a tree across documents never asks for more than one relay frame carries | P-D6 | the coordinator, from test-02's gap-3 analysis, 2026-10-21 | landed (this commit) |
 
 ### Notes (second sweep)
 
@@ -350,6 +351,22 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   `<input type=image>` reads as a `textbox`. HTML-AAM maps it to `button`, and the fill path already
   calls it a button, so inspect contradicts fill and a selector for role `button` never finds it.
   (A `file` input reading as a textbox is deliberate: docs/tasks/linux-1/LEDGER.md.)
+- A-D4 (landed): a read, an inspect, a find or a page tree across documents asked every document
+  in one `call`, each for the whole share (up to 50,000 characters, 200 targets or 398 nodes), so
+  one receipt could pass the relay's 8 MiB bound, end every session's browser connection on a 2.0.0
+  extension, and meet P-D6's `answer_too_large` on 2.0.1. `merge.rs` now sizes a call by its worst
+  case, six bytes a character plus room for each answer and for the receipt, against
+  `ghostlight_relay::MAX_FRAME_BYTES`: `documents_per_call` says how many documents one call may
+  ask, and `TARGETS_PER_DOCUMENT` (138) caps one document's target ask, from `TARGET_WORST_CHARS`,
+  the page's caps on a target's fields summed. The read asks the embedded documents in batches for
+  what the bound has left and stops once it is full, so the documents left unread mark the text
+  `truncated`; the listings ask each document for at most 138 targets, in batches, and a document
+  holding more says it was cut, which the listing reports with its `truncated` and left-out counts;
+  the tree's subtrees are batched by their node share. Only the first call of a command carries
+  the guard, as the read already did. The accessibility snapshot needs nothing: no service path
+  sends that primitive. No language changes: the existing `truncated` and left-out words carry the
+  partial answer. Proof: rows of merge's kept read test, that each call's worst case fits one frame
+  and asks as many documents as fit; no new test.
 - A-D3, found the same way, lower confidence: `observe` with `visual_settle` and a locator reads its
   element through `heldElement`, which returns nothing for a gone or unknown handle, and
   `settleVisual(undefined)` then measures the whole document. The wait reports the page's settle
