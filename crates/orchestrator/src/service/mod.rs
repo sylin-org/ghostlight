@@ -202,7 +202,7 @@ impl StartTerms {
 pub struct ServiceHost {
     /// Typed in-process application boundary for the disposable desktop workbench.
     pub workbench: WorkbenchFacade,
-    /// The process-diagnostics hub this authority owns.
+    /// The process-diagnostics hub this service owns.
     pub diagnostics: Arc<DiagnosticsHub>,
     browser: Arc<RelayBrowserPort>,
     audit: Arc<AuditRecorder>,
@@ -210,7 +210,7 @@ pub struct ServiceHost {
     threads: Vec<JoinHandle<()>>,
     refresher: Thread,
     home: PathBuf,
-    intake: Arc<Intake>,
+    context: Arc<ServiceContext>,
     bound: Mutex<Option<Bound>>,
     quit: Quit,
     ready: Arc<ReadyWatch>,
@@ -227,8 +227,8 @@ struct Bound {
 /// Another service holds this home's service lock and stays, so this start gives way to it: the
 /// caller reaches that service by its endpoint ([`lifetime::lock_wait`]).
 #[derive(Debug, thiserror::Error)]
-#[error("another Ghostlight orchestrator already owns this runtime")]
-pub struct AuthorityAlreadyRunning;
+#[error("another Ghostlight service already owns this runtime")]
+pub struct ServiceAlreadyRunning;
 
 /// The person quit Ghostlight, and this start is one that Quit holds back.
 #[derive(Debug, thiserror::Error)]
@@ -323,7 +323,7 @@ impl ServiceHost {
     pub(crate) fn route(&self) -> Arc<ShellRoute> {
         Arc::new(ShellRoute::new(
             self.quit.shells(),
-            Arc::clone(&self.intake.presence),
+            Arc::clone(&self.context.presence),
         ))
     }
 
@@ -360,7 +360,7 @@ impl ServiceHost {
                     None,
                     &format!("{}: {QUIT_HELD}", terms.reason.as_str()),
                 );
-            } else if !error.is::<AuthorityAlreadyRunning>() {
+            } else if !error.is::<ServiceAlreadyRunning>() {
                 startup_failed(&diagnostics, error);
             }
         })?;
@@ -481,7 +481,7 @@ impl ServiceHost {
                 audit_for_thread.wait_for_recovery(&audit_stop);
             }
         });
-        let intake = Arc::new(Intake {
+        let context = Arc::new(ServiceContext {
             instance: format!("{INSTANCE_PREFIX}{}", Uuid::new_v4().simple()),
             started_by: terms.reason,
             templates: failure_templates(),
@@ -519,7 +519,7 @@ impl ServiceHost {
             ],
             refresher: refresher_thread,
             home: home.into(),
-            intake,
+            context,
             bound: Mutex::new(None),
             quit,
             ready: Arc::default(),
@@ -545,7 +545,7 @@ impl ServiceHost {
         // Edges that served an earlier service find this one from here on, so a call with no
         // browser waits for them from this moment, not from construction. After a replacement
         // they are the browsers of the service that just ended, on their relays' backoff.
-        if lifetime::replaces_a_service(self.intake.started_by) {
+        if lifetime::replaces_a_service(self.context.started_by) {
             self.browser.replacement_published();
         } else {
             self.browser.endpoint_published();
@@ -557,11 +557,11 @@ impl ServiceHost {
                 return Err(error);
             }
         };
-        let thread = spawn_listener(Arc::clone(&listener), Arc::clone(&self.intake));
+        let thread = spawn_listener(Arc::clone(&listener), Arc::clone(&self.context));
         *bound = Some(Bound { listener, thread });
         self.ready.settle();
-        self.intake.streams.published();
-        self.intake.presence.published();
+        self.context.streams.published();
+        self.context.presence.published();
         wake_waiting_edges(&self.home, &self.diagnostics);
         let endpoint = Endpoint::for_home(&self.home).map(|endpoint| endpoint.to_string());
         self.diagnostics.sink().emit(
@@ -591,17 +591,17 @@ impl ServiceHost {
             }
         };
         self.workbench
-            .attach_quit(Arc::new(self.intake.quit.clone()));
-        self.intake
+            .attach_quit(Arc::new(self.context.quit.clone()));
+        self.context
             .governance
             .protect_workbench_port(pending.address().port());
         let watching = Arc::new(Watching::load(
             install::layout::Layout::new(&self.home).watch_off_marker(),
         ));
         let server =
-            Arc::new(pending.serve(&self.workbench, self.intake.instance.clone(), watching));
+            Arc::new(pending.serve(&self.workbench, self.context.instance.clone(), watching));
         let address = server.address().clone();
-        let _ = self.intake.workbench_server.set(server);
+        let _ = self.context.workbench_server.set(server);
         Some(address)
     }
 
@@ -609,7 +609,7 @@ impl ServiceHost {
     #[must_use]
     #[cfg(test)]
     pub fn workbench_address(&self) -> Option<WorkbenchAddress> {
-        self.intake
+        self.context
             .workbench_server
             .get()
             .map(|server| server.address().clone())
@@ -664,7 +664,7 @@ impl ServiceHost {
         self.quit.clone()
     }
 
-    /// The process-diagnostics hub this authority owns.
+    /// The process-diagnostics hub this service owns.
     #[must_use]
     pub fn diagnostics(&self) -> Arc<DiagnosticsHub> {
         Arc::clone(&self.diagnostics)
@@ -679,7 +679,7 @@ impl ServiceHost {
         for handle in &self.threads {
             handle.thread().unpark();
         }
-        if let Some(server) = self.intake.workbench_server.get() {
+        if let Some(server) = self.context.workbench_server.get() {
             server.stop();
         }
         if let Some(bound) = lock(&self.bound).take() {
@@ -1074,7 +1074,7 @@ impl Drop for Enrolled {
 }
 
 /// Everything a relay connection needs from the service.
-struct Intake {
+struct ServiceContext {
     /// The value that changes on every start of this service.
     instance: String,
     /// Why this service was started.
@@ -1109,7 +1109,7 @@ struct Intake {
     toolsets: Arc<Toolsets>,
 }
 
-impl Intake {
+impl ServiceContext {
     /// The reply that accepts an opening for `role`. Only an `mcp` stream is handed the failure
     /// templates.
     fn accepted(&self, role: Role) -> Reply {
@@ -1125,34 +1125,34 @@ impl Intake {
 ///
 /// A connection holds one of a few pre-judgement slots until its opening is judged, so local
 /// processes that connect and say nothing cannot exhaust the service.
-fn spawn_listener(listener: Arc<Listener>, intake: Arc<Intake>) -> JoinHandle<()> {
+fn spawn_listener(listener: Arc<Listener>, context: Arc<ServiceContext>) -> JoinHandle<()> {
     let handshakes = Capacity::new(admission::HANDSHAKES);
     thread::Builder::new()
         .name("ghostlight-relay-listener".into())
         .spawn(move || {
-            while !intake.stop.load(Ordering::SeqCst) {
+            while !context.stop.load(Ordering::SeqCst) {
                 let connection = match listener.accept() {
                     Ok(connection) => connection,
-                    Err(_) if intake.stop.load(Ordering::SeqCst) => break,
+                    Err(_) if context.stop.load(Ordering::SeqCst) => break,
                     Err(_) => {
                         thread::sleep(ACCEPT_RETRY);
                         continue;
                     }
                 };
-                if intake.stop.load(Ordering::SeqCst) {
+                if context.stop.load(Ordering::SeqCst) {
                     break;
                 }
                 let Some(handshake) = handshakes.acquire(1) else {
                     continue;
                 };
-                let intake = Arc::clone(&intake);
+                let context = Arc::clone(&context);
                 let _ = thread::Builder::new()
                     .name("ghostlight-relay-connection".into())
                     .spawn(move || {
                         let judgement =
-                            listener::judge(&connection, intake.quit.drain.is_quitting());
+                            listener::judge(&connection, context.quit.drain.is_quitting());
                         drop(handshake);
-                        serve_connection(connection, judgement, &intake);
+                        serve_connection(connection, judgement, &context);
                     });
             }
         })
@@ -1160,7 +1160,7 @@ fn spawn_listener(listener: Arc<Listener>, intake: Arc<Intake>) -> JoinHandle<()
 }
 
 /// Serve one judged connection to its end.
-fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<Intake>) {
+fn serve_connection(connection: Connection, judgement: Judgement, context: &Arc<ServiceContext>) {
     match judgement {
         Judgement::Drop => {}
         Judgement::Refuse(refusal) => listener::refuse(&connection, refusal),
@@ -1168,27 +1168,27 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
             match opening.role {
                 Role::Browser => {
                     // Only the opening is held here; the port counts the stream while it lives.
-                    let Some(_opening) = intake.streams.admit() else {
+                    let Some(_opening) = context.streams.admit() else {
                         return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
                     };
-                    if listener::accept(&connection, &intake.accepted(Role::Browser)).is_ok() {
+                    if listener::accept(&connection, &context.accepted(Role::Browser)).is_ok() {
                         // The first frame on the stream is the extension's own hello.
-                        let _ = intake.browser.attach(connection);
-                        intake.workbench.refresh_live_parts();
+                        let _ = context.browser.attach(connection);
+                        context.workbench.refresh_live_parts();
                     }
                 }
                 Role::Control => {
-                    let Some(_stream) = intake.streams.admit() else {
+                    let Some(_stream) = context.streams.admit() else {
                         return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
                     };
-                    serve_control(connection, opening.control, intake);
+                    serve_control(connection, opening.control, context);
                 }
                 Role::Mcp => {
-                    let Some(_stream) = intake.streams.admit() else {
+                    let Some(_stream) = context.streams.admit() else {
                         return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
                     };
-                    if let Err(error) = serve_mcp(connection, intake, &opening) {
-                        intake.diagnostics.sink().emit(
+                    if let Err(error) = serve_mcp(connection, context, &opening) {
+                        context.diagnostics.sink().emit(
                         ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
                         ghostlight_bridge::diagnostics::Level::Warn,
                         None,
@@ -1197,13 +1197,13 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
                     }
                 }
                 Role::Desktop => {
-                    let Some(_stream) = intake.streams.admit() else {
+                    let Some(_stream) = context.streams.admit() else {
                         return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
                     };
                     // A shell that goes away abruptly or sends a frame this build cannot read ends
                     // its own stream and nothing else.
                     let view = ShellView::from_channel(opening.channel.as_deref());
-                    let _ = serve_desktop(connection, intake, view);
+                    let _ = serve_desktop(connection, context, view);
                 }
                 Role::Command | Role::Unknown => {
                     listener::refuse(&connection, OpeningRefusal::Unsupported);
@@ -1229,47 +1229,47 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
 /// skipped. A frame that does not decode ends the stream, and the shell is detached.
 fn serve_desktop(
     connection: Connection,
-    intake: &Arc<Intake>,
+    context: &Arc<ServiceContext>,
     view: Option<ShellView>,
 ) -> Result<()> {
-    let Some(server) = intake.workbench_server.get() else {
+    let Some(server) = context.workbench_server.get() else {
         listener::refuse(&connection, OpeningRefusal::Unsupported);
         return Ok(());
     };
-    let Some(_place) = intake.desktops.acquire(1) else {
+    let Some(_place) = context.desktops.acquire(1) else {
         listener::refuse(&connection, OpeningRefusal::Capacity);
         return Ok(());
     };
-    listener::accept(&connection, &intake.accepted(Role::Desktop))?;
+    listener::accept(&connection, &context.accepted(Role::Desktop))?;
     let mut reader =
-        SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
+        SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&context.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
-    let claim = match intake.quit.shells().claim() {
+    let claim = match context.quit.shells().claim() {
         Ok(claim) => claim,
         Err(occupied) => {
             if view != Some(ShellView::Tray) && occupied.show() {
-                intake.presence.person_acted();
-                intake.presence.window_shown();
+                context.presence.person_acted();
+                context.presence.window_shown();
             }
             writer.native(&DesktopFrame::AlreadyOpen)?;
             return Ok(());
         }
     };
-    let tray = intake.workbench.tray_model();
+    let tray = context.workbench.tray_model();
     writer.native(&DesktopFrame::workbench(
         server.address().url(),
         server.bearer(),
         tray.clone(),
     ))?;
     let attached = claim.attach(writer, tray);
-    let _present = ShellPresent::begin(&intake.presence);
+    let _present = ShellPresent::begin(&context.presence);
     // Whether a reveal for the tray's Open is in flight: clicks that arrive meanwhile join it.
     let revealing = Arc::new(AtomicBool::new(false));
-    if let Some(wanted) = intake.presence.attached(view) {
+    if let Some(wanted) = context.presence.attached(view) {
         attached.show(wanted.address);
     }
     // A change between the tray handed over and the shell being attached would have gone nowhere.
-    attached.draw_tray(intake.workbench.tray_model());
+    attached.draw_tray(context.workbench.tray_model());
     while let Some(frame) = reader.native::<DesktopFrame>(None)? {
         let item = match frame {
             DesktopFrame::Tray { item } => item,
@@ -1278,14 +1278,14 @@ fn serve_desktop(
                 continue;
             }
             DesktopFrame::Unavailable { reason } => {
-                intake.presence.unavailable(reason.window_reason());
+                context.presence.unavailable(reason.window_reason());
                 attached.window_fails(reason == UnavailableReason::WindowFailed);
                 continue;
             }
             DesktopFrame::Closed { stays } => {
-                intake.presence.closed(stays);
+                context.presence.closed(stays);
                 if stays {
-                    explain_close(intake, &attached);
+                    explain_close(context, &attached);
                 }
                 continue;
             }
@@ -1293,21 +1293,21 @@ fn serve_desktop(
         };
         match item {
             TrayItemId::Hold | TrayItemId::Resume => {
-                if let Some(intent) = item.intent(intake.workbench.runtime_state()) {
-                    intake
+                if let Some(intent) = item.intent(context.workbench.runtime_state()) {
+                    context
                         .workbench
                         .apply_runtime_control(intent, RuntimeSource::Tray);
                 }
             }
-            TrayItemId::Quit => intake.quit.begin(QuitReason::Quit, QUIT_GRACE),
+            TrayItemId::Quit => context.quit.begin(QuitReason::Quit, QUIT_GRACE),
             TrayItemId::Open => {
-                intake.presence.person_acted();
-                intake.presence.window_shown();
+                context.presence.person_acted();
+                context.presence.window_shown();
                 attached.window_fails(false);
                 // The shell shows its own window, where it last was. While setup is incomplete
                 // the person is brought back to it, as a window opened fresh would be.
-                if let Some(address) = intake.workbench.show_address() {
-                    reveal_once(&intake.workbench, Some(address), &revealing);
+                if let Some(address) = context.workbench.show_address() {
+                    reveal_once(&context.workbench, Some(address), &revealing);
                 }
             }
         }
@@ -1331,11 +1331,11 @@ impl Drop for ShellPresent<'_> {
 }
 
 /// Say, once per home, that closing the window left Ghostlight running and where its icon is.
-fn explain_close(intake: &Intake, shell: &shell::Attached) {
-    match hint::first_close(&intake.layout.tray_hint()) {
+fn explain_close(context: &ServiceContext, shell: &shell::Attached) {
+    match hint::first_close(&context.layout.tray_hint()) {
         Ok(true) => shell.notice(TRAY_HINT_TITLE, TRAY_HINT_BODY),
         Ok(false) => {}
-        Err(error) => intake.diagnostics.sink().emit(
+        Err(error) => context.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
             ghostlight_bridge::diagnostics::Level::Warn,
             None,
@@ -1390,43 +1390,43 @@ impl WorkbenchTrayPort for TrayRelay {
 
 /// The answer to a control `status`: who this service is, what is connected and where the
 /// workbench is. The workbench's bearer is never part of it.
-fn control_status(intake: &Intake) -> control::Status {
+fn control_status(context: &ServiceContext) -> control::Status {
     control::Status {
         service: env!("CARGO_PKG_VERSION").into(),
-        instance: intake.instance.clone(),
+        instance: context.instance.clone(),
         pid: std::process::id(),
-        started_by: intake.started_by,
-        connections: Some(intake.workbench.connection_counts()),
-        workbench: intake
+        started_by: context.started_by,
+        connections: Some(context.workbench.connection_counts()),
+        workbench: context
             .workbench_server
             .get()
             .map(|server| control::WorkbenchStatus {
                 url: server.address().url().to_owned(),
                 usual_port: server.address().usual(),
-                watching: intake.workbench.watching(),
+                watching: context.workbench.watching(),
             }),
-        window: intake.presence.window_reason(),
+        window: context.presence.window_reason(),
     }
 }
 
 /// Answer one control operation and close.
-fn serve_control(connection: Connection, operation: Option<Control>, intake: &Intake) {
+fn serve_control(connection: Connection, operation: Option<Control>, context: &ServiceContext) {
     let value = match operation {
         Some(Control::Readiness) => {
-            serde_json::to_value(intake.workbench.readiness()).unwrap_or(Value::Null)
+            serde_json::to_value(context.workbench.readiness()).unwrap_or(Value::Null)
         }
         Some(Control::Status) => {
-            serde_json::to_value(control_status(intake)).unwrap_or(Value::Null)
+            serde_json::to_value(control_status(context)).unwrap_or(Value::Null)
         }
         Some(Control::Show) => serde_json::to_value(control::Shown {
-            shown: intake
+            shown: context
                 .workbench
-                .reveal(intake.workbench.show_address())
+                .reveal(context.workbench.show_address())
                 .is_ok(),
         })
         .unwrap_or(Value::Null),
         Some(Control::Quit { reason }) => {
-            intake.quit.begin(reason, QUIT_GRACE);
+            context.quit.begin(reason, QUIT_GRACE);
             serde_json::to_value(control::Quitting { quitting: true }).unwrap_or(Value::Null)
         }
         Some(Control::Unknown) | None => {
@@ -1434,7 +1434,7 @@ fn serve_control(connection: Connection, operation: Option<Control>, intake: &In
             return;
         }
     };
-    if listener::accept(&connection, &intake.accepted(Role::Control)).is_ok() {
+    if listener::accept(&connection, &context.accepted(Role::Control)).is_ok() {
         let _ = listener::answer_control(&connection, &value);
     }
 }
@@ -1453,10 +1453,10 @@ fn serve_control(connection: Connection, operation: Option<Control>, intake: &In
 /// (ADR-0203 Decision 1). Until then the tab stays in every token the session hands out.
 fn serve_mcp(
     connection: Connection,
-    intake: &Arc<Intake>,
+    context: &Arc<ServiceContext>,
     requested: &protocol::Opening,
 ) -> Result<()> {
-    let Some(_session_permit) = intake.sessions.acquire(1) else {
+    let Some(_session_permit) = context.sessions.acquire(1) else {
         listener::refuse(&connection, OpeningRefusal::Capacity);
         return Ok(());
     };
@@ -1476,7 +1476,7 @@ fn serve_mcp(
     // again, so a token that cannot be read still resumes an initialized session.
     let resumed = requested.resume.as_deref().map(|token| {
         ResumeState::decode(token).unwrap_or_else(|error| {
-            intake.diagnostics.sink().emit(
+            context.diagnostics.sink().emit(
                 ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
                 ghostlight_bridge::diagnostics::Level::Warn,
                 None,
@@ -1487,16 +1487,16 @@ fn serve_mcp(
             ResumeState::unreadable()
         })
     });
-    listener::accept(&connection, &intake.accepted(Role::Mcp))?;
+    listener::accept(&connection, &context.accepted(Role::Mcp))?;
     let attribution =
         Attribution::accepted(IntakeChannel::of_opening(requested.channel.as_deref()));
-    let observation = intake.sources.read(connection.peer_process_id());
+    let observation = context.sources.read(connection.peer_process_id());
     let accepted = Accepted {
         attribution: attribution.observed(observation.as_ref()),
         marker,
     };
     let mut reader =
-        SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
+        SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&context.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
     let (session, resumed_tabs) = match resumed {
         Some(state) => {
@@ -1509,22 +1509,22 @@ fn serve_mcp(
         None => (McpSession::new(), None),
     };
     let wire = Arc::new(McpWire::new(Arc::clone(&writer), session));
-    let _enrolled = intake.quit.enroll(Arc::clone(&wire));
-    let seat = intake.toolsets.enter(Arc::clone(&wire));
+    let _enrolled = context.quit.enroll(Arc::clone(&wire));
+    let seat = context.toolsets.enter(Arc::clone(&wire));
     wire.seat(seat.seating(accepted.attribution.channel, observation.as_ref()));
 
     let mut live = match resumed_tabs {
         Some(kept) => {
-            let live = LiveSession::open(intake, &wire, &accepted)?;
+            let live = LiveSession::open(context, &wire, &accepted)?;
             // Its client listed tools from an earlier service and will not list them again, so
             // the session watch tells it to, unless the session stands by with no tools.
             if !wire.stands_by() {
                 live.advertised.given_earlier();
             }
-            remember_resumed_tabs(&intake.workspaces, &live.workspace, &kept);
+            remember_resumed_tabs(&context.workspaces, &live.workspace, &kept);
             wire.publish_resume(
-                &intake.workspaces,
-                intake.browser_port.as_ref(),
+                &context.workspaces,
+                context.browser_port.as_ref(),
                 &live.workspace,
             );
             Some(live)
@@ -1544,7 +1544,7 @@ fn serve_mcp(
             // far, so its `initialize` answer never waits on opening its workspace.
             let mut open_when_initialized = |live: &mut Option<LiveSession>| -> Result<()> {
                 if live.is_none() && wire.is_initialized() {
-                    *live = Some(LiveSession::open(intake, &wire, &accepted)?);
+                    *live = Some(LiveSession::open(context, &wire, &accepted)?);
                     opened = true;
                 }
                 Ok(())
@@ -1560,7 +1560,7 @@ fn serve_mcp(
                     Step::Forward(request) => {
                         open_when_initialized(&mut live)?;
                         if let Some(live) = &live {
-                            live.handle(intake, &wire, request);
+                            live.handle(context, &wire, request);
                         }
                     }
                 }
@@ -1568,8 +1568,8 @@ fn serve_mcp(
             open_when_initialized(&mut live)?;
             if let (true, Some(live)) = (opened, &live) {
                 wire.publish_resume(
-                    &intake.workspaces,
-                    intake.browser_port.as_ref(),
+                    &context.workspaces,
+                    context.browser_port.as_ref(),
                     &live.workspace,
                 );
             }
@@ -1579,7 +1579,7 @@ fn serve_mcp(
 
     writer.close();
     if let Some(live) = live {
-        live.close(intake);
+        live.close(context);
     }
     drop(seat);
     served
@@ -1938,27 +1938,31 @@ impl LiveSession {
     ///
     /// This is where the connection's one evidence is built, from its observed attribution and
     /// its client's claim.
-    fn open(intake: &Arc<Intake>, wire: &Arc<McpWire>, accepted: &Accepted) -> Result<Self> {
+    fn open(
+        context: &Arc<ServiceContext>,
+        wire: &Arc<McpWire>,
+        accepted: &Accepted,
+    ) -> Result<Self> {
         // Before opening anything, release workspaces whose owner is gone and close the tabs they
         // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
-        reap_finished_sessions(&intake.workspaces, intake.browser_port.as_ref());
+        reap_finished_sessions(&context.workspaces, context.browser_port.as_ref());
         // Evidence belongs to this connection. Workspace continuity never replaces it.
         let connection = Arc::new(ConnectionEvidence::new(
             accepted.attribution.clone(),
             wire.claim().as_deref(),
         ));
-        let workspace = intake
+        let workspace = context
             .workspaces
             .connect(connection.clone(), accepted.marker.clone());
-        intake.diagnostics.sink().emit(
+        context.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
             ghostlight_bridge::diagnostics::Level::Info,
             None,
             &attached(connection.attribution()),
         );
         let queue = Arc::new(SessionQueue::new(
-            intake.budget.clone(),
-            Arc::clone(&intake.quit.drain),
+            context.budget.clone(),
+            Arc::clone(&context.quit.drain),
         ));
         let advertised = Arc::new(AdvertisedCatalog::default());
         let watch_stop = Arc::new(AtomicBool::new(false));
@@ -1975,30 +1979,34 @@ impl LiveSession {
             watch_stop,
             advertised,
         };
-        live.watch = Some(live.spawn_watch(intake, wire)?);
+        live.watch = Some(live.spawn_watch(context, wire)?);
         for independent in [false, true] {
-            let worker = live.spawn_worker(intake, wire, independent);
+            let worker = live.spawn_worker(context, wire, independent);
             match worker {
                 Ok(worker) => live.workers.push(worker),
                 Err(error) => {
-                    live.close(intake);
+                    live.close(context);
                     return Err(error);
                 }
             }
         }
-        intake.workbench.refresh_live_parts();
+        context.workbench.refresh_live_parts();
         Ok(live)
     }
 
     /// The once-a-second thread that advances cancelled work, keeps waiting work visible, hands
     /// the client a fresh resume token when a tab changed outside its calls, and tells the client
     /// when policy changes the catalog it was given.
-    fn spawn_watch(&self, intake: &Arc<Intake>, wire: &Arc<McpWire>) -> Result<JoinHandle<()>> {
-        let intake = Arc::clone(intake);
+    fn spawn_watch(
+        &self,
+        context: &Arc<ServiceContext>,
+        wire: &Arc<McpWire>,
+    ) -> Result<JoinHandle<()>> {
+        let context = Arc::clone(context);
         let queue = Arc::clone(&self.queue);
-        let executor = Arc::clone(&intake.executor);
+        let executor = Arc::clone(&context.executor);
         let workspace = self.workspace.clone();
-        let governance = intake.governance.clone();
+        let governance = context.governance.clone();
         let wire = Arc::clone(wire);
         let advertised = Arc::clone(&self.advertised);
         let stop = Arc::clone(&self.watch_stop);
@@ -2014,8 +2022,8 @@ impl LiveSession {
                         executor.show_waiting(&request);
                     }
                     wire.publish_resume(
-                        &intake.workspaces,
-                        intake.browser_port.as_ref(),
+                        &context.workspaces,
+                        context.browser_port.as_ref(),
                         &workspace,
                     );
                     if advertised.changed_by(&governance.snapshot()).is_some() {
@@ -2029,15 +2037,15 @@ impl LiveSession {
     /// One bounded worker: ordinary work, or the independent lane that keeps controls moving.
     fn spawn_worker(
         &self,
-        intake: &Arc<Intake>,
+        context: &Arc<ServiceContext>,
         wire: &Arc<McpWire>,
         independent: bool,
     ) -> Result<JoinHandle<()>> {
         let queue = Arc::clone(&self.queue);
-        let executor = Arc::clone(&intake.executor);
+        let executor = Arc::clone(&context.executor);
         let workspace = self.workspace.clone();
-        let workspaces = intake.workspaces.clone();
-        let port = Arc::clone(&intake.browser_port);
+        let workspaces = context.workspaces.clone();
+        let port = Arc::clone(&context.browser_port);
         let wire = Arc::clone(wire);
         thread::Builder::new()
             .name("ghostlight-session-work".into())
@@ -2058,13 +2066,13 @@ impl LiveSession {
     /// its answer is written before the stream can close: over capacity, it is refused; while
     /// Ghostlight quits, it is cancelled before it started, with the quit's cause. Each goes
     /// through the one completion path and its audit line.
-    fn handle(&self, intake: &Arc<Intake>, wire: &Arc<McpWire>, request: ServiceRequest) {
+    fn handle(&self, context: &Arc<ServiceContext>, wire: &Arc<McpWire>, request: ServiceRequest) {
         match request {
             ServiceRequest::Catalog => {
                 let tools = if wire.stands_by() {
                     Vec::new()
                 } else {
-                    self.advertised.advertise(&intake.governance.snapshot())
+                    self.advertised.advertise(&context.governance.snapshot())
                 };
                 wire.render(ServiceResponse::Catalog { tools });
             }
@@ -2089,11 +2097,11 @@ impl LiveSession {
                     },
                     Err(Refused::Cancelled(by)) => (Admission::Cancelled(by), None),
                 };
-                let result = intake.executor.execute_prepared(&request, admission);
+                let result = context.executor.execute_prepared(&request, admission);
                 deliver_result(wire, result);
                 wire.publish_resume(
-                    &intake.workspaces,
-                    intake.browser_port.as_ref(),
+                    &context.workspaces,
+                    context.browser_port.as_ref(),
                     &self.workspace,
                 );
             }
@@ -2106,10 +2114,10 @@ impl LiveSession {
     ///
     /// The work still admitted is cancelled because Ghostlight quit, while a quit drains, and
     /// because the session ended otherwise.
-    fn close(self, intake: &Intake) {
+    fn close(self, context: &ServiceContext) {
         self.watch_stop.store(true, Ordering::SeqCst);
         self.queue.stop(
-            intake
+            context
                 .quit
                 .drain
                 .cause()
@@ -2121,7 +2129,7 @@ impl LiveSession {
         for worker in self.workers {
             let _ = worker.join();
         }
-        intake.workspaces.disconnect(
+        context.workspaces.disconnect(
             &self.workspace,
             self.connection
                 .attribution()
@@ -2132,10 +2140,10 @@ impl LiveSession {
         // A workspace with an owner outlives this connection: the caller is still there and its
         // next call must reach the same tabs. It is released when its owner is gone or the
         // service ends, not when a socket is.
-        if !intake.workspaces.is_owned(&self.workspace) {
-            intake.quit.release_on_close(&self.workspace);
+        if !context.workspaces.is_owned(&self.workspace) {
+            context.quit.release_on_close(&self.workspace);
         }
-        intake.diagnostics.sink().emit(
+        context.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
             ghostlight_bridge::diagnostics::Level::Info,
             None,
@@ -2145,7 +2153,7 @@ impl LiveSession {
                 .as_deref()
                 .unwrap_or_default(),
         );
-        intake.workbench.refresh_live_parts();
+        context.workbench.refresh_live_parts();
     }
 }
 
@@ -2176,7 +2184,7 @@ fn remember_resumed_tabs(workspaces: &WorkspaceStore, workspace: &WorkspaceId, k
 /// start is refused while the quit latch is set ([`QuitLatched`]); the lock is taken, and a start
 /// that finds it held asks again, an update for [`lifetime::UPDATE_LOCK_WAIT`] so the service it
 /// replaces can finish leaving and any other start for [`lifetime::LEAVING_LOCK_WAIT`] so it
-/// outlasts a service leaving on idle, and gives way ([`AuthorityAlreadyRunning`]) when the wait
+/// outlasts a service leaving on idle, and gives way ([`ServiceAlreadyRunning`]) when the wait
 /// ends; a browser or recover start that waited looks at the latch again once it holds the lock;
 /// and only then does any other start clear the latch.
 fn admit(
@@ -2210,7 +2218,7 @@ fn acquire_lock(path: &Path, wait: Duration) -> Result<ServiceLock> {
         }
         let remaining = give_up.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(AuthorityAlreadyRunning.into());
+            return Err(ServiceAlreadyRunning.into());
         }
         thread::sleep(LOCK_POLL.min(remaining));
     }
@@ -2546,8 +2554,8 @@ mod tests {
     use crate::workspace::ReleasedTabs;
 
     use super::{
-        cleanup_released_tabs, AuthorityAlreadyRunning, QuitLatched, ServiceHost, StartTerms,
-        World, QUIT_GRACE,
+        cleanup_released_tabs, QuitLatched, ServiceAlreadyRunning, ServiceHost, StartTerms, World,
+        QUIT_GRACE,
     };
 
     /// The MCP revision the test clients speak and the resume tokens name.
@@ -2832,7 +2840,7 @@ mod tests {
 
         let home = TestHome::new("registration-pending");
         let served = serve_relayed(&home);
-        let workspaces = served.intake.workspaces.clone();
+        let workspaces = served.context.workspaces.clone();
         served
             .relay
             .set_event_sink(Arc::new(super::ServiceBrowserEvents::new(
@@ -2971,7 +2979,7 @@ mod tests {
 
     /// A relay listener over a fake browser, bound at the test home's endpoint.
     struct Served {
-        intake: Arc<super::Intake>,
+        context: Arc<super::ServiceContext>,
         relay: Arc<crate::browser::RelayBrowserPort>,
         listener: Arc<Listener>,
         thread: Option<thread::JoinHandle<()>>,
@@ -2980,7 +2988,7 @@ mod tests {
 
     impl Drop for Served {
         fn drop(&mut self) {
-            self.intake.stop.store(true, Ordering::SeqCst);
+            self.context.stop.store(true, Ordering::SeqCst);
             self.listener.shutdown();
             if let Some(thread) = self.thread.take() {
                 let _ = thread.join();
@@ -3103,7 +3111,7 @@ mod tests {
             let _ = signal.send(());
         }));
         let toolsets = super::Toolsets::new(Arc::clone(&quit.drain));
-        let intake = Arc::new(super::Intake {
+        let context = Arc::new(super::ServiceContext {
             instance: TEST_INSTANCE.into(),
             started_by: StartReason::Agent,
             templates: failure_templates(),
@@ -3127,9 +3135,9 @@ mod tests {
             toolsets,
         });
         let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
-        let thread = super::spawn_listener(Arc::clone(&listener), intake.clone());
+        let thread = super::spawn_listener(Arc::clone(&listener), context.clone());
         Served {
-            intake,
+            context,
             relay,
             listener,
             thread: Some(thread),
@@ -3351,7 +3359,7 @@ mod tests {
             let mut socket = open_mcp(resumed.then(tabless_token));
             eventually(|| held.began() == 1);
             assert!(
-                served.intake.workspaces.summaries().is_empty(),
+                served.context.workspaces.summaries().is_empty(),
                 "the session opens only once its source is read"
             );
 
@@ -3550,7 +3558,7 @@ mod tests {
 
         // A policy change reaches the holder, and a re-list still offers no second set.
         write_policy(&policy, "narrower", json!(["read"]));
-        served.intake.governance.refresh_tick();
+        served.context.governance.refresh_tick();
         until_list_changed(&mut entry);
         let narrowed = list_tools(&mut entry, 3);
         assert!(!narrowed.is_empty() && narrowed.len() < offered.len());
@@ -3716,10 +3724,10 @@ mod tests {
 
     /// The confirmed tabs the one session holds in the workspace store.
     fn bound_tabs(served: &Served) -> Vec<(String, u64)> {
-        let summaries = served.intake.workspaces.summaries();
+        let summaries = served.context.workspaces.summaries();
         assert_eq!(summaries.len(), 1);
         served
-            .intake
+            .context
             .workspaces
             .tab_bindings(&summaries[0].id)
             .into_iter()
@@ -3730,9 +3738,9 @@ mod tests {
 
     /// The pending tabs the one session holds in the workspace store, with their browsers.
     fn pending_tabs(served: &Served) -> Vec<(String, String)> {
-        let summaries = served.intake.workspaces.summaries();
+        let summaries = served.context.workspaces.summaries();
         served
-            .intake
+            .context
             .workspaces
             .tab_bindings(&summaries[0].id)
             .into_iter()
@@ -3770,7 +3778,7 @@ mod tests {
             assert_eq!(resumed.owned_tabs, vec![returning_tab()]);
             assert!(bound_tabs(&served).is_empty());
             assert_eq!(
-                served.intake.workspaces.summaries()[0]
+                served.context.workspaces.summaries()[0]
                     .opener
                     .reported_application
                     .as_deref(),
@@ -3932,7 +3940,7 @@ mod tests {
             assert!(resumed.owned_tabs.is_empty());
             let listed = call_tool(&mut socket, 2, "browser_tabs", json!({"action": "list"}));
             assert_eq!(listed["status"], json!(Status::Succeeded), "{listed}");
-            assert_eq!(served.intake.workspaces.summaries().len(), 1);
+            assert_eq!(served.context.workspaces.summaries().len(), 1);
         }
 
         // A fresh session's token comes before its initialize answer, ahead of its workspace.
@@ -3961,7 +3969,7 @@ mod tests {
             );
             response(&mut socket, 9);
             served
-                .intake
+                .context
                 .quit
                 .begin(QuitReason::Replace, Duration::ZERO);
             served
@@ -3988,7 +3996,7 @@ mod tests {
         let address = host.workbench_address().expect("the workbench is served");
         assert!(address.url().starts_with("http://127.0.0.1:"));
 
-        let snapshot = host.intake.governance.snapshot();
+        let snapshot = host.context.governance.snapshot();
         for url in [address.url().to_owned(), format!("{}app.js", address.url())] {
             let decision = snapshot.authorize_landing(crate::governance::CapabilitySet::READ, &url);
             assert!(!decision.allowed, "{url} must be barred from agents");
@@ -4125,7 +4133,7 @@ mod tests {
             let error = start_for(&directory, StartTerms::asking_once(reason))
                 .err()
                 .expect("the lock is held");
-            assert!(error.is::<AuthorityAlreadyRunning>(), "{reason:?}");
+            assert!(error.is::<ServiceAlreadyRunning>(), "{reason:?}");
             assert!(
                 super::latch::is_set(&layout.quit_latch()),
                 "{reason:?}: a start that gives way leaves the latch alone"
@@ -4613,8 +4621,8 @@ mod tests {
         let (opened, _) = listed_with_audit(&home, &mut socket, 2);
         assert_eq!(opened["status"], json!(Status::Succeeded), "{opened}");
 
-        let running = served.intake.quit.drain.admit().unwrap();
-        served.intake.quit.begin(reason, PATIENCE);
+        let running = served.context.quit.drain.admit().unwrap();
+        served.context.quit.begin(reason, PATIENCE);
         let draining = listed_with_audit(&home, &mut socket, 3);
         drop(running);
         served
@@ -4643,11 +4651,11 @@ mod tests {
         let marker = SessionMarker::Declared {
             key: "session-end-calls".into(),
         };
-        let workspace = served.intake.workspaces.connect(
+        let workspace = served.context.workspaces.connect(
             Arc::new(ConnectionEvidence::claimed("holder", IntakeChannel::Cli)),
             Some(marker.clone()),
         );
-        let _held = served.intake.workspaces.acquire(&workspace).unwrap();
+        let _held = served.context.workspaces.acquire(&workspace).unwrap();
         let mut opening = mcp_opening(None);
         opening.session = Some(serde_json::to_value(marker).unwrap());
         let (mut socket, reply) = dial(&opening);
@@ -4806,7 +4814,7 @@ mod tests {
     /// Open an MCP session and wait until it is open, with its workspace, and return the stream
     /// and that workspace.
     fn open_session(served: &Served) -> (Connection, crate::workspace::WorkspaceId) {
-        let before = served.intake.workspaces.ids();
+        let before = served.context.workspaces.ids();
         let mut socket = open_mcp(None);
         initialize(&mut socket);
         // A forwarded request is served only once the session has opened.
@@ -4816,7 +4824,7 @@ mod tests {
         );
         response(&mut socket, 2);
         let workspace = served
-            .intake
+            .context
             .workspaces
             .ids()
             .into_iter()
@@ -4931,10 +4939,10 @@ mod tests {
             let served = serve_relayed(&home);
             let browser = attach_ending_browser(&served, PageWork::Answered);
             let (mut socket, workspace) = open_session(&served);
-            let handle = bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+            let handle = bind_tab(&served.context.workspaces, &workspace, RETURNING_TAB);
 
             served
-                .intake
+                .context
                 .quit
                 .begin(QuitReason::Replace, Duration::ZERO);
 
@@ -4970,9 +4978,9 @@ mod tests {
             let browser = attach_ending_browser(&served, PageWork::Answered);
             let (mut first, first_workspace) = open_session(&served);
             let (mut second, second_workspace) = open_session(&served);
-            let first_tab = bind_tab(&served.intake.workspaces, &first_workspace, RETURNING_TAB);
+            let first_tab = bind_tab(&served.context.workspaces, &first_workspace, RETURNING_TAB);
             let second_tab = bind_tab(
-                &served.intake.workspaces,
+                &served.context.workspaces,
                 &second_workspace,
                 RETURNING_TAB + 1,
             );
@@ -4982,7 +4990,7 @@ mod tests {
                 while handles_in(&next_resume(socket)) != [handle.as_str()] {}
             }
 
-            served.intake.quit.begin(reason, Duration::ZERO);
+            served.context.quit.begin(reason, Duration::ZERO);
 
             for socket in [&mut first, &mut second] {
                 let (tokens, goodbye) = until_goodbye(socket);
@@ -5001,7 +5009,7 @@ mod tests {
                 [RETURNING_TAB, RETURNING_TAB + 1],
                 "{reason:?}"
             );
-            assert!(served.intake.workspaces.ids().is_empty(), "{reason:?}");
+            assert!(served.context.workspaces.ids().is_empty(), "{reason:?}");
         }
 
         // A command-line session is released at every end, because nothing can resume it.
@@ -5014,16 +5022,16 @@ mod tests {
             let home = TestHome::new("end-command-line");
             let served = serve_relayed(&home);
             let browser = attach_ending_browser(&served, PageWork::Answered);
-            let workspace = served.intake.workspaces.resume_or_admit(
+            let workspace = served.context.workspaces.resume_or_admit(
                 "command line".into(),
                 IntakeChannel::Cli,
                 SessionMarker::Declared {
                     key: "end-command-line".into(),
                 },
             );
-            bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+            bind_tab(&served.context.workspaces, &workspace, RETURNING_TAB);
 
-            served.intake.quit.begin(reason, Duration::ZERO);
+            served.context.quit.begin(reason, Duration::ZERO);
 
             served
                 .quit_requested
@@ -5034,7 +5042,7 @@ mod tests {
                 [RETURNING_TAB],
                 "{reason:?}"
             );
-            assert!(served.intake.workspaces.ids().is_empty(), "{reason:?}");
+            assert!(served.context.workspaces.ids().is_empty(), "{reason:?}");
         }
 
         // The end of the session and the idle exit send the browser nothing and forget the tab.
@@ -5045,22 +5053,22 @@ mod tests {
             let home = TestHome::new("end-command-line-quietly");
             let served = serve_relayed(&home);
             let browser = attach_ending_browser(&served, PageWork::Answered);
-            let workspace = served.intake.workspaces.resume_or_admit(
+            let workspace = served.context.workspaces.resume_or_admit(
                 "command line".into(),
                 IntakeChannel::Cli,
                 SessionMarker::Declared {
                     key: "end-command-line".into(),
                 },
             );
-            bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+            bind_tab(&served.context.workspaces, &workspace, RETURNING_TAB);
 
-            ends(&served.intake.quit);
+            ends(&served.context.quit);
 
             served
                 .quit_requested
                 .recv_timeout(PATIENCE)
                 .expect("the end finishes");
-            assert!(served.intake.workspaces.ids().is_empty());
+            assert!(served.context.workspaces.ids().is_empty());
             assert!(requests_at(&browser.wait(|_| true), "close_tab").is_empty());
         }
 
@@ -5072,17 +5080,17 @@ mod tests {
             let browser = attach_ending_browser(&served, PageWork::Answered);
             let (left, left_workspace) = open_session(&served);
             let (mut stays, stays_workspace) = open_session(&served);
-            bind_tab(&served.intake.workspaces, &left_workspace, RETURNING_TAB);
+            bind_tab(&served.context.workspaces, &left_workspace, RETURNING_TAB);
             let kept = bind_tab(
-                &served.intake.workspaces,
+                &served.context.workspaces,
                 &stays_workspace,
                 RETURNING_TAB + 1,
             );
-            let running = served.intake.quit.drain.admit().unwrap();
+            let running = served.context.quit.drain.admit().unwrap();
 
-            served.intake.quit.begin(QuitReason::Replace, PATIENCE);
+            served.context.quit.begin(QuitReason::Replace, PATIENCE);
             drop(left);
-            eventually(|| served.intake.workspaces.ids() == [stays_workspace.clone()]);
+            eventually(|| served.context.workspaces.ids() == [stays_workspace.clone()]);
             drop(running);
 
             let (tokens, goodbye) = until_goodbye(&mut stays);
@@ -5102,7 +5110,7 @@ mod tests {
             let served = serve_relayed(&home);
             let browser = attach_ending_browser(&served, PageWork::HeldUntilCancelled);
             let (mut socket, workspace) = open_session(&served);
-            let handle = bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+            let handle = bind_tab(&served.context.workspaces, &workspace, RETURNING_TAB);
             send_line(
                 &mut socket,
                 json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
@@ -5114,7 +5122,7 @@ mod tests {
 
             // The drain gives up on the call, so the end meets the workspace still leased.
             served
-                .intake
+                .context
                 .quit
                 .begin(QuitReason::Quit, Duration::from_millis(100));
 
@@ -5134,7 +5142,7 @@ mod tests {
             let closed = requests_at(&seen, "close_tab")[0].0;
             assert!(cancelled < closed, "{:?}", seen.frames);
             drop(seen);
-            assert!(served.intake.workspaces.ids().is_empty());
+            assert!(served.context.workspaces.ids().is_empty());
         }
 
         // However many tabs a session holds, the end of the session says both goodbyes inside its
@@ -5147,11 +5155,11 @@ mod tests {
             let browser = attach_ending_browser(&served, PageWork::Silent);
             let (mut socket, workspace) = open_session(&served);
             for tab in 0..TABS {
-                bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB + tab);
+                bind_tab(&served.context.workspaces, &workspace, RETURNING_TAB + tab);
             }
 
             let began = Instant::now();
-            served.intake.quit.session_end();
+            served.context.quit.session_end();
 
             let (_, goodbye) = until_goodbye(&mut socket);
             assert_eq!(goodbye, GoodbyeReason::SessionEnd);
@@ -5164,7 +5172,7 @@ mod tests {
             assert!(requests_at(&seen, "close_tab").is_empty());
             assert!(requests_at(&seen, "diagnostics").is_empty());
             drop(seen);
-            assert!(served.intake.workspaces.ids().is_empty());
+            assert!(served.context.workspaces.ids().is_empty());
         }
     }
 
@@ -5458,7 +5466,7 @@ mod tests {
             let mut shell = attached_shell(&host);
             let browser = super::ServiceBrowserEvents::new(
                 host.workbench.clone(),
-                host.intake.workspaces.clone(),
+                host.context.workspaces.clone(),
             );
             let click = |shell: &mut Connection, item| {
                 frame::write_frame(shell, &DesktopFrame::Tray { item }).unwrap();
@@ -5485,7 +5493,7 @@ mod tests {
             // With setup complete the window opens where it last was, and the tray's Open asks for
             // nothing more than the shell already does: a Hold click is answered after it, by a
             // tray model, and the next show is a later one.
-            let record = host.intake.layout.setup_record();
+            let record = host.context.layout.setup_record();
             assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
             host.workbench.attach_setup(SetupProgress::load(&record));
             click(&mut shell, TrayItemId::Open);
@@ -5583,7 +5591,7 @@ mod tests {
         .unwrap();
         host.publish_ready().unwrap();
         // With setup complete a tray Open only says the person has the window open.
-        let record = host.intake.layout.setup_record();
+        let record = host.context.layout.setup_record();
         assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
         host.workbench.attach_setup(SetupProgress::load(&record));
         let window = || cli_client::status_at(home.path()).unwrap().window;
@@ -5605,7 +5613,7 @@ mod tests {
         // Presence's own tray launch attaches with the icon only, and a tray Open is a person
         // opening the window.
         fake.advance(super::presence::LAUNCH_DELAY);
-        host.intake.presence.tick();
+        host.context.presence.tick();
         assert_eq!(fake.launches(), [true]);
         let (mut stream, _) = open_desktop();
         eventually(|| window() == Some(WindowReason::Tray));
@@ -5923,7 +5931,7 @@ mod tests {
         /// so the first sees everything done before this call; the second comes only because the
         /// first did not leave.
         fn looked_and_stayed(&self, why: &str) {
-            let streams = &self.host.intake.streams;
+            let streams = &self.host.context.streams;
             let before = streams.looks();
             let until = Instant::now() + PATIENCE;
             while streams.looks() < before + 2 {
@@ -5942,7 +5950,7 @@ mod tests {
         /// Wait until no stream is open, so the last close has armed the limit, then move the
         /// idle clock past the limit and expect the quit within [`PATIENCE`].
         fn leaves_past_the_limit(&self, why: &str) {
-            eventually(|| self.host.intake.streams.open() == 0);
+            eventually(|| self.host.context.streams.open() == 0);
             self.clock.advance(IDLE_LIMIT * 2);
             self.quit_requested.recv_timeout(PATIENCE).expect(why);
         }
@@ -6006,7 +6014,7 @@ mod tests {
                 idling.clock.advance(IDLE_LIMIT * 9 / 10);
                 idling.looked_and_stayed("the last call came less than a limit ago");
                 cli_client::status().expect("the service answers a status call");
-                eventually(|| idling.host.intake.streams.open() == 0);
+                eventually(|| idling.host.context.streams.open() == 0);
             }
             idling.leaves_past_the_limit("the service leaves a limit after the last call");
         }
@@ -6061,7 +6069,7 @@ mod tests {
             });
             // The opening is counted out once the browser is attached: from here only the browser
             // holds the service.
-            eventually(|| host.intake.streams.open() == 1);
+            eventually(|| host.context.streams.open() == 1);
             idling.stays_past_the_limit("an attached browser holds the service");
 
             let (service, extension) = pair().unwrap();
@@ -6069,7 +6077,7 @@ mod tests {
                 FakeExtension::connect(extension, &FakeExtension::hello("browser_idle"), listing());
             host.browser.attach(service).unwrap();
             assert_eq!(
-                host.intake.streams.open(),
+                host.context.streams.open(),
                 1,
                 "a connection that replaces another for the same browser is the same stream"
             );
@@ -6089,7 +6097,7 @@ mod tests {
             let idling = idling_host("idle-exit", &fake);
             idling.leaves_past_the_limit("the idle service asks the process to exit");
             fake.advance(super::presence::LAUNCH_DELAY);
-            idling.host.intake.presence.tick();
+            idling.host.context.presence.tick();
             assert!(
                 fake.launches().is_empty(),
                 "a service that is leaving starts no shell"
@@ -6100,11 +6108,11 @@ mod tests {
                 "an idle exit is not a person's Quit"
             );
             assert!(
-                host.intake.quit.drain.admit().is_err(),
+                host.context.quit.drain.admit().is_err(),
                 "no new work is admitted once the service is leaving"
             );
             assert!(
-                host.intake.streams.admit().is_none(),
+                host.context.streams.admit().is_none(),
                 "no stream is admitted once the service is leaving"
             );
             drop(host);
@@ -6117,7 +6125,7 @@ mod tests {
             let live = Arc::new(Fake::default());
             let idling = idling_host("idle-exit-control", &live);
             live.advance(super::presence::LAUNCH_DELAY);
-            idling.host.intake.presence.tick();
+            idling.host.context.presence.tick();
             assert_eq!(live.launches(), [true]);
         }
 
@@ -6130,7 +6138,7 @@ mod tests {
                 .recv_timeout(PATIENCE)
                 .expect("the session end asks the process to exit");
             idling.clock.advance(IDLE_LIMIT * 3);
-            let streams = Arc::clone(&idling.host.intake.streams);
+            let streams = Arc::clone(&idling.host.context.streams);
             let before = streams.looks();
             eventually(|| streams.looks() > before);
             let Idling {

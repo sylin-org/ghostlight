@@ -154,7 +154,7 @@ fn record_start_failure(home: &Path, ended: &anyhow::Result<()>) {
     let Err(error) = ended else {
         return;
     };
-    if error.is::<crate::service::AuthorityAlreadyRunning>()
+    if error.is::<crate::service::ServiceAlreadyRunning>()
         || error.is::<crate::service::QuitLatched>()
     {
         return;
@@ -220,7 +220,7 @@ fn serve_in<L>(
 pub fn settle_serve(ended: anyhow::Result<()>) -> anyhow::Result<()> {
     match ended {
         Err(error)
-            if error.is::<crate::service::AuthorityAlreadyRunning>()
+            if error.is::<crate::service::ServiceAlreadyRunning>()
                 || error.is::<crate::service::QuitLatched>() =>
         {
             Ok(())
@@ -580,7 +580,7 @@ mod tests {
             assert_eq!(*order.lock().unwrap(), ["listener", "start"]);
         }
         {
-            assert!(settle_serve(Err(crate::service::AuthorityAlreadyRunning.into())).is_ok());
+            assert!(settle_serve(Err(crate::service::ServiceAlreadyRunning.into())).is_ok());
             assert!(settle_serve(Err(crate::service::QuitLatched.into())).is_ok());
             assert!(settle_serve(Err(anyhow::anyhow!("the endpoint could not be bound"))).is_err());
             assert!(settle_serve(Ok(())).is_ok());
@@ -590,7 +590,7 @@ mod tests {
             let record = Layout::new(home.path()).start_failure();
             record_start_failure(
                 home.path(),
-                &Err(crate::service::AuthorityAlreadyRunning.into()),
+                &Err(crate::service::ServiceAlreadyRunning.into()),
             );
             record_start_failure(home.path(), &Err(crate::service::QuitLatched.into()));
             record_start_failure(home.path(), &Ok(()));
