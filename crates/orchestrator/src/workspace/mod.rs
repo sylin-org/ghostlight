@@ -609,6 +609,19 @@ impl WorkspaceState {
             .ok_or(WorkspaceError::StaleTab)
     }
 
+    /// The confirmed binding of `tab`, while it still shows the document `tab` was selected on.
+    ///
+    /// # Errors
+    ///
+    /// [`WorkspaceError::StaleTab`] when the binding is gone or its page has navigated since.
+    fn current(&self, tab: &SelectedTab) -> Result<&TabState, WorkspaceError> {
+        let known = self.confirmed(&tab.handle)?;
+        if known.generation != tab.generation {
+            return Err(WorkspaceError::StaleTab);
+        }
+        Ok(known)
+    }
+
     /// The confirmed binding `handle` names, to change it.
     fn confirmed_mut(&mut self, handle: &TabHandle) -> Result<&mut TabState, WorkspaceError> {
         self.tabs
@@ -682,6 +695,18 @@ struct AggregateState {
 }
 
 impl AggregateState {
+    /// Whether a workspace other than `current` matches `holds`: it holds the handle a refusal
+    /// is about, so the refusal says the handle belongs to another session.
+    fn owned_elsewhere(
+        &self,
+        current: &WorkspaceId,
+        holds: impl Fn(&WorkspaceState) -> bool,
+    ) -> bool {
+        self.workspaces
+            .iter()
+            .any(|(id, workspace)| id != current && holds(workspace))
+    }
+
     /// Whether a workspace other than `current` holds a confirmed binding of `browser`'s tab.
     ///
     /// Physical tab ids are unique inside one browser and nowhere else: Chrome's tab 5 and Edge's
@@ -1519,6 +1544,28 @@ pub struct WorkspaceLease {
 }
 
 impl WorkspaceLease {
+    /// This lease's workspace in the locked `state`.
+    fn workspace_in<'s>(
+        &self,
+        state: &'s AggregateState,
+    ) -> Result<&'s WorkspaceState, WorkspaceError> {
+        state
+            .workspaces
+            .get(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)
+    }
+
+    /// This lease's workspace in the locked `state`, to change.
+    fn workspace_in_mut<'s>(
+        &self,
+        state: &'s mut AggregateState,
+    ) -> Result<&'s mut WorkspaceState, WorkspaceError> {
+        state
+            .workspaces
+            .get_mut(&self.workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)
+    }
+
     /// Opaque owning workspace id.
     #[must_use]
     pub fn workspace(&self) -> &WorkspaceId {
@@ -1606,10 +1653,7 @@ impl WorkspaceLease {
     /// did not come back for a call that needed it.
     pub fn forget_pending(&self, browser: &str) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in_mut(&mut state)?;
         let stale: Vec<TabHandle> = workspace
             .tabs
             .iter()
@@ -1661,17 +1705,14 @@ impl WorkspaceLease {
         requested: Option<&str>,
     ) -> Result<SelectedTab, WorkspaceError> {
         let state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in(&state)?;
         if let Some(requested) = requested {
             let handle = TabHandle(requested.into());
             if let Ok(tab) = workspace.confirmed(&handle) {
                 return Ok(selected(&handle, tab));
             }
-            let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
-                id != &self.workspace && candidate.confirmed(&handle).is_ok()
+            let owned_elsewhere = state.owned_elsewhere(&self.workspace, |candidate| {
+                candidate.confirmed(&handle).is_ok()
             });
             return Err(if owned_elsewhere {
                 WorkspaceError::NotOwnedTab
@@ -1732,10 +1773,7 @@ impl WorkspaceLease {
         tab: &PhysicalTab,
     ) -> Result<SelectedTab, WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in_mut(&mut state)?;
         let known = workspace.confirmed_mut(handle)?;
         if known.physical_id != tab.tab_id {
             return Err(WorkspaceError::StaleTab);
@@ -1761,10 +1799,7 @@ impl WorkspaceLease {
         tab: &PhysicalTab,
     ) -> Result<SelectedTab, WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in_mut(&mut state)?;
         let known = workspace.confirmed_mut(handle)?;
         if known.physical_id != tab.tab_id {
             return Err(WorkspaceError::StaleTab);
@@ -1784,10 +1819,7 @@ impl WorkspaceLease {
         readiness: BrowserReadiness,
     ) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in_mut(&mut state)?;
         let tab = workspace.confirmed_mut(handle)?;
         tab.readiness = readiness;
         Ok(())
@@ -1799,10 +1831,7 @@ impl WorkspaceLease {
     /// clears the hold. `hold` is the refusal every later refusal on the tab repeats.
     pub fn hold_tab(&self, handle: &TabHandle, hold: TabHold) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in_mut(&mut state)?;
         workspace.confirmed_mut(handle)?.hold = Some(hold);
         Ok(())
     }
@@ -1815,14 +1844,8 @@ impl WorkspaceLease {
         tree: serde_json::Value,
     ) -> Result<SnapshotHandle, WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let generation = workspace.confirmed(&tab.handle)?.generation;
-        if generation != tab.generation {
-            return Err(WorkspaceError::StaleTab);
-        }
+        let workspace = self.workspace_in_mut(&mut state)?;
+        let generation = workspace.current(tab)?.generation;
         workspace
             .snapshots
             .retain(|_, snapshot| snapshot.tab != tab.handle);
@@ -1852,10 +1875,7 @@ impl WorkspaceLease {
     ) -> Option<serde_json::Value> {
         let state = self.store.lock();
         let workspace = state.workspaces.get(&self.workspace)?;
-        let known = workspace.confirmed(&tab.handle).ok()?;
-        if known.generation != tab.generation {
-            return None;
-        }
+        let known = workspace.current(tab).ok()?;
         workspace
             .snapshots
             .values()
@@ -1881,14 +1901,8 @@ impl WorkspaceLease {
             return Ok(None);
         }
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let generation = workspace.confirmed(&tab.handle)?.generation;
-        if generation != tab.generation {
-            return Err(WorkspaceError::StaleTab);
-        }
+        let workspace = self.workspace_in_mut(&mut state)?;
+        let generation = workspace.current(tab)?.generation;
         workspace.images.retain(|_, image| image.tab != tab.handle);
         let handle = ImageHandle(short_handle("image_", |candidate| {
             workspace
@@ -1912,10 +1926,7 @@ impl WorkspaceLease {
     pub fn take_image(&self, handle: &str, tab: &SelectedTab) -> Option<(String, String)> {
         let state = self.store.lock();
         let workspace = state.workspaces.get(&self.workspace)?;
-        let known = workspace.confirmed(&tab.handle).ok()?;
-        if known.generation != tab.generation {
-            return None;
-        }
+        let known = workspace.current(tab).ok()?;
         workspace
             .images
             .iter()
@@ -1930,10 +1941,7 @@ impl WorkspaceLease {
     /// Confirm decisive physical closure, tolerating its earlier asynchronous close event.
     pub fn confirm_tab_closed(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in_mut(&mut state)?;
         workspace.forget_tab(handle);
         Ok(())
     }
@@ -1956,11 +1964,9 @@ impl WorkspaceLease {
         let handle = TabHandle(handle.into());
         let mut state = self.store.lock();
         state.admit_tab(&self.workspace, browser, tab.tab_id)?;
-        if state
-            .workspaces
-            .iter()
-            .any(|(id, candidate)| id != &self.workspace && candidate.confirmed(&handle).is_ok())
-        {
+        if state.owned_elsewhere(&self.workspace, |candidate| {
+            candidate.confirmed(&handle).is_ok()
+        }) {
             return Err(WorkspaceError::NotOwnedTab);
         }
         let value = TabState {
@@ -1981,14 +1987,8 @@ impl WorkspaceLease {
         targets: &[ObservedTarget],
     ) -> Result<Vec<(TargetHandle, ObservedTarget)>, WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let known = workspace.confirmed(&tab.handle)?;
-        if known.generation != tab.generation {
-            return Err(WorkspaceError::StaleTab);
-        }
+        let workspace = self.workspace_in_mut(&mut state)?;
+        workspace.current(tab)?;
         let mapped = targets
             .iter()
             .map(|target| (workspace.targets.register(tab, target), target.clone()))
@@ -2004,17 +2004,14 @@ impl WorkspaceLease {
         selected_tab: Option<&SelectedTab>,
     ) -> Result<SelectedTarget, WorkspaceError> {
         let state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in(&state)?;
         let handle = TargetHandle(requested.into());
         if let Some(reason) = workspace.targets.retired_reason(&handle) {
             return Err(WorkspaceError::StaleTarget { reason });
         }
         let Some(target) = workspace.targets.get(&handle) else {
-            let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
-                id != &self.workspace && candidate.targets.contains(&handle)
+            let owned_elsewhere = state.owned_elsewhere(&self.workspace, |candidate| {
+                candidate.targets.contains(&handle)
             });
             return Err(if owned_elsewhere {
                 WorkspaceError::NotOwnedTarget
@@ -2062,14 +2059,8 @@ impl WorkspaceLease {
         height: u32,
     ) -> Result<ViewHandle, WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let known = workspace.confirmed(&tab.handle)?;
-        if known.generation != tab.generation {
-            return Err(WorkspaceError::StaleTab);
-        }
+        let workspace = self.workspace_in_mut(&mut state)?;
+        workspace.current(tab)?;
         workspace.views.retain(|_, view| view.tab != tab.handle);
         let handle = ViewHandle(short_handle("view_", |candidate| {
             workspace.views.contains_key(&ViewHandle(candidate.into()))
@@ -2087,23 +2078,27 @@ impl WorkspaceLease {
         Ok(handle)
     }
 
-    /// Resolve an image point to page CSS coordinates with ownership and generation checks.
-    pub fn resolve_view_point(
+    /// The view `requested` names, with the view a result reports: owned by this workspace, on
+    /// its tab's current document, on `selected_tab` when the call named one, and with a usable
+    /// scale.
+    ///
+    /// # Errors
+    ///
+    /// [`WorkspaceError::NotOwnedView`] when another workspace holds the handle,
+    /// [`WorkspaceError::StaleView`] when the view or its document is gone or its scale is
+    /// unusable, and [`WorkspaceError::HandleOnOtherTab`] when it is on another tab than the call
+    /// named.
+    fn resolve_view<'s>(
         &self,
+        state: &'s AggregateState,
         requested: &str,
         selected_tab: Option<&SelectedTab>,
-        x: f64,
-        y: f64,
-    ) -> Result<(SelectedView, PhysicalPoint), WorkspaceError> {
-        let state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+    ) -> Result<(&'s ViewState, SelectedView), WorkspaceError> {
+        let workspace = self.workspace_in(state)?;
         let handle = ViewHandle(requested.into());
         let Some(view) = workspace.views.get(&handle) else {
-            let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
-                id != &self.workspace && candidate.views.contains_key(&handle)
+            let owned_elsewhere = state.owned_elsewhere(&self.workspace, |candidate| {
+                candidate.views.contains_key(&handle)
             });
             return Err(if owned_elsewhere {
                 WorkspaceError::NotOwnedView
@@ -2125,6 +2120,26 @@ impl WorkspaceLease {
         if view.viewport.output_scale <= 0.0 {
             return Err(WorkspaceError::StaleView);
         }
+        let selected = SelectedView {
+            handle,
+            tab: view.tab.clone(),
+            viewport: view.viewport,
+            width: view.width,
+            height: view.height,
+        };
+        Ok((view, selected))
+    }
+
+    /// Resolve an image point to page CSS coordinates with ownership and generation checks.
+    pub fn resolve_view_point(
+        &self,
+        requested: &str,
+        selected_tab: Option<&SelectedTab>,
+        x: f64,
+        y: f64,
+    ) -> Result<(SelectedView, PhysicalPoint), WorkspaceError> {
+        let state = self.store.lock();
+        let (view, selected) = self.resolve_view(&state, requested, selected_tab)?;
         if !x.is_finite()
             || !y.is_finite()
             || x < 0.0
@@ -2134,13 +2149,6 @@ impl WorkspaceLease {
         {
             return Err(view.outside());
         }
-        let selected = SelectedView {
-            handle,
-            tab: view.tab.clone(),
-            viewport: view.viewport,
-            width: view.width,
-            height: view.height,
-        };
         let point = PhysicalPoint {
             x: view.viewport.page_x + x / view.viewport.output_scale,
             y: view.viewport.page_y + y / view.viewport.output_scale,
@@ -2159,35 +2167,7 @@ impl WorkspaceLease {
         height: f64,
     ) -> Result<(SelectedView, PhysicalRectangle), WorkspaceError> {
         let state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let handle = ViewHandle(requested.into());
-        let Some(view) = workspace.views.get(&handle) else {
-            let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
-                id != &self.workspace && candidate.views.contains_key(&handle)
-            });
-            return Err(if owned_elsewhere {
-                WorkspaceError::NotOwnedView
-            } else {
-                WorkspaceError::StaleView
-            });
-        };
-        let tab = workspace
-            .confirmed(&view.tab)
-            .map_err(|_| WorkspaceError::StaleView)?;
-        if view.generation != tab.generation {
-            return Err(WorkspaceError::StaleView);
-        }
-        if selected_tab.is_some_and(|selected| selected.handle != view.tab) {
-            return Err(WorkspaceError::HandleOnOtherTab {
-                tab: view.tab.clone(),
-            });
-        }
-        if view.viewport.output_scale <= 0.0 {
-            return Err(WorkspaceError::StaleView);
-        }
+        let (view, selected) = self.resolve_view(&state, requested, selected_tab)?;
         let right = x + width;
         let bottom = y + height;
         if !x.is_finite()
@@ -2205,13 +2185,6 @@ impl WorkspaceLease {
         {
             return Err(view.outside());
         }
-        let selected = SelectedView {
-            handle,
-            tab: view.tab.clone(),
-            viewport: view.viewport,
-            width: view.width,
-            height: view.height,
-        };
         let region = PhysicalRectangle {
             x: view.viewport.page_x + x / view.viewport.output_scale,
             y: view.viewport.page_y + y / view.viewport.output_scale,
@@ -2224,10 +2197,7 @@ impl WorkspaceLease {
     /// Invalidate screenshot coordinates after a viewport-changing operation.
     pub fn invalidate_views(&self, tab: &TabHandle) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in_mut(&mut state)?;
         workspace.views.retain(|_, view| &view.tab != tab);
         Ok(())
     }
@@ -2238,10 +2208,7 @@ impl WorkspaceLease {
         physical_ids: &[u64],
     ) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let workspace = self.workspace_in_mut(&mut state)?;
         let affected: Vec<_> = workspace
             .tabs
             .iter()
