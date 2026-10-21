@@ -618,14 +618,9 @@ fn page(head: &Head, asset: &'static Asset) -> Response {
     } else {
         Response::new(Status::Ok).with_body(asset.kind.media_type(), asset.bytes.to_vec())
     };
-    let response = response
+    response
         .with_header(header::ETAG, tag)
-        .with_header(header::CACHE_CONTROL, PAGE_CACHE);
-    if head.method == Method::Head {
-        response.head_only()
-    } else {
-        response
-    }
+        .with_header(header::CACHE_CONTROL, PAGE_CACHE)
 }
 
 /// Serve the image the service has for the catalog agent `agent_id` now (its app's own icon, else
@@ -644,15 +639,10 @@ fn agent_image(shared: &Shared, head: &Head, agent_id: &str) -> Response {
     } else {
         Response::new(Status::Ok).with_body(image.media_type, image.bytes)
     };
-    let response = response
+    response
         .with_header(header::ETAG, tag)
         .with_header(header::CACHE_CONTROL, PAGE_CACHE)
-        .with_header(header::CONTENT_SECURITY_POLICY, IMAGE_POLICY);
-    if head.method == Method::Head {
-        response.head_only()
-    } else {
-        response
-    }
+        .with_header(header::CONTENT_SECURITY_POLICY, IMAGE_POLICY)
 }
 
 fn api(

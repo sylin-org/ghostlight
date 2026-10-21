@@ -1661,6 +1661,42 @@ fn the_notification_test_reaches_the_window_only() {
     );
 }
 
+/// U-D6 (RFC 9110 9.3.2): a HEAD answer carries no body, a refusal's included. A read of each of
+/// these is refused with a JSON body; the HEAD is refused too (a data route takes no HEAD), and
+/// only its headers go out.
+#[test]
+fn a_head_answer_carries_no_body_a_refusals_included() {
+    let fixture = Fixture::closed();
+    let port = fixture.port();
+    let calls = [
+        Call::new("GET", "/api/snapshot"),
+        Call::new("GET", "/api/context").bearer("not-this-start"),
+        Call::new("GET", "/nothing").bearer(&fixture.bearer()),
+        Call::new("GET", "/api/context").host("example.invalid"),
+        Call::new("GET", "/api/search").bearer(&fixture.bearer()),
+    ];
+    for read in calls {
+        let path = read.path.clone();
+        let full = read.send(port);
+        let head = Call {
+            method: "HEAD",
+            ..read
+        }
+        .send(port);
+        assert!(full.status >= 400, "{path}: {}", full.status);
+        assert!(
+            !full.body.is_empty(),
+            "{path}: the read carries the refusal"
+        );
+        assert!(head.status >= 400, "{path}: {}", head.status);
+        assert!(
+            head.body.is_empty(),
+            "{path}: {}",
+            String::from_utf8_lossy(&head.body)
+        );
+    }
+}
+
 #[test]
 fn a_request_head_over_sixteen_kibibytes_is_refused() {
     let fixture = Fixture::start();
@@ -2810,12 +2846,20 @@ fn an_agents_image_answers_that_watching_is_off_and_never_shows_what_is_installe
     .map(|call| {
         let reply = fixture.watch(call);
         assert!(!reply.body.starts_with(&bytes[..4]));
-        (reply.status, reply.code(), reply.body)
+        // A HEAD refusal has only its status (U-D6); a read carries the code.
+        let code = if reply.body.is_empty() {
+            String::new()
+        } else {
+            reply.code()
+        };
+        (reply.status, code, reply.body)
     })
     .collect();
-    for (status, code, _) in &refusals {
+    for (index, (status, code, _)) in refusals.iter().enumerate() {
         assert_eq!(*status, 403);
-        assert_eq!(code, "watching_off");
+        if index % 2 == 0 {
+            assert_eq!(code, "watching_off");
+        }
     }
     let gets: Vec<&Vec<u8>> = refusals
         .iter()

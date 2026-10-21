@@ -363,6 +363,13 @@ fn serve_connection(shared: &Shared, stream: TcpStream) {
     let _ = stream.set_nodelay(true);
     let (mut incoming, head) = http::Incoming::read_head(stream);
     let mut response = match head {
+        // A HEAD answer carries no body, a refusal's included (RFC 9110 9.3.2; U-D6): every
+        // route answers it as it answers a read, and only the headers go out.
+        Ok(head) if head.method == http::Method::Head => {
+            let mut response = routes::answer(shared, &head, &mut incoming);
+            drop(response.take_events());
+            response.head_only()
+        }
         Ok(head) => routes::answer(shared, &head, &mut incoming),
         Err(http::ReadError::Closed) => return,
         Err(http::ReadError::Malformed) => routes::unreadable(),
