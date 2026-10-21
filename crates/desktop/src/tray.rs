@@ -260,15 +260,6 @@ impl TrayModel {
             state: TrayState::Ready,
         }
     }
-
-    /// The tray while the window cannot be built: the tooltip says `words` and the rest is as the
-    /// service described it.
-    pub fn while_window_fails(&self, words: &str) -> TrayModel {
-        TrayModel {
-            tooltip: words.to_owned(),
-            ..self.clone()
-        }
-    }
 }
 
 /// The taskbar the icon is drawn on: whether its ground is light and the size of a small icon on

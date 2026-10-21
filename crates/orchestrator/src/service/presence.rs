@@ -672,6 +672,7 @@ mod tests {
         for (blocked, expected) in [
             (WindowReason::NoDisplay, WindowReason::NoDisplay),
             (WindowReason::NoWebview, WindowReason::NoWebview),
+            (WindowReason::WindowFailed, WindowReason::WindowFailed),
             (WindowReason::NoTray, WindowReason::NoTray),
         ] {
             let (presence, fake) = presence();

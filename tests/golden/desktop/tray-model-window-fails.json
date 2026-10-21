@@ -1,0 +1,29 @@
+{
+  "kind": "tray_model",
+  "model": {
+    "tooltip": "Ghostlight cannot open its window on this computer.",
+    "items": [
+      {
+        "id": "open",
+        "label": "Open Ghostlight",
+        "enabled": true
+      },
+      {
+        "id": "hold",
+        "label": "Pause agents",
+        "enabled": true
+      },
+      {
+        "id": "resume",
+        "label": "Resume agents",
+        "enabled": false
+      },
+      {
+        "id": "quit",
+        "label": "Quit Ghostlight",
+        "enabled": true
+      }
+    ],
+    "state": "ready"
+  }
+}

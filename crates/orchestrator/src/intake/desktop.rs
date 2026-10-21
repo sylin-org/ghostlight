@@ -163,8 +163,10 @@ impl ShellView {
 pub enum UnavailableReason {
     /// The session has no display.
     NoDisplay,
-    /// The computer has no web view runtime, or the window could not be built.
+    /// The computer has no web view runtime, as the shell finds before it opens.
     NoWebview,
+    /// The runtime is there, but the window could not be built.
+    WindowFailed,
     /// The desktop has no tray to draw the icon in.
     NoTray,
 }
@@ -176,6 +178,7 @@ impl UnavailableReason {
         match self {
             Self::NoDisplay => words::WindowReason::NoDisplay,
             Self::NoWebview => words::WindowReason::NoWebview,
+            Self::WindowFailed => words::WindowReason::WindowFailed,
             Self::NoTray => words::WindowReason::NoTray,
         }
     }
@@ -373,6 +376,16 @@ pub struct TrayModel {
 }
 
 impl TrayModel {
+    /// The tray while the window cannot be built: the tooltip says so and the rest is as the
+    /// service describes it.
+    #[must_use]
+    pub fn while_window_fails(&self) -> Self {
+        Self {
+            tooltip: words::TRAY_WINDOW_FAILS.to_owned(),
+            ..self.clone()
+        }
+    }
+
     /// The tray for a service in `readiness` with `runtime` control and `counts` connected.
     ///
     /// Open and Quit can always be chosen. A runtime entry can be chosen only when the act it asks
@@ -512,6 +525,18 @@ mod tests {
                 "unavailable.json",
                 DesktopFrame::Unavailable {
                     reason: UnavailableReason::NoTray,
+                },
+            ),
+            (
+                "unavailable-window-failed.json",
+                DesktopFrame::Unavailable {
+                    reason: UnavailableReason::WindowFailed,
+                },
+            ),
+            (
+                "tray-model-window-fails.json",
+                DesktopFrame::TrayModel {
+                    model: golden_tray().while_window_fails(),
                 },
             ),
             ("closed.json", DesktopFrame::Closed { stays: true }),

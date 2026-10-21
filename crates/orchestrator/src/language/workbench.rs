@@ -147,6 +147,8 @@ pub enum WindowReason {
     NoShellFile,
     /// The computer has no web view runtime for the window.
     NoWebview,
+    /// The runtime is there, but the window could not be built.
+    WindowFailed,
     /// The desktop shows no tray icons, so the window program does not stay.
     NoTray,
     /// The window program started and ended again and again, so the service stopped starting it.
@@ -164,6 +166,7 @@ impl WindowReason {
             Self::NoInteractiveDesktop => "no_interactive_desktop",
             Self::NoShellFile => "no_shell_file",
             Self::NoWebview => "no_webview",
+            Self::WindowFailed => "window_failed",
             Self::NoTray => "no_tray",
             Self::DidNotStay => "did_not_stay",
         }
@@ -184,11 +187,17 @@ impl WindowReason {
                 "No Ghostlight window: the window program is missing from the Ghostlight folder. Install Ghostlight again to restore it."
             }
             Self::NoWebview => WINDOW_NO_WEBVIEW,
+            Self::WindowFailed => {
+                "No Ghostlight window: the window could not be built on this computer. Run ghostlight open to try again."
+            }
             Self::NoTray => WINDOW_NO_TRAY,
             Self::DidNotStay => WINDOW_DID_NOT_STAY,
         })
     }
 }
+
+/// What the tray's tooltip says while the window cannot be built.
+pub const TRAY_WINDOW_FAILS: &str = "Ghostlight cannot open its window on this computer.";
 
 #[cfg(windows)]
 const WINDOW_TRAY: &str = "The Ghostlight window is closed. Its icon is in the notification area.";

@@ -7,7 +7,9 @@
 //! presentation port and its native acts: with a shell attached it writes `show`, `notice` and
 //! `act` frames to it. Without one, a request to show the window goes to presence, which starts a
 //! shell, and every other request is unavailable. The tray model the service describes is written
-//! to the attached shell each time it differs from the one the shell last drew.
+//! to the attached shell each time it differs from the one the shell last drew. While the shell
+//! cannot build its window the service says so in the tooltip, until a person asks for the window
+//! again.
 //!
 //! An act waits for the shell's `act_result`. A stream that ends, a goodbye, and a quit that
 //! begins each release every act waiting on the streams they touch, and the waiting act answers
@@ -168,7 +170,11 @@ impl Claim {
             writer,
             next_act: AtomicU64::new(0),
             waiting: Mutex::default(),
-            tray: Mutex::new(tray),
+            tray: Mutex::new(Tray {
+                described: tray.clone(),
+                drawn: tray,
+                window_fails: false,
+            }),
         });
         registry.place = Place::Attached(Arc::clone(&stream));
         self.attached = true;
@@ -197,7 +203,7 @@ impl Occupied {
     /// A shell that is still being handed the workbench is about to open its window anyway.
     pub fn show(&self) -> bool {
         match &self.holder {
-            Some(stream) => stream.tell(&DesktopFrame::Show { address: None }).is_ok(),
+            Some(stream) => stream.show(None).is_ok(),
             None => false,
         }
     }
@@ -217,7 +223,13 @@ impl Attached {
 
     /// Ask this shell to bring its window forward at `address`.
     pub fn show(&self, address: Option<PageAddress>) {
-        let _ = self.stream.tell(&DesktopFrame::Show { address });
+        let _ = self.stream.show(address);
+    }
+
+    /// The shell could not build its window (`true`), or a person asked it for the window again
+    /// (`false`): the tooltip says so until then.
+    pub fn window_fails(&self, fails: bool) {
+        self.stream.window_fails(fails);
     }
 
     /// Hand this shell one notice to show.
@@ -255,8 +267,17 @@ struct Stream {
     writer: Arc<SocketWriter>,
     next_act: AtomicU64,
     waiting: Mutex<Waiting>,
+    tray: Mutex<Tray>,
+}
+
+/// The tray of one stream.
+struct Tray {
+    /// The tray as the service last described it.
+    described: TrayModel,
     /// The tray the shell last drew, as far as the service has told it.
-    tray: Mutex<TrayModel>,
+    drawn: TrayModel,
+    /// Set while the shell cannot build its window.
+    window_fails: bool,
 }
 
 #[derive(Default)]
@@ -276,8 +297,32 @@ impl Stream {
 
     /// Tell the shell to draw `model` when it is not the tray it already draws.
     fn draw(&self, model: TrayModel) {
-        let mut drawn = lock(&self.tray);
-        if *drawn == model {
+        let mut tray = lock(&self.tray);
+        tray.described = model;
+        self.redraw(&mut tray);
+    }
+
+    /// Say in the tooltip whether the shell can build its window.
+    fn window_fails(&self, fails: bool) {
+        let mut tray = lock(&self.tray);
+        tray.window_fails = fails;
+        self.redraw(&mut tray);
+    }
+
+    /// Ask the shell for its window at `address`. The window it could not build before is tried
+    /// again, so the tooltip stops saying it fails; the shell says so again if it does.
+    fn show(&self, address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
+        self.window_fails(false);
+        self.tell(&DesktopFrame::Show { address })
+    }
+
+    fn redraw(&self, tray: &mut Tray) {
+        let model = if tray.window_fails {
+            tray.described.while_window_fails()
+        } else {
+            tray.described.clone()
+        };
+        if tray.drawn == model {
             return;
         }
         if self
@@ -286,7 +331,7 @@ impl Stream {
             })
             .is_ok()
         {
-            *drawn = model;
+            tray.drawn = model;
         }
     }
 
@@ -383,7 +428,7 @@ impl WorkbenchPresentationPort for ShellRoute {
                     // Both callers are a person. A reason the shell gave for a window it could
                     // not build is over: it gives one again if this window fails too.
                     self.presence.person_acted();
-                    stream.tell(&DesktopFrame::Show { address })?;
+                    stream.show(address)?;
                     self.presence.window_shown();
                     return Ok(());
                 }

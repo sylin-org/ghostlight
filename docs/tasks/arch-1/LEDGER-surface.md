@@ -24,7 +24,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | S1 | fix(tray): every surface offers the acts the runtime state accepts | candidate | P10 | - | landed (37554eab) |
 | S2 | fix(workbench): history rows and counts say what the service decided | candidate | C12a | see Notes | landed (this commit) |
 | S4a | fix(workbench): the Policy page previews and names what governance decides | candidate | P3, P4 | see Notes | landed (this commit) |
-| S8 | fix(window): a window that cannot be built says so | none | ux-2 closes | - | todo |
+| S8 | fix(window): a window that cannot be built says so | none | ux-2 closes | - | landed (this commit) |
 | S6 | fix(setup): setup starts browsers the way recovery does, and marks the right host in use | none | C3c, C13 | - | todo |
 | S3 | refactor(workbench): every part comes from one gather | none | P5, I6, C2 | - | todo |
 | S4b | refactor(workbench): the Policy page's words come from governance | none | P7, P8 | - | todo |
@@ -164,3 +164,16 @@ C3c), then the rows below.
   the bearer must send it on the request that opens the connection.
 - U-D6 as landed: the connection answers a HEAD the way every route answers a read and sends only
   the headers, in one place (`workbench/web/mod.rs`), so the per-route copies went.
+- S8 as landed (Decision 12.7): a window build that fails while the runtime is there reports
+  `window_failed`, a new `UnavailableReason` and `WindowReason` with its sentence; `no_webview`
+  now comes only from preflight. The service words the tooltip, `TRAY_WINDOW_FAILS`: the shell
+  stream keeps the tray it was described and whether the window fails, draws the tooltip while it
+  does, and clears it when a show or a tray Open asks for the window again (the shell reports the
+  failure again if it recurs). The shell's `WINDOW_FAILS_TOOLTIP`, its flag and
+  `TrayModel::while_window_fails` go. Proofs are rows in kept tests, no new test:
+  `the_status_names_the_window_by_what_the_shell_last_reported` now fails the build with the
+  runtime present and reads `window_failed`, the window-fails tooltip and its clearing; presence's
+  unavailable table, status and doctor gain the reason; two desktop goldens
+  (`unavailable-window-failed.json`, `tray-model-window-fails.json`), which the shell decodes. The
+  ADR's suggested test name is not added as a separate test. ARCHITECTURE's unavailable reasons
+  get `window_failed` in D2, as LEDGER-docs plans.

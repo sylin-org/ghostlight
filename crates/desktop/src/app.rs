@@ -81,9 +81,6 @@ const EXIT_FAILURE: u8 = 1;
 /// pause is short, and it only happens on the way out.
 const LAST_REPORT_LINGER: Duration = Duration::from_millis(300);
 
-/// What the tray's tooltip says while the window cannot be built.
-const WINDOW_FAILS_TOOLTIP: &str = "Ghostlight cannot open its window on this computer.";
-
 /// The file name of the shell in `bin`.
 #[cfg(windows)]
 const SHELL_EXECUTABLE_NAME: &str = "ghostlight-desktop.exe";
@@ -360,8 +357,6 @@ struct Shell {
     /// How the first attempt to open the stream ended, made before the display was initialised.
     /// The machine's first request to open the stream takes it.
     first_open: Option<Result<(Link, Workbench), LinkError>>,
-    /// Set while the window cannot be built.
-    window_fails: bool,
     machine: Machine,
     world: ThisWorld,
     lifecycle: WindowLifecycle,
@@ -505,9 +500,6 @@ impl Shell {
         };
         let shown = match self.machine.screen() {
             Some(Screen::State(state)) => model.while_without_service(state.words()),
-            Some(Screen::Workbench) | None if self.window_fails => {
-                model.while_window_fails(WINDOW_FAILS_TOOLTIP)
-            }
             Some(Screen::Workbench) | None => model.clone(),
         };
         let Some(tray) = &mut self.tray else {
@@ -645,17 +637,13 @@ impl Shell {
                 }
                 window.focus();
                 self.window = Some(window);
-                if self.window_fails {
-                    self.window_fails = false;
-                    self.sync_tray();
-                }
             }
             Err(error) => {
                 eprintln!("ghostlight-desktop: {error}");
                 self.apply(LifecycleEvent::Destroyed, target);
-                self.window_fails = true;
-                self.report_unavailable(UnavailableReason::NoWebview);
-                self.sync_tray();
+                // Preflight found the runtime, so the service hears that the build failed, never
+                // that the runtime is missing, and words the tooltip.
+                self.report_unavailable(UnavailableReason::WindowFailed);
             }
         }
     }
@@ -936,7 +924,6 @@ pub fn run(launch: Launch) -> ExitCode {
         launch,
         tray_host: ThisPlace.tray_host(),
         first_open: Some(first_open),
-        window_fails: false,
         machine: Machine::new(launch, image, Instant::now()),
         world: ThisWorld {
             session: ThisSession,

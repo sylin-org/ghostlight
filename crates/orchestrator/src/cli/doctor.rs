@@ -491,6 +491,7 @@ mod tests {
                 WindowReason::NoInteractiveDesktop,
                 WindowReason::NoShellFile,
                 WindowReason::NoWebview,
+                WindowReason::WindowFailed,
                 WindowReason::NoTray,
                 WindowReason::DidNotStay,
             ] {

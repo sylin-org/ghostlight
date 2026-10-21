@@ -67,7 +67,7 @@ use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuthoritySnapshot, GovernanceFacade};
 use crate::install;
 use crate::install::icons::{self, IconCache, IconPlaces};
-use crate::intake::desktop::{DesktopFrame, ShellView, TrayItemId, TrayModel};
+use crate::intake::desktop::{DesktopFrame, ShellView, TrayItemId, TrayModel, UnavailableReason};
 use crate::intake::listener::{self, control, Judgement};
 use crate::intake::mcp::{
     failure_templates, McpSession, OwnedTab, ResumeState, Seating, Step, OLDEST_REVISION,
@@ -1265,6 +1265,7 @@ fn serve_desktop(
             }
             DesktopFrame::Unavailable { reason } => {
                 intake.presence.unavailable(reason.window_reason());
+                attached.window_fails(reason == UnavailableReason::WindowFailed);
                 continue;
             }
             DesktopFrame::Closed { stays } => {
@@ -1288,6 +1289,7 @@ fn serve_desktop(
             TrayItemId::Open => {
                 intake.presence.person_acted();
                 intake.presence.window_shown();
+                attached.window_fails(false);
                 // The shell shows its own window, where it last was. While setup is incomplete
                 // the person is brought back to it, as a window opened fresh would be.
                 if let Some(address) = intake.workbench.show_address() {
@@ -5507,12 +5509,14 @@ mod tests {
 
     /// ACCEPTANCE D13 and defects c51808e7 and a034fc2d: status names the window by what the shell
     /// last reported and a person last did, and a reason the shell gave for a window it cannot
-    /// build stands, also after the shell goes, until a person acts.
+    /// build stands, also after the shell goes, until a person acts. A build that fails with the
+    /// runtime there reads `window_failed`, never a missing runtime, and the service words the
+    /// tooltip that says so until the window is asked for again (ADR-0203 Decision 12.7).
     #[test]
     fn the_status_names_the_window_by_what_the_shell_last_reported() {
         use crate::install::setup_state::{self, SetupRecord};
         use crate::intake::desktop::UnavailableReason;
-        use crate::language::workbench::WindowReason;
+        use crate::language::workbench::{self as words, WindowReason};
         use crate::workbench::setup::SetupProgress;
 
         let home = TestHome::new("status-window");
@@ -5535,7 +5539,11 @@ mod tests {
             item: TrayItemId::Open,
         };
         let cannot_build = DesktopFrame::Unavailable {
-            reason: UnavailableReason::NoWebview,
+            reason: UnavailableReason::WindowFailed,
+        };
+        let tooltip = |stream: &mut Connection| match next_frame(stream) {
+            DesktopFrame::TrayModel { model } => model.tooltip,
+            other => panic!("expected a tray model, got {other:?}"),
         };
         assert_eq!(window(), None, "presence has nothing to say yet");
 
@@ -5554,9 +5562,11 @@ mod tests {
         host.workbench.reveal(Some(PageAddress::About)).unwrap();
         assert!(matches!(next_frame(&mut stream), DesktopFrame::Show { .. }));
         send(&mut stream, cannot_build.clone());
-        eventually(|| window() == Some(WindowReason::NoWebview));
+        assert_eq!(tooltip(&mut stream), words::TRAY_WINDOW_FAILS);
+        eventually(|| window() == Some(WindowReason::WindowFailed));
         assert_eq!(host.quit.shells().attached(), 1, "the shell is still there");
         host.workbench.reveal(None).unwrap();
+        assert_ne!(tooltip(&mut stream), words::TRAY_WINDOW_FAILS);
         assert!(matches!(next_frame(&mut stream), DesktopFrame::Show { .. }));
         eventually(|| window() == Some(WindowReason::Shown));
 
@@ -5568,10 +5578,10 @@ mod tests {
 
         // The reason a shell gave outlives it, until a person starts a shell again.
         send(&mut stream, cannot_build);
-        eventually(|| window() == Some(WindowReason::NoWebview));
+        eventually(|| window() == Some(WindowReason::WindowFailed));
         drop(stream);
         eventually(|| host.quit.shells().attached() == 0);
-        assert_eq!(window(), Some(WindowReason::NoWebview));
+        assert_eq!(window(), Some(WindowReason::WindowFailed));
         let (_person, _) = open_desktop();
         eventually(|| window() == Some(WindowReason::Shown));
         drop(host);

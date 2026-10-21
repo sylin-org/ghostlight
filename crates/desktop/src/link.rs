@@ -123,8 +123,10 @@ pub enum DesktopFrame {
 pub enum UnavailableReason {
     /// The session has no display.
     NoDisplay,
-    /// The computer has no web view runtime, or the window could not be built.
+    /// The computer has no web view runtime, as preflight finds.
     NoWebview,
+    /// The runtime is there, but the window could not be built.
+    WindowFailed,
     /// The desktop has no tray to draw the icon in.
     NoTray,
 }
