@@ -255,44 +255,6 @@ mod tests {
         }
     }
 
-    /// I-D4 (ADR-0106, amendment of 2026-10-21): every `ghostlight call` one agent session makes
-    /// runs in a fresh shell, and each reached a session of its own because the caller was that
-    /// shell. The caller is now the agent's own process, the same for both calls; the desktop app
-    /// above it, a same-named agent, is not folded in.
-    #[test]
-    fn an_agents_calls_through_fresh_shells_reach_the_agents_own_process() {
-        let code = "C:/Users/a/AppData/Roaming/Claude/claude-code/2.1.304/b/claude.exe";
-        let desktop = "C:/Program Files/WindowsApps/Claude_1_x64__p/app/claude.exe";
-        let imaged = |pid, image: &str, parent| Ancestor {
-            image: Some(PathBuf::from(image)),
-            ..process(
-                pid,
-                Path::new(image).file_name().unwrap().to_str().unwrap(),
-                parent,
-            )
-        };
-        let agent_app = |image: &Path| image == Path::new(code) || image == Path::new(desktop);
-        let callers: Vec<_> = [21, 22]
-            .into_iter()
-            .map(|shell| {
-                let chain = [
-                    imaged(shell + 10, SERVICE_EXECUTABLE_NAME, Some(shell)),
-                    imaged(shell, "C:/Windows/System32/cmd.exe", Some(50)),
-                    imaged(50, code, Some(60)),
-                    imaged(60, desktop, Some(1)),
-                ];
-                caller_in(
-                    shell + 10,
-                    u64::MAX,
-                    |pid| chain.iter().find(|p| p.pid == pid).cloned(),
-                    agent_app,
-                )
-                .map(|caller| caller.pid)
-            })
-            .collect();
-        assert_eq!(callers, [Some(50), Some(50)]);
-    }
-
     /// Walk from `start` as a process that began after everything in the chain.
     fn walk(chain: &[Ancestor], start: u32) -> Option<u32> {
         walk_after(chain, start, u64::MAX)
@@ -306,94 +268,6 @@ mod tests {
         .map(|p| p.pid)
     }
 
-    #[test]
-    fn a_terminal_parent_is_the_caller() {
-        let chain = [process(10, "pwsh.exe", Some(1))];
-        assert_eq!(walk(&chain, 10), Some(10));
-    }
-
-    #[test]
-    fn forwarding_hops_are_climbed() {
-        let g = SERVICE_EXECUTABLE_NAME;
-        let one = [process(20, g, Some(10)), process(10, "pwsh.exe", Some(1))];
-        assert_eq!(walk(&one, 20), Some(10));
-        let two = [
-            process(30, g, Some(20)),
-            process(20, &g.to_uppercase(), Some(10)),
-            process(10, "pwsh.exe", Some(1)),
-        ];
-        assert_eq!(walk(&two, 30), Some(10));
-    }
-
-    #[test]
-    fn ghostlight_is_recognized_by_its_full_name_and_by_the_name_the_system_reports() {
-        for file_name in [EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME] {
-            assert!(is_ghostlight(file_name));
-            assert!(is_ghostlight(&file_name.to_uppercase()));
-            assert!(is_ghostlight(reported_name(file_name)));
-        }
-        assert!(!is_ghostlight("pwsh.exe"));
-        assert!(!is_ghostlight("ghostlight-other"));
-    }
-
-    #[test]
-    fn the_edge_and_the_image_it_runs_are_both_climbed_as_the_names_the_system_reports() {
-        let edge = reported_name(EDGE_EXECUTABLE_NAME);
-        let service = reported_name(SERVICE_EXECUTABLE_NAME);
-        let chain = [
-            process(30, service, Some(20)),
-            process(20, edge, Some(10)),
-            process(10, "pwsh.exe", Some(1)),
-        ];
-        assert_eq!(walk(&chain, 30), Some(10));
-    }
-
-    #[test]
-    fn a_chain_that_ends_has_no_caller() {
-        let g = SERVICE_EXECUTABLE_NAME;
-        let no_parent = [process(20, g, None)];
-        assert_eq!(walk(&no_parent, 20), None);
-        let vanished = [process(20, g, Some(99))];
-        assert_eq!(walk(&vanished, 20), None);
-    }
-
-    #[test]
-    fn the_walk_is_bounded() {
-        let g = SERVICE_EXECUTABLE_NAME;
-        let hops = u32::try_from(MAX_ANCESTORS_READ).unwrap();
-        let mut chain: Vec<Ancestor> = (0..=hops + 3)
-            .map(|pid| process(pid, g, Some(pid + 1)))
-            .collect();
-        chain.push(process(hops + 4, "pwsh.exe", None));
-        assert_eq!(
-            walk(&chain, 0),
-            None,
-            "a long chain must not be walked forever"
-        );
-        assert_eq!(walk(&chain, hops + 3), Some(hops + 4));
-    }
-
-    #[test]
-    fn a_git_bash_stub_folds_into_its_shell() {
-        // Two commands from one bash: the per-command stub differs, the shells above it do not.
-        let g = SERVICE_EXECUTABLE_NAME;
-        let shells = [
-            process(444_668, "bash.exe", Some(447_552)),
-            process(447_552, "bash.exe", Some(100)),
-            process(100, "claude.exe", Some(1)),
-        ];
-        let mut first = shells.to_vec();
-        first.push(process(448_400, g, Some(448_356)));
-        first.push(process(448_356, "bash.exe", Some(444_668)));
-        let mut second = shells.to_vec();
-        second.push(process(449_200, g, Some(448_296)));
-        second.push(process(448_296, "bash.exe", Some(444_668)));
-        let a = walk(&first, 448_400);
-        let b = walk(&second, 449_200);
-        assert_eq!(a, Some(447_552));
-        assert_eq!(a, b, "two commands from one shell are one session");
-    }
-
     fn started(pid: u32, name: &str, parent: Option<u32>, started_at: u64) -> Ancestor {
         Ancestor {
             started_at,
@@ -401,161 +275,259 @@ mod tests {
         }
     }
 
+    /// Protects ADR-0106 and its 2026-10-21 amendment (I-D4): a session is keyed on the caller, the
+    /// nearest ancestor that is a catalog agent's installed app, reached through fresh shells, or else
+    /// the terminal. Forwarding hops, the edge and the image it runs, and Git Bash stubs are climbed
+    /// or folded; nested shells of one name are one terminal; a parent that started after its child
+    /// is a recycled pid; the walk and a same-name run are bounded; and an explicit key wins, bounded,
+    /// naming a process by its pid and start time.
     #[test]
-    fn a_parent_that_started_after_its_child_is_a_recycled_pid() {
-        // The stub's recorded parent pid now names a newer bash that is not its real parent.
-        let g = SERVICE_EXECUTABLE_NAME;
-        let chain = [
-            started(40, g, Some(30), 400),
-            started(30, "bash.exe", Some(20), 300),
-            started(20, "bash.exe", Some(10), 900),
-            started(10, "claude.exe", None, 100),
-        ];
-        assert_eq!(
-            walk(&chain, 40),
-            Some(30),
-            "the fold stops at the recycled parent"
-        );
-        let orphan = [
-            started(40, g, Some(20), 400),
-            started(20, "bash.exe", None, 900),
-        ];
-        assert_eq!(walk(&orphan, 40), None, "the hop skip stops at it too");
-        let equal = [
-            started(40, g, Some(20), 400),
-            started(20, "bash.exe", None, 400),
-        ];
-        assert_eq!(walk(&equal, 40), Some(20), "equal start times are allowed");
-    }
-
-    #[test]
-    fn a_first_parent_that_started_after_this_process_is_a_recycled_pid() {
-        // The spawning stub exited and its pid now names an unrelated, newer shell.
-        let chain = [started(20, "pwsh.exe", Some(10), 900)];
-        assert_eq!(walk_after(&chain, 20, 400), None);
-        assert_eq!(
-            walk_after(&chain, 20, 900),
-            Some(20),
-            "equal times are allowed"
-        );
-        let hop = [
-            started(20, SERVICE_EXECUTABLE_NAME, Some(10), 900),
-            started(10, "pwsh.exe", None, 100),
-        ];
-        assert_eq!(
-            walk_after(&hop, 20, 400),
-            None,
-            "a Ghostlight first parent is held to the rule too"
-        );
-    }
-
-    #[test]
-    fn a_direct_terminal_chain_is_unchanged() {
-        let chain = [
-            process(10, "pwsh.exe", Some(5)),
-            process(5, "WindowsTerminal.exe", Some(1)),
-        ];
-        assert_eq!(walk(&chain, 10), Some(10));
-    }
-
-    #[test]
-    fn a_forwarding_hop_above_a_stub_is_climbed_then_folded() {
-        let g = SERVICE_EXECUTABLE_NAME;
-        let chain = [
-            process(40, g, Some(30)),
-            process(30, "bash.exe", Some(20)),
-            process(20, "BASH.EXE", Some(10)),
-            process(10, "claude.exe", None),
-        ];
-        assert_eq!(walk(&chain, 40), Some(20));
-    }
-
-    #[test]
-    fn nested_same_name_shells_are_one_terminal() {
-        let chain = [
-            process(30, "bash.exe", Some(20)),
-            process(20, "bash.exe", Some(10)),
-            process(10, "bash.exe", Some(5)),
-            process(5, "tmux.exe", None),
-        ];
-        assert_eq!(walk(&chain, 30), Some(10));
-    }
-
-    #[test]
-    fn a_same_name_run_is_bounded_by_the_ancestor_budget() {
-        let hops = u32::try_from(MAX_ANCESTORS_READ).unwrap();
-        let chain: Vec<Ancestor> = (0..hops + 6)
-            .map(|pid| process(pid, "bash.exe", Some(pid + 1)))
-            .collect();
-        assert_eq!(
-            walk(&chain, 0),
-            Some(hops - 1),
-            "the climb stops at the bound"
-        );
-    }
-
-    #[test]
-    fn the_caller_of_this_process_is_identified() {
-        let Some(SessionMarker::Process {
-            pid,
-            started_at,
-            name,
-        }) = caller()
-        else {
-            // A parent that cannot be identified is a supported outcome, not a failure.
-            return;
-        };
-        assert!(pid > 0);
-        assert!(
-            started_at > 0,
-            "a start time is what disambiguates a recycled pid"
-        );
-        assert!(!name.is_empty());
-    }
-
-    #[test]
-    fn an_explicit_key_wins_and_is_bounded() {
-        // Two markers differing only in pid must not collide, and a declared key must not carry an
-        // unbounded string into the workspace registry.
-        std::env::set_var(SESSION_VARIABLE, format!("  {}  ", "k".repeat(400)));
-        let Some(SessionMarker::Declared { key }) = marker() else {
-            panic!("an explicit key must win over the parent process");
-        };
-        assert_eq!(key.len(), 120);
-        std::env::set_var(SESSION_VARIABLE, "   ");
-        assert!(
-            !matches!(marker(), Some(SessionMarker::Declared { .. })),
-            "a blank key is not a key"
-        );
-        std::env::remove_var(SESSION_VARIABLE);
-    }
-
-    #[test]
-    fn a_key_identifies_a_process_by_pid_and_start_time() {
-        let first = SessionMarker::Process {
-            pid: 4312,
-            started_at: 100,
-            name: "pwsh.exe".into(),
-        };
-        let recycled = SessionMarker::Process {
-            pid: 4312,
-            started_at: 200,
-            name: "pwsh.exe".into(),
-        };
-        assert_ne!(
-            first.key(),
-            recycled.key(),
-            "a recycled pid running the same program must not inherit the dead session"
-        );
-        let renamed = SessionMarker::Process {
-            pid: 4312,
-            started_at: 100,
-            name: "other.exe".into(),
-        };
-        assert_eq!(
-            first.key(),
-            renamed.key(),
-            "the name is attribution, so it must not change identity"
-        );
+    fn a_session_is_keyed_on_the_callers_agent_app_or_its_terminal() {
+        {
+            let code = "C:/Users/a/AppData/Roaming/Claude/claude-code/2.1.304/b/claude.exe";
+            let desktop = "C:/Program Files/WindowsApps/Claude_1_x64__p/app/claude.exe";
+            let imaged = |pid, image: &str, parent| Ancestor {
+                image: Some(PathBuf::from(image)),
+                ..process(
+                    pid,
+                    Path::new(image).file_name().unwrap().to_str().unwrap(),
+                    parent,
+                )
+            };
+            let agent_app = |image: &Path| image == Path::new(code) || image == Path::new(desktop);
+            let callers: Vec<_> = [21, 22]
+                .into_iter()
+                .map(|shell| {
+                    let chain = [
+                        imaged(shell + 10, SERVICE_EXECUTABLE_NAME, Some(shell)),
+                        imaged(shell, "C:/Windows/System32/cmd.exe", Some(50)),
+                        imaged(50, code, Some(60)),
+                        imaged(60, desktop, Some(1)),
+                    ];
+                    caller_in(
+                        shell + 10,
+                        u64::MAX,
+                        |pid| chain.iter().find(|p| p.pid == pid).cloned(),
+                        agent_app,
+                    )
+                    .map(|caller| caller.pid)
+                })
+                .collect();
+            assert_eq!(callers, [Some(50), Some(50)]);
+        }
+        {
+            let chain = [process(10, "pwsh.exe", Some(1))];
+            assert_eq!(walk(&chain, 10), Some(10));
+        }
+        {
+            let g = SERVICE_EXECUTABLE_NAME;
+            let one = [process(20, g, Some(10)), process(10, "pwsh.exe", Some(1))];
+            assert_eq!(walk(&one, 20), Some(10));
+            let two = [
+                process(30, g, Some(20)),
+                process(20, &g.to_uppercase(), Some(10)),
+                process(10, "pwsh.exe", Some(1)),
+            ];
+            assert_eq!(walk(&two, 30), Some(10));
+        }
+        {
+            for file_name in [EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME] {
+                assert!(is_ghostlight(file_name));
+                assert!(is_ghostlight(&file_name.to_uppercase()));
+                assert!(is_ghostlight(reported_name(file_name)));
+            }
+            assert!(!is_ghostlight("pwsh.exe"));
+            assert!(!is_ghostlight("ghostlight-other"));
+        }
+        {
+            let edge = reported_name(EDGE_EXECUTABLE_NAME);
+            let service = reported_name(SERVICE_EXECUTABLE_NAME);
+            let chain = [
+                process(30, service, Some(20)),
+                process(20, edge, Some(10)),
+                process(10, "pwsh.exe", Some(1)),
+            ];
+            assert_eq!(walk(&chain, 30), Some(10));
+        }
+        {
+            let g = SERVICE_EXECUTABLE_NAME;
+            let no_parent = [process(20, g, None)];
+            assert_eq!(walk(&no_parent, 20), None);
+            let vanished = [process(20, g, Some(99))];
+            assert_eq!(walk(&vanished, 20), None);
+        }
+        {
+            let g = SERVICE_EXECUTABLE_NAME;
+            let hops = u32::try_from(MAX_ANCESTORS_READ).unwrap();
+            let mut chain: Vec<Ancestor> = (0..=hops + 3)
+                .map(|pid| process(pid, g, Some(pid + 1)))
+                .collect();
+            chain.push(process(hops + 4, "pwsh.exe", None));
+            assert_eq!(
+                walk(&chain, 0),
+                None,
+                "a long chain must not be walked forever"
+            );
+            assert_eq!(walk(&chain, hops + 3), Some(hops + 4));
+        }
+        {
+            // Two commands from one bash: the per-command stub differs, the shells above it do not.
+            let g = SERVICE_EXECUTABLE_NAME;
+            let shells = [
+                process(444_668, "bash.exe", Some(447_552)),
+                process(447_552, "bash.exe", Some(100)),
+                process(100, "claude.exe", Some(1)),
+            ];
+            let mut first = shells.to_vec();
+            first.push(process(448_400, g, Some(448_356)));
+            first.push(process(448_356, "bash.exe", Some(444_668)));
+            let mut second = shells.to_vec();
+            second.push(process(449_200, g, Some(448_296)));
+            second.push(process(448_296, "bash.exe", Some(444_668)));
+            let a = walk(&first, 448_400);
+            let b = walk(&second, 449_200);
+            assert_eq!(a, Some(447_552));
+            assert_eq!(a, b, "two commands from one shell are one session");
+        }
+        {
+            // The stub's recorded parent pid now names a newer bash that is not its real parent.
+            let g = SERVICE_EXECUTABLE_NAME;
+            let chain = [
+                started(40, g, Some(30), 400),
+                started(30, "bash.exe", Some(20), 300),
+                started(20, "bash.exe", Some(10), 900),
+                started(10, "claude.exe", None, 100),
+            ];
+            assert_eq!(
+                walk(&chain, 40),
+                Some(30),
+                "the fold stops at the recycled parent"
+            );
+            let orphan = [
+                started(40, g, Some(20), 400),
+                started(20, "bash.exe", None, 900),
+            ];
+            assert_eq!(walk(&orphan, 40), None, "the hop skip stops at it too");
+            let equal = [
+                started(40, g, Some(20), 400),
+                started(20, "bash.exe", None, 400),
+            ];
+            assert_eq!(walk(&equal, 40), Some(20), "equal start times are allowed");
+        }
+        {
+            // The spawning stub exited and its pid now names an unrelated, newer shell.
+            let chain = [started(20, "pwsh.exe", Some(10), 900)];
+            assert_eq!(walk_after(&chain, 20, 400), None);
+            assert_eq!(
+                walk_after(&chain, 20, 900),
+                Some(20),
+                "equal times are allowed"
+            );
+            let hop = [
+                started(20, SERVICE_EXECUTABLE_NAME, Some(10), 900),
+                started(10, "pwsh.exe", None, 100),
+            ];
+            assert_eq!(
+                walk_after(&hop, 20, 400),
+                None,
+                "a Ghostlight first parent is held to the rule too"
+            );
+        }
+        {
+            let chain = [
+                process(10, "pwsh.exe", Some(5)),
+                process(5, "WindowsTerminal.exe", Some(1)),
+            ];
+            assert_eq!(walk(&chain, 10), Some(10));
+        }
+        {
+            let g = SERVICE_EXECUTABLE_NAME;
+            let chain = [
+                process(40, g, Some(30)),
+                process(30, "bash.exe", Some(20)),
+                process(20, "BASH.EXE", Some(10)),
+                process(10, "claude.exe", None),
+            ];
+            assert_eq!(walk(&chain, 40), Some(20));
+        }
+        {
+            let chain = [
+                process(30, "bash.exe", Some(20)),
+                process(20, "bash.exe", Some(10)),
+                process(10, "bash.exe", Some(5)),
+                process(5, "tmux.exe", None),
+            ];
+            assert_eq!(walk(&chain, 30), Some(10));
+        }
+        {
+            let hops = u32::try_from(MAX_ANCESTORS_READ).unwrap();
+            let chain: Vec<Ancestor> = (0..hops + 6)
+                .map(|pid| process(pid, "bash.exe", Some(pid + 1)))
+                .collect();
+            assert_eq!(
+                walk(&chain, 0),
+                Some(hops - 1),
+                "the climb stops at the bound"
+            );
+        }
+        {
+            let Some(SessionMarker::Process {
+                pid,
+                started_at,
+                name,
+            }) = caller()
+            else {
+                // A parent that cannot be identified is a supported outcome, not a failure.
+                return;
+            };
+            assert!(pid > 0);
+            assert!(
+                started_at > 0,
+                "a start time is what disambiguates a recycled pid"
+            );
+            assert!(!name.is_empty());
+        }
+        {
+            // Two markers differing only in pid must not collide, and a declared key must not carry an
+            // unbounded string into the workspace registry.
+            std::env::set_var(SESSION_VARIABLE, format!("  {}  ", "k".repeat(400)));
+            let Some(SessionMarker::Declared { key }) = marker() else {
+                panic!("an explicit key must win over the parent process");
+            };
+            assert_eq!(key.len(), 120);
+            std::env::set_var(SESSION_VARIABLE, "   ");
+            assert!(
+                !matches!(marker(), Some(SessionMarker::Declared { .. })),
+                "a blank key is not a key"
+            );
+            std::env::remove_var(SESSION_VARIABLE);
+        }
+        {
+            let first = SessionMarker::Process {
+                pid: 4312,
+                started_at: 100,
+                name: "pwsh.exe".into(),
+            };
+            let recycled = SessionMarker::Process {
+                pid: 4312,
+                started_at: 200,
+                name: "pwsh.exe".into(),
+            };
+            assert_ne!(
+                first.key(),
+                recycled.key(),
+                "a recycled pid running the same program must not inherit the dead session"
+            );
+            let renamed = SessionMarker::Process {
+                pid: 4312,
+                started_at: 100,
+                name: "other.exe".into(),
+            };
+            assert_eq!(
+                first.key(),
+                renamed.key(),
+                "the name is attribution, so it must not change identity"
+            );
+        }
     }
 }
