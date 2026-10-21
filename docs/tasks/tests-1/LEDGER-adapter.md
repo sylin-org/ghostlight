@@ -13,14 +13,15 @@ ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (
 (`geometry/tests.rs`), A7 (`locator.rs`), A8
 (`scope/tests.rs`), A9 (`tree/tests.rs`),
 A10 (`merge/tests.rs`), A11 (`link/tests.rs`), A12 (`connection/tests.rs`), A13
-(`golden.rs`), A14 (`translate/script.rs`) and A15 (`translate/tests/forms.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+(`golden.rs`), A14 (`translate/script.rs`), A15 (`translate/tests/forms.rs`) and
+A16 (`translate/tests/points.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 123 |
+| `browser/adapter/` | 337 | 55 | 104 |
 
 ## Slices
 
@@ -43,7 +44,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A12 | `protocol4/connection/tests.rs`: one browser's connection, from hello to its end | 16 | 7 | promise 4, contract 1, defect 2 | landed (dd3eded6) |
 | A13 | `protocol4/golden.rs`: the goldens both sides read, one test per contract | 19 | 4 | contract 4 | landed (2a3a574e) |
 | A14 | `protocol4/translate/script.rs`: which scripts `browser_execute` awaits | 2 | 1 | contract 1 | landed (4de312d7) |
-| A15 | `protocol4/translate/tests/forms.rs`: a fill's order, its refusals and its partial outcomes | 20 | 3 | promise 2, defect 1 | landed (this commit) |
+| A15 | `protocol4/translate/tests/forms.rs`: a fill's order, its refusals and its partial outcomes | 20 | 3 | promise 2, defect 1 | landed (1a4ccfed) |
+| A16 | `protocol4/translate/tests/points.rs`: where a point or a target may land | 22 | 3 | promise 2, defect 1 | landed (this commit) |
 
 ## Notes
 
@@ -67,7 +69,9 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   `vocabulary.json` says what the service says (names, scalars, limits), and every closed word a
   page asset or the extension spells is one the service knows; no golden file changes; translate 99 to 14 (`tests.rs` 4,
   `interaction.rs` 4, `points.rs` 3, `forms.rs` 3, `script.rs` 1, less the composed ceiling, which
-  `merge` proves, and the fill's followed handle, which `world` proves). Total 54.
+  `merge` proves, and the fill's followed handle, which `world` proves). Total 55 after the recount at A16: `world`'s removed-lookup test becomes a case of
+  interaction's refusal test, interaction's click and hover geometry go (the placement is the one
+  points' nested-frames test proves), and `tree`'s two tests become one.
 - A2: the 27 cut tests restated the key tables, the modifier masks, the wheel tick, the drag
   stride count and the button map, or were cases of the three kept rules: a press types its text
   unless a shortcut modifier is held (Enter as the carriage return a form submits on), a text fill
@@ -167,6 +171,15 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   whole budget from its arrival, after the budget began, so the case no longer depends on how fast
   the call starts. A first version measured from before the call and failed one run in five;
   fifteen runs in a row passed after the fix.
+- A16: kept three: a point or target reaches only the admitted document it lands in, checked
+  before any input, with ten cases as named functions (document boundary evidence 4, executor 8);
+  a target in nested frames is placed through its owners' boxes (journeys 10); and a drag reports
+  a handle its preparing hover followed (259241ad). The page-export document change (a9d40c83)
+  is now a case of `translate/tests.rs`'s reloaded-iframe test, which calls it. Cut: hover, wheel,
+  stride and modifier tests `keys` proves, a viewport-edge failure passed through as is, the
+  export's attach call the golden pins, and the mid-drag dialog, which interaction's mid-input
+  dialog case proves. Scope's admission test regains the rows A8 left to this slice: a point needs
+  routing on a page with a frame the scope cannot read, and an open page routes none.
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden

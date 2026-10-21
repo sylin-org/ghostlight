@@ -7,12 +7,12 @@
 
 use super::interaction::{expected_view, inputs_seen, kinds, primitives_seen, unscoped, view};
 use super::*;
-use crate::browser::adapter::{PhysicalFile, RecordingDelivery, RecordingDestination};
+use crate::browser::adapter::{PhysicalFile, RecordingDestination};
 use serde_json::json;
 
 use super::super::super::geometry;
 use super::super::super::keys;
-use super::super::super::wire::{InputStep, MouseAction, Point};
+use super::super::super::wire::{InputStep, Point};
 use super::super::super::world::OwnerBox;
 use crate::browser::adapter::PhysicalActionSubject;
 use crate::browser::adapter::{
@@ -335,7 +335,6 @@ fn frame_ids(guard: &wire::DocumentGuard) -> Vec<&str> {
         .collect()
 }
 
-#[test]
 fn an_open_scope_sends_a_point_click_without_routing_it() {
     let (port, fake) = exact();
     let result = unscoped(call(&port, scoped(all_open(), click_at(OVER_G))).unwrap());
@@ -370,38 +369,6 @@ fn an_open_scope_sends_a_point_click_without_routing_it() {
     assert!(inputs[0].guard.is_some());
 }
 
-#[test]
-fn a_modified_point_click_holds_its_modifiers() {
-    let (port, fake) = exact();
-    call(
-        &port,
-        scoped(
-            all_open(),
-            BrowserCommand::ActivatePoint(PhysicalPointClick {
-                at: PhysicalViewPoint {
-                    tab_id: 12,
-                    point: at(OVER_E.0, OVER_E.1),
-                    expected_viewport: expected_view(),
-                },
-                button: PointerButton::Primary,
-                click_count: 2,
-                modifiers: vec!["Shift".into()],
-            }),
-        ),
-    )
-    .unwrap();
-    assert_eq!(
-        inputs_seen(&fake)[0].steps,
-        keys::click(
-            Point { x: 550.0, y: 100.0 },
-            keys::mouse_button(PointerButton::Primary),
-            2,
-            keys::modifier_mask(&["Shift"])
-        )
-    );
-}
-
-#[test]
 fn a_stale_view_refuses_the_point_before_anything_is_sent() {
     let moved = json!({"visual_page_x": 0, "visual_page_y": 0, "visual_css_width": 800,
         "visual_css_height": 600, "content_css_width": 800, "content_css_height": 2000,
@@ -422,7 +389,6 @@ fn a_stale_view_refuses_the_point_before_anything_is_sent() {
     }
 }
 
-#[test]
 fn a_scoped_point_is_routed_through_nested_documents_to_its_subject() {
     let (port, fake) = exact();
     let (observation, result) =
@@ -474,7 +440,6 @@ fn a_scoped_point_is_routed_through_nested_documents_to_its_subject() {
     );
 }
 
-#[test]
 fn identical_embeds_are_told_apart_by_their_owners() {
     let (port, fake) = exact();
     let result = unscoped(call(&port, scoped(without_c(), click_at(OVER_E))).unwrap());
@@ -493,6 +458,13 @@ fn identical_embeds_are_told_apart_by_their_owners() {
     assert_eq!(frames_of(&calls[2]), ["E"]);
 }
 
+/// A point or a target reaches only the admitted document it lands in, checked before any input:
+/// an open page sends a point without routing it; a governed one routes it through its nested
+/// documents to the subject, tells identical embeds apart by their owners, and refuses a point
+/// over a document the scope leaves out, one no owner or several claim, a stale view, a click
+/// covered by a denied document and a recording exported into a document left out, with nothing
+/// sent; a dropped image is delivered inside the document under the point (ACCEPTANCE, document
+/// boundary evidence 4 and executor and truth gates 8).
 #[test]
 fn a_point_over_a_document_the_scope_leaves_out_is_refused_before_input() {
     for command in [
@@ -518,9 +490,19 @@ fn a_point_over_a_document_the_scope_leaves_out_is_refused_before_input() {
             .all(|call| !kinds(call).contains(&"drop_files".to_owned())),
         "the drop is never delivered"
     );
+
+    an_open_scope_sends_a_point_click_without_routing_it();
+    a_stale_view_refuses_the_point_before_anything_is_sent();
+    a_scoped_point_is_routed_through_nested_documents_to_its_subject();
+    identical_embeds_are_told_apart_by_their_owners();
+    a_point_that_zero_or_several_owners_claim_is_unresolved_and_sends_nothing();
+    a_restricted_click_on_a_target_lands_when_the_point_is_where_the_target_is();
+    a_restricted_click_covered_by_a_denied_document_is_refused_before_input();
+    a_restricted_drag_between_points_names_the_subjects_at_both_ends();
+    a_dropped_image_is_delivered_inside_the_document_under_the_point();
+    a_recording_is_never_exported_into_a_document_the_scope_leaves_out();
 }
 
-#[test]
 fn a_point_that_zero_or_several_owners_claim_is_unresolved_and_sends_nothing() {
     for owners in [Owners::Nobody, Owners::Everybody] {
         let (port, fake) = rig(owners, view());
@@ -533,7 +515,6 @@ fn a_point_that_zero_or_several_owners_claim_is_unresolved_and_sends_nothing() {
     }
 }
 
-#[test]
 fn a_restricted_click_on_a_target_lands_when_the_point_is_where_the_target_is() {
     let (port, fake) = exact();
     let result = unscoped(
@@ -561,7 +542,6 @@ fn a_restricted_click_on_a_target_lands_when_the_point_is_where_the_target_is() 
     );
 }
 
-#[test]
 fn a_restricted_click_covered_by_a_denied_document_is_refused_before_input() {
     let covered = |scope| {
         let (port, fake) = exact();
@@ -590,125 +570,6 @@ fn a_restricted_click_covered_by_a_denied_document_is_refused_before_input() {
     assert_eq!(inputs, 1);
 }
 
-#[test]
-fn a_hover_at_a_point_moves_the_pointer_there() {
-    let (port, fake) = exact();
-    let result = unscoped(call(&port, scoped(without_e(), hover_at(OVER_G))).unwrap());
-    assert!(matches!(
-        result,
-        BrowserOutcome::Hovered { tab_id: 12, ref subject } if subject.as_ref().is_some_and(|subject| subject.name == "In G")
-    ));
-    let inputs = inputs_seen(&fake);
-    assert_eq!(inputs[0].steps, keys::hover(Point { x: 150.0, y: 100.0 }));
-    assert_eq!(inputs[0].settle_ms, 0);
-}
-
-#[test]
-fn a_sideways_wheel_turn_is_refused_before_any_input() {
-    for direction in [ScrollDirection::Left, ScrollDirection::Right] {
-        let (port, fake) = exact();
-        let result = call(&port, scoped(all_open(), wheel_at(OVER_E, direction, 1)));
-        assert!(
-            matches!(result, Err(BrowserError::Protocol(_))),
-            "{direction:?}: {result:?}"
-        );
-        assert!(
-            inputs_seen(&fake).is_empty(),
-            "{direction:?}: no wheel turned down instead"
-        );
-    }
-}
-
-#[test]
-fn a_wheel_turns_once_a_tick_in_the_direction_asked() {
-    for (direction, ticks, delta) in [
-        (ScrollDirection::Down, 3_u8, 120.0),
-        (ScrollDirection::Up, 2, -120.0),
-    ] {
-        let (port, fake) = exact();
-        let result = unscoped(
-            call(
-                &port,
-                scoped(all_open(), wheel_at(OVER_E, direction, ticks)),
-            )
-            .unwrap(),
-        );
-        assert_eq!(
-            result,
-            BrowserOutcome::Scrolled {
-                tab_id: 12,
-                x: 550.0,
-                y: 100.0,
-                subject: Some(PhysicalActionSubject {
-                    role: TOP_ROLE.into(),
-                    name: "Top".into(),
-                    rebound: false,
-                })
-            },
-            "the receipt reports where the wheel turned, in the top viewport"
-        );
-        let input = &inputs_seen(&fake)[0];
-        assert_eq!(input.steps.len(), usize::from(ticks));
-        for step in &input.steps {
-            let InputStep::Mouse {
-                action,
-                x,
-                y,
-                delta_x,
-                delta_y,
-                ..
-            } = step
-            else {
-                panic!("a mouse step, not {step:?}");
-            };
-            assert_eq!(*action, MouseAction::Wheel);
-            assert_eq!((*x, *y), (550.0, 100.0));
-            assert_eq!((*delta_x, *delta_y), (0.0, delta));
-        }
-        assert_eq!(input.settle_ms, 120);
-    }
-}
-
-#[test]
-fn a_drag_between_points_moves_in_twelve_strides() {
-    let (port, fake) = exact();
-    let result = unscoped(call(&port, scoped(all_open(), drag_points(OVER_G, OVER_E))).unwrap());
-    let BrowserOutcome::Dragged {
-        tab,
-        source_subject,
-        destination_subject,
-        ..
-    } = result
-    else {
-        panic!("a drag");
-    };
-    assert_eq!(tab.tab_id, 12);
-    assert_eq!(source_subject.unwrap().name, "Top");
-    assert_eq!(destination_subject.unwrap().name, "Top");
-    let calls = calls_seen(&fake);
-    assert_eq!(calls.len(), 1, "an open scope routes nothing");
-    assert_eq!(calls[0].mode, wire::CallMode::Sequence);
-    assert_eq!(kinds(&calls[0]), ["viewport_point", "viewport_point"]);
-    assert!(calls[0].guard.is_some());
-    let inputs = inputs_seen(&fake);
-    assert_eq!(inputs[0].steps.len(), 1);
-    let InputStep::Drag { path, modifiers } = &inputs[0].steps[0] else {
-        panic!("a drag step");
-    };
-    assert_eq!(*modifiers, 0);
-    assert_eq!(path.len(), 13, "the press point, then twelve moves");
-    assert_eq!(*path.first().unwrap(), Point { x: 150.0, y: 100.0 });
-    assert_eq!(*path.last().unwrap(), Point { x: 550.0, y: 100.0 });
-    let strides: Vec<f64> = path.windows(2).map(|pair| pair[1].x - pair[0].x).collect();
-    assert!(
-        strides
-            .iter()
-            .all(|stride| (stride - 400.0 / 12.0).abs() < 1e-6),
-        "equal strides, not {strides:?}"
-    );
-}
-
-#[test]
 fn a_restricted_drag_between_points_names_the_subjects_at_both_ends() {
     let (port, fake) = exact();
     let scope = nested_scope(&["T.t1", "G.g1", "E.e1"]);
@@ -728,18 +589,8 @@ fn a_restricted_drag_between_points_names_the_subjects_at_both_ends() {
     assert!(frame_ids(&guard).contains(&"G") && frame_ids(&guard).contains(&"E"));
 }
 
-#[test]
-fn a_drag_point_outside_the_viewport_is_a_plain_failure() {
-    let (port, fake) = exact();
-    let error = call(
-        &port,
-        scoped(all_open(), drag_points((150.0, 50.0), OVER_E)),
-    )
-    .unwrap_err();
-    assert_eq!(error, BrowserError::primitive("outside_viewport"));
-    assert!(inputs_seen(&fake).is_empty());
-}
-
+/// A target in nested frames is placed in top-viewport coordinates through its owners' content
+/// boxes, so a drag lands where the target is (ACCEPTANCE, browser job journeys 10).
 #[test]
 fn offsets_through_two_nested_frames_place_a_dragged_target() {
     let (port, fake) = exact();
@@ -837,8 +688,8 @@ fn following_hovers(followed: &'static [&'static str]) -> (RelayBrowserPort, Fak
     }))
 }
 
-/// The measurements that follow the preparing hovers find both ends live and say nothing of a
-/// follow, so a drag takes the fact from the hover that brought each end into view.
+/// A drag whose preparing hover followed a handle through a re-render reports it at that end,
+/// through the drag's own measurements (commit 259241ad).
 #[test]
 fn a_drag_whose_preparing_hover_followed_a_handle_reports_it_at_that_end() {
     let cases: [(&'static [&'static str], bool, bool); 4] = [
@@ -876,34 +727,6 @@ fn a_drag_whose_preparing_hover_followed_a_handle_reports_it_at_that_end() {
     }
 }
 
-#[test]
-fn a_dialog_while_the_pointer_is_down_leaves_a_drag_half_done() {
-    let (port, _fake) = port_with(Box::new(|correlation, primitive| {
-        Reply::Now(match primitive {
-            wire::Primitive::View(_) => FakeExtension::ok(correlation, view()),
-            wire::Primitive::Call(call) => FakeExtension::ok(
-                correlation,
-                json!({"answers": call.calls.iter()
-                    .map(|world| answer(world, Owners::Exact)).collect::<Vec<_>>()}),
-            ),
-            wire::Primitive::Input(_) => wire::Receipt {
-                dispatched: true,
-                ..FakeExtension::ok(
-                    correlation,
-                    json!({"completed_steps": 0,
-                        "stopped": {"reason": "dialog", "dialog_type": "confirm"}}),
-                )
-            },
-            _ => FakeExtension::ok(correlation, Value::Null),
-        })
-    }));
-    assert!(matches!(
-        call(&port, scoped(all_open(), drag_points(OVER_G, OVER_E))),
-        Err(BrowserError::EffectUnknown(_))
-    ));
-}
-
-#[test]
 fn a_dropped_image_is_delivered_inside_the_document_under_the_point() {
     for scope in [all_open(), without_e()] {
         let (port, fake) = exact();
@@ -963,54 +786,7 @@ fn exports_seen(fake: &FakeExtension) -> Vec<wire::RecordingOp> {
         .collect()
 }
 
-#[test]
-fn a_recording_exported_into_a_page_carries_its_attach_call_and_guard() {
-    let (port, fake) = exact();
-    call(
-        &port,
-        scoped(all_open(), BrowserCommand::StartRecording { tab_id: 12 }),
-    )
-    .unwrap();
-    let (_, result) =
-        unwrap_scoped(call(&port, scoped(all_open(), export_to("C:c1:locator_a1_4"))).unwrap());
-    assert!(matches!(
-        result,
-        BrowserOutcome::RecordingExported {
-            delivery: RecordingDelivery::Attached { tab_id: 12 },
-            ..
-        }
-    ));
-    let exports = exports_seen(&fake);
-    assert_eq!(exports.len(), 1);
-    let wire::RecordingOp::Export {
-        recording_id,
-        destination:
-            wire::RecordingTarget::Page {
-                tab_id,
-                call,
-                guard,
-            },
-        max_output_bytes,
-    } = &exports[0]
-    else {
-        panic!("an export into a page");
-    };
-    assert_eq!(recording_id, "recording_1");
-    assert_eq!(*tab_id, 12);
-    assert_eq!(*max_output_bytes, 4096);
-    assert_eq!(call.frame.as_ref().unwrap().frame_id, "C");
-    assert_eq!(
-        call.message,
-        json!({"kind": "attach_file", "locator": "locator_a1_4", "file_name": "flow.gif"})
-    );
-    assert!(
-        guard.is_some(),
-        "the extension checks the guard right before the call"
-    );
-}
-
-#[test]
-fn a_document_change_during_a_page_export_is_a_navigated_target() {
+pub(super) fn a_document_change_during_a_page_export_is_a_navigated_target() {
     // The file input's document reloaded between the description and the export, so the
     // export names a target that navigated, not a document whose access is in doubt.
     let (port, _fake) = port_with(Box::new(|correlation, primitive| {
@@ -1034,7 +810,6 @@ fn a_document_change_during_a_page_export_is_a_navigated_target() {
     );
 }
 
-#[test]
 fn a_recording_is_never_exported_into_a_document_the_scope_leaves_out() {
     let (port, fake) = exact();
     call(

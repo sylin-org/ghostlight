@@ -73,7 +73,9 @@ fn outcome() -> BrowserOutcome {
 /// A content call or input reaches only a real document the scope allows, a metadata call only a
 /// document in the tree, and a reused frame id never revives a handle to the document it
 /// replaced: everything else is refused before anything is sent (ACCEPTANCE, document boundary
-/// evidence 1).
+/// evidence 1). A point needs routing unless every document is allowed and readable, so a frame
+/// the scope cannot read grants no coordinate authority, and an open page pays nothing (document
+/// boundary evidence 4).
 #[test]
 fn a_call_reaches_only_the_documents_its_scope_admits() {
     let scope = Scope::admit(&scope_of(two_documents(), &["T.t1"])).unwrap();
@@ -121,6 +123,23 @@ fn a_call_reaches_only_the_documents_its_scope_admits() {
             Scope::admit(&scope_of(documents, allowed)).map(|_| ()),
             Err(BrowserError::DocumentUnavailable),
             "{allowed:?}"
+        );
+    }
+
+    assert!(!both.needs_point_check(), "an open page routes no point");
+    assert!(scope.needs_point_check());
+    let mut closed = two_documents();
+    closed[1].supported = false;
+    let hidden = vec![
+        physical("T.t1", None, "https://allowed.test/"),
+        physical("unseen.0", Some("T.t1"), "https://hidden.test/"),
+    ];
+    for documents in [closed, hidden] {
+        assert!(
+            Scope::admit(&scope_of(documents, &["T.t1"]))
+                .unwrap()
+                .needs_point_check(),
+            "a frame the scope cannot read grants no coordinate authority"
         );
     }
 

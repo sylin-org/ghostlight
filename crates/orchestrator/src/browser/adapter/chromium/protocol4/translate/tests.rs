@@ -976,6 +976,7 @@ fn a_target_in_a_reloaded_iframe_is_refused_as_navigated() {
         describe_locator(&port, "not a locator"),
         Err(BrowserError::stale(StaleReason::Unknown))
     );
+    points::a_document_change_during_a_page_export_is_a_navigated_target();
 }
 
 #[test]
