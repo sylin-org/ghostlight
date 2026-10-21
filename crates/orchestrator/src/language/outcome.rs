@@ -1764,9 +1764,10 @@ pub enum Refusal {
     BrowserRecoveryFailed {
         reason: BrowserRecoveryReason,
         /// Whether the person also needs to hear where the extension comes from. It only
-        /// changes the advice for [`BrowserRecoveryReason::ExtensionAbsent`] and
-        /// [`BrowserRecoveryReason::HandshakeTimeout`]: a browser Ghostlight started whose
-        /// adapter never arrived is, while no profile has the extension, a browser without it.
+        /// changes the advice for [`BrowserRecoveryReason::HandshakeTimeout`]: a browser
+        /// Ghostlight started whose adapter never arrived is, while no profile has the extension,
+        /// a browser without it. [`BrowserRecoveryReason::ExtensionAbsent`] always names the
+        /// store.
         extension: ExtensionAdvice,
     },
     /// The connection was lost after dispatch, before a completion receipt.
@@ -2021,7 +2022,7 @@ impl Refusal {
                     "The installed browser is sandboxed, so it cannot connect to Ghostlight."
                 }
                 BrowserRecoveryReason::ExtensionAbsent => {
-                    "The selected browser does not have the Ghostlight extension installed."
+                    "The selected browser does not have the Ghostlight extension installed and turned on."
                 }
                 BrowserRecoveryReason::NativeHostUnavailable => {
                     "The browser cannot use Ghostlight's native messaging registration."
@@ -2194,10 +2195,12 @@ impl Refusal {
                     "Ask the user to run ghostlight install from the Ghostlight installation that should own the browsers, then repeat the call."
                         .into(),
                 ],
-                BrowserRecoveryReason::ExtensionAbsent => vec![extension.step().unwrap_or_else(|| {
-                    "Install Ghostlight in the selected browser profile, then repeat the call."
-                        .into()
-                })],
+                // No profile of the started browser holds the extension turned on: it is missing or
+                // turned off, and either way the person adds it or turns it on (S-D7).
+                BrowserRecoveryReason::ExtensionAbsent => vec![format!(
+                    "Ask the user to add or turn on Ghostlight in Browser from {}, or to open the Ghostlight window on this computer for the setup steps, then repeat the call.",
+                    setup::STORE_LISTING_URL
+                )],
                 BrowserRecoveryReason::HandshakeTimeout => vec![extension.step().unwrap_or_else(|| {
                     ASK_FOR_THAT_BROWSER.into()
                 })],

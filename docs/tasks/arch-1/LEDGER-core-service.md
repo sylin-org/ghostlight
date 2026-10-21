@@ -138,6 +138,12 @@ A kill-on-close job would need the relay to break away; none has been seen.
   Ghostlight starts the browser. `ExtensionAbsent` always gets the store step, setup finished or
   not. A development build loaded from a folder has no `Extensions` directory, so the profile scan
   also reads its settings' `location` (unpacked 4, command line 8).
+- S-D7, follow-up after the live check on test-01 (2026-10-21, the owner's go): the extension was
+  installed but turned off, and the agent was told the browser "does not have the Ghostlight
+  extension installed" and to "add" it. The sentence now reads "does not have the Ghostlight
+  extension installed and turned on", and its one step asks the user to "add or turn on Ghostlight
+  in Browser" from the store listing or to open the Ghostlight window, whether or not setup
+  finished. Only the handshake timeout still depends on setup for its advice.
 - S-D8, found on 2026-10-21 by the relay and edge classification and confirmed by test-02: the
   browser relay ends its port on any Chrome frame over the relay bound (8 MiB), and that one port
   carries every session's browser. The extension bounds what it sends in UTF-16 characters, never

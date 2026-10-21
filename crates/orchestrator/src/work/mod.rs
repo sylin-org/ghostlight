@@ -2637,11 +2637,11 @@ fn routing_refusal(
         BrowserError::RecoveryFailed { reason, details } => Some((
             Refusal::BrowserRecoveryFailed {
                 reason: recovery_reason(*reason),
-                // A browser known to lack the extension always learns where it comes from (S-D7).
-                extension: match reason {
-                    RecoveryFailure::ExtensionAbsent => ExtensionAdvice::AddFromStore,
-                    RecoveryFailure::HandshakeTimeout => extension(),
-                    _ => ExtensionAdvice::Plain,
+                // ExtensionAbsent names the store itself (S-D7); only a timeout depends on setup.
+                extension: if *reason == RecoveryFailure::HandshakeTimeout {
+                    extension()
+                } else {
+                    ExtensionAdvice::Plain
                 },
             },
             json!({"details":details}),
