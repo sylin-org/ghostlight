@@ -237,7 +237,8 @@ Now:
   title is the ghost emoji and the agent's name instead of `Ghostlight - `, and the extension
   retitles a group 2.0.0 named rather than opening a second one (ADR-0098 amendment of
   2026-10-21). P-D3 changes three packaged extension files, so the next candidate carries it.
-  Owed: the tab strip on the four test machines, the Alpine one first, for the emoji font. dev
+  The owner checked the tab strip on Windows on 2026-10-21 ("it's working beautifully"); the four
+  test machines check theirs as their tests-1 lanes start, the Alpine one first. dev
   73d5cc46 is deployed on the owner's machine and was checked live on the local 2.0.1 extension:
   the desk with its prompt and a held dialog, the three forms, diagnose and wait, history, a
   script, a screenshot and a kept close, plus P-D4 and P-D5. The morning's extension check had run
@@ -250,7 +251,9 @@ Now:
 - tests-1 opened on 2026-10-21 (ADR-0204, the owner's mandate of meaningful tests): the 2,851
   Rust tests are cut to at most 500 before the 2.0.1 candidate, in five lanes on the test
   machines and the coordinator's ([BOOTSTRAP](tasks/tests-1/BOOTSTRAP.md)). arch-1's refactor
-  slices wait for it; core-work's W-D4 goes first. The lanes start when the test machines are on.
+  slices wait for it; core-work's W-D4 and W-D5 and install's I-D4 go first. The coordinator's
+  service lane has cut 396 tests to 113 so far; the four test-machine lanes started on 2026-10-21,
+  when the owner powered the machines on.
 - Owed before the new 2.0.1 candidate: the changelog and `release/notes-v2.0.1.md` take the
   second sweep's user-visible fixes. About twenty landed after the changelog's last entry
   (7cecdda7), and of those only P-D3, P-D4 and P-D5 wrote theirs.

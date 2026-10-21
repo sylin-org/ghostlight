@@ -319,8 +319,9 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   group with another title. `notice.js` names the popup's agent through `protocol.groupAgentName`
   after either prefix. The `open_tab` fixtures carry the ghost title, so the extension's group
   tests run on it and only the legacy tests use the old one. The freeze record is regenerated from a
-  local package; B-final takes it from the release workflow's candidate. Owed: the tab strip on the
-  four test machines, the Alpine one first, for the emoji font.
+  local package; B-final takes it from the release workflow's candidate. The owner checked the tab
+  strip on Windows on 2026-10-21 ("it's working beautifully"); owed: the four test machines, the
+  Alpine one first, for the emoji font, which their tests-1 lanes check first.
 - P-D4, found while doing P-D3: `arguments.requireText` counted a text's `length`, in UTF-16 code
   units, while the service's checks count `chars()`, code points. A character outside the Basic
   Multilingual Plane, such as an emoji, counts twice in the extension and once in the service, so
