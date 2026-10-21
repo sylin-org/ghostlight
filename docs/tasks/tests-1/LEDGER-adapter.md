@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 158 |
+| `crates/desktop` | 161 | 20 | 129 |
 
 ## Slices
 
@@ -44,7 +44,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A16 | `protocol4/translate/tests/points.rs`: where a point or a target may land | 22 | 3 | promise 2, defect 1 | landed (f64971b8) |
 | A17 | `protocol4/translate/tests/interaction.rs` (and `world`'s removed lookup): input refusals, unknown effects, capture and scripts | 37 + 1 | 4 | promise 3, defect 1 | landed (fa3d1e60) |
 | A18 | `protocol4/translate/tests.rs`: no unguarded content, the diagnostics binding and a changed document | 18 | 4 | contract 1, defect 3 | landed (8be0e02c) |
-| A19 | `protocol4/tree/tests.rs`: an inventory decodes to a tree or to a refusal | 2 | 1 | contract 1 | landed (this commit) |
+| A19 | `protocol4/tree/tests.rs`: an inventory decodes to a tree or to a refusal | 2 | 1 | contract 1 | landed (fb1b7b29) |
+| D1 | `crates/desktop/src/machine.rs`: what the shell starts and when | 37 | 5 | promise 4, defect 1 | landed (60dbba71; its ledger row came in the next commit) |
 
 ## Notes
 
@@ -56,6 +57,19 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   goldens the service writes: keep it. `tray.rs`'s `assert_eq!(MAX_TOOLTIP_LEN, 127)` only restates
   the number and can go.
 
+- `crates/desktop` (from 2026-10-21): classified first, read-only, like the adapter. Only
+  `tests/loads.rs` is Windows-only (`#![cfg(windows)]`); its verdicts go to the coordinator, who
+  cuts it on Windows.
+- D1: kept five: before the shell attaches only a person's launch or the Start button starts the
+  service, so no shell undoes a Quit (ACCEPTANCE 13 and gate 1); each goodbye reason decides what
+  the shell does (13); a loss without goodbye recovers at most `RECOVER_TRIES` times; a service
+  that is shutting down spends no recover try (4e1a8e2a); and nothing starts once the session is
+  ending (gate 1). The 32 others were their cases, now named functions, or pinned the patience
+  durations, chose failure screens, restated the relay's backoff, a derived `PartialEq` or
+  `std::fs::metadata`. The fake world's two failure switches, which only cut tests set, go, and
+  the restated recover count and patience name `RECOVER_TRIES` and `RECOVER_PATIENCE`. Its ledger
+  row missed 60dbba71 (an edit script failed on a stale anchor while the commit still ran) and
+  came in the next commit.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against
