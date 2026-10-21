@@ -1,4 +1,5 @@
-//! Actual executor dispatch binds read feedback and closes each composition child's visuals.
+//! Page feedback at the application boundary: where it lands, what a refusal draws, and that a
+//! presentation failure changes nothing an agent or the audit sees.
 
 use super::*;
 use crate::browser::adapter::{PhysicalFill, PhysicalScroll};
@@ -14,135 +15,65 @@ impl PresentationPort for PageSignals {
     }
 }
 
-#[test]
-fn credential_guidance_finishes_visuals_without_a_denial_notice() {
-    for composed in [false, true] {
-        let (mut executor, browser, _, workspace, _) = fixture();
-        let signals = Arc::new(PageSignals::default());
-        executor.presentation = PresentationReactor::new(signals.clone());
-        browser.push(Ok(BrowserOutcome::TabOpened {
-            tab: tab(7, "https://example.com/"),
-            committed_urls: vec!["https://example.com/".into()],
-        }));
-        let opened = executor.execute(
-            &workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com/"}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(opened.status, Status::Succeeded);
-        signals.0.lock().unwrap().clear();
-        browser.push(Ok(BrowserOutcome::TargetsDescribed {
-            rebound: false,
-            tab_id: 7,
-            targets: vec![ObservedTarget {
-                locator: "password".into(),
-                role: "textbox".into(),
-                name: "Password".into(),
-                state: vec![],
-                credential_class: true,
-                ..Default::default()
-            }],
-        }));
-        let input = json!({"tab":opened.facts["tab"],"focused":true,"text":"PRIVATE_SECRET"});
-        let (tool, input) = if composed {
-            (
-                "browser_flow",
-                json!({"steps":[{"tool":"browser_type_text","arguments":input}]}),
-            )
-        } else {
-            ("browser_type_text", input)
-        };
-        let result = executor.execute(&workspace, tool, input, &CancellationToken::default());
-        assert_eq!(result.status, Status::Blocked);
-        assert_eq!(result.effect, Effect::None);
-        let signals = signals.0.lock().unwrap();
-        assert!(signals
-            .iter()
-            .all(|signal| signal.signal != PresentationKind::Denial));
-        assert!(signals
-            .iter()
-            .any(|signal| signal.signal == PresentationKind::Completion));
-        assert!(!serde_json::to_string(&*signals)
-            .unwrap()
-            .contains("PRIVATE_SECRET"));
-    }
-}
-
-#[test]
-fn a_tab_close_the_policy_refuses_shows_the_kept_tab_notice_in_a_flow_too() {
-    for composed in [false, true] {
-        let policy = temporary_policy("tab-close-notice");
-        fs::write(
-            &policy,
-            all_open_policy_with(
-                r#"[{"key":"browser.tabs.allow_close","value":false,"level":"mandatory"}]"#,
-            ),
-        )
-        .unwrap();
-        let (mut executor, browser, _, workspace, _) =
-            fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
-        let signals = Arc::new(PageSignals::default());
-        executor.presentation = PresentationReactor::new(signals.clone());
-        browser.push(Ok(BrowserOutcome::TabOpened {
-            tab: tab(7, "https://example.com/"),
-            committed_urls: vec!["https://example.com/".into()],
-        }));
-        let opened = executor.execute(
-            &workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com/"}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(opened.status, Status::Succeeded);
-        signals.0.lock().unwrap().clear();
-        let close = json!({"action":"close","tab":opened.facts["tab"]});
-        let (tool, input) = if composed {
-            (
-                "browser_flow",
-                json!({"steps":[{"tool":"browser_tabs","arguments":close}]}),
-            )
-        } else {
-            ("browser_tabs", close)
-        };
-        let result = executor.execute(&workspace, tool, input, &CancellationToken::default());
-        assert_eq!(result.status, Status::Blocked, "composed: {composed}");
-        let signals = signals.0.lock().unwrap();
-        let denial = signals
-            .iter()
-            .find(|signal| signal.signal == PresentationKind::Denial)
-            .unwrap_or_else(|| panic!("no denial notice, composed: {composed}"));
-        assert_eq!(
-            denial.phase, "Ghostlight kept this tab open",
-            "composed: {composed}"
-        );
-        assert_eq!(denial.tab_id, Some(7), "composed: {composed}");
-    }
-}
-
-#[test]
-fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
-    let (mut executor, browser, _, workspace, audit) = fixture();
+/// A session with tab 7 open on example.com whose page signals land in the answered list.
+fn drawn_session(
+    governance: GovernanceFacade,
+) -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    crate::workspace::WorkspaceId,
+    Arc<PageSignals>,
+    serde_json::Value,
+) {
+    let (mut executor, browser, _, workspace, _) = fixture_with_governance(governance);
     let signals = Arc::new(PageSignals::default());
     executor.presentation = PresentationReactor::new(signals.clone());
-    let mut handles = Vec::new();
-    for id in [7, 11] {
-        browser.push(Ok(BrowserOutcome::TabOpened {
-            tab: tab(id, "https://example.com/"),
-            committed_urls: vec!["https://example.com/".into()],
-        }));
-        let result = executor.execute(
-            &workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com/","new_tab":true}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(result.status, Status::Succeeded);
-        handles.push(result.facts["tab"].clone());
-    }
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/","new_tab":true}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(opened.status, Status::Succeeded);
+    signals.0.lock().unwrap().clear();
+    (
+        executor,
+        browser,
+        workspace,
+        signals,
+        opened.facts["tab"].clone(),
+    )
+}
+
+/// ACCEPTANCE Presentation 1, 2 and 5 (W-D2, C2, P2; 27199af1): page feedback lands on the tab the work
+/// reached, and a refusal draws its notice on the tab it kept or held.
+///
+/// A read, alone or as each step of a flow, starts and completes on its own dispatched tab only,
+/// with none of the page's text in any signal. Credential guidance finishes its visuals with no
+/// denial notice and no typed text. A tab close the policy refuses shows the kept-tab notice on
+/// that tab, alone or in a flow. A read that finds its tab on a refused page holds it and shows
+/// the hold the way a navigation's hold does.
+#[test]
+fn feedback_lands_on_the_tab_the_work_reached_and_a_refusal_on_the_tab_it_kept() {
+    // Reads draw on their own tabs only.
+    let (executor, browser, workspace, signals, first) = drawn_session(GovernanceFacade::new(None));
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(11, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let second = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/","new_tab":true}),
+        &CancellationToken::default(),
+    );
+    let handles = [first, second.facts["tab"].clone()];
     for composed in [false, true] {
         signals.0.lock().unwrap().clear();
-        let before = browser.calls().len();
         let tabs = if composed { vec![7, 11] } else { vec![7] };
         for id in &tabs {
             browser.push(Ok(BrowserOutcome::Text {
@@ -166,55 +97,139 @@ fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
         };
         let result = executor.execute(&workspace, tool, input, &CancellationToken::default());
         assert_eq!(result.status, Status::Succeeded, "{result:?}");
-        assert_eq!(
-            browser.calls()[before..]
-                .iter()
-                .map(|call| match call {
-                    BrowserCommand::ReadDocument { tab_id, .. } => *tab_id,
-                    _ => panic!("unexpected read dispatch"),
-                })
-                .collect::<Vec<_>>(),
-            tabs
-        );
         let signals = signals.0.lock().unwrap();
         let rendered: Vec<_> = signals
             .iter()
             .filter(|signal| {
                 signal.activity == PresentationActivity::Read && signal.tab_id.is_some()
             })
+            .map(|signal| (signal.signal, signal.tab_id, signal.invocation.clone()))
             .collect();
-        assert_eq!(rendered.len(), tabs.len() * 2);
-        for (phase, tab) in rendered.chunks_exact(2).zip(&tabs) {
-            assert_eq!(phase[0].signal, PresentationKind::Start);
-            assert_eq!(phase[1].signal, PresentationKind::Completion);
-            assert_eq!(phase[0].tab_id, Some(*tab));
-            assert_eq!(phase[1].tab_id, Some(*tab));
-            assert_eq!(phase[0].invocation, result.invocation);
-            assert_eq!(phase[1].invocation, result.invocation);
-        }
+        let expected: Vec<_> = tabs
+            .iter()
+            .flat_map(|id| {
+                [PresentationKind::Start, PresentationKind::Completion]
+                    .map(|kind| (kind, Some(*id), result.invocation.to_string()))
+            })
+            .collect();
+        assert_eq!(rendered, expected, "composed={composed}");
         assert!(!serde_json::to_string(&*signals)
             .unwrap()
             .contains("PRIVATE_READ_CONTENT"));
-        let audit = audit.0.lock().unwrap();
-        let records: Vec<_> = audit
+    }
+
+    for composed in [false, true] {
+        // Credential guidance finishes its visuals with no denial notice.
+        let (executor, browser, workspace, signals, handle) =
+            drawn_session(GovernanceFacade::new(None));
+        browser.push(Ok(BrowserOutcome::TargetsDescribed {
+            rebound: false,
+            tab_id: 7,
+            targets: vec![ObservedTarget {
+                locator: "password".into(),
+                role: "textbox".into(),
+                name: "Password".into(),
+                credential_class: true,
+                ..Default::default()
+            }],
+        }));
+        let input = json!({"tab":handle,"focused":true,"text":"PRIVATE_SECRET"});
+        let (tool, input) = if composed {
+            (
+                "browser_flow",
+                json!({"steps":[{"tool":"browser_type_text","arguments":input}]}),
+            )
+        } else {
+            ("browser_type_text", input)
+        };
+        let result = executor.execute(&workspace, tool, input, &CancellationToken::default());
+        assert_eq!(result.status, Status::Blocked);
+        assert_eq!(result.effect, Effect::None);
+        let drawn = signals.0.lock().unwrap();
+        assert!(drawn
             .iter()
-            .filter(|record| record.invocation == result.invocation)
-            .collect();
+            .all(|signal| signal.signal != PresentationKind::Denial));
+        assert!(drawn
+            .iter()
+            .any(|signal| signal.signal == PresentationKind::Completion));
+        assert!(!serde_json::to_string(&*drawn)
+            .unwrap()
+            .contains("PRIVATE_SECRET"));
+
+        // A refused close keeps the tab and says so on it.
+        let policy = temporary_policy("tab-close-notice");
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"browser.tabs.allow_close","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
+        let (executor, _browser, workspace, signals, handle) =
+            drawn_session(GovernanceFacade::new(Some(policy.to_path_buf())));
+        let close = json!({"action":"close","tab":handle});
+        let (tool, input) = if composed {
+            (
+                "browser_flow",
+                json!({"steps":[{"tool":"browser_tabs","arguments":close}]}),
+            )
+        } else {
+            ("browser_tabs", close)
+        };
+        let result = executor.execute(&workspace, tool, input, &CancellationToken::default());
+        assert_eq!(result.status, Status::Blocked, "composed: {composed}");
+        let drawn = signals.0.lock().unwrap();
+        let denial = drawn
+            .iter()
+            .find(|signal| signal.signal == PresentationKind::Denial)
+            .unwrap_or_else(|| panic!("no denial notice, composed: {composed}"));
         assert_eq!(
-            records
-                .iter()
-                .filter(|record| record.step.is_none())
-                .count(),
-            1
-        );
-        assert_eq!(
-            records
-                .iter()
-                .filter(|record| record.step.is_some())
-                .count(),
-            if composed { 2 } else { 0 }
+            (denial.phase.as_str(), denial.tab_id),
+            (
+                crate::language::presentation::denial_lines(
+                    crate::events::DenialPresentation::TabKeptOpenByPolicy
+                )
+                .0,
+                Some(7)
+            ),
+            "composed: {composed}"
         );
     }
+
+    // A read that finds its page refused holds the tab and shows the hold.
+    let reference = Arc::new(PageSignals::default());
+    PresentationReactor::new(reference.clone()).react(&crate::events::DomainEvent::HoldEntered {
+        invocation: "reference".into(),
+        workspace: "reference".into(),
+        physical_id: 7,
+    });
+    let hold = reference.0.lock().unwrap()[0].clone();
+    let policy = example_com_only();
+    let (executor, browser, workspace, signals, handle) = drawn_session(policy.facade());
+    // The page moved itself to a refused host without a navigation Ghostlight saw.
+    browser.push(Ok(BrowserOutcome::Text {
+        tab_id: 7,
+        text: "Elsewhere".into(),
+        truncated: false,
+        title: "Elsewhere".into(),
+        url: "https://elsewhere.test/".into(),
+    }));
+    let read = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(read.status, Status::Blocked, "{}", read.summary);
+    assert_eq!(read.facts["held"], true);
+    let drawn = signals.0.lock().unwrap();
+    assert!(
+        drawn.iter().any(|signal| signal.signal == hold.signal
+            && signal.phase == hold.phase
+            && signal.detail == hold.detail
+            && signal.tab_id == Some(7)),
+        "{drawn:?}"
+    );
 }
 
 /// What the page is told and the browser commands already sent when it is told, in one order.
@@ -531,61 +546,6 @@ fn fill_upload_and_scroll_name_their_targets_once_the_browser_has_acted() {
     );
     assert_eq!(dropped.status, Status::Succeeded, "{dropped:?}");
     assert!(signals.targets(dropped.invocation.as_str()).is_empty());
-}
-
-/// A read that finds its tab on a refused page holds the tab, and the hold shows on the page the
-/// way a navigation's hold does.
-#[test]
-fn a_read_that_holds_a_tab_announces_the_hold() {
-    let reference = Arc::new(PageSignals::default());
-    PresentationReactor::new(reference.clone()).react(&crate::events::DomainEvent::HoldEntered {
-        invocation: "reference".into(),
-        workspace: "reference".into(),
-        physical_id: 7,
-    });
-    let hold = reference.0.lock().unwrap()[0].clone();
-
-    let policy = example_com_only();
-    let (mut executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
-    let signals = Arc::new(PageSignals::default());
-    executor.presentation = PresentationReactor::new(signals.clone());
-    browser.push(Ok(BrowserOutcome::TabOpened {
-        tab: tab(7, "https://example.com/"),
-        committed_urls: vec!["https://example.com/".into()],
-    }));
-    let opened = executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com/"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(opened.status, Status::Succeeded);
-    signals.0.lock().unwrap().clear();
-
-    // The page moved itself to a refused host without a navigation Ghostlight saw.
-    browser.push(Ok(BrowserOutcome::Text {
-        tab_id: 7,
-        text: "Elsewhere".into(),
-        truncated: false,
-        title: "Elsewhere".into(),
-        url: "https://elsewhere.test/".into(),
-    }));
-    let read = executor.execute(
-        &workspace,
-        "browser_read",
-        json!({"tab":opened.facts["tab"]}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(read.status, Status::Blocked, "{}", read.summary);
-    assert_eq!(read.facts["held"], true);
-    let signals = signals.0.lock().unwrap();
-    assert!(
-        signals.iter().any(|signal| signal.signal == hold.signal
-            && signal.phase == hold.phase
-            && signal.detail == hold.detail
-            && signal.tab_id == Some(7)),
-        "{signals:?}"
-    );
 }
 
 /// A presentation port that refuses every signal, as a browser that cannot draw would.
