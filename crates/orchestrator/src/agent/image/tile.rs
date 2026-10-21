@@ -502,175 +502,6 @@ pub(super) mod tests {
             .find(|ground| ground.color() == Some(corner))
     }
 
-    fn decoded(bytes: &[u8]) -> Pixels {
-        decode_png(bytes).unwrap()
-    }
-
-    #[test]
-    fn a_white_glyph_on_transparent_goes_on_the_dark_ground_and_a_black_one_on_the_light() {
-        assert_eq!(
-            ground_for(&glyph(48, [0xff, 0xff, 0xff, 0xff], mark(48))),
-            Ground::Dark
-        );
-        assert_eq!(
-            ground_for(&glyph(48, [0, 0, 0, 0xff], mark(48))),
-            Ground::Light
-        );
-    }
-
-    #[test]
-    fn a_saturated_colored_glyph_goes_on_the_light_ground_unless_it_is_very_light() {
-        for color in [
-            [0xe5, 0x1c, 0x23, 0xff],
-            [0x1d, 0x4e, 0xd8, 0xff],
-            [0x7c, 0x3a, 0xed, 0xff],
-        ] {
-            assert_eq!(
-                ground_for(&glyph(48, color, mark(48))),
-                Ground::Light,
-                "{color:?}"
-            );
-        }
-        assert_eq!(
-            ground_for(&glyph(48, [0xfa, 0xe0, 0x3c, 0xff], mark(48))),
-            Ground::Dark
-        );
-        assert_eq!(
-            ground_for(&glyph(48, [0xff; 4], |_, _| false)),
-            Ground::Light,
-            "an icon with no ink reads on neither ground, a tie, which goes to light"
-        );
-    }
-
-    #[test]
-    fn an_icon_with_an_opaque_outer_ring_is_its_own_plate_and_is_served_as_cached() {
-        let square = glyph(48, [0x1d, 0x4e, 0xd8, 0xff], |_, _| true);
-        assert_eq!(ground_for(&square), Ground::Plate);
-        let bytes = png_of(48, &square.rgba);
-        assert_eq!(tile(IconKind::Png, &bytes), None);
-
-        let rounded = glyph(48, [0x1d, 0x4e, 0xd8, 0xff], |x, y| {
-            let corner = |v: u32| v.min(47 - v);
-            corner(x) + corner(y) >= 3
-        });
-        assert_eq!(
-            ground_for(&rounded),
-            Ground::Plate,
-            "slightly rounded corners keep a plate"
-        );
-        let disc = glyph(48, [0x1d, 0x4e, 0xd8, 0xff], |x, y| {
-            let (dx, dy) = (f64::from(x) - 23.5, f64::from(y) - 23.5);
-            (dx * dx + dy * dy).sqrt() <= 24.0
-        });
-        assert_eq!(
-            ground_for(&disc),
-            Ground::Light,
-            "a disc leaves its corners open"
-        );
-    }
-
-    #[test]
-    fn a_plate_set_in_a_transparent_margin_with_a_faint_shadow_is_its_own_plate() {
-        // A 64 px icon, as most app icons are drawn: a rounded plate inset by 6 px, and a faint
-        // shadow under it.
-        let inset = glyph(64, [0x1d, 0x1d, 0x22, 0xff], |x, y| {
-            let inside = |v: u32| (6..58).contains(&v);
-            let corner = |v: u32| (v - 6).min(57 - v);
-            inside(x) && inside(y) && corner(x) + corner(y) >= 8
-        });
-        let mut rgba = inset.rgba.clone();
-        for y in 58..61 {
-            for x in 10..54 {
-                rgba[index(x, y, 64) * 4 + 3] = 0x28;
-            }
-        }
-        let shadowed = Pixels::new(64, 64, rgba).unwrap();
-        assert_eq!(ground_for(&inset), Ground::Plate);
-        assert_eq!(ground_for(&shadowed), Ground::Plate);
-        assert_eq!(tile(IconKind::Png, &png_of(64, &shadowed.rgba)), None);
-
-        let inset_disc = glyph(64, [0x1d, 0x4e, 0xd8, 0xff], |x, y| {
-            let (dx, dy) = (f64::from(x) - 31.5, f64::from(y) - 31.5);
-            (dx * dx + dy * dy).sqrt() <= 26.0
-        });
-        assert_eq!(
-            ground_for(&inset_disc),
-            Ground::Light,
-            "an inset disc is no plate"
-        );
-    }
-
-    #[test]
-    fn an_icon_that_cannot_be_read_or_is_too_large_is_served_as_cached() {
-        assert_eq!(tile(IconKind::Png, b"\x89PNG\r\n\x1a\nzed"), None);
-        assert_eq!(tile(IconKind::Png, b""), None);
-        assert_eq!(tile(IconKind::Ico, b"not an icon file"), None);
-        let side = MAX_SIDE + 1;
-        let large = png_of(side, &vec![0xff; side as usize * side as usize * 4]);
-        assert_eq!(decode_png(&large), None);
-        assert_eq!(tile(IconKind::Png, &large), None);
-        let largest = glyph(MAX_SIDE, [0xff; 4], mark(MAX_SIDE));
-        assert!(tile(IconKind::Png, &png_of(MAX_SIDE, &largest.rgba)).is_some());
-    }
-
-    #[test]
-    fn the_tile_is_the_icon_at_its_own_size_in_the_middle_of_its_ground() {
-        let white = glyph(40, [0xff; 4], |x, y| {
-            (16..24).contains(&x) && (16..24).contains(&y)
-        });
-        let bytes = tile(IconKind::Png, &png_of(40, &white.rgba)).unwrap();
-        let mut decoder = png::Decoder::new(Cursor::new(&bytes));
-        decoder.set_transformations(png::Transformations::IDENTITY);
-        let reader = decoder.read_info().unwrap();
-        assert_eq!(
-            reader.info().color_type,
-            png::ColorType::Rgb,
-            "the tile is opaque"
-        );
-        let tile = decoded(&bytes);
-        assert_eq!(
-            (tile.width, tile.height),
-            (48, 48),
-            "4 px of room on each edge of 40 px"
-        );
-        let at = |x: u32, y: u32| tile.rgba[index(x, y, 48) * 4..][..4].to_vec();
-        assert_eq!(
-            at(0, 0),
-            [0x3a, 0x3a, 0x41, 0xff],
-            "a white icon's corner is the dark ground"
-        );
-        assert_eq!(at(47, 47), [0x3a, 0x3a, 0x41, 0xff]);
-        assert_eq!(at(24, 24), [0xff; 4], "the icon's center is its own pixel");
-        assert_eq!(
-            at(4 + 15, 24),
-            [0x3a, 0x3a, 0x41, 0xff],
-            "copied at its own place"
-        );
-        assert_eq!(at(4 + 16, 24), [0xff; 4]);
-    }
-
-    #[test]
-    fn a_partly_transparent_pixel_is_blended_over_the_ground() {
-        let half = glyph(10, [0, 0, 0, 0x80], |_, _| true);
-        let tile = decoded(&composite(&half, LIGHT_GROUND).unwrap());
-        let center = &tile.rgba[index(5, 5, tile.width) * 4..][..4];
-        assert_eq!(center, [0x73, 0x72, 0x72, 0xff]);
-    }
-
-    #[test]
-    fn the_same_icon_always_gives_the_same_bytes() {
-        let icon = png_of(48, &glyph(48, [0xe5, 0x1c, 0x23, 0xff], mark(48)).rgba);
-        let first = tile(IconKind::Png, &icon).unwrap();
-        assert_eq!(tile(IconKind::Png, &icon).unwrap(), first);
-        assert!(first.starts_with(&PNG_SIGNATURE));
-        let corner = &decoded(&first).rgba[..4];
-        assert_eq!(
-            corner,
-            [0xe7, 0xe5, 0xe4, 0xff],
-            "a red glyph sits on the light ground"
-        );
-    }
-
     /// An icon file holding `images`, each its bytes and its directory side.
     fn ico_of(images: &[(u8, u16, Vec<u8>)]) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -723,51 +554,122 @@ pub(super) mod tests {
         bytes
     }
 
+    /// Protects defect 5107be98 and the icon-file contract: an icon with an opaque outer ring, or a
+    /// plate set in a transparent margin with a faint shadow, is its own plate and is served as cached,
+    /// as is an icon that cannot be read or is too large; and an icon file is read from its largest
+    /// image, a PNG or a 32-bit bitmap.
     #[test]
-    fn an_icon_file_is_read_from_its_largest_image_a_png_or_a_32_bit_bitmap() {
-        let small = glyph(16, [0, 0, 0, 0xff], mark(16));
-        let large = glyph(32, [0xff; 4], mark(32));
-        let with_png = ico_of(&[
-            (16, 32, png_of(16, &small.rgba)),
-            (32, 32, png_of(32, &large.rgba)),
-        ]);
-        assert_eq!(
-            decode_ico(&with_png),
-            Some(large.clone()),
-            "the largest image, a PNG"
-        );
+    fn an_icon_that_is_its_own_plate_or_cannot_be_tiled_is_served_as_cached() {
+        {
+            let square = glyph(48, [0x1d, 0x4e, 0xd8, 0xff], |_, _| true);
+            assert_eq!(ground_for(&square), Ground::Plate);
+            let bytes = png_of(48, &square.rgba);
+            assert_eq!(tile(IconKind::Png, &bytes), None);
 
-        let with_bitmap = ico_of(&[
-            (32, 32, bitmap_of(&large, None)),
-            (16, 32, png_of(16, &small.rgba)),
-        ]);
-        assert_eq!(
-            decode_ico(&with_bitmap),
-            Some(large.clone()),
-            "the largest image, a bitmap"
-        );
-        assert_eq!(ground_for(&decode_ico(&with_bitmap).unwrap()), Ground::Dark);
-        assert!(tile(IconKind::Ico, &with_bitmap).is_some());
+            let rounded = glyph(48, [0x1d, 0x4e, 0xd8, 0xff], |x, y| {
+                let corner = |v: u32| v.min(47 - v);
+                corner(x) + corner(y) >= 3
+            });
+            assert_eq!(
+                ground_for(&rounded),
+                Ground::Plate,
+                "slightly rounded corners keep a plate"
+            );
+            let disc = glyph(48, [0x1d, 0x4e, 0xd8, 0xff], |x, y| {
+                let (dx, dy) = (f64::from(x) - 23.5, f64::from(y) - 23.5);
+                (dx * dx + dy * dy).sqrt() <= 24.0
+            });
+            assert_eq!(
+                ground_for(&disc),
+                Ground::Light,
+                "a disc leaves its corners open"
+            );
+        }
+        {
+            // A 64 px icon, as most app icons are drawn: a rounded plate inset by 6 px, and a faint
+            // shadow under it.
+            let inset = glyph(64, [0x1d, 0x1d, 0x22, 0xff], |x, y| {
+                let inside = |v: u32| (6..58).contains(&v);
+                let corner = |v: u32| (v - 6).min(57 - v);
+                inside(x) && inside(y) && corner(x) + corner(y) >= 8
+            });
+            let mut rgba = inset.rgba.clone();
+            for y in 58..61 {
+                for x in 10..54 {
+                    rgba[index(x, y, 64) * 4 + 3] = 0x28;
+                }
+            }
+            let shadowed = Pixels::new(64, 64, rgba).unwrap();
+            assert_eq!(ground_for(&inset), Ground::Plate);
+            assert_eq!(ground_for(&shadowed), Ground::Plate);
+            assert_eq!(tile(IconKind::Png, &png_of(64, &shadowed.rgba)), None);
 
-        let ink = mark(32);
-        let masked = ico_of(&[(32, 32, bitmap_of(&large, Some(&|x, y| !ink(x, y))))]);
-        assert_eq!(
-            decode_ico(&masked),
-            Some(large),
-            "an old bitmap's mask gives its transparency"
-        );
+            let inset_disc = glyph(64, [0x1d, 0x4e, 0xd8, 0xff], |x, y| {
+                let (dx, dy) = (f64::from(x) - 31.5, f64::from(y) - 31.5);
+                (dx * dx + dy * dy).sqrt() <= 26.0
+            });
+            assert_eq!(
+                ground_for(&inset_disc),
+                Ground::Light,
+                "an inset disc is no plate"
+            );
+        }
+        {
+            assert_eq!(tile(IconKind::Png, b"\x89PNG\r\n\x1a\nzed"), None);
+            assert_eq!(tile(IconKind::Png, b""), None);
+            assert_eq!(tile(IconKind::Ico, b"not an icon file"), None);
+            let side = MAX_SIDE + 1;
+            let large = png_of(side, &vec![0xff; side as usize * side as usize * 4]);
+            assert_eq!(decode_png(&large), None);
+            assert_eq!(tile(IconKind::Png, &large), None);
+            let largest = glyph(MAX_SIDE, [0xff; 4], mark(MAX_SIDE));
+            assert!(tile(IconKind::Png, &png_of(MAX_SIDE, &largest.rgba)).is_some());
+        }
+        {
+            let small = glyph(16, [0, 0, 0, 0xff], mark(16));
+            let large = glyph(32, [0xff; 4], mark(32));
+            let with_png = ico_of(&[
+                (16, 32, png_of(16, &small.rgba)),
+                (32, 32, png_of(32, &large.rgba)),
+            ]);
+            assert_eq!(
+                decode_ico(&with_png),
+                Some(large.clone()),
+                "the largest image, a PNG"
+            );
 
-        let shallow = {
-            let mut bitmap = bitmap_of(&small, None);
-            bitmap[14..16].copy_from_slice(&8_u16.to_le_bytes());
-            ico_of(&[(16, 8, bitmap)])
-        };
-        assert_eq!(
-            tile(IconKind::Ico, &shallow),
-            None,
-            "a palette bitmap is served as cached"
-        );
-        let truncated = &with_png[..with_png.len() - 10];
-        assert_eq!(tile(IconKind::Ico, truncated), None);
+            let with_bitmap = ico_of(&[
+                (32, 32, bitmap_of(&large, None)),
+                (16, 32, png_of(16, &small.rgba)),
+            ]);
+            assert_eq!(
+                decode_ico(&with_bitmap),
+                Some(large.clone()),
+                "the largest image, a bitmap"
+            );
+            assert_eq!(ground_for(&decode_ico(&with_bitmap).unwrap()), Ground::Dark);
+            assert!(tile(IconKind::Ico, &with_bitmap).is_some());
+
+            let ink = mark(32);
+            let masked = ico_of(&[(32, 32, bitmap_of(&large, Some(&|x, y| !ink(x, y))))]);
+            assert_eq!(
+                decode_ico(&masked),
+                Some(large),
+                "an old bitmap's mask gives its transparency"
+            );
+
+            let shallow = {
+                let mut bitmap = bitmap_of(&small, None);
+                bitmap[14..16].copy_from_slice(&8_u16.to_le_bytes());
+                ico_of(&[(16, 8, bitmap)])
+            };
+            assert_eq!(
+                tile(IconKind::Ico, &shallow),
+                None,
+                "a palette bitmap is served as cached"
+            );
+            let truncated = &with_png[..with_png.len() - 10];
+            assert_eq!(tile(IconKind::Ico, truncated), None);
+        }
     }
 }
