@@ -697,6 +697,15 @@ pub struct Quit {
     farewell: Arc<Farewell>,
 }
 
+/// Make the quit signal, if one is installed. The signal is cloned out of its lock first, so it
+/// runs unlocked.
+fn fire(signal: &Mutex<Option<QuitSignal>>) {
+    let signal = lock(signal).clone();
+    if let Some(signal) = signal {
+        signal();
+    }
+}
+
 impl Quit {
     /// A quit that sets `latch` for a person's Quit, decides the tabs of the workspaces in
     /// `workspaces` and closes released ones through `port`, and says goodbye on the MCP streams
@@ -736,63 +745,55 @@ impl Quit {
             }
         }
         let drain = Arc::clone(&self.drain);
-        let signal = Arc::clone(&self.signal);
         let diagnostics = Arc::clone(&self.diagnostics);
         let farewell = Arc::clone(&self.farewell);
-        let spawned = thread::Builder::new()
-            .name("ghostlight-quit-drain".into())
-            .spawn(move || {
-                let drained = drain.wait_idle(grace);
-                diagnostics.sink().emit(
-                    ghostlight_bridge::diagnostics::event::PROCESS_EXITED,
-                    ghostlight_bridge::diagnostics::Level::Info,
-                    None,
-                    &format!(
-                        "quit: reason={} drained={drained} in_flight={}",
-                        goodbye_for(reason).as_str(),
-                        drain.in_flight()
-                    ),
-                );
-                farewell.end(reason);
-                let signal = lock(&signal).clone();
-                if let Some(signal) = signal {
-                    signal();
-                }
-            });
-        if spawned.is_err() {
-            self.diagnostics.sink().emit(
-                ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
-                ghostlight_bridge::diagnostics::Level::Error,
+        self.end_on_thread("ghostlight-quit-drain", "the quit drain", move || {
+            let drained = drain.wait_idle(grace);
+            diagnostics.sink().emit(
+                ghostlight_bridge::diagnostics::event::PROCESS_EXITED,
+                ghostlight_bridge::diagnostics::Level::Info,
                 None,
-                "the quit drain could not start",
+                &format!(
+                    "quit: reason={} drained={drained} in_flight={}",
+                    goodbye_for(reason).as_str(),
+                    drain.in_flight()
+                ),
             );
-        }
+            farewell.end(reason);
+        });
     }
 
     /// Leave because the session is ending: refuse new work, forget every tab without a browser
     /// command, say `session_end` goodbye on every stream, then make the quit signal. Returns at
     /// once, and neither waits for work in flight nor sets the latch, since a sign-out is not a
     /// person's Quit and the caller has already armed the fallback exit that bounds this stop.
+    ///
+    /// A session end that arrives during a quit still runs: the quit's drain may outlast the
+    /// session, and only this path says the `session_end` goodbye the streams must hear before the
+    /// fallback exit ends the process.
     pub fn session_end(&self) {
         self.drain.begin_quit(QuitCause::SignOut);
         self.farewell.shells.close();
-        let signal = Arc::clone(&self.signal);
         let farewell = Arc::clone(&self.farewell);
-        let spawned = thread::Builder::new()
-            .name("ghostlight-session-end".into())
-            .spawn(move || {
-                farewell.end_session();
-                let signal = lock(&signal).clone();
-                if let Some(signal) = signal {
-                    signal();
-                }
-            });
+        self.end_on_thread("ghostlight-session-end", "the session end", move || {
+            farewell.end_session();
+        });
+    }
+
+    /// Run `end` on a thread of its own named `name`, then make the quit signal. A thread that
+    /// cannot start is one diagnostics line naming `what`.
+    fn end_on_thread(&self, name: &str, what: &str, end: impl FnOnce() + Send + 'static) {
+        let signal = Arc::clone(&self.signal);
+        let spawned = thread::Builder::new().name(name.into()).spawn(move || {
+            end();
+            fire(&signal);
+        });
         if spawned.is_err() {
             self.diagnostics.sink().emit(
                 ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
                 ghostlight_bridge::diagnostics::Level::Error,
                 None,
-                "the session end could not start",
+                &format!("{what} could not start"),
             );
         }
     }
@@ -814,9 +815,7 @@ impl Quit {
             None,
             &format!("no stream of any role for {} s", idle.as_secs()),
         );
-        if let Some(signal) = lock(&self.signal).clone() {
-            signal();
-        }
+        fire(&self.signal);
     }
 
     /// Record `wire` as a live MCP stream until the returned guard is dropped, so a quit hands it

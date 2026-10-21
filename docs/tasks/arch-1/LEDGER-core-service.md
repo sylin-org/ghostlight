@@ -42,7 +42,7 @@ In order. "After" names what a slice waits for.
 | C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | - | ADR-0203 C18, moved from core; SURF-4's label half; EXT-5's pins | moved to test-02 (LEDGER-package.md), 2026-10-20 |
 | C19b | feat(audit): the record names the browser | I1 | ADR-0203 C19b, moved from core | landed (this commit) |
 | SERV-3 | refactor(service): `service/mod.rs` splits on its seams, and its tests move to `service/tests/` | C19c-s | SERV-3; the moves land alone | todo |
-| SERV-8 | refactor(service): one end for the three exits | SERV-3 | SERV-8 | todo |
+| SERV-8 | refactor(service): one end for the three exits | SERV-3 | SERV-8 | landed (this commit) |
 | SERV-10 | refactor(service): one start function | SERV-3 | SERV-10; the two browser handles stay for the tests' fake | todo |
 | SERV-6 | refactor(intake): the service's vocabulary is read where the CLI reads it | - | SERV-6, both halves in one slice | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | SERV-12 | refactor(diagnostics): one typed record | - | SERV-12; optional fields, relay's writer pinned by a round-trip test | moved to test-01 (LEDGER-core-language.md), 2026-10-21 |
