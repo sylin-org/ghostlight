@@ -2545,4 +2545,28 @@ mod tests {
                 .contains_key(&windows_manifest_path(&context)));
         }
     }
+
+    /// The extension's manifest, whose `key` fixes the unpacked development build's identity.
+    const EXTENSION_MANIFEST: &str = include_str!("../../../../extension/manifest.json");
+
+    /// Protects the coordinator's reserve contract between the native-host manifest and the
+    /// extension: the development identity the manifest allows is the one Chromium derives from
+    /// `extension/manifest.json`'s `key` (the SHA-256 of the key's bytes, its first sixteen bytes
+    /// written one letter from `a` to `p` per half-byte), so an unpacked build connects.
+    #[test]
+    fn the_development_identity_is_the_one_the_extensions_key_gives() {
+        use base64::Engine as _;
+        use sha2::{Digest, Sha256};
+
+        let manifest: serde_json::Value = serde_json::from_str(EXTENSION_MANIFEST).unwrap();
+        let key = base64::engine::general_purpose::STANDARD
+            .decode(manifest["key"].as_str().expect("the manifest has a key"))
+            .expect("the key is base64");
+        let identity: String = Sha256::digest(&key)[..16]
+            .iter()
+            .flat_map(|byte| [byte >> 4, byte & 0x0f])
+            .map(|half| char::from(b'a' + half))
+            .collect();
+        assert_eq!(identity, DEVELOPMENT_EXTENSION_ID);
+    }
 }

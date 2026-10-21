@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 77 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 78 |
 | `crates/desktop` | 161 | 20 | moved to the adapter lane (2026-10-21) |
 
 ## Slices
@@ -63,6 +63,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I39 | `crates/bridge`: twenty-one tests become three: the diagnostics sink writes the shared schema privately when on and bounds its files (layering, live toggle, fault, privacy, pruning and rotation as cases); a record reaches the file whole when the process exits mid-append, with its ignored stand-in. Gone: the literal, timestamp and sequence restatements, the test of the test helper `Scratch`, and the wake-up seam test, with the seam it alone used: `MarkerWatcher` and `OsMarkerWatcher` become one private `watch_marker`, and `Sink::birth_with` loses its watcher (finding 5) | 104 | 86 | the diagnostics contract; defects 97ddf868, 22f882db, 5ddb4706 | landed (this commit) |
 | T-I40 | `crates/win-peer`: fifteen tests become five, one per FFI area and every assertion kept (coordinator decision a): the item-id list, the package, the access list, the icon resource, and the process's token with its window station (lib.rs's check joins the token test as a block, without its early return). Gone: the tests of the `Scratch` test helper, which becomes Windows-only (only Windows modules use it), and `tests/elevation.rs`, which repeated the token test | 86 | 76 | the unsafe and FFI boundary (ADR-0204) | landed (this commit) |
 | T-I41 | `install/record.rs`: the second reserve test, `install_json_is_written_as_the_golden_the_launchers_read`: the service writes `bin/install.json` byte for byte as the new `tests/golden/install/install.json` records, and the golden reads back as the record. The launchers' own tests can read the same file (the JS side is not part of this lane) | 76 | 77 | the record contract between the service and the npm and mcpb launchers; reserve 2 of 3 | landed (this commit) |
+| T-I42 | `install/native_host.rs`: the third reserve test, `the_development_identity_is_the_one_the_extensions_key_gives`: `DEVELOPMENT_EXTENSION_ID`, which the native-host manifest allows, is derived from `extension/manifest.json`'s `key` the way Chromium derives it | 77 | 78 | the native-messaging contract with the unpacked extension; reserve 3 of 3 | landed (this commit) |
 
 ## Notes
 
