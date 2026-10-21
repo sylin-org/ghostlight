@@ -123,7 +123,7 @@ C3c), then the rows below.
 | U-D1 | fix(workbench): a policy draft near the limit gets the policy-size sentence | - | SURF-5's size defect; one web test; test-01 | landed (this commit) |
 | U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | todo |
 | U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | todo |
-| U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first | todo |
+| U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first; test-01 | landed (this commit) |
 | U-D5 | fix(workbench): a window with the bearer always finds room among the workbench's connections | - | found by test-01's tests-1 classification, 2026-10-21 (Notes, second sweep); test-01 took it first in `workbench/` | landed (9db6e896) |
 | U-D6 | fix(workbench): a refused HEAD request carries no body | - | the same classification; test-01 | landed (dc1c4fbf) |
 | SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1 | todo |
@@ -144,6 +144,12 @@ C3c), then the rows below.
   which source paused, so check whether a repeated control from another source changes what a
   screen shows before deciding; publish only when the state or the pausing source changed. The
   pilot deletes the test.
+- U-D4 as landed (test-01): checked first. A repeated control keeps the state, and `Live::record_runtime`
+  keeps the first source, so nothing a screen shows changes; the one exception is a pause that
+  came from outside the facade, where the note "paused from ..." appears for the first time.
+  `record_runtime` now says whether it remembered anything new, and `apply_runtime_control`
+  publishes `RuntimeChanged` and refreshes the live parts only when the state or that memory
+  changed. The proof is a row in the kept live-parts test.
 - U-D5 and U-D6, found by test-01 classifying `workbench/`'s tests on 2026-10-21 and decided by the
   coordinator for what delights the person. U-D5: the loopback workbench's 32-connection cap is
   shared with callers that carry no bearer, so any local account could hold all 32 open and lock the

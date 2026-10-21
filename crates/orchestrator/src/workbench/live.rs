@@ -567,11 +567,15 @@ impl Live {
 
     /// Remember who brought the runtime to `state`. A request that leaves the state as it was
     /// keeps the first source: the pause came from there.
-    pub fn record_runtime(&self, state: RuntimeControlState, source: RuntimeSource) {
+    ///
+    /// Returns whether it remembered anything new, which changes what a screen says of the pause.
+    pub fn record_runtime(&self, state: RuntimeControlState, source: RuntimeSource) -> bool {
         let mut remembered = lock(&self.remembered);
-        if remembered.runtime.map(|(known, _)| known) != Some(state) {
+        let new = remembered.runtime.map(|(known, _)| known) != Some(state);
+        if new {
             remembered.runtime = Some((state, source));
         }
+        new
     }
 
     /// The sentence that says where a pause came from. There is none while agents are not paused,

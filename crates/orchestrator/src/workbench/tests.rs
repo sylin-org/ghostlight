@@ -1950,12 +1950,21 @@ fn a_change_reaches_the_live_parts_without_a_pull_and_only_once() {
     assert_eq!(pushed[1].runtime.state, RuntimeControlState::Held);
     assert_eq!(pushed[1], facade.snapshot().controls);
     let paused = statuses(&heard(&events)).len();
+    let runtime_changes = || {
+        heard(&events)
+            .iter()
+            .filter(|event| matches!(event.change, WorkbenchChange::RuntimeChanged { .. }))
+            .count()
+    };
+    let changed = runtime_changes();
     facade.apply_runtime_control(RuntimeControlIntent::Hold, RuntimeSource::Tray);
     assert_eq!(
         statuses(&heard(&events)).len(),
         paused,
         "an identical pause published a second status"
     );
+    // U-D4: a pause that changes nothing a screen shows publishes no runtime change either.
+    assert_eq!(runtime_changes(), changed);
 
     let tag = super::parts::policy_etag(&facade.policy());
     facade.apply_user_policy_if(READ_ONLY_POLICY, &tag).unwrap();

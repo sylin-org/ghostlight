@@ -1139,12 +1139,16 @@ impl WorkbenchFacade {
         intent: RuntimeControlIntent,
         source: RuntimeSource,
     ) -> WorkbenchIntentResult {
+        let before = self.governance.runtime_state();
         let state = self.governance.apply_runtime_intent(intent);
-        self.live.record_runtime(state, source);
-        self.projection.publish(WorkbenchChange::RuntimeChanged {
-            runtime_state: state,
-        });
-        self.live.refresh();
+        // A control that changes neither the state nor where a pause came from changes nothing a
+        // screen shows, so it publishes nothing (U-D4).
+        if self.live.record_runtime(state, source) || state != before {
+            self.projection.publish(WorkbenchChange::RuntimeChanged {
+                runtime_state: state,
+            });
+            self.live.refresh();
+        }
         WorkbenchIntentResult {
             accepted: true,
             runtime_state: state,
