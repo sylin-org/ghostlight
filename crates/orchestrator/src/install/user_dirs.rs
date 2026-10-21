@@ -124,7 +124,9 @@ impl UserDirs {
         self.or_below_home(self.app_data.as_deref(), &ROAMING_DEFAULT)
     }
 
-    /// The roaming application data directory only when `APPDATA` names it.
+    /// The roaming application data directory only when `APPDATA` names it. Only the Windows
+    /// Start-menu shortcut reads it.
+    #[cfg(any(windows, test))]
     #[must_use]
     pub(super) fn named_roaming(&self) -> Option<&Path> {
         self.app_data.as_deref()
