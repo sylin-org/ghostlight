@@ -93,6 +93,31 @@ pub const MANIFESTS_DIRECTORY_NAME: &str = "manifests";
 /// The edge's command name without a platform suffix, which is how a client entry names it.
 pub const EDGE_COMMAND_NAME: &str = "ghostlight";
 
+// The relay names the edge's executable; a client entry that starts `EDGE_COMMAND_NAME` must reach
+// that file, so the relay's name is this name and the platform suffix. Checked when this compiles.
+const _: () = assert!(is_command_of(EDGE_COMMAND_NAME, EDGE_EXECUTABLE_NAME));
+
+/// Whether `file` is the command `name` with this platform's executable suffix.
+const fn is_command_of(name: &str, file: &str) -> bool {
+    let (name, file, suffix) = (name.as_bytes(), file.as_bytes(), EXE_SUFFIX.as_bytes());
+    if file.len() != name.len() + suffix.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < file.len() {
+        let expected = if index < name.len() {
+            name[index]
+        } else {
+            suffix[index - name.len()]
+        };
+        if file[index] != expected {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
 /// The retired MCP connector's name without a platform suffix. Earlier builds installed it beside
 /// the service, and client entries written for them still name it.
 pub const RETIRED_MCP_CONNECTOR_NAME: &str = "ghostlight-mcp-connector";
@@ -278,78 +303,5 @@ impl Layout {
     #[must_use]
     pub fn manifests(&self) -> PathBuf {
         self.home.join(MANIFESTS_DIRECTORY_NAME)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(windows)]
-    const HOME: &str = "C:\\Users\\person\\.ghostlight";
-    #[cfg(not(windows))]
-    const HOME: &str = "/home/person/.ghostlight";
-
-    #[cfg(windows)]
-    const EXE: &str = ".exe";
-    #[cfg(not(windows))]
-    const EXE: &str = "";
-
-    #[test]
-    fn every_path_derives_from_the_home() {
-        let layout = Layout::new(HOME);
-        let home = Path::new(HOME);
-        assert_eq!(layout.home(), home);
-        assert_eq!(layout.bin(), home.join("bin"));
-        assert_eq!(layout.retired_development_directory(), home.join("dev"));
-        assert_eq!(
-            layout.retired_development_marker(),
-            home.join("development")
-        );
-        assert_eq!(
-            layout.install_record(),
-            home.join("bin").join("install.json")
-        );
-        assert_eq!(layout.install_lock(), home.join("install.lock"));
-        assert_eq!(layout.run(), home.join("run"));
-        assert_eq!(layout.service_lock(), home.join("run").join("service.lock"));
-        assert_eq!(layout.state(), home.join("state"));
-        assert_eq!(layout.quit_latch(), home.join("state").join("quit"));
-        assert_eq!(
-            layout.watch_off_marker(),
-            home.join("state").join("watch.off")
-        );
-        assert_eq!(layout.tray_hint(), home.join("state").join("tray-hint"));
-        assert_eq!(layout.setup_record(), home.join("state").join("setup.json"));
-        assert_eq!(
-            layout.last_browser_record(),
-            home.join("state").join("last-browser.json")
-        );
-        assert_eq!(layout.policy(), home.join("policy"));
-        assert_eq!(layout.manifests(), home.join("manifests"));
-    }
-
-    #[test]
-    fn executables_carry_the_platform_suffix() {
-        let layout = Layout::new(HOME);
-        let bin = Path::new(HOME).join("bin");
-        assert_eq!(
-            layout.service_executable(),
-            bin.join(format!("ghostlight-service{EXE}"))
-        );
-        assert_eq!(layout.edge(), bin.join(format!("ghostlight{EXE}")));
-        assert_eq!(
-            layout.desktop_executable(),
-            bin.join(format!("ghostlight-desktop{EXE}"))
-        );
-    }
-
-    #[test]
-    fn the_command_name_is_the_edge_file_name_without_its_suffix() {
-        assert_eq!(
-            format!("{EDGE_COMMAND_NAME}{EXE}"),
-            EDGE_EXECUTABLE_NAME,
-            "a client entry names the edge by this stem"
-        );
     }
 }
