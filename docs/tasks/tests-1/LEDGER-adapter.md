@@ -10,14 +10,15 @@ Opened on 2026-10-21. Every test of `browser/adapter/` was classified first, rea
 ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (`wire.rs`), A2
 (`keys/tests.rs`) A3 (`world/tests.rs`), A4
 (`assets.rs`), A5 (`work.rs`), A6
-(`geometry/tests.rs`), A7 (`locator.rs`) and A8 (`scope/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+(`geometry/tests.rs`), A7 (`locator.rs`), A8
+(`scope/tests.rs`) and A9 (`tree/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 222 |
+| `browser/adapter/` | 337 | 55 | 209 |
 
 ## Slices
 
@@ -33,7 +34,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A5 | `work.rs`: the command vocabulary's checks become build-time assertions | 3 | 0 | - | landed (355d492c) |
 | A6 | `protocol4/geometry/tests.rs`: a view is current only within its tolerances | 17 | 1 | promise 1 | landed (6f414572) |
 | A7 | `protocol4/locator.rs`: the handle form the page mints | 6 | 1 | contract 1 | landed (08f65ec6) |
-| A8 | `protocol4/scope/tests.rs`: admission, the guard, the settle budget and coverage | 26 | 4 | promise 3, defect 1 | landed (this commit) |
+| A8 | `protocol4/scope/tests.rs`: admission, the guard, the settle budget and coverage | 26 | 4 | promise 3, defect 1 | landed (6dcc12bf) |
+| A9 | `protocol4/tree/tests.rs`: the tree the service builds from the extension's inventory | 15 | 2 | contract 2 | landed (this commit) |
 
 ## Notes
 
@@ -101,6 +103,13 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   constructor, and the point-routing test, which points' all-open row proves through the
   translator; that slice keeps an open page's and a hidden frame's rows. The coverage rows name
   `AssetErrorCode`, not restated words.
+- A9: kept, an inventory becomes one tree in depth-first order (out-of-process subtrees under
+  their parent, so `nth` and form numbers count in one order), frames the extension cannot see
+  are placeholders that are never addressable, and only a real web page is addressable; and an
+  inventory that is not one tree, or is over `DOCUMENT_LIMIT`, is refused. Cut: private helpers
+  (children, the owner chain, which points' nested-frame test proves), a restated `From`, the
+  re-parse of the service's own document list, and the ancestor closure, which scope's guard
+  test proves.
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden
