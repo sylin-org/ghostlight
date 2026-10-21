@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
-use super::golden::{check_golden, golden_text, repository_path, CATALOG_GOLDEN};
+use super::golden::{check_golden, golden_text, CATALOG_GOLDEN};
 use super::schema::{is_valid, violations};
 use crate::language::catalog::EXAMPLE_UPLOAD_PATH;
 use crate::language::{catalog, decode};
@@ -325,33 +325,22 @@ fn assert_accepted(tool: &str, call: &Value) {
     }
 }
 
-#[test]
-fn every_example_satisfies_its_own_schema_and_decodes() {
+/// Every call the gate-2 checks read: the known-good calls and every example each tool advertises.
+fn every_call() -> Vec<(String, Value)> {
+    let mut calls: Vec<(String, Value)> = known_good_calls()
+        .into_iter()
+        .map(|(tool, call)| (tool.to_owned(), call))
+        .collect();
     for tool in catalog() {
-        let examples = tool.input_schema["examples"]
+        for example in tool.input_schema["examples"]
             .as_array()
-            .unwrap_or_else(|| panic!("{} advertises no examples", tool.name));
-        assert!(!examples.is_empty(), "{} advertises no examples", tool.name);
-        for example in examples {
-            assert_accepted(&tool.name, example);
+            .into_iter()
+            .flatten()
+        {
+            calls.push((tool.name.clone(), example.clone()));
         }
     }
-}
-
-#[test]
-fn known_good_calls_satisfy_the_schema_and_decode() {
-    let calls = known_good_calls();
-    for tool in catalog() {
-        let count = calls.iter().filter(|(name, _)| *name == tool.name).count();
-        let takes_input = tool.input_schema["properties"]
-            .as_object()
-            .is_some_and(|properties| !properties.is_empty());
-        let least = if takes_input { 2 } else { 1 };
-        assert!(count >= least, "{} has {count} known-good calls", tool.name);
-    }
-    for (tool, call) in &calls {
-        assert_accepted(tool, call);
-    }
+    calls
 }
 
 /// `call` with every advertised default filled in for the fields it leaves out, as a client that
@@ -370,39 +359,6 @@ fn with_defaults(schema: &Value, call: &Value) -> Value {
         }
     }
     filled
-}
-
-/// Some clients fill in every advertised default before they send a call (Claude Code began to in
-/// October 2026). A default means the same as leaving its field out, so every example and every
-/// known-good call is still accepted with its defaults filled in.
-#[test]
-fn every_call_is_accepted_with_the_advertised_defaults_filled_in() {
-    let mut calls: Vec<(String, Value)> = known_good_calls()
-        .into_iter()
-        .map(|(tool, call)| (tool.to_owned(), call))
-        .collect();
-    for tool in catalog() {
-        for example in tool.input_schema["examples"]
-            .as_array()
-            .into_iter()
-            .flatten()
-        {
-            calls.push((tool.name.clone(), example.clone()));
-        }
-    }
-    let mut refused = Vec::new();
-    for (tool, call) in &calls {
-        let filled = with_defaults(&advertised(tool), call);
-        if !violations(&advertised(tool), &filled).is_empty()
-            || decode(tool, filled.clone()).is_err()
-        {
-            refused.push(format!("{tool} {filled}"));
-        }
-    }
-    assert!(
-        refused.is_empty(),
-        "refused with defaults filled in: {refused:#?}"
-    );
 }
 
 /// Walk a value alongside its schema and count, for every `oneOf` the value reaches, how many
@@ -447,45 +403,6 @@ fn one_of_locations(schema: &Value, at: &str, found: &mut BTreeSet<String>) {
     }
 }
 
-#[test]
-fn no_one_of_matches_a_known_good_value_more_than_once() {
-    let mut calls: Vec<(String, Value)> = known_good_calls()
-        .into_iter()
-        .map(|(tool, call)| (tool.to_owned(), call))
-        .collect();
-    for tool in catalog() {
-        for example in tool.input_schema["examples"]
-            .as_array()
-            .into_iter()
-            .flatten()
-        {
-            calls.push((tool.name.clone(), example.clone()));
-        }
-    }
-    let mut exercised = BTreeSet::new();
-    for (tool, call) in &calls {
-        let mut seen = Vec::new();
-        one_of_matches(&advertised(tool), call, tool, &mut seen);
-        for (at, matched) in seen {
-            assert_eq!(
-                matched, 1,
-                "{call} matches {matched} oneOf branches at {at}"
-            );
-            exercised.insert(at);
-        }
-    }
-    for tool in catalog() {
-        let mut locations = BTreeSet::new();
-        one_of_locations(&tool.input_schema, &tool.name, &mut locations);
-        for location in locations {
-            assert!(
-                exercised.contains(&location),
-                "no known-good call reaches the oneOf at {location}"
-            );
-        }
-    }
-}
-
 /// Call `visit` on every subschema of `schema`, including itself.
 fn each_subschema(schema: &Value, visit: &mut impl FnMut(&Value)) {
     visit(schema);
@@ -509,19 +426,134 @@ fn each_subschema(schema: &Value, visit: &mut impl FnMut(&Value)) {
     }
 }
 
+/// ACCEPTANCE contract gate 2 (MSURF-1, 0ddb34af): under a strict JSON Schema check, every
+/// advertised example and at least two ordinary calls per tool that takes input satisfy the
+/// tool's own schema, match each `oneOf` they reach exactly once, and decode. Every `oneOf` in the
+/// catalog is reached by some call, and the checker flags the ambiguous schema MSURF-1 shipped, so
+/// the check cannot pass vacuously.
 #[test]
-fn any_of_only_separates_different_types_and_defaults_are_valid() {
+fn every_example_and_ordinary_call_is_accepted_exactly_once() {
+    let ordinary = known_good_calls();
+    for tool in catalog() {
+        let examples = tool.input_schema["examples"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{} advertises no examples", tool.name));
+        assert!(!examples.is_empty(), "{} advertises no examples", tool.name);
+        let count = ordinary
+            .iter()
+            .filter(|(name, _)| *name == tool.name)
+            .count();
+        let takes_input = tool.input_schema["properties"]
+            .as_object()
+            .is_some_and(|properties| !properties.is_empty());
+        let least = if takes_input { 2 } else { 1 };
+        assert!(count >= least, "{} has {count} known-good calls", tool.name);
+    }
+
+    let mut exercised = BTreeSet::new();
+    for (tool, call) in &every_call() {
+        assert_accepted(tool, call);
+        let mut seen = Vec::new();
+        one_of_matches(&advertised(tool), call, tool, &mut seen);
+        for (at, matched) in seen {
+            assert_eq!(
+                matched, 1,
+                "{call} matches {matched} oneOf branches at {at}"
+            );
+            exercised.insert(at);
+        }
+    }
+    for tool in catalog() {
+        let mut locations = BTreeSet::new();
+        one_of_locations(&tool.input_schema, &tool.name, &mut locations);
+        for location in locations {
+            assert!(
+                exercised.contains(&location),
+                "no known-good call reaches the oneOf at {location}"
+            );
+        }
+    }
+
+    // The flattened `text` schema browser_type_text shipped before ADR-0196: every ordinary value
+    // matched two branches, so a strict validator rejected ordinary typing.
+    let shipped = json!({"oneOf":[
+        {"type":"string","minLength":1,"maxLength":8000},
+        {"type":"string","const":""},
+        {"type":"string","minLength":0,"maxLength":8000}
+    ]});
+    for typed in [json!("hello"), json!("")] {
+        let found = violations(&shipped, &typed);
+        assert!(
+            found
+                .iter()
+                .any(|violation| violation.contains("ambiguous oneOf")),
+            "the MSURF-1 schema must be ambiguous for {typed}; got {found:?}"
+        );
+    }
+}
+
+/// Advertised defaults the decoder keeps unset, because a later step applies them: settlement
+/// reads `visual_settle`, and the scroll executor applies its direction and amount.
+const APPLIED_AFTER_DECODE: [&str; 3] = ["visual_settle", "direction", "amount"];
+
+/// A default means the same as leaving its field out (b79f4024: Claude Code fills in advertised
+/// defaults, and browser_navigate new_tab:true with reuse:"domain" was refused; f54e2469). Every
+/// example and ordinary call, with its advertised defaults filled in, satisfies the schema and
+/// decodes to the same operation; the defaults applied after decoding agree with the step that
+/// applies them; and every default in the catalog satisfies its own schema.
+#[test]
+fn an_advertised_default_means_the_same_as_leaving_the_field_out() {
+    let mut refused = Vec::new();
+    let mut drifted = Vec::new();
+    for (tool, call) in &every_call() {
+        let schema = advertised(tool);
+        let mut filled = with_defaults(&schema, call);
+        let full = match decode(tool, filled.clone()) {
+            Ok(full) if violations(&schema, &filled).is_empty() => full,
+            _ => {
+                refused.push(format!("{tool} {filled}"));
+                continue;
+            }
+        };
+        let bare = decode(tool, call.clone()).expect("a known-good call decodes");
+        for field in APPLIED_AFTER_DECODE {
+            if call.get(field).is_none() {
+                filled
+                    .as_object_mut()
+                    .expect("calls are objects")
+                    .remove(field);
+            }
+        }
+        if crate::language::settlement::enabled(&bare)
+            != crate::language::settlement::enabled(&full)
+        {
+            drifted.push(format!("{tool} {call}: visual_settle"));
+        }
+        let partial = decode(tool, filled).expect("a call with some defaults decodes");
+        if format!("{bare:?}") != format!("{partial:?}") {
+            drifted.push(format!(
+                "{tool} {call}:\n  omitted {bare:?}\n  filled  {partial:?}"
+            ));
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "refused with defaults filled in: {refused:#?}"
+    );
+    assert!(drifted.is_empty(), "defaults that drifted: {drifted:#?}");
+
+    let scroll = advertised("browser_scroll");
+    assert_eq!(
+        scroll["properties"]["direction"]["default"],
+        crate::language::SCROLL_DIRECTION_DEFAULT.as_str()
+    );
+    assert_eq!(
+        scroll["properties"]["amount"]["default"],
+        crate::language::SCROLL_AMOUNT_DEFAULT.as_str()
+    );
+
     for tool in catalog() {
         each_subschema(&tool.input_schema, &mut |schema| {
-            if let Some(branches) = schema.get("anyOf").and_then(Value::as_array) {
-                let types: Vec<&Value> = branches.iter().filter_map(|b| b.get("type")).collect();
-                let distinct: BTreeSet<String> = types.iter().map(ToString::to_string).collect();
-                assert!(
-                    types.len() == branches.len() && distinct.len() == types.len(),
-                    "{} uses anyOf for same-typed alternatives: {schema}",
-                    tool.name
-                );
-            }
             if let Some(default) = schema.get("default") {
                 let found = violations(schema, default);
                 assert!(
@@ -534,33 +566,132 @@ fn any_of_only_separates_different_types_and_defaults_are_valid() {
     }
 }
 
-/// Negative control: the same checker, against the real catalog, rejects calls a strict client
-/// would reject, so the passing tests above are not vacuous.
+/// What a strict client refuses is what Ghostlight refuses (ACCEPTANCE gate 2: the schemas carry
+/// every decoder requirement). Each invalid call breaks one keyword the catalog uses; the
+/// advertised schema reports that keyword and the decoder refuses the call, so the checks above
+/// are not vacuous.
 #[test]
-fn the_checker_rejects_invalid_calls_against_the_real_catalog() {
+fn the_schema_and_the_decoder_refuse_the_same_invalid_calls() {
     let invalid = [
-        ("browser_dialog", json!({"accept":true})),
-        ("browser_tabs", json!({"action":"open"})),
-        ("browser_wait", json!({"condition":"never"})),
-        ("browser_type_text", json!({"target":"target_1"})),
-        ("browser_scroll", json!({"direction":"sideways"})),
-        ("browser_navigate", json!({"url":"ftp://example.com"})),
-        ("browser_press_key", json!({"strokes":["Control","a"]})),
-        ("browser_click", json!({"target":"view_1"})),
-        ("browser_wait", json!({"condition":"layout_stable"})),
+        // L-D7: a nested object the schema closes is closed in the decoder too.
+        (
+            "browser_click",
+            json!({"selector":{"name":"Save","rol":"button"}}),
+            "unknown field `rol`",
+        ),
+        (
+            "browser_click",
+            json!({"target":"target_1","expect":{"condition":"load_ready","valu":"x"}}),
+            "unknown field `valu`",
+        ),
+        (
+            "browser_upload",
+            json!({"target":"target_1","files":[{"name":"a.txt","data_base64":"SGk=","mime":"x"}]}),
+            "unknown field `mime`",
+        ),
+        (
+            "browser_dialog",
+            json!({"accept":true}),
+            "unknown field `accept`",
+        ),
+        ("browser_tabs", json!({"action":"open"}), "is not one of"),
+        (
+            "browser_wait",
+            json!({"condition":"never"}),
+            "is not one of",
+        ),
+        (
+            "browser_wait",
+            json!({"condition":"layout_stable"}),
+            "is not one of",
+        ),
+        (
+            "browser_type_text",
+            json!({"target":"target_1"}),
+            "missing required field `text`",
+        ),
+        (
+            "browser_scroll",
+            json!({"direction":"sideways"}),
+            "is not one of",
+        ),
+        (
+            "browser_navigate",
+            json!({"url":"ftp://example.com"}),
+            "does not match",
+        ),
+        (
+            "browser_press_key",
+            json!({"strokes":["Control","a"]}),
+            "matches no oneOf branch",
+        ),
+        (
+            "browser_click",
+            json!({"target":"view_1"}),
+            "does not match",
+        ),
         (
             "browser_record",
             json!({"action":"stop","recording":"recording_1"}),
+            "unknown field `recording`",
         ),
-        ("browser_read", json!({"timeout_ms":99})),
+        ("browser_read", json!({"timeout_ms":99}), "breaks minimum"),
+        (
+            "browser_click",
+            json!({"target":"target_1","click_count":"2"}),
+            "is not of type integer",
+        ),
+        (
+            "browser_press_key",
+            json!({"key":"Enter","repeat":1.5}),
+            "is not of type integer",
+        ),
+        ("browser_find", json!({"text":""}), "breaks minLength"),
+        (
+            "browser_find",
+            json!({"text":"a".repeat(501)}),
+            "breaks maxLength",
+        ),
+        (
+            "browser_click",
+            json!({"target":"target_1","click_count":4}),
+            "breaks maximum",
+        ),
+        (
+            "browser_screenshot",
+            json!({"view":"view_1","x":0,"y":0,"width":0,"height":10}),
+            "breaks exclusiveMinimum",
+        ),
+        ("browser_fill_form", json!({"fields":[]}), "break minItems"),
+        (
+            "browser_press_key",
+            json!({"strokes":vec!["a"; 21]}),
+            "break maxItems",
+        ),
+        (
+            "browser_press_key",
+            json!({"key":"a","modifiers":["Shift","Shift"]}),
+            "not unique",
+        ),
+        (
+            "browser_fill_form",
+            json!({"fields":[{"target":"target_1","value":{}}]}),
+            "matches no anyOf branch",
+        ),
     ];
-    for (tool, call) in invalid {
-        assert!(
-            !violations(&advertised(tool), &call).is_empty(),
-            "{tool} schema accepts invalid {call}"
-        );
-        assert!(decode(tool, call.clone()).is_err(), "{tool} decodes {call}");
+    let mut disagreements = Vec::new();
+    for (tool, call, fragment) in invalid {
+        let found = violations(&advertised(tool), &call);
+        if !found.iter().any(|violation| violation.contains(fragment)) {
+            disagreements.push(format!(
+                "{tool} {call}: schema says {found:?}, not {fragment:?}"
+            ));
+        }
+        if let Ok(operation) = decode(tool, call.clone()) {
+            disagreements.push(format!("{tool} {call}: decodes to {operation:?}"));
+        }
     }
+    assert!(disagreements.is_empty(), "{disagreements:#?}");
 }
 
 /// The most characters the `tools` array of `tools/list` may serialize to (ADR-0198 decision 26).
@@ -589,15 +720,17 @@ const PINNED_PHRASES: [&str; 7] = [
     "refused before any field changes",
 ];
 
+/// ADR-0198 Decision 26 and ACCEPTANCE gate 2: the catalog that tools/list serves stays under its
+/// size budget, the tools that carry the most guidance stay under their own caps, and the trim
+/// keeps the governance phrases the decision pins.
 #[test]
-fn the_listed_catalog_stays_under_its_size_budget() {
+fn the_catalog_trim_stays_under_budget_and_keeps_the_governance_phrases() {
     let tools = catalog();
-    let size = serde_json::to_string(&tools)
-        .expect("catalog serializes")
-        .len();
+    let listed = serde_json::to_string(&tools).expect("catalog serializes");
     assert!(
-        size <= CATALOG_BUDGET_CHARS,
-        "tools/list serializes to {size} characters; the budget is {CATALOG_BUDGET_CHARS}"
+        listed.len() <= CATALOG_BUDGET_CHARS,
+        "tools/list serializes to {} characters; the budget is {CATALOG_BUDGET_CHARS}",
+        listed.len()
     );
     for (name, cap) in TOOL_BUDGET_CHARS {
         let tool = tools
@@ -610,32 +743,14 @@ fn the_listed_catalog_stays_under_its_size_budget() {
             "{name} serializes to {size} characters; its cap is {cap}"
         );
     }
-}
-
-#[test]
-fn the_trim_keeps_the_governance_phrases() {
-    let listed = serde_json::to_string(&catalog()).expect("catalog serializes");
     for phrase in PINNED_PHRASES {
         assert!(listed.contains(phrase), "the catalog lost \"{phrase}\"");
     }
 }
 
-/// These tools lead with the shortest call LANGUAGE.md documents for them: `{}` where every
-/// field has a default, `{"key":"Enter"}` for `browser_press_key`.
-#[test]
-fn the_documented_shortest_calls_lead_their_examples() {
-    let first = |name: &str| {
-        catalog()
-            .into_iter()
-            .find(|tool| tool.name == name)
-            .map(|tool| tool.input_schema["examples"][0].clone())
-            .unwrap_or_else(|| panic!("{name} is not in the catalog"))
-    };
-    assert_eq!(first("browser_screenshot"), json!({}));
-    assert_eq!(first("browser_scroll"), json!({}));
-    assert_eq!(first("browser_press_key"), json!({"key":"Enter"}));
-}
-
+/// Contract: the catalog tools/list serves is docs/1.0/catalog.json, the golden LANGUAGE.md,
+/// ACCEPTANCE, the integrity script and the process journey read (GHOSTLIGHT_CATALOG_UPDATE=1
+/// rewrites it).
 #[test]
 fn the_catalog_matches_docs_1_0_catalog_json() {
     let platform = serde_json::to_string(EXAMPLE_UPLOAD_PATH).expect("a path encodes");
@@ -643,97 +758,5 @@ fn the_catalog_matches_docs_1_0_catalog_json() {
     check_golden(
         CATALOG_GOLDEN,
         &golden_text(&catalog()).replace(&platform, &canonical),
-    );
-}
-
-/// The wait schema the catalog builds from `WaitCondition` is the one the golden records. Unlike
-/// the full comparison, no update variable can rewrite this expectation.
-#[test]
-fn the_wait_catalog_is_unchanged() {
-    let text = std::fs::read_to_string(repository_path(CATALOG_GOLDEN)).expect("golden exists");
-    let golden: serde_json::Value = serde_json::from_str(&text).expect("the golden parses");
-    let tools = golden
-        .get("tools")
-        .and_then(serde_json::Value::as_array)
-        .or_else(|| golden.as_array())
-        .expect("the golden lists tools");
-    let recorded = tools
-        .iter()
-        .find(|tool| tool["name"] == "browser_wait")
-        .expect("the golden holds browser_wait");
-    let built = catalog()
-        .into_iter()
-        .find(|tool| tool.name == "browser_wait")
-        .expect("the catalog holds browser_wait");
-    assert_eq!(built.input_schema, recorded["inputSchema"]);
-    assert_eq!(built.description, recorded["description"]);
-}
-
-#[test]
-fn the_catalog_golden_is_ascii() {
-    let text = std::fs::read_to_string(repository_path(CATALOG_GOLDEN)).expect("golden exists");
-    assert!(
-        text.is_ascii(),
-        "{CATALOG_GOLDEN} holds a non-ASCII character"
-    );
-}
-
-/// Advertised defaults the decoder keeps unset, because a later step applies them: settlement
-/// reads `visual_settle`, and the scroll executor applies its direction and amount.
-const APPLIED_AFTER_DECODE: [&str; 3] = ["visual_settle", "direction", "amount"];
-
-/// Every default the catalog advertises is the value the decoder gives an omitted field: a call
-/// decodes to the same operation with its defaults left out or filled in. The few defaults
-/// applied after decoding are checked against the step that applies them.
-#[test]
-fn every_advertised_default_is_the_decoded_default() {
-    let mut calls: Vec<(String, Value)> = known_good_calls()
-        .into_iter()
-        .map(|(tool, call)| (tool.to_owned(), call))
-        .collect();
-    for tool in catalog() {
-        for example in tool.input_schema["examples"]
-            .as_array()
-            .into_iter()
-            .flatten()
-        {
-            calls.push((tool.name.clone(), example.clone()));
-        }
-    }
-    let mut drifted = Vec::new();
-    for (tool, call) in &calls {
-        let schema = advertised(tool);
-        let mut filled = with_defaults(&schema, call);
-        let full = decode(tool, filled.clone()).expect("a call with its defaults decodes");
-        let bare = decode(tool, call.clone()).expect("a known-good call decodes");
-        for field in APPLIED_AFTER_DECODE {
-            if call.get(field).is_none() {
-                filled
-                    .as_object_mut()
-                    .expect("calls are objects")
-                    .remove(field);
-            }
-        }
-        if crate::language::settlement::enabled(&bare)
-            != crate::language::settlement::enabled(&full)
-        {
-            drifted.push(format!("{tool} {call}: visual_settle"));
-        }
-        let partial = decode(tool, filled).expect("a call with some defaults decodes");
-        if format!("{bare:?}") != format!("{partial:?}") {
-            drifted.push(format!(
-                "{tool} {call}:\n  omitted {bare:?}\n  filled  {partial:?}"
-            ));
-        }
-    }
-    assert!(drifted.is_empty(), "defaults that drifted: {drifted:#?}");
-    let scroll = advertised("browser_scroll");
-    assert_eq!(
-        scroll["properties"]["direction"]["default"],
-        crate::language::SCROLL_DIRECTION_DEFAULT.as_str()
-    );
-    assert_eq!(
-        scroll["properties"]["amount"]["default"],
-        crate::language::SCROLL_AMOUNT_DEFAULT.as_str()
     );
 }

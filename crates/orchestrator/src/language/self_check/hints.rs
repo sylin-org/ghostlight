@@ -20,7 +20,7 @@
 //! Representative values cover every `Outcome` and `Refusal` variant. The matches in
 //! `outcome_variant` and `refusal_variant` have no wildcard, so a new variant stops this module
 //! compiling until it is named there. Add the name to the variant list beside the match and a
-//! sample below; the coverage test compares the two.
+//! sample below; the next-steps test compares the two.
 
 use std::collections::BTreeSet;
 
@@ -1157,8 +1157,12 @@ fn every_next_step() -> BTreeSet<String> {
         .collect()
 }
 
+/// ACCEPTANCE gate 2 (MSURF-2): every next step Ghostlight can author, sampled from every Outcome
+/// and Refusal variant, is ASCII and names only catalog tools, fields those tools advertise,
+/// values their closed fields accept and handles of the prefix the field takes. The hint that
+/// asked browser_dialog for `accept: true` is caught, so the check is not vacuous.
 #[test]
-fn every_outcome_and_refusal_variant_is_sampled() {
+fn every_next_step_names_only_what_the_catalog_offers() {
     let sampled: BTreeSet<&str> = outcome_samples().iter().map(outcome_variant).collect();
     let expected: BTreeSet<&str> = OUTCOME_VARIANTS.iter().copied().collect();
     assert_eq!(
@@ -1167,7 +1171,6 @@ fn every_outcome_and_refusal_variant_is_sampled() {
         "duplicate outcome name"
     );
     assert_eq!(sampled, expected);
-
     let sampled: BTreeSet<&str> = refusal_samples().iter().map(refusal_variant).collect();
     let expected: BTreeSet<&str> = REFUSAL_VARIANTS.iter().copied().collect();
     assert_eq!(
@@ -1176,10 +1179,7 @@ fn every_outcome_and_refusal_variant_is_sampled() {
         "duplicate refusal name"
     );
     assert_eq!(sampled, expected);
-}
 
-#[test]
-fn every_next_step_names_real_tools_and_their_fields() {
     let advertised = Advertised::read();
     let steps = every_next_step();
     assert!(
@@ -1193,13 +1193,35 @@ fn every_next_step_names_real_tools_and_their_fields() {
         let found = hint_violations(step, &advertised);
         assert!(found.is_empty(), "{step:?}: {found:?}");
     }
+
+    for (hint, expected) in [
+        (
+            "Call browser_dialog with accept: true or accept: false before continuing.",
+            "`browser_dialog` has no field `accept`",
+        ),
+        (
+            "Call browser_tabs with action open to see the tabs.",
+            "does not accept `open`",
+        ),
+        (
+            "Repeat browser_click with tab target_7k2nb5xe.",
+            "`browser_click` field `tab` does not take a target_ handle",
+        ),
+    ] {
+        let found = hint_violations(hint, &advertised);
+        assert!(
+            found.iter().any(|violation| violation.contains(expected)),
+            "{hint:?} should report {expected:?}; got {found:?}"
+        );
+    }
 }
 
 /// The plugin skill an agent loads beside the tools.
 const PLUGIN_SKILL: &str = "packaging/plugin/ghostlight/skills/control-browser/SKILL.md";
 
-/// The plugin skill names only tools and fields the catalog advertises (ADR-0203 C20). Its YAML
-/// front matter is not a hint, so the body after it is read.
+/// Contract (ADR-0203 C20, 6f37117f): the plugin skill an agent loads beside the tools names only
+/// tools and fields the catalog advertises. Its YAML front matter is not a hint, so the body after
+/// it is read, and a field the catalog lacks, appended to it, fails the check.
 #[test]
 fn the_plugin_skill_names_only_catalog_tools_and_fields() {
     let advertised = Advertised::read();
@@ -1219,61 +1241,4 @@ fn the_plugin_skill_names_only_catalog_tools_and_fields() {
             .any(|violation| violation.contains("max_result_chars")),
         "a field the catalog does not advertise must fail the skill"
     );
-}
-
-/// Negative control: hints that ask for what the catalog does not offer are caught.
-#[test]
-fn the_hint_checker_catches_calls_the_decoder_would_reject() {
-    let advertised = Advertised::read();
-    for (hint, expected) in [
-        (
-            "Call browser_dialog with accept: true or accept: false before continuing.",
-            "`browser_dialog` has no field `accept`",
-        ),
-        (
-            "Call browser_tabs with action open to see the tabs.",
-            "does not accept `open`",
-        ),
-        (
-            "Call browser_dialog with action accept or approve.",
-            "does not accept `approve`",
-        ),
-        (
-            "Call browser_teleport to go anywhere.",
-            "`browser_teleport` is not a catalog tool",
-        ),
-        (
-            "Repeat the call with a longer timeout_millis.",
-            "no catalog tool has a field `timeout_millis`",
-        ),
-        (
-            "Repeat browser_click with tab target_7k2nb5xe.",
-            "`browser_click` field `tab` does not take a target_ handle",
-        ),
-        (
-            "Repeat browser_click with targt target_7k2nb5xe.",
-            "`browser_click` has no field `targt`",
-        ),
-        (
-            "Call browser_read with `max_result_chars` set higher.",
-            "`browser_read` has no field `max_result_chars`",
-        ),
-    ] {
-        let found = hint_violations(hint, &advertised);
-        assert!(
-            found.iter().any(|violation| violation.contains(expected)),
-            "{hint:?} should report {expected:?}; got {found:?}"
-        );
-    }
-    for hint in [
-        "Call browser_tabs with action list to see the connected browsers.",
-        "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.",
-        "Repeat with a longer timeout_ms when the page genuinely needs more time.",
-        "Check the page with browser_read or browser_inspect before repeating.",
-        "Repeat browser_click with target target_7k2nb5xe.",
-        "Repeat browser_fill_form with target_7k2nb5xe set to one of the offered options.",
-        "Call browser_dialog with action dismiss on tab tab_m3k5q2xa.",
-    ] {
-        assert_eq!(hint_violations(hint, &advertised), Vec::<String>::new(), "{hint}");
-    }
 }

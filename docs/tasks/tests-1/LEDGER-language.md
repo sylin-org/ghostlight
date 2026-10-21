@@ -6,13 +6,13 @@ Machine: test-01 (CachyOS). Paths without a crate are under `crates/orchestrator
 
 ## RESUME HERE
 
-Opened on 2026-10-21, not started. Read ADR-0204 and BOOTSTRAP.md, then take `language/` module by module, starting with the largest test files (`language/setup.rs`, `language/outcome.rs`), then `workbench/`.
+In progress since 2026-10-21. Every test in `language/` and `workbench/` was classified read-only first (keep, rewrite or delete, each with what it protects), then cut one file per commit. The decoder defect the gate-2 control found landed first as arch-1 L-D7 (4b1cdea0). Next: the rest of `language/` against its budget, then `workbench/`.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `language/` | 349 | 55 | 349 |
+| `language/` | 349 | 55 | 335 |
 | `workbench/` | 252 | 35 | 252 |
 
 ## Slices
@@ -22,6 +22,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 
 | Slice | Subject | Before | After | Kept for | Status |
 | --- | --- | --- | --- | --- | --- |
+| TL1 | test(language): `self_check/` keeps the 7 tests of the model surface contract | 21 | 7 | 3 promise, 3 contract, 1 defect | landed (this commit) |
 
 ## Notes
 
