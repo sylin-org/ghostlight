@@ -366,9 +366,13 @@ export function imagePath(pid) {
 export function processesOf(images) {
   const wanted = [...images];
   if (process.platform === "win32") {
-    const names = [...new Set(wanted.map((image) => basename(image).replace(/\.exe$/i, "")))];
-    const command = "Get-Process -Name " + names.map((name) => "'" + name + "'").join(",") +
-      " -ErrorAction SilentlyContinue | ForEach-Object { '{0}|{1}' -f $_.Id, $_.Path }";
+    // A CIM query that matches nothing prints nothing and exits 0. Get-Process would exit 1 when
+    // no process has the name, even with its errors silenced, and that is the answer a journey
+    // waits for after a quit.
+    const names = [...new Set(wanted.map((image) => basename(image)))];
+    const filter = names.map((name) => "Name='" + name + "'").join(" OR ");
+    const command = "Get-CimInstance Win32_Process -Filter \"" + filter + "\"" +
+      " | ForEach-Object { '{0}|{1}' -f $_.ProcessId, $_.ExecutablePath }";
     const printed = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command],
       { encoding: "utf8", windowsHide: true });
     return printed.split(/\r?\n/).filter(Boolean).map((line) => line.split("|"))
