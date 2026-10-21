@@ -22,8 +22,8 @@ use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 use super::result::Readiness;
 use super::{
     action_subject, adapter_budget_ms, bounded, followed, load_physical_files, named_key,
-    observed_host, readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult,
-    ResolvedLocation, Shape, Status, Terminal, SELECTOR_MATCH_MAX,
+    observed_host, readiness, ApplicationExecutor, Effect, InvocationContext, ResolvedLocation,
+    Shape, Status, Terminal, SELECTOR_MATCH_MAX,
 };
 use crate::browser::adapter::PhysicalFile;
 use crate::browser::adapter::{
@@ -879,22 +879,19 @@ impl ApplicationExecutor {
                         "visual_settle": should_settle,
                         "visual_settled": visual_settled,
                     });
-                    return Terminal {
-                        result: InvocationResult::new(
-                            context.invocation,
-                            Status::Succeeded,
-                            Effect::None,
-                            readiness(selected.readiness),
-                            true,
-                            outcome.summary().as_str(),
-                            facts,
-                            outcome.next_steps(),
-                        ),
+                    return Terminal::completed(
+                        context.invocation,
+                        Shape {
+                            status: Status::Succeeded,
+                            effect: Effect::None,
+                            readiness: readiness(selected.readiness),
+                            repeat_safe: true,
+                        },
+                        &outcome,
+                        facts,
                         decision,
-                        physical_id: Some(selected.physical_id),
-                        observed: outcome.observed(),
-                        audit: outcome.audit(),
-                    };
+                        Some(selected.physical_id),
+                    );
                 }
                 // Waiting on what the page calls a control: polled executor-side through the same
                 // semantic query every selector-based action uses, so no handle pre-resolution is
@@ -1001,22 +998,19 @@ impl ApplicationExecutor {
                         "visual_settle": should_settle,
                         "visual_settled": visual_settled,
                     });
-                    return Terminal {
-                        result: InvocationResult::new(
-                            context.invocation,
+                    return Terminal::completed(
+                        context.invocation,
+                        Shape {
                             status,
-                            Effect::None,
-                            readiness(selected.readiness),
-                            true,
-                            outcome.summary().as_str(),
-                            facts,
-                            outcome.next_steps(),
-                        ),
+                            effect: Effect::None,
+                            readiness: readiness(selected.readiness),
+                            repeat_safe: true,
+                        },
+                        &outcome,
+                        facts,
                         decision,
-                        physical_id: Some(selected.physical_id),
-                        observed: outcome.observed(),
-                        audit: outcome.audit(),
-                    };
+                        Some(selected.physical_id),
+                    );
                 }
                 let Some(condition) = value.condition.page() else {
                     unreachable!("duration and selector_present waits return above")
@@ -1080,9 +1074,6 @@ impl ApplicationExecutor {
                             satisfied: final_satisfied,
                             host: observed_host(&selected.url),
                         };
-                        let summary = outcome.summary();
-                        let next_steps = outcome.next_steps();
-                        let outcome_observed = outcome.observed();
                         let facts = json!({
                             "tab": selected.handle.as_str(),
                             "condition": value.condition.as_str(),
@@ -1092,22 +1083,19 @@ impl ApplicationExecutor {
                             "visual_settle": should_settle,
                         "visual_settled": visual_settled,
                         });
-                        Terminal {
-                            result: InvocationResult::new(
-                                context.invocation,
+                        Terminal::completed(
+                            context.invocation,
+                            Shape {
                                 status,
-                                Effect::None,
-                                readiness(browser_readiness),
-                                true,
-                                &summary,
-                                facts,
-                                next_steps,
-                            ),
+                                effect: Effect::None,
+                                readiness: readiness(browser_readiness),
+                                repeat_safe: true,
+                            },
+                            &outcome,
+                            facts,
                             decision,
-                            physical_id: Some(tab_id),
-                            observed: outcome_observed,
-                            audit: outcome.audit(),
-                        }
+                            Some(tab_id),
+                        )
                     }
                     Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
                     Err(error) => {

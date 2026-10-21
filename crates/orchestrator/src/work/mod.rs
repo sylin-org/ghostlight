@@ -1071,22 +1071,19 @@ impl ApplicationExecutor {
                         matched,
                         more: listing.truncated,
                     };
-                    return Err(Box::new(Terminal {
-                        result: InvocationResult::new(
-                            context.invocation,
-                            Status::Failed,
-                            Effect::None,
-                            readiness(selected.readiness),
-                            true,
-                            outcome.summary().as_str(),
-                            json!({"tab":selected.handle.as_str(),"selector_matched":matched}),
-                            outcome.next_steps(),
-                        ),
+                    return Err(Box::new(Terminal::completed(
+                        context.invocation,
+                        Shape {
+                            status: Status::Failed,
+                            effect: Effect::None,
+                            readiness: readiness(selected.readiness),
+                            repeat_safe: true,
+                        },
+                        &outcome,
+                        json!({"tab":selected.handle.as_str(),"selector_matched":matched}),
                         decision,
-                        physical_id: Some(selected.physical_id),
-                        observed: outcome.observed(),
-                        audit: outcome.audit(),
-                    }));
+                        Some(selected.physical_id),
+                    )));
                 }
                 let observed = &targets[0];
                 let registered = lease
@@ -1693,25 +1690,19 @@ impl ApplicationExecutor {
         if outcome.rebound() {
             facts["rebound"] = json!(true);
         }
-        let summary = outcome.summary();
-        let next_steps = outcome.next_steps();
-        let observed = outcome.observed();
-        Terminal {
-            result: InvocationResult::new(
-                context.invocation,
-                Status::Succeeded,
+        Terminal::completed(
+            context.invocation,
+            Shape {
+                status: Status::Succeeded,
                 effect,
                 readiness,
                 repeat_safe,
-                &summary,
-                facts,
-                next_steps,
-            ),
+            },
+            &outcome,
+            facts,
             decision,
             physical_id,
-            observed,
-            audit: outcome.audit(),
-        }
+        )
     }
 
     /// Report a denial the caller can act on, naming the host when the work named an address.
@@ -2481,6 +2472,34 @@ impl Terminal {
             physical_id,
             observed: refusal.observed(),
             audit: refusal.audit(),
+        }
+    }
+
+    /// The terminal of `outcome`: its sentence, next steps, observation and audit come from the
+    /// one typed outcome (AGENTS.md), so no call site pairs them by hand.
+    fn completed(
+        invocation: &InvocationId,
+        shape: Shape,
+        outcome: &Outcome,
+        facts: Value,
+        decision: Decision,
+        physical_id: Option<u64>,
+    ) -> Self {
+        Self {
+            result: InvocationResult::new(
+                invocation,
+                shape.status,
+                shape.effect,
+                shape.readiness,
+                shape.repeat_safe,
+                &outcome.summary(),
+                facts,
+                outcome.next_steps(),
+            ),
+            decision,
+            physical_id,
+            observed: outcome.observed(),
+            audit: outcome.audit(),
         }
     }
 }

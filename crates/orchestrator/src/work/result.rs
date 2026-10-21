@@ -133,13 +133,15 @@ pub struct InvocationResult {
 }
 
 impl InvocationResult {
-    /// Construct a bounded result and enforce the contextual next-step limit.
+    /// Construct a bounded result and enforce the contextual next-step limit. Only the typed
+    /// terminals call it: `Terminal::refused` and `Terminal::completed`, and the flow's finish,
+    /// which qualifies its outcome's sentence by coverage.
     #[expect(
         clippy::too_many_arguments,
         reason = "one argument per field the result contract requires; rich content is attached after construction"
     )]
     #[must_use]
-    pub fn new(
+    pub(super) fn new(
         invocation: &super::InvocationId,
         status: Status,
         effect: Effect,

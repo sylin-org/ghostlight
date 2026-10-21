@@ -8,14 +8,10 @@ entry in [ADR-0203](../../adr/0203-one-owner-for-each-fact.md)'s Rebuild plan. S
 
 ## RESUME HERE
 
-Parked 2026-10-21. Landed: W-D2, W-D3, C19c, C10c, C12b-2, C16 and WORK-12, with WORK-2b's
-workspace half and WORK-7's lease half. W-D1 moved to core-language (L-D5) and D52(c) to test-02.
-Next, in order: W-D4 (the tab-truth defect, below), then WORK-3, WORK-1, WORK-10, the rest of WORK-7
-(`substitute_references`'s `Option`), WORK-9, WORK-13, WORK-6, WORK-5 and the rest of WORK-2b
-(`work/mod.rs`'s three `stage` locks). Pull first: test-01 holds `work/mod.rs` for BROW-2 and says
-when it lands. Build in `.target-lane-arch-core-work`; push through a rebase that retests when
-crate commits come in. A slice's hash is filled in by the next slice's commit, since a rebase
-before the push changes it.
+Resumed 2026-10-21 for the second sweep's open rows, in order: WORK-3, WORK-1, WORK-10, WORK-9,
+WORK-13, WORK-6 and WORK-5, each after its After column. A slice's hash is filled in by the next
+slice's commit, since a rebase before the push changes it. Earlier: W-D1 to W-D5, C19c, C10c,
+C12b-2, C16 and WORK-12 landed, with WORK-2b's workspace half and WORK-7's lease half.
 
 ## Slices
 
@@ -30,7 +26,7 @@ In order. "After" names what a slice waits for.
 | C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | landed (616bfffa) |
 | C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | landed (c43e2e20 and the port commit) |
 | C12b-2 | refactor(work): the typed refusal builds its result (the work half) | C12b-1 | ADR-0203 C12b; WORK-4, WORK-2 and WORK-3's refusal sites | landed (c1603722) |
-| WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | todo |
+| WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | landed |
 | WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | todo |
 | WORK-10 | refactor(work): timings and limits are named | - | WORK-10 | todo |
 | WORK-7 | refactor(work): dead code goes | C19c | WORK-7; the two unused lease methods go | lease methods landed (6e38949a); `substitute_references`'s `Option` todo |
