@@ -8,14 +8,15 @@ Machine: test-02 (Bluefin). Paths without a crate are under `crates/orchestrator
 
 Opened on 2026-10-21. Every test of `browser/adapter/` was classified first, read-only, against
 ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (`wire.rs`), A2
-(`keys/tests.rs`) and A3 (`world/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+(`keys/tests.rs`) A3 (`world/tests.rs`) and A4
+(`assets.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 269 |
+| `browser/adapter/` | 337 | 55 | 268 |
 
 ## Slices
 
@@ -26,7 +27,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | --- | --- | --- | --- | --- | --- |
 | A1 | `protocol4/wire.rs`: the golden pins already prove the wire | 25 | 1 | contract 1 | landed (6728d73e) |
 | A2 | `protocol4/keys/tests.rs`: what a press, a text fill and a double click send | 30 | 3 | promise 2, contract 1 | landed (82e4df75) |
-| A3 | `protocol4/world/tests.rs`: what the service reads from a page's answer | 21 | 4 | promise 2, contract 1, defect 1 | landed (this commit) |
+| A3 | `protocol4/world/tests.rs`: what the service reads from a page's answer | 21 | 4 | promise 2, contract 1, defect 1 | landed (a50e4956) |
+| A4 | `protocol4/assets.rs`: the shipped page assets and their frame | 3 | 2 | contract 2 (one also defect 95faf5ee) | landed (this commit) |
 
 ## Notes
 
@@ -62,6 +64,10 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   constructors' table rows, duplicated the world golden, the vocabulary's pre-effect codes or the
   forms translator, or tested decoder branches. `Message::payload`, which only a cut test read,
   goes.
+- A4: kept, the shipped source hashes to the id both suites pin (95faf5ee, LF line endings), and
+  `hello_accepted`, which carries the assets and is never chunked, fits one native message. Cut:
+  the private include expander's test, which the pinned hash covers, and a source budget no
+  component reads (`MAX_SOURCE_BYTES`).
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden

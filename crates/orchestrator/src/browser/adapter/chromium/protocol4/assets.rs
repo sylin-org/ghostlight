@@ -83,9 +83,10 @@ mod tests {
     /// The pinned asset id both test suites compare against.
     const PINNED_ID: &str =
         include_str!("../../../../../../../tests/golden/protocol4/assets.sha256");
-    /// Largest page source the service ships.
-    const MAX_SOURCE_BYTES: usize = 512 * 1024;
 
+    /// The service ships the page source whose hash the page-asset tests pin, with every include
+    /// expanded and LF line endings, so a checkout's line-ending conversion cannot change the id
+    /// (commit 95faf5ee).
     #[test]
     fn the_asset_id_is_the_pinned_hash_of_the_expanded_source() {
         let assets = page_assets();
@@ -95,33 +96,17 @@ mod tests {
         assert!(!assets.source.contains('\r'));
     }
 
+    /// The page assets travel whole in `hello_accepted`, which is never chunked, so they must fit
+    /// one native message the extension can receive.
     #[test]
-    fn the_source_and_the_hello_accepted_frame_stay_within_their_budgets() {
-        let assets = page_assets();
-        assert!(
-            assets.source.len() <= MAX_SOURCE_BYTES,
-            "{}",
-            assets.source.len()
-        );
+    fn the_hello_accepted_frame_fits_one_native_message() {
         let frame = serde_json::to_vec(&Outbound::HelloAccepted {
             service_epoch: format!("service_{}", "0".repeat(32)),
             service_version: env!("CARGO_PKG_VERSION").into(),
             control_state: RuntimeControlState::Active,
-            assets: (*assets).clone(),
+            assets: (*page_assets()).clone(),
         })
         .expect("hello_accepted serializes");
         assert!(frame.len() < DIRECT_FRAME_BYTES, "{}", frame.len());
-    }
-
-    #[test]
-    fn the_marker_expands_in_its_listed_order_with_one_newline_each() {
-        let sources = [("a.js", "A"), ("b.js", "B")];
-        assert_eq!(
-            expand("x/*@include b.js a.js*/y", &sources).as_deref(),
-            Some("xB\nA\ny")
-        );
-        assert_eq!(expand("no marker", &sources), None);
-        assert_eq!(expand("/*@include c.js*/", &sources), None);
-        assert_eq!(expand("/*@include a.js*//*@include b.js*/", &sources), None);
     }
 }
