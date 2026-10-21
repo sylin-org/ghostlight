@@ -4,8 +4,8 @@ The 2.0.1 release candidate, installed over the public 2.0.0 on leo-desktop-02 o
 Claude Code session at the coordinator's direction. The machine and its history are in
 [the 2.0.0 record](windows-public-2.0.0-2026-10-20.md). Every check passed. The two 2.0.0
 defects seen on this machine are gone: VS Code is no longer registered in another app's container,
-and no Ghostlight window vetoes a Windows restart. The agent task was not run
-([limits](#limits)).
+and no Ghostlight window vetoes a Windows restart. The agent task ran later with the GitHub
+Copilot CLI ([addendum](#addendum-the-agent-task-with-the-github-copilot-cli)).
 
 ## The bundle
 
@@ -69,13 +69,49 @@ Every process kept running and responding after both probes.
 
 ## Limits
 
-- The agent task was not run. The Claude Code CLI bundled with Claude Desktop still says
-  `Not logged in`, and no Codex CLI is installed. A Copilot CLI is present
-  (`%LOCALAPPDATA%\github-copilot-sdk\cli\1.0.99-2\copilot.exe`), but it would run on the GitHub
-  account the owner signed in for the download, so it was left for the owner to choose.
+- The Claude Code CLI bundled with Claude Desktop still says `Not logged in`, and no Codex CLI is
+  installed. The agent task ran with the Copilot CLI once the owner chose it (addendum).
 - The restart query stands in for a real restart; the machine was not restarted.
 - The 2.0.0 edge and the bundle's edge are both 4.0.0 but differ in bytes. This run kept the
   installed one by design; it does not show whether the bundle's edge would behave the same.
 - Logs on that machine: `C:\Users\leo\ghostlight-install-2.0.1.log`,
   `ghostlight-doctor-before-2.0.1.log`, `ghostlight-doctor-2.0.1.log`,
   `ghostlight-query-end-session-2.0.0.log` and `ghostlight-query-end-session-2.0.1.log`.
+
+## Addendum: the agent task, with the GitHub Copilot CLI
+
+The owner chose the GitHub Copilot CLI on the GitHub account signed in for the download. GitHub
+Copilot CLI 1.0.99-2 (`%LOCALAPPDATA%\github-copilot-sdk\cli\1.0.99-2\copilot.exe`) ran once, from
+an empty folder, non-interactively, with only Ghostlight's tools allowed:
+
+```
+copilot -p "Open sylin.org/ghostlight/demo/desk and ring the bell." --allow-tool ghostlight --deny-tool shell --deny-tool write --deny-tool url --disable-builtin-mcps --output-format json
+```
+
+It asked for no sign-in or consent. The only MCP server it loaded was `ghostlight`, connected.
+Auto mode chose `mai-code-1.1-flash`. 38 s, 8 turns, 8 tool calls, 1 premium request, exit 0.
+
+| Call | Result |
+| --- | --- |
+| `browser_navigate` the desk, new tab | "Opened sylin.org." |
+| `browser_find` "bell" | 3 matches. |
+| `browser_inspect` controls with `max_depth` | Refused: "root and max_depth apply only to document scope". |
+| `browser_click` the bell | "Clicked the "Ring the bell" button on sylin.org. A prompt dialog is now open." |
+| `browser_dialog` status | "A prompt dialog is currently visible: "The bell asks: what should it say?"" with accept, respond or dismiss as next steps. |
+| `browser_read` | Refused: "A JavaScript dialog is open on this page, so nothing was sent." |
+| `browser_dialog` respond "ding" | "Accepted the browser dialog." |
+| `browser_read` visible | The page under the bell: `the bell says: "ding"`. |
+
+Its answer: "Done -- I opened the page and rang the bell. It replied: "ding"."
+
+The agent did not stop to ask what the bell should say. It made up its own answer instead of
+accepting the suggestion in the field ("hello from the desk"). The dialog status names the question
+and offers accept "with the text in its field", but not that text, so the agent could not know what
+accept would answer. This is the open Bluefin finding
+([bluefin-2.0-bundle-2026-10-19.md](bluefin-2.0-bundle-2026-10-19.md#finding-status-does-not-say-what-accept-will-answer)),
+seen here with a different agent and a different outcome: there Claude Code stopped and asked, and
+here Copilot guessed. The two refusals are Ghostlight working as designed and cost one turn each.
+
+The coordinator's note: the store's 2.0.0 extension cannot report a prompt's field, so the 2.0.1
+service says only that accept answers with it. With the 2.0.1 extension, in store review on
+2026-10-20, status names the field's text, as the owner's machine showed.
