@@ -32,7 +32,7 @@ use crate::session::Session;
 /// The shell's AppUserModelID. Windows groups the window with a Start-menu shortcut that carries
 /// the same id, and shows a notification from an unpackaged program only then (ADR-0199
 /// Decision 7).
-pub const SHELL_APP_ID: &str = "Sylin.Ghostlight";
+pub const SHELL_APP_ID: &str = ghostlight_relay::APP_USER_MODEL_ID;
 
 /// The name notices are shown under where the system asks for one.
 const NOTICE_APP_NAME: &str = "Ghostlight";

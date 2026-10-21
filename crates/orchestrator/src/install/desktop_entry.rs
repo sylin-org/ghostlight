@@ -15,7 +15,7 @@ use thiserror::Error;
 use super::record::{Link, Replace};
 use crate::language::deployment as words;
 
-const APPLICATION_ID: &str = "org.sylin.ghostlight";
+const APPLICATION_ID: &str = ghostlight_relay::APPLICATION_ID;
 const DESKTOP_TEMPLATE: &str = include_str!("../../../../packaging/linux/ghostlight.desktop.hbs");
 const ICON: &[u8] = include_bytes!("../../../../extension/icons/icon128.png");
 const OWNERSHIP_MARKER: &str = "X-Ghostlight-Owned=true";

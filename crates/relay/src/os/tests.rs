@@ -312,7 +312,7 @@ mod app_user_model_id {
 
     #[test]
     fn a_valid_id_is_accepted() {
-        set_app_user_model_id("Sylin.Ghostlight").expect("set the test process id");
+        set_app_user_model_id(crate::APP_USER_MODEL_ID).expect("set the test process id");
     }
 }
 

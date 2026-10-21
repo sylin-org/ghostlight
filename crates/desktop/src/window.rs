@@ -65,7 +65,7 @@ pub const WINDOW_CLASS: &str = "Ghostlight Window";
 
 /// The application id. On Linux it is the Wayland app id and the X11 class (with the `.desktop`
 /// suffix, the Applications entry's file name), so the shell groups under its installed entry.
-pub const APPLICATION_ID: &str = "org.sylin.ghostlight";
+pub const APPLICATION_ID: &str = ghostlight_relay::APPLICATION_ID;
 
 /// How long after an Open the shell made on its own the service's follow-up show is taken as the
 /// answer to it. The service answers within a round trip; a show later than this is a request of

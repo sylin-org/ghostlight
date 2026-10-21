@@ -31,6 +31,15 @@ pub mod spawn;
 pub mod wake;
 pub mod watchdog;
 
+/// The AppUserModelID Windows groups Ghostlight under: the shell sets it on its window and the
+/// installer writes it into the Start-menu shortcut, and Windows shows an unpackaged program's
+/// notification only when the two match (ADR-0199 Decision 7). Shortcuts persist it.
+pub const APP_USER_MODEL_ID: &str = "Sylin.Ghostlight";
+
+/// The application id on Linux: the Wayland app id and the X11 class the shell sets, and the file
+/// name of the Applications entry the installer writes, so the shell groups under that entry.
+pub const APPLICATION_ID: &str = "org.sylin.ghostlight";
+
 /// The relay revision spoken by this crate. Carried in every opening.
 pub const RELAY: u16 = 5;
 

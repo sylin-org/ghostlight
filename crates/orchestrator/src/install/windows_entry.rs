@@ -27,9 +27,8 @@ use super::record::atomic_replace;
 /// The name the shortcut and the installed-apps entry carry.
 const PRODUCT_NAME: &str = "Ghostlight";
 
-/// The AppUserModelID of the shortcut. It is the shell's own id (`SHELL_APP_ID` in the shell
-/// crate), written again here because the service depends on no UI crate; a test keeps them equal.
-pub const APP_USER_MODEL_ID: &str = "Sylin.Ghostlight";
+/// The AppUserModelID of the shortcut: the shell's own id, which both take from the relay.
+pub const APP_USER_MODEL_ID: &str = ghostlight_relay::APP_USER_MODEL_ID;
 
 /// The per-user Uninstall key, below `HKEY_CURRENT_USER`.
 const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Ghostlight";
@@ -823,9 +822,6 @@ mod tests {
                 app_user_model_id_of(&bytes).as_deref(),
                 Some(APP_USER_MODEL_ID)
             );
-        }
-        {
-            assert_eq!(APP_USER_MODEL_ID, "Sylin.Ghostlight");
         }
         {
             let target =
