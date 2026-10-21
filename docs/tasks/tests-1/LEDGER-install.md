@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 526 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 509 |
 | `crates/desktop` | 161 | 20 | 161 |
 
 ## Slices
@@ -37,6 +37,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I13 | `install/windows_entry.rs`: nine tests fold into one; a byte-inequality check, a routing arm and a command-format restatement go; the AUMID pin stays inside it until the shared constant replaces it | 567 | 556 | promise 1 (Desktop 15) | landed (this commit) |
 | T-I14 | `install/command_path.rs`: the Windows `Path` tests fold into one round trip; the Unix link tests go, as the plan ranked them below the budget line; a detail restatement and two routing arms go | 556 | 539 | promise 1 (the command on `Path` on Windows) | landed (this commit) |
 | T-I15 | `install/user_path.rs`: twelve tests of the `Path` value fold into one, which runs on every system (one over the plan, which folded them into T-I14's Windows-only test; made back later in the area); two that only round-tripped the registry encoding through itself go | 539 | 526 | promise 1 (the value comes back byte for byte) | landed (this commit) |
+| T-I16 | `install/icons.rs`: its seventeen tests go, with `IconCache::with_catalog` and `IconCache::version`, which only they used; the plan ranked the icon-cache and PNG-only folds below the budget line, and `agent/image.rs`'s tile golden still reads the cache | 526 | 509 | none here | landed (this commit) |
 
 ## Notes
 
