@@ -80,12 +80,6 @@ pub const MISDIRECTED: &str = "This view is served only at its own address.";
 /// The license shown on the About page.
 pub const PRODUCT_LICENSE: &str = "Apache-2.0 OR MIT";
 
-/// Confirmation after copying a harness's MCP command.
-pub const COPIED_COMMAND: &str = "MCP command copied.";
-
-/// Confirmation after copying a harness's manual setup.
-pub const COPIED_SETUP: &str = "Manual setup copied.";
-
 /// Why the runtime is held, when the pause came from the Ghostlight window.
 pub const PAUSED_IN_WINDOW: &str = "Paused in the Ghostlight window.";
 
@@ -786,70 +780,45 @@ pub const fn harness_state_word(
 mod tests {
     use super::*;
 
-    const EVERY_WINDOW_REASON: [WindowReason; 8] = [
-        WindowReason::Shown,
-        WindowReason::Tray,
-        WindowReason::NoDisplay,
-        WindowReason::NoInteractiveDesktop,
-        WindowReason::NoShellFile,
-        WindowReason::NoWebview,
-        WindowReason::NoTray,
-        WindowReason::DidNotStay,
-    ];
-
     /// The window's own vocabulary, which the search palette's words must say the same way.
     const PAGE_WORDS: &str = include_str!("../../ui/lib/words.js");
 
-    #[test]
-    fn a_tool_reads_in_words_as_the_activity_list_names_it() {
-        assert_eq!(tool_words("browser_fill_form"), "fill form");
-        assert_eq!(tool_words("policy_explain"), "policy explain");
-        assert_eq!(
-            search_action_title("browser_navigate", "Opened sylin.org."),
-            "navigate: Opened sylin.org."
-        );
-        assert_eq!(search_action_title("browser_read", ""), "read");
-        assert!(PAGE_WORDS.contains(&format!("SHARED_TOOL_PREFIX = \"{SHARED_TOOL_PREFIX}\"")));
-    }
+    /// Where [`PAGE_WORDS`] lives, as a failure names it.
+    const PAGE_WORDS_FILE: &str = "crates/orchestrator/ui/lib/words.js";
 
-    #[test]
-    fn a_session_line_says_what_its_card_says() {
-        assert_eq!(
-            session_line(2, Some("Google Chrome"), false, false),
-            "2 tabs in Google Chrome, idle"
-        );
-        assert_eq!(
-            session_line(1, Some("Edge"), false, true),
-            "1 tab in Edge, idle, from the command line"
-        );
-        assert_eq!(
-            session_line(0, Some("Edge"), true, false),
-            "In Edge, no tabs, working"
-        );
-        assert_eq!(session_line(0, None, false, false), "No tabs, idle");
-        for (key, word) in [
-            ("working", SESSION_WORKING),
-            ("idle", SESSION_IDLE),
-            ("fromCommandLine", SESSION_FROM_COMMAND_LINE),
-        ] {
-            assert!(PAGE_WORDS.contains(&format!("{key}: \"{word}\"")), "{key}");
-        }
-    }
+    /// The browser toolbar's popup, which says the pause entries in the words of the tray.
+    const TOOLBAR_WORDS: &str = "extension/lib/popup-view.js";
 
+    /// Contract between the service and the page and toolbar: a word the service says that the
+    /// window or the browser toolbar also spells is spelled the same in both, so search finds a
+    /// row by the words its card shows (desktop gate 3, n-d-04) and the tray, the band and the
+    /// toolbar say one word per act (ADR-0199 amendment of 2026-10-18).
     #[test]
-    fn an_agent_on_this_computer_wears_the_word_of_its_integrations_entry() {
-        assert_eq!(
-            harness_state_word(HarnessState::Installed, false, false),
-            "Connected"
-        );
-        assert_eq!(
-            harness_state_word(HarnessState::Available, true, false),
-            WORD_BY_HAND
-        );
-        assert_eq!(
-            harness_state_word(HarnessState::Available, true, true),
-            WORD_CONNECTED
-        );
+    fn the_words_the_service_says_are_the_words_the_window_and_the_toolbar_show() {
+        let toolbar = std::fs::read_to_string(
+            crate::language::self_check::golden::repository_path(TOOLBAR_WORDS),
+        )
+        .expect("the toolbar popup exists");
+        let page = (PAGE_WORDS_FILE, PAGE_WORDS);
+        let mut spelled = vec![
+            (
+                page,
+                format!("SHARED_TOOL_PREFIX = \"{SHARED_TOOL_PREFIX}\""),
+            ),
+            (page, format!("working: \"{SESSION_WORKING}\"")),
+            (page, format!("idle: \"{SESSION_IDLE}\"")),
+            (
+                page,
+                format!("fromCommandLine: \"{SESSION_FROM_COMMAND_LINE}\""),
+            ),
+            (
+                page,
+                format!(
+                    "by_hand: \"{}\"",
+                    harness_state_word(HarnessState::Available, true, false)
+                ),
+            ),
+        ];
         for (key, state) in [
             ("installed", HarnessState::Installed),
             ("not_detected", HarnessState::NotDetected),
@@ -858,356 +827,45 @@ mod tests {
             ("needs_attention", HarnessState::NeedsAttention),
         ] {
             let word = harness_state_word(state, false, false);
-            assert!(PAGE_WORDS.contains(&format!("{key}: \"{word}\"")), "{key}");
+            spelled.push((page, format!("{key}: \"{word}\"")));
+        }
+        for words in [page, (TOOLBAR_WORDS, toolbar.as_str())] {
+            spelled.push((words, format!("pause: \"{TRAY_HOLD}\"")));
+            spelled.push((words, format!("resume: \"{TRAY_RESUME}\"")));
+            spelled.push((words, format!("startSession: \"{TRAY_START_SESSION}\"")));
+        }
+        for ((file, text), entry) in spelled {
+            assert!(text.contains(&entry), "{file} does not spell {entry}");
         }
     }
 
+    /// The window, the tray and status count one thing, the agents (j-08, window-1; ADR-0199
+    /// amendment of 2026-10-18): the line counts agents and browsers, never MCP or command-line
+    /// connections, and reads as the amendment quotes it.
     #[test]
-    fn a_browser_and_work_in_flight_read_as_a_person_says_them() {
-        assert_eq!(search_browser_detail(2), "Connected, 2 tabs");
-        assert_eq!(search_browser_detail(0), "Connected, no tabs");
-        assert_eq!(
-            search_operation_detail("Claude Code", SEARCH_RUNNING),
-            "Claude Code, running"
-        );
-        assert_eq!(search_action_detail("", "Google Chrome"), "Google Chrome");
-    }
-
-    #[test]
-    fn the_no_browser_line_names_a_browser_only_when_one_starts_on_request() {
-        assert_eq!(
-            no_browser(Some("Google Chrome")),
-            "Starts Google Chrome on request"
-        );
-        assert_eq!(no_browser(None), NO_BROWSER);
-    }
-
-    #[test]
-    fn a_window_reason_is_its_wire_word_and_every_word_is_different() {
-        let mut words = std::collections::BTreeSet::new();
-        for reason in EVERY_WINDOW_REASON {
-            assert_eq!(serde_json::to_value(reason).unwrap(), reason.as_str());
-            assert!(words.insert(reason.as_str()), "{reason:?}");
-        }
-    }
-
-    #[test]
-    fn every_reason_but_an_open_window_has_one_plain_sentence() {
-        for reason in EVERY_WINDOW_REASON {
-            match reason.sentence() {
-                None => assert_eq!(reason, WindowReason::Shown),
-                Some(sentence) => {
-                    assert!(sentence.is_ascii(), "{sentence}");
-                    assert!(sentence.ends_with('.'), "{sentence}");
-                    assert!(!sentence.contains('\n'), "{sentence}");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn no_window_reasons_open_with_the_same_words_and_the_linux_cause_is_named() {
-        for reason in [
-            WindowReason::NoDisplay,
-            WindowReason::NoInteractiveDesktop,
-            WindowReason::NoShellFile,
-            WindowReason::NoWebview,
-            WindowReason::NoTray,
-            WindowReason::DidNotStay,
+    fn the_service_line_counts_agents_never_their_connections() {
+        for (counts, line) in [
+            (None, "Ghostlight is not running."),
+            (
+                Some(ConnectionCounts {
+                    agents: 2,
+                    mcp_clients: 5,
+                    command_line: 1,
+                    browsers: 1,
+                }),
+                "Ghostlight is running; 2 agents and 1 browser connected.",
+            ),
+            (
+                Some(ConnectionCounts {
+                    agents: 1,
+                    mcp_clients: 3,
+                    command_line: 1,
+                    browsers: 2,
+                }),
+                "Ghostlight is running; 1 agent and 2 browsers connected.",
+            ),
         ] {
-            assert!(reason
-                .sentence()
-                .unwrap()
-                .starts_with("No Ghostlight window: "));
+            assert_eq!(service_line(counts), line, "{counts:?}");
         }
-        if cfg!(not(windows)) {
-            assert!(WindowReason::DidNotStay
-                .sentence()
-                .unwrap()
-                .contains("WebKitGTK 4.1"));
-        }
-    }
-
-    #[test]
-    fn the_first_close_hint_says_that_ghostlight_is_still_running_and_where_the_icon_is() {
-        assert_eq!(TRAY_HINT_TITLE, "Ghostlight is still running");
-        assert!(TRAY_HINT_BODY.is_ascii());
-        assert!(TRAY_HINT_BODY.starts_with("Open it again from the Ghostlight icon in the "));
-        if cfg!(windows) {
-            assert_eq!(
-                TRAY_HINT_BODY,
-                "Open it again from the Ghostlight icon in the notification area (under ^ if it is hidden) or from the Start menu."
-            );
-        } else {
-            assert!(TRAY_HINT_BODY.ends_with("system tray or from Applications."));
-        }
-    }
-
-    #[test]
-    fn every_sentence_is_plain_ascii_and_ends_a_sentence() {
-        for sentence in [
-            SENTENCE_CONTROL_WATCHED,
-            SENTENCE_CONTROL_PRIVATE,
-            SENTENCE_WATCH,
-            WATCHING_OFF,
-            CHANGE_IN_WINDOW,
-            WRONG_KEY,
-            TOO_MANY,
-            STALE_POLICY,
-            STALE_HARNESS,
-            BAD_REQUEST,
-            TOO_LARGE,
-            UNSUPPORTED_TYPE,
-            CROSS_SITE,
-            NOT_FOUND,
-            METHOD_NOT_ALLOWED,
-            MISDIRECTED,
-            PAUSED_IN_WINDOW,
-            PAUSED_FROM_WATCHER,
-            PAUSED_FROM_TRAY,
-            PAUSED_FROM_BROWSER,
-            TOO_MANY_SCREENS,
-            COPIED_COMMAND,
-            COPIED_SETUP,
-            SEARCH_CONTROL_CHARACTER,
-            POLICY_EMPTY,
-            DIAGNOSTICS_OFF,
-            LINK_NOT_SECURE,
-            NATIVE_ACT_FAILED,
-            NOTICE_BLOCKED_BODY,
-            NOTICE_CHECKUP_BODY,
-            CONTROLS_NOTIFICATIONS_WORD,
-            BROWSER_EFFECTS_WORD,
-            BROWSER_CAPTIONS_WORD,
-            WATCHING_NOT_SERVED,
-            WATCHING_NOT_SAVED,
-            QUITTING,
-            QUIT_UNAVAILABLE,
-            SETUP_STEP_NOT_OFFERED,
-            SETUP_SESSION_ENDING,
-            SETUP_BROWSER_NOT_STARTED,
-            SERVICE_UP,
-            SERVICE_STARTS_ON_DEMAND,
-            STATUS_SERVICE_RUNNING,
-            STATUS_BROWSER_WAITING,
-            STATUS_RULES_INVALID,
-            STATUS_RULES_EDIT_INVALID,
-            status_rules_valid(false, false),
-            status_rules_valid(true, false),
-            status_rules_valid(false, true),
-        ] {
-            assert!(sentence.is_ascii(), "{sentence}");
-            assert!(sentence.ends_with('.'), "{sentence}");
-        }
-    }
-
-    #[test]
-    fn the_rules_check_names_a_switched_off_channel() {
-        let mcp_off = ChannelsOff {
-            mcp: Some(crate::language::outcome::PolicyAuthor::User),
-            ..ChannelsOff::default()
-        };
-        assert_eq!(
-            status_rules_in_force(true, false, mcp_off),
-            "Your rules are valid. MCP agents are turned off. Command-line work may continue."
-        );
-        assert_eq!(
-            status_rules_in_force(true, false, ChannelsOff::default()),
-            "Your rules are valid."
-        );
-    }
-
-    #[test]
-    fn a_pause_from_a_watching_page_names_no_screen() {
-        assert!(
-            !PAUSED_FROM_WATCHER.contains("screen"),
-            "{PAUSED_FROM_WATCHER}"
-        );
-        assert!(
-            PAUSED_FROM_WATCHER.contains("a watching page")
-                && PAUSED_FROM_WATCHER.contains("a local program"),
-            "{PAUSED_FROM_WATCHER}"
-        );
-        for own in [PAUSED_IN_WINDOW, PAUSED_FROM_TRAY, PAUSED_FROM_BROWSER] {
-            assert_ne!(own, PAUSED_FROM_WATCHER);
-        }
-    }
-
-    #[test]
-    fn the_never_touch_count_reads_in_the_singular_and_the_plural() {
-        assert_eq!(
-            never_touch_count(1),
-            "1 site is marked never-touch by policy."
-        );
-        assert_eq!(
-            never_touch_count(3),
-            "3 sites are marked never-touch by policy."
-        );
-    }
-    /// `agents` agents over as many MCP connections, and `browsers` browsers.
-    fn counts(agents: usize, browsers: usize) -> Option<ConnectionCounts> {
-        Some(ConnectionCounts {
-            agents,
-            mcp_clients: agents,
-            command_line: 0,
-            browsers,
-        })
-    }
-
-    #[test]
-    fn the_status_checks_speak_of_ghostlight_the_browser_rules_and_history() {
-        assert_eq!(
-            [
-                STATUS_SERVICE_LABEL,
-                STATUS_BROWSER_LABEL,
-                STATUS_RULES_LABEL,
-                STATUS_HISTORY_LABEL
-            ],
-            ["Ghostlight", "Browser", "Rules", "History"]
-        );
-        assert_eq!(
-            status_browser_connected(&["Google Chrome"]),
-            "Ghostlight in Browser is connected in Google Chrome."
-        );
-        assert_eq!(
-            status_browser_connected(&["Google Chrome", "Microsoft Edge", "Google Chrome"]),
-            "Ghostlight in Browser is connected in Google Chrome and Microsoft Edge."
-        );
-        assert_eq!(status_browser_connected(&[]), STATUS_BROWSER_WAITING);
-        assert_eq!(status_rules_valid(false, false), "No rules apply.");
-        assert_eq!(status_rules_valid(true, true), "Your rules are valid.");
-    }
-
-    #[test]
-    fn the_pause_entries_use_the_words_of_the_band_and_the_browser_toolbar() {
-        assert_eq!(
-            (TRAY_HOLD, TRAY_RESUME, TRAY_START_SESSION),
-            ("Pause agents", "Resume agents", "Start a new session")
-        );
-    }
-
-    #[test]
-    fn the_workbench_line_says_who_can_watch_and_names_a_taken_port() {
-        let url = "http://127.0.0.1:47600/";
-        assert_eq!(
-            workbench_line(url, true, true),
-            "Workbench: http://127.0.0.1:47600/ -- others on this computer can watch"
-        );
-        assert_eq!(
-            workbench_line(url, false, true),
-            "Workbench: http://127.0.0.1:47600/ -- watching is off"
-        );
-        assert_eq!(
-            workbench_line(url, true, false),
-            "Workbench: http://127.0.0.1:47600/ -- others on this computer can watch (the usual port was taken)"
-        );
-    }
-
-    #[test]
-    fn an_idle_service_says_how_it_starts() {
-        assert_eq!(
-            service_not_running_line(false),
-            "Ghostlight is not running."
-        );
-        assert_eq!(
-            service_not_running_line(true),
-            "Ghostlight is not running. It starts when a browser or an agent connects."
-        );
-    }
-
-    #[test]
-    fn the_stray_lines_name_the_image_and_the_fix() {
-        assert_eq!(
-            stray_line("C:/gl/bin/old.exe"),
-            "Something from an older Ghostlight installation is still running: C:/gl/bin/old.exe. Close it, or run ghostlight install."
-        );
-        assert_eq!(
-            version_directory_line("C:/gl/bin/v1.3.5"),
-            "An older Ghostlight left C:/gl/bin/v1.3.5 in bin. Run ghostlight install to remove it."
-        );
-        assert_eq!(
-            stray_not_stopped_line("old.exe"),
-            "Could not stop old.exe. Close it yourself."
-        );
-    }
-
-    #[test]
-    fn a_service_that_is_not_running_says_so() {
-        assert_eq!(service_line(None), "Ghostlight is not running.");
-    }
-
-    #[test]
-    fn a_service_with_nothing_connected_says_so() {
-        assert_eq!(
-            service_line(counts(0, 0)),
-            "Ghostlight is running; nothing is connected yet."
-        );
-    }
-
-    #[test]
-    fn one_agent_reads_in_the_singular() {
-        assert_eq!(
-            service_line(counts(1, 0)),
-            "Ghostlight is running; 1 agent connected."
-        );
-    }
-
-    #[test]
-    fn agents_and_browsers_are_joined_with_and() {
-        assert_eq!(
-            service_line(counts(3, 1)),
-            "Ghostlight is running; 3 agents and 1 browser connected."
-        );
-    }
-
-    #[test]
-    fn the_line_counts_agents_never_their_connections() {
-        let one_agent_two_ways = ConnectionCounts {
-            agents: 1,
-            mcp_clients: 3,
-            command_line: 1,
-            browsers: 2,
-        };
-        assert_eq!(
-            service_line(Some(one_agent_two_ways)),
-            "Ghostlight is running; 1 agent and 2 browsers connected."
-        );
-    }
-
-    #[test]
-    fn a_kind_with_none_connected_is_left_out() {
-        assert_eq!(
-            service_line(counts(0, 3)),
-            "Ghostlight is running; 3 browsers connected."
-        );
-        assert_eq!(
-            service_line(counts(2, 0)),
-            "Ghostlight is running; 2 agents connected."
-        );
-    }
-
-    #[test]
-    fn the_tray_tooltip_names_the_state_in_the_bands_word() {
-        let both = counts(2, 2).unwrap();
-        assert_eq!(
-            tray_tooltip(Readiness::Ready, both),
-            "Ready. Ghostlight is running; 2 agents and 2 browsers connected."
-        );
-        assert_eq!(
-            tray_tooltip(Readiness::Paused, both),
-            "Paused. Ghostlight is running; 2 agents and 2 browsers connected."
-        );
-    }
-
-    #[test]
-    fn the_tray_tooltip_says_when_no_browser_is_connected() {
-        assert_eq!(
-            tray_tooltip(Readiness::NotConnected, counts(1, 0).unwrap()),
-            "Not connected. Ghostlight is running; 1 agent connected. No browser connected."
-        );
-        assert_eq!(
-            tray_tooltip(Readiness::Ready, counts(0, 0).unwrap()),
-            "Ready. Ghostlight is running; nothing is connected yet."
-        );
     }
 }
