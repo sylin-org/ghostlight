@@ -544,11 +544,6 @@ pub(crate) mod testing {
             Box::new(World(Arc::clone(self), Instant::now()))
         }
 
-        /// A world nothing else reads or moves: it starts no process.
-        pub(crate) fn into_world(self) -> Box<dyn Outside> {
-            Arc::new(self).world()
-        }
-
         /// Move the clock forward.
         pub(crate) fn advance(&self, by: Duration) {
             *lock(&self.offset) += by;

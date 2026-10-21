@@ -2448,20 +2448,19 @@ impl BrowserEventSink for ServiceBrowserEvents {
 mod tests {
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
     use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
     use crate::intake::session::{IntakeChannel, SessionMarker};
-    use crate::provenance::{
-        Attribution, ConnectionEvidence, Observation, Source, SourceProcess, SourceReader,
-    };
-    use ghostlight_relay::endpoint::{pair, Connection, Endpoint, Listener};
+    use crate::provenance::{ConnectionEvidence, Observation, Source, SourceProcess, SourceReader};
+    use ghostlight_relay::endpoint::{pair, Connection, Listener};
     use ghostlight_relay::frame;
     use ghostlight_relay::protocol::{
         self, Control, Edge, GoodbyeReason, McpFrame, Opening as RelayOpening, Program, QuitReason,
-        RefusalCode, Reply, Role, StartReason,
+        Reply, Role, StartReason,
     };
     use serde_json::{json, Value};
 
@@ -2469,21 +2468,22 @@ mod tests {
     use super::presence::testing::Fake;
     use super::test_home::TestHome;
     use crate::browser::adapter::BrowserCommand;
-    use crate::browser::adapter::RuntimeControlIntent;
     use crate::browser::adapter::RuntimeControlState;
     use crate::browser::testing::{FakeBrowser, FAKE_BROWSER};
     use crate::cli::client as cli_client;
+    use crate::install::layout::Layout;
     use crate::intake::desktop::{
         ActOutcome, DesktopFrame, NativeAct, ShellView, TrayItemId, TrayModel,
     };
-    use crate::intake::listener::{self, control};
+    use crate::intake::listener::control;
     use crate::intake::mcp::failure_templates;
     use crate::intake::mcp::ResumeState;
-    use crate::language::intake::OpeningRefusal;
+    use crate::language::outcome::{CancelCause, QuitCause, Refusal};
     use crate::scratch::Scratch;
+    use crate::work::result::{Effect, Status};
     use crate::workbench::{
-        PageAddress, RuntimeSource, WorkbenchNativeActs, WorkbenchNotification,
-        WorkbenchPresentationError, WorkbenchPresentationPort,
+        PageAddress, WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
+        WorkbenchPresentationPort,
     };
     use crate::workspace::ReleasedTabs;
 
@@ -2491,6 +2491,15 @@ mod tests {
         cleanup_released_tabs, AuthorityAlreadyRunning, QuitLatched, ServiceHost, StartTerms,
         QUIT_GRACE,
     };
+
+    /// The MCP revision the test clients speak and the resume tokens name.
+    const REVISION: &str = "2025-06-18";
+
+    /// The name the client of an ordinary test session claims.
+    const CLIENT_NAME: &str = "relay test";
+
+    /// The name the client of a session that returns with a resume token claims.
+    const RETURNING_CLIENT: &str = "returning client";
 
     /// The terms of an agent start, which asks for the lock once.
     fn agent() -> StartTerms {
@@ -2502,6 +2511,9 @@ mod tests {
         Scratch::named(&format!("service-{name}"))
     }
 
+    /// ACCEPTANCE B15 (ADR-0164) and defect d8d27be0: a page the person loads in a controlled tab
+    /// never authorizes, audits or reaches the executor, and a tab Ghostlight never opened stays
+    /// unowned; the next agent request checks the current page and is refused there.
     #[test]
     fn passive_browsing_never_becomes_work_or_claims_a_child_tab() {
         use crate::audit::{AuditRecorder, JsonlAuditSink};
@@ -2509,7 +2521,6 @@ mod tests {
         use crate::browser::BrowserEventSink;
         use crate::governance::GovernanceFacade;
         use crate::presentation::{BrowserPresentation, PresentationReactor};
-        use crate::work::result::Status;
         use crate::work::{ApplicationExecutor, CancellationToken};
         use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
         use crate::workspace::WorkspaceStore;
@@ -2662,21 +2673,6 @@ mod tests {
         workspaces.release(&workspace)
     }
 
-    /// Run release cleanup against a browser whose preserve-tabs setting keeps every tab open.
-    fn clean_up_kept_open(workspaces: &crate::workspace::WorkspaceStore, released: &ReleasedTabs) {
-        use crate::browser::adapter::BrowserOutcome;
-        use crate::browser::BrowserError;
-
-        let browser = FakeBrowser::default();
-        browser.push(Ok(BrowserOutcome::DiagnosticsCleared {
-            cleared_count: released.physical_ids.len(),
-        }));
-        for _ in &released.physical_ids {
-            browser.push(Err(BrowserError::LocalInterlock("preserved".into())));
-        }
-        cleanup_released_tabs(released, &browser, workspaces, None);
-    }
-
     /// The tab a later session of the same client opening example.com would reuse, if any.
     fn reusable_example_tab(workspaces: &crate::workspace::WorkspaceStore) -> Option<u64> {
         let key = ConnectionEvidence::claimed(RELEASED_CLIENT, IntakeChannel::Mcp)
@@ -2687,12 +2683,47 @@ mod tests {
             .map(|released| released.physical_id)
     }
 
+    /// ACCEPTANCE B25, ADR-0196 Decisions 8 and 9, and defect 740d5e77: release cleanup clears the
+    /// tabs' diagnostics in batches of the size the extension accepts before any close, and a tab
+    /// becomes reusable only once the preserve-tabs interlock kept it open.
     #[test]
-    fn only_a_tab_the_browser_kept_open_after_release_cleanup_is_reusable() {
+    fn release_cleanup_clears_diagnostics_in_batches_before_any_close_and_only_a_tab_kept_open_is_reusable(
+    ) {
         use crate::browser::adapter::BrowserOutcome;
         use crate::browser::BrowserError;
         use crate::workspace::WorkspaceStore;
 
+        // Every batch of diagnostics is cleared before the first close is attempted.
+        let browser = FakeBrowser::default();
+        let ids: Vec<u64> = (1..=super::DIAGNOSTIC_CLEAR_BATCH_SIZE as u64 + 1).collect();
+        let released = ReleasedTabs {
+            browser: Some(FAKE_BROWSER.into()),
+            physical_ids: ids.clone(),
+        };
+        cleanup_released_tabs(&released, &browser, &WorkspaceStore::default(), None);
+        let (batch, rest) = ids.split_at(super::DIAGNOSTIC_CLEAR_BATCH_SIZE);
+        let closes: Vec<BrowserCommand> = ids
+            .iter()
+            .map(|&tab_id| BrowserCommand::CloseTab {
+                tab_id,
+                released: true,
+            })
+            .collect();
+        let calls = browser.calls();
+        assert_eq!(
+            calls[..2],
+            [
+                BrowserCommand::ClearDiagnostics {
+                    tab_ids: batch.to_vec()
+                },
+                BrowserCommand::ClearDiagnostics {
+                    tab_ids: rest.to_vec()
+                },
+            ]
+        );
+        assert_eq!(calls[2..], closes[..]);
+
+        // Only a tab the browser kept open after its close is reusable, and only once.
         let workspaces = WorkspaceStore::default();
         let mut released = release_example_tabs(&workspaces, &[1, 2, 3]);
         // The fake answers in call order, so close the tabs in a known order.
@@ -2734,122 +2765,9 @@ mod tests {
         assert_eq!(reusable_example_tab(&workspaces), None);
     }
 
-    #[test]
-    fn the_browser_reporting_a_dialog_is_recorded_for_the_tab_that_holds_it() {
-        use crate::browser::adapter::{BrowserEvent, BrowserReadiness, PhysicalTab};
-        use crate::browser::BrowserEventSink;
-        use crate::language::outcome::DialogKind;
-        use crate::workspace::WorkspaceStore;
-
-        let workspaces = WorkspaceStore::default();
-        let workspace = workspaces.admit("dialogs".into(), IntakeChannel::Mcp);
-        let lease = workspaces.acquire(&workspace).unwrap();
-        lease
-            .add_tab(
-                FAKE_BROWSER,
-                &PhysicalTab {
-                    tab_id: 4,
-                    url: "https://example.com/".into(),
-                    title: "Example".into(),
-                    active: true,
-                    readiness: BrowserReadiness::Complete,
-                },
-            )
-            .unwrap();
-        drop(lease);
-        let sink =
-            super::ServiceBrowserEvents::new(test_workbench(&workspaces), workspaces.clone());
-        let dialog = |tab_id, present, dialog_type: &str| BrowserEvent::DialogChanged {
-            tab_id,
-            present,
-            dialog_type: dialog_type.into(),
-        };
-
-        sink.on_event(FAKE_BROWSER, dialog(4, true, "confirm"));
-        assert_eq!(
-            workspaces.dialog_open(&workspace, 4),
-            Some(DialogKind::Confirm)
-        );
-        // A tab this session does not control is not its dialog.
-        sink.on_event(FAKE_BROWSER, dialog(9, true, "alert"));
-        assert_eq!(workspaces.dialog_open(&workspace, 9), None);
-        // The browser closing it, and a kind this build does not name.
-        sink.on_event(FAKE_BROWSER, dialog(4, false, "unknown"));
-        assert_eq!(workspaces.dialog_open(&workspace, 4), None);
-        sink.on_event(FAKE_BROWSER, dialog(4, true, "a kind from the future"));
-        assert_eq!(
-            workspaces.dialog_open(&workspace, 4),
-            Some(DialogKind::Other)
-        );
-    }
-
-    #[test]
-    fn browser_events_take_released_tabs_out_of_reuse() {
-        use crate::browser::adapter::BrowserEvent;
-        use crate::browser::BrowserEventSink;
-        use crate::workspace::WorkspaceStore;
-
-        let workspaces = WorkspaceStore::default();
-        let sink =
-            super::ServiceBrowserEvents::new(test_workbench(&workspaces), workspaces.clone());
-        let closed = |tab_id| BrowserEvent::TabClosed { tab_id };
-        // The person loaded a page in a tab Ghostlight left open: it is theirs again.
-        let committed = |tab_id| BrowserEvent::DocumentCommitted {
-            tab_id,
-            url: "https://example.com/mine".into(),
-        };
-
-        let released = release_example_tabs(&workspaces, &[1, 2, 3]);
-        clean_up_kept_open(&workspaces, &released);
-        sink.on_event(FAKE_BROWSER, closed(1));
-        sink.on_event(FAKE_BROWSER, committed(2));
-        assert_eq!(reusable_example_tab(&workspaces), Some(3));
-        assert_eq!(reusable_example_tab(&workspaces), None);
-
-        // A close or a commit while cleanup is still running counts the same way: the cleanup
-        // answer that follows does not bring the tab back.
-        let released = release_example_tabs(&workspaces, &[5, 6]);
-        sink.on_event(FAKE_BROWSER, closed(5));
-        sink.on_event(FAKE_BROWSER, committed(6));
-        clean_up_kept_open(&workspaces, &released);
-        assert_eq!(reusable_example_tab(&workspaces), None);
-    }
-
-    /// A browser that restarted may have handed the agent's tab id to the person's tab. With
-    /// preserve-tabs off the extension closes any id it is sent, so a release after the gap sends
-    /// no close for a binding the browser has not confirmed.
-    #[test]
-    fn a_release_after_a_browser_restart_never_closes_the_persons_tab() {
-        use crate::browser::adapter::{BrowserEvent, BrowserReadiness, PhysicalTab};
-        use crate::browser::BrowserEventSink;
-        use crate::workspace::WorkspaceStore;
-
-        let workspaces = WorkspaceStore::default();
-        let sink =
-            super::ServiceBrowserEvents::new(test_workbench(&workspaces), workspaces.clone());
-        let workspace = workspaces.admit(RELEASED_CLIENT.into(), IntakeChannel::Mcp);
-        let lease = workspaces.acquire(&workspace).unwrap();
-        let tab = PhysicalTab {
-            tab_id: 4,
-            url: "https://example.com/".into(),
-            title: "Example".into(),
-            active: true,
-            readiness: BrowserReadiness::Complete,
-        };
-        let added = lease.add_tab(FAKE_BROWSER, &tab).unwrap();
-        lease.apply_landing(&added.handle, &tab).unwrap();
-        drop(lease);
-
-        sink.on_event(FAKE_BROWSER, BrowserEvent::Disconnected { life: None });
-        let released = workspaces.release(&workspace);
-        let browser = FakeBrowser::default();
-        cleanup_released_tabs(&released, &browser, &workspaces, None);
-        assert!(browser.calls().is_empty(), "{:?}", browser.calls());
-        assert_eq!(reusable_example_tab(&workspaces), None);
-    }
-
-    /// A hello that registers a browser id again replaces its connection, whether or not the old
-    /// stream's end was seen, so the bindings in that browser wait for it to confirm them.
+    /// Defect C4 (e4f353ab, findings T-02 and X-01) and ADR-0203 Decision 1: a hello that registers
+    /// a browser id again replaces its connection, seen to end or not, so the bindings in that
+    /// browser wait for it to confirm them instead of acting on a reused tab id.
     #[test]
     fn a_registration_that_replaces_a_connection_marks_its_bindings_pending() {
         use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
@@ -2915,19 +2833,6 @@ mod tests {
             self.0.lock().unwrap().clone()
         }
 
-        /// The sessions the latest connections change named, if there has been one.
-        fn sessions(&self) -> Option<usize> {
-            self.all()
-                .iter()
-                .rev()
-                .find_map(|event| match &event.change {
-                    crate::workbench::WorkbenchChange::ConnectionsChanged { connections } => {
-                        Some(connections.sessions.len())
-                    }
-                    _ => None,
-                })
-        }
-
         fn notes(&self) -> Vec<Option<String>> {
             self.all()
                 .iter()
@@ -2941,93 +2846,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_browser_toolbar_pauses_through_the_workbench_and_says_so() {
-        use crate::browser::adapter::{BrowserEvent, RuntimeControlIntent};
-        use crate::browser::BrowserEventSink;
-        use crate::language::workbench::PAUSED_FROM_BROWSER;
-
-        let workspaces = crate::workspace::WorkspaceStore::default();
-        let workbench = test_workbench(&workspaces);
-        let heard = Arc::new(HeardChanges::default());
-        workbench.attach_events(heard.clone());
-        let sink = super::ServiceBrowserEvents::new(workbench.clone(), workspaces);
-        let request = |intent| BrowserEvent::RuntimeControlRequested { intent };
-
-        sink.on_event(FAKE_BROWSER, request(RuntimeControlIntent::ToggleHold));
-        assert_eq!(heard.notes().pop(), Some(Some(PAUSED_FROM_BROWSER.into())));
-        let statuses = heard.notes().len();
-        let runtime_changes = |heard: &HeardChanges| {
-            heard
-                .all()
-                .iter()
-                .filter(|event| {
-                    matches!(
-                        event.change,
-                        crate::workbench::WorkbenchChange::RuntimeChanged { .. }
-                    )
-                })
-                .count()
-        };
-        assert_eq!(runtime_changes(&heard), 1);
-
-        // The same pause again is a change of nothing a screen shows.
-        sink.on_event(FAKE_BROWSER, request(RuntimeControlIntent::Hold));
-        assert_eq!(runtime_changes(&heard), 2);
-        assert_eq!(heard.notes().len(), statuses);
-
-        sink.on_event(FAKE_BROWSER, request(RuntimeControlIntent::ToggleHold));
-        assert_eq!(heard.notes().pop(), Some(None));
-    }
-
-    #[test]
-    fn a_show_request_from_the_browser_reveals_the_workbench_once() {
-        use crate::browser::adapter::BrowserEvent;
-        use crate::browser::BrowserEventSink;
-
-        let workspaces = crate::workspace::WorkspaceStore::default();
-        let workbench = test_workbench(&workspaces);
-        let sink = super::ServiceBrowserEvents::new(workbench.clone(), workspaces);
-
-        // Nothing is attached yet, and that is not an error.
-        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
-        eventually(|| !sink.showing.load(Ordering::SeqCst));
-
-        let reveals = Arc::new(RevealCounter::default());
-        workbench.attach_presentation(reveals.clone());
-        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
-        eventually(|| reveals.0.load(Ordering::SeqCst) == 1);
-    }
-
-    #[test]
-    fn a_show_request_opens_the_window_at_setup_until_setup_is_complete() {
-        use crate::browser::adapter::BrowserEvent;
-        use crate::browser::BrowserEventSink;
-        use crate::install::setup_state::{self, SetupRecord};
-        use crate::workbench::setup::SetupProgress;
-
-        let home = TestHome::new("show-address");
-        let record = home.path().join("setup.json");
-        let workspaces = crate::workspace::WorkspaceStore::default();
-        let workbench = test_workbench(&workspaces);
-        workbench.attach_setup(SetupProgress::load(&record));
-        let revealed = Arc::new(RevealedAt::default());
-        workbench.attach_presentation(revealed.clone());
-        let sink = super::ServiceBrowserEvents::new(workbench.clone(), workspaces);
-
-        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
-        eventually(|| revealed.addresses().len() == 1);
-        assert_eq!(revealed.addresses(), [Some(PageAddress::Setup)]);
-
-        // A home whose setup is complete shows the window where it last was.
-        assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
-        workbench.attach_setup(SetupProgress::load(&record));
-        eventually(|| !sink.showing.load(Ordering::SeqCst));
-        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
-        eventually(|| revealed.addresses().len() == 2);
-        assert_eq!(revealed.addresses(), [Some(PageAddress::Setup), None]);
-    }
-
+    /// Defect e74e3a23: a browser's request to show Ghostlight is carried out off the browser's
+    /// reader, one at a time, so a reveal that waits never holds the link the browser's next
+    /// event and its receipts arrive on, and a request with nothing to show frees the next.
     #[test]
     fn a_show_request_that_waits_does_not_hold_the_browser_link() {
         use crate::browser::adapter::{BrowserEvent, RuntimeControlIntent};
@@ -3038,10 +2859,15 @@ mod tests {
         let workbench = test_workbench(&workspaces);
         let heard = Arc::new(HeardChanges::default());
         workbench.attach_events(heard.clone());
+        let sink = super::ServiceBrowserEvents::new(workbench.clone(), workspaces);
+
+        // Nothing is attached yet, and that is not an error: the request ends, so the next one is
+        // carried out.
+        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+        eventually(|| !sink.showing.load(Ordering::SeqCst));
+
         let held = Arc::new(HeldReveal::default());
         workbench.attach_presentation(held.clone());
-        let sink = super::ServiceBrowserEvents::new(workbench, workspaces);
-
         // The reveal waits, and the sink still returns and applies the next event.
         sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
         eventually(|| held.started.load(Ordering::SeqCst) == 1);
@@ -3055,16 +2881,18 @@ mod tests {
         assert_eq!(heard.notes().pop(), Some(Some(PAUSED_FROM_BROWSER.into())));
 
         // The press that arrived while one was waiting was absorbed by it.
-        held.release.store(true, Ordering::SeqCst);
+        held.release();
         eventually(|| !sink.showing.load(Ordering::SeqCst));
         assert_eq!(held.started.load(Ordering::SeqCst), 1);
     }
 
+    /// Defect S-D3 (b0290246) and ACCEPTANCE C10: a service that becomes ready wakes every edge
+    /// that registered to wait for it, so a browser left open after a Quit comes back at once.
     #[test]
     fn a_published_service_wakes_the_edges_that_wait_for_it() {
         let home = TestHome::new("wakes-waiting-edges");
         let waiting = ghostlight_relay::wake::Waiting::register(home.path()).unwrap();
-        let (woken, wakes) = std::sync::mpsc::channel();
+        let (woken, wakes) = mpsc::channel();
         thread::spawn(move || {
             if waiting.next().is_ok() {
                 let _ = woken.send(());
@@ -3077,30 +2905,6 @@ mod tests {
             .expect("the waiting edge was woken");
     }
 
-    #[test]
-    fn opening_and_closing_a_session_tells_every_screen() {
-        let home = TestHome::new("connections-live");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let heard = Arc::new(HeardChanges::default());
-        host.workbench.attach_events(heard.clone());
-
-        let mut socket = open_mcp(None);
-        initialize(&mut socket);
-        let deadline = Instant::now() + PATIENCE;
-        while heard.sessions() != Some(1) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(heard.sessions(), Some(1), "the session opened unannounced");
-
-        drop(socket);
-        let deadline = Instant::now() + PATIENCE;
-        while heard.sessions() != Some(0) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(heard.sessions(), Some(0), "the session closed unannounced");
-    }
-
     /// The instance every test service reports.
     const TEST_INSTANCE: &str = "instance_test";
 
@@ -3110,11 +2914,10 @@ mod tests {
     /// A relay listener over a fake browser, bound at the test home's endpoint.
     struct Served {
         intake: Arc<super::Intake>,
-        browser: Arc<FakeBrowser>,
         relay: Arc<crate::browser::RelayBrowserPort>,
         listener: Arc<Listener>,
         thread: Option<thread::JoinHandle<()>>,
-        quit_requested: std::sync::mpsc::Receiver<()>,
+        quit_requested: mpsc::Receiver<()>,
     }
 
     impl Drop for Served {
@@ -3124,20 +2927,6 @@ mod tests {
             if let Some(thread) = self.thread.take() {
                 let _ = thread.join();
             }
-        }
-    }
-
-    impl Served {
-        /// A connection to the service that never touches the endpoint: the far end is served on
-        /// its own thread, the way the listener serves an accepted one.
-        fn over_a_pair(&self) -> Connection {
-            let (client, server) = pair().unwrap();
-            let intake = Arc::clone(&self.intake);
-            thread::spawn(move || {
-                let judgement = listener::judge(&server, intake.quit.drain.is_quitting());
-                super::serve_connection(server, judgement, &intake);
-            });
-            client
         }
     }
 
@@ -3208,7 +2997,6 @@ mod tests {
         use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
         use crate::workspace::WorkspaceStore;
 
-        let browser = Arc::new(FakeBrowser::default());
         let relay = Arc::new(crate::browser::RelayBrowserPort::new(
             "service_test".into(),
             test_assets(),
@@ -3216,7 +3004,7 @@ mod tests {
         let port: Arc<dyn crate::browser::BrowserPort> = if relayed {
             relay.clone()
         } else {
-            browser.clone()
+            Arc::new(FakeBrowser::default())
         };
         let workspaces = WorkspaceStore::default();
         let governance = GovernanceFacade::new(policy);
@@ -3252,7 +3040,7 @@ mod tests {
             workspaces.clone(),
             port.clone(),
         );
-        let (signal, quit_requested) = std::sync::mpsc::channel();
+        let (signal, quit_requested) = mpsc::channel();
         *super::lock(&quit.signal) = Some(Arc::new(move || {
             let _ = signal.send(());
         }));
@@ -3276,7 +3064,7 @@ mod tests {
             workbench_server: std::sync::OnceLock::new(),
             presence: Arc::new(super::Presence::new(Arc::new(Fake::default()).world())),
             streams: super::Streams::new(Arc::new(super::SystemClock), super::idle::IDLE_EXIT),
-            layout: crate::install::layout::Layout::new(home.path()),
+            layout: Layout::new(home.path()),
             sources,
             toolsets,
         });
@@ -3284,7 +3072,6 @@ mod tests {
         let thread = super::spawn_listener(Arc::clone(&listener), intake.clone());
         Served {
             intake,
-            browser,
             relay,
             listener,
             thread: Some(thread),
@@ -3349,7 +3136,7 @@ mod tests {
     }
 
     fn initialize(socket: &mut Connection) -> (Value, Vec<String>) {
-        initialize_as(socket, "relay test")
+        initialize_as(socket, CLIENT_NAME)
     }
 
     /// Initialize a session whose client claims to be `claim`.
@@ -3361,7 +3148,7 @@ mod tests {
                 "id": 1,
                 "method": "initialize",
                 "params": {
-                    "protocolVersion": "2025-06-18",
+                    "protocolVersion": REVISION,
                     "capabilities": {},
                     "clientInfo": {"name": claim, "version": "1"}
                 }
@@ -3384,126 +3171,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn an_mcp_session_initializes_lists_tools_and_calls_one() {
-        let home = TestHome::new("mcp-session");
-        let served = serve_fake(&home);
-        let mut socket = open_mcp(None);
-
-        let (initialized, tokens) = initialize(&mut socket);
-        assert_eq!(initialized["result"]["protocolVersion"], "2025-06-18");
-        assert_eq!(initialized["result"]["serverInfo"]["name"], "ghostlight");
-
-        send_line(
-            &mut socket,
-            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-        );
-        let (listed, later) = response(&mut socket, 2);
-        let tools = listed["result"]["tools"].as_array().unwrap();
-        assert!(tools.iter().any(|tool| tool["name"] == "browser_tabs"));
-        assert!(tools.iter().all(|tool| tool.get("outputSchema").is_none()));
-        let resumed: Vec<String> = tokens.into_iter().chain(later).collect();
-        let state =
-            ResumeState::decode(resumed.first().expect("a resume token after initialize")).unwrap();
-        assert_eq!(state.revision, "2025-06-18");
-        assert_eq!(state.claim.as_deref(), Some("relay test"));
-
-        send_line(
-            &mut socket,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
-            }),
-        );
-        let (called, _) = response(&mut socket, 3);
-        let result = &called["result"];
-        assert!(
-            result["structuredContent"]["status"].is_string(),
-            "{called}"
-        );
-        assert_eq!(result["content"][0]["type"], "text");
-        assert_eq!(served.intake.workspaces.summaries().len(), 1);
-
-        drop(socket);
-        eventually(|| served.intake.workspaces.summaries().is_empty());
-    }
-
-    #[test]
-    fn the_result_a_client_receives_names_the_invocation_its_receipt_names() {
-        let home = TestHome::new("mcp-invocation");
-        let _served = serve_fake(&home);
-        let mut socket = open_mcp(None);
-        initialize(&mut socket);
-
-        let mut invocations = Vec::new();
-        for id in [2, 3] {
-            send_line(
-                &mut socket,
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "method": "tools/call",
-                    "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
-                }),
-            );
-            let (called, _) = response(&mut socket, id);
-            let invocation = called["result"]["structuredContent"]["invocation"].clone();
-            assert!(invocation.is_string(), "{called}");
-            invocations.push(invocation);
-        }
-        assert_ne!(invocations[0], invocations[1]);
-
-        let audit = home.path().join("audit.jsonl");
-        let recorded = || -> Vec<Value> {
-            std::fs::read_to_string(&audit)
-                .unwrap_or_default()
-                .lines()
-                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                .map(|record| record["invocation"].clone())
-                .collect()
-        };
-        eventually(|| recorded().len() == invocations.len());
-        assert_eq!(recorded(), invocations);
-    }
-
-    /// Join an `mcp` stream to a declared session whose workspace the test holds leased, so its
-    /// calls wait in the session queue. The lease is the second value.
-    fn open_held_session(
-        served: &Served,
-        key: &str,
-    ) -> (Connection, crate::workspace::WorkspaceLease) {
-        let marker = SessionMarker::Declared { key: key.into() };
-        let workspace = served.intake.workspaces.connect(
-            Arc::new(ConnectionEvidence::claimed("holder", IntakeChannel::Cli)),
-            Some(marker.clone()),
-        );
-        let lease = served.intake.workspaces.acquire(&workspace).unwrap();
-        let mut opening = mcp_opening(None);
-        opening.session = Some(serde_json::to_value(marker).unwrap());
-        let (mut socket, reply) = dial(&opening);
-        assert!(reply.accepted, "{reply:?}");
-        initialize(&mut socket);
-        (socket, lease)
-    }
-
-    /// Send a `browser_tabs` list under `id` that may wait as long as a call can.
-    fn send_list(socket: &mut Connection, id: u64) {
-        send_line(
-            socket,
-            json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "tools/call",
-                "params": {
-                    "name": "browser_tabs",
-                    "arguments": {"action": "list", "timeout_ms": 30_000}
-                }
-            }),
-        );
-    }
-
     /// The audit lines of the test home, oldest first.
     fn audit_lines(home: &TestHome) -> Vec<Value> {
         std::fs::read_to_string(home.path().join("audit.jsonl"))
@@ -3513,203 +3180,8 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn a_full_queue_refuses_through_the_completion_path() {
-        let home = TestHome::new("mcp-full-queue");
-        let served = serve_fake(&home);
-        let (mut socket, lease) = open_held_session(&served, "full-queue");
-        // One call waits for the lease and the rest fill the ordinary lane behind it.
-        let queued = 2..2 + super::admission::SESSION_WORK as u64;
-        for id in queued.clone() {
-            send_list(&mut socket, id);
-        }
-        let refused = queued.end;
-        send_list(&mut socket, refused);
-        let (called, _) = response(&mut socket, refused);
-        let result = &called["result"]["structuredContent"];
-        assert_eq!(result["status"], "failed", "{called}");
-        assert_eq!(result["facts"]["reason"], "capacity", "{called}");
-        let invocation = result["invocation"].clone();
-        eventually(|| {
-            audit_lines(&home)
-                .iter()
-                .any(|record| record["invocation"] == invocation)
-        });
-        let records: Vec<Value> = audit_lines(&home)
-            .into_iter()
-            .filter(|record| record["invocation"] == invocation)
-            .collect();
-        assert_eq!(records.len(), 1, "{records:?}");
-        assert_eq!(records[0]["status"], "failed");
-        drop(lease);
-        for id in queued {
-            let (called, _) = response(&mut socket, id);
-            assert_ne!(
-                called["result"]["structuredContent"]["facts"]["reason"],
-                "capacity"
-            );
-        }
-    }
-
-    /// A declared session whose workspace the test holds, with the calls `ids` waiting for its
-    /// lease.
-    fn work_waiting(
-        served: &Served,
-        key: &str,
-        ids: std::ops::Range<u64>,
-    ) -> (Connection, crate::workspace::WorkspaceLease) {
-        let (mut socket, lease) = open_held_session(served, key);
-        for id in ids {
-            send_list(&mut socket, id);
-        }
-        eventually(|| {
-            served
-                .intake
-                .workbench
-                .snapshot()
-                .operations
-                .iter()
-                .any(|operation| operation.phase == crate::workbench::OperationPhase::Waiting)
-        });
-        (socket, lease)
-    }
-
-    /// Every audit line's summary, once `count` lines are written.
-    fn summaries_of(home: &TestHome, count: usize) -> Vec<Value> {
-        eventually(|| audit_lines(home).len() == count);
-        audit_lines(home)
-            .iter()
-            .map(|record| {
-                assert_eq!(record["status"], "cancelled", "{record}");
-                record["summary"].clone()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn a_client_cancel_is_recorded_as_cancelled_by_the_agent() {
-        let home = TestHome::new("mcp-client-cancel");
-        let served = serve_fake(&home);
-        let (mut socket, _lease) = work_waiting(&served, "client-cancel", 2..3);
-        send_line(
-            &mut socket,
-            json!({
-                "jsonrpc": "2.0",
-                "method": "notifications/cancelled",
-                "params": {"requestId": 2}
-            }),
-        );
-        assert_eq!(
-            summaries_of(&home, 1),
-            ["The agent cancelled the browser job before it started."]
-        );
-    }
-
-    #[test]
-    fn work_waiting_when_its_session_ends_says_the_session_ended() {
-        let home = TestHome::new("mcp-session-ends");
-        let served = serve_fake(&home);
-        let (socket, _lease) = work_waiting(&served, "session-ends", 2..4);
-        drop(socket);
-        assert_eq!(
-            summaries_of(&home, 2),
-            ["The agent's session ended before the browser job started."; 2]
-        );
-    }
-
-    #[test]
-    fn work_waiting_at_quit_says_ghostlight_quit() {
-        let home = TestHome::new("mcp-quit-waiting");
-        let served = serve_fake(&home);
-        let (socket, _lease) = work_waiting(&served, "quit-waiting", 2..4);
-        served.intake.quit.begin(QuitReason::Quit, Duration::ZERO);
-        served
-            .quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the quit finishes its drain");
-        drop(socket);
-        assert_eq!(
-            summaries_of(&home, 2),
-            ["Ghostlight quit before the browser job started."; 2]
-        );
-    }
-
-    #[test]
-    fn a_disconnect_cancels_queued_work_and_records_it_once() {
-        let home = TestHome::new("mcp-disconnect-queue");
-        let served = serve_fake(&home);
-        let (socket, lease) = work_waiting(&served, "disconnect-queue", 2..5);
-        drop(socket);
-        eventually(|| audit_lines(&home).len() == 3);
-        drop(lease);
-        eventually(|| served.intake.workbench.snapshot().operations.is_empty());
-        let records = audit_lines(&home);
-        assert_eq!(records.len(), 3, "{records:?}");
-        let invocations: std::collections::BTreeSet<String> = records
-            .iter()
-            .map(|record| record["invocation"].as_str().unwrap().to_owned())
-            .collect();
-        assert_eq!(invocations.len(), 3, "each request is recorded once");
-        for record in &records {
-            assert_eq!(record["status"], "cancelled", "{record}");
-        }
-    }
-
-    #[test]
-    fn a_real_relay_connection_carries_the_app_that_started_its_peer_and_a_pair_carries_none() {
-        let home = TestHome::new("mcp-source");
-        let served = serve_fake(&home);
-        let observed = Observation::of_peer(Some(std::process::id()));
-        assert!(
-            observed.is_some(),
-            "the test runner was started by a program that is not a wrapper"
-        );
-        let expected = ConnectionEvidence::new(
-            Attribution {
-                source: observed.map(|observation| observation.source),
-                ..Attribution::accepted(IntakeChannel::Mcp)
-            },
-            Some("relay test"),
-        )
-        .details()
-        .explanation;
-
-        let mut socket = open_mcp(None);
-        initialize(&mut socket);
-        eventually(|| served.intake.workspaces.summaries().len() == 1);
-        let summary = &served.intake.workspaces.summaries()[0];
-        assert_eq!(summary.connections[0].explanation, expected);
-
-        let mut paired = served.over_a_pair();
-        paired.set_read_timeout(Some(PATIENCE)).unwrap();
-        let reply = protocol::open(&paired, &mcp_opening(None), Instant::now() + PATIENCE).unwrap();
-        assert!(reply.accepted, "{reply:?}");
-        initialize(&mut paired);
-        eventually(|| served.intake.workspaces.summaries().len() == 2);
-        let explanations: Vec<String> = served
-            .intake
-            .workspaces
-            .summaries()
-            .iter()
-            .map(|summary| summary.connections[0].explanation.clone())
-            .collect();
-        let unseen = ConnectionEvidence::new(
-            Attribution::accepted(IntakeChannel::Mcp),
-            Some("relay test"),
-        )
-        .details()
-        .explanation;
-        assert!(
-            explanations.contains(&unseen),
-            "a stream with no peer process keeps the caveat: {explanations:?}"
-        );
-    }
-
     /// The executable a held source read names.
     const HELD_SOURCE: &str = "held.exe";
-
-    /// How long a test waits between an accept and what follows it.
-    const PAUSE: Duration = Duration::from_millis(300);
 
     /// A source read that waits until the test releases it, and counts the reads that began.
     #[derive(Default)]
@@ -3773,8 +3245,8 @@ mod tests {
     /// A resume token for a session that owned no tabs.
     fn tabless_token() -> String {
         ResumeState {
-            revision: "2025-06-18".into(),
-            claim: Some("returning client".into()),
+            revision: REVISION.into(),
+            claim: Some(RETURNING_CLIENT.into()),
             owned_tabs: Vec::new(),
             lives: BTreeMap::new(),
             standby: false,
@@ -3805,63 +3277,42 @@ mod tests {
         accepted().unwrap()
     }
 
+    /// Defect 967d2147 (ADR-0202 Decision 3 as ADR-0203 amends it): the accept, not the source
+    /// read, is when a session begins, so the opening is answered before the read, which happens
+    /// once, and a fresh or resumed session is dated at its accept.
     #[test]
-    fn an_opening_is_answered_before_the_source_is_read() {
-        let home = TestHome::new("opening-before-source");
-        let held = Arc::new(HeldRead::default());
-        let _release = Release(Arc::clone(&held));
-        let served = serve_reading(&home, held.reader());
+    fn an_opening_is_answered_before_the_source_is_read_and_the_session_is_dated_at_its_accept() {
+        for resumed in [false, true] {
+            let home = TestHome::new("accept");
+            let held = Arc::new(HeldRead::default());
+            let _release = Release(Arc::clone(&held));
+            let served = serve_reading(&home, held.reader());
+            let before = now_ms();
 
-        let mut socket = open_mcp(Some(tabless_token()));
-        eventually(|| held.began() == 1);
-        assert!(
-            served.intake.workspaces.summaries().is_empty(),
-            "the session opens only once its source is read"
-        );
+            // The opening is answered while the read is still held.
+            let mut socket = open_mcp(resumed.then(tabless_token));
+            eventually(|| held.began() == 1);
+            assert!(
+                served.intake.workspaces.summaries().is_empty(),
+                "the session opens only once its source is read"
+            );
 
-        held.release();
-        send_line(
-            &mut socket,
-            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-        );
-        let (listed, _) = response(&mut socket, 2);
-        assert!(listed["result"]["tools"].is_array(), "{listed}");
-        assert_eq!(held.began(), 1, "the source is read once per connection");
-    }
-
-    #[test]
-    fn a_fresh_session_is_dated_when_it_was_accepted() {
-        let home = TestHome::new("fresh-dated");
-        let _served = serve_fake(&home);
-        let before = now_ms();
-        let mut socket = open_mcp(None);
-        thread::sleep(PAUSE);
-        let paused = now_ms();
-        initialize(&mut socket);
-        let accepted = recorded_accept_time(&home, &mut socket);
-        assert!(
-            (before..paused).contains(&accepted),
-            "accepted at {accepted}, dialed at {before}, initialized at {paused}"
-        );
-    }
-
-    #[test]
-    fn a_resumed_session_is_dated_when_it_was_accepted() {
-        let home = TestHome::new("resumed-dated");
-        let held = Arc::new(HeldRead::default());
-        let _release = Release(Arc::clone(&held));
-        let _served = serve_reading(&home, held.reader());
-        let before = now_ms();
-        let mut socket = open_mcp(Some(tabless_token()));
-        eventually(|| held.began() == 1);
-        thread::sleep(PAUSE);
-        let released = now_ms();
-        held.release();
-        let accepted = recorded_accept_time(&home, &mut socket);
-        assert!(
-            (before..released).contains(&accepted),
-            "accepted at {accepted}, dialed at {before}, read at {released}"
-        );
+            // The accept came before the read began; the wall clock passes that moment before the
+            // read ends, so a session dated by its read would read later than `released`.
+            let read_began = now_ms();
+            eventually(|| now_ms() > read_began);
+            let released = now_ms();
+            held.release();
+            if !resumed {
+                initialize(&mut socket);
+            }
+            let accepted = recorded_accept_time(&home, &mut socket);
+            assert!(
+                (before..released).contains(&accepted),
+                "resumed {resumed}: accepted at {accepted}, dialed at {before}, read released at {released}"
+            );
+            assert_eq!(held.began(), 1, "the source is read once per connection");
+        }
     }
 
     /// The catalog id and client name of the agent the toolset tests connect as.
@@ -3906,28 +3357,43 @@ mod tests {
         listed["result"]["tools"].as_array().unwrap().clone()
     }
 
+    /// Defect L2-04 (4f52e834) and ADR-0203's amendment of 2026-10-19, items 1 to 3: connections
+    /// from one running app of the agent their clients claim share one set of tools, which passes
+    /// to the next when the holder ends; connections that are not one agent's each get it.
     #[test]
-    fn two_connections_from_one_agent_process_get_one_toolset() {
-        let home = TestHome::new("toolset-one-agent");
-        let _served = serve_reading(
-            &home,
-            scripted(vec![running(CLAUDE_CODE, 40), running(CLAUDE_CODE, 40)]),
-        );
+    fn one_agents_own_app_gets_one_set_of_tools_and_the_next_connection_takes_it_over() {
+        {
+            let home = TestHome::new("toolset-one-agent");
+            let _served = serve_reading(
+                &home,
+                scripted(vec![running(CLAUDE_CODE, 40), running(CLAUDE_CODE, 40)]),
+            );
+            let (entry, instructions, offered) = connect_as_claude_code();
+            assert!(!offered.is_empty(), "the first connection offers the tools");
+            assert_eq!(instructions, crate::language::SERVER_INSTRUCTIONS);
 
-        let (_entry, instructions, tools) = connect_as_claude_code();
-        assert!(!tools.is_empty(), "the first connection offers the tools");
-        assert_eq!(instructions, crate::language::SERVER_INSTRUCTIONS);
+            let (mut plugin, instructions, none) = connect_as_claude_code();
+            assert!(
+                none.is_empty(),
+                "the same agent is offered no second set: {none:?}"
+            );
+            assert_eq!(instructions, crate::language::STANDBY_INSTRUCTIONS);
 
-        let (_plugin, instructions, tools) = connect_as_claude_code();
-        assert!(
-            tools.is_empty(),
-            "the same agent is offered no second set: {tools:?}"
-        );
-        assert_eq!(instructions, crate::language::STANDBY_INSTRUCTIONS);
-    }
+            // When the holder ends, the one that stood by offers the tools and says so.
+            drop(entry);
+            let tokens = until_list_changed(&mut plugin);
+            let last = tokens.last().expect("the promotion writes a token");
+            assert!(
+                !ResumeState::decode(last).unwrap().standby,
+                "a restart after the promotion resumes it offering the tools"
+            );
+            assert_eq!(
+                list_tools(&mut plugin, 3),
+                offered,
+                "the agent keeps one working set of tools"
+            );
+        }
 
-    #[test]
-    fn connections_that_are_not_one_agents_each_get_the_toolset() {
         let editor = Some(Observation {
             source: Source {
                 agent: Some("vscode".into()),
@@ -3958,31 +3424,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_duplicate_is_promoted_with_list_changed_when_the_holder_ends() {
-        let home = TestHome::new("toolset-promoted");
-        let _served = serve_reading(
-            &home,
-            scripted(vec![running(CLAUDE_CODE, 40), running(CLAUDE_CODE, 40)]),
-        );
-        let (entry, _, offered) = connect_as_claude_code();
-        let (mut plugin, _, none) = connect_as_claude_code();
-        assert!(none.is_empty());
-
-        drop(entry);
-        let tokens = until_list_changed(&mut plugin);
-        let last = tokens.last().expect("the promotion writes a token");
-        assert!(
-            !ResumeState::decode(last).unwrap().standby,
-            "a restart after the promotion resumes it offering the tools"
-        );
-        assert_eq!(
-            list_tools(&mut plugin, 3),
-            offered,
-            "the agent keeps one working set of tools"
-        );
-    }
-
     /// Read frames on `socket` until it is told its tool list changed, and return the resume
     /// tokens handed on the way.
     fn until_list_changed(socket: &mut Connection) -> Vec<String> {
@@ -4004,7 +3445,7 @@ mod tests {
     /// A resume token for a Claude Code session that owned no tabs and stood by when `standby`.
     fn claude_code_token(standby: bool) -> String {
         ResumeState {
-            revision: "2025-06-18".into(),
+            revision: REVISION.into(),
             claim: Some(CLAUDE_CODE.into()),
             owned_tabs: Vec::new(),
             lives: BTreeMap::new(),
@@ -4013,8 +3454,22 @@ mod tests {
         .encode()
     }
 
+    /// Defects d28bb1dc and L2-12 (0285ce2d), ADR-0203's amendment of 2026-10-19 item 5: after a
+    /// restart a resumed session keeps the toolset role its client saw, so the one that stood by
+    /// is never offered a second set and the one that offered the tools is told to list again.
     #[test]
-    fn resumed_connections_keep_the_role_their_clients_saw_in_either_order() {
+    fn a_resumed_session_keeps_the_toolset_role_its_client_saw_and_a_holder_lists_again() {
+        // A resumed holder's client listed its tools with the earlier service and does not list
+        // them again on its own, so the new service tells it to.
+        {
+            let home = TestHome::new("resumed-relist");
+            let _served = serve_fake(&home);
+            let mut resumed = open_mcp(Some(claude_code_token(false)));
+            until_list_changed(&mut resumed);
+            assert!(!list_tools(&mut resumed, 2).is_empty());
+        }
+
+        // After a replace, the edge that stood by reconnects first and still stands by.
         let home = TestHome::new("toolset-resumed");
         let policy = home.path().join("policy.json");
         write_policy(
@@ -4027,8 +3482,6 @@ mod tests {
             scripted(vec![running(CLAUDE_CODE, 40), running(CLAUDE_CODE, 40)]),
             policy.clone(),
         );
-
-        // After a replace, the edge that stood by reconnects first.
         let mut plugin = open_mcp(Some(claude_code_token(true)));
         assert!(next_resume(&mut plugin).standby);
         let mut entry = open_mcp(Some(claude_code_token(false)));
@@ -4037,7 +3490,7 @@ mod tests {
         assert!(!offered.is_empty(), "the former holder offers the tools");
         assert!(list_tools(&mut plugin, 2).is_empty());
 
-        // A policy change tells the holder, and a re-list still offers no second set.
+        // A policy change reaches the holder, and a re-list still offers no second set.
         write_policy(&policy, "narrower", json!(["read"]));
         served.intake.governance.refresh_tick();
         until_list_changed(&mut entry);
@@ -4047,192 +3500,6 @@ mod tests {
             list_tools(&mut plugin, 3).is_empty(),
             "the client that stood by is never offered a second set"
         );
-    }
-
-    /// After a service restart, the client of a resumed session already holds the catalog an
-    /// earlier service gave and does not list it again on its own, so the new service tells it to:
-    /// a tool a newer service or a changed policy adds reaches a running agent.
-    #[test]
-    fn a_resumed_session_is_told_to_list_its_tools_again() {
-        let home = TestHome::new("resumed-relist");
-        let _served = serve_fake(&home);
-        let mut resumed = open_mcp(Some(claude_code_token(false)));
-        until_list_changed(&mut resumed);
-        assert!(!list_tools(&mut resumed, 2).is_empty());
-    }
-
-    #[test]
-    fn harness_attached_names_the_source_file_and_never_the_claim() {
-        let attribution = Attribution {
-            source: Some(Source {
-                agent: Some("claude-desktop".into()),
-                image: "claude.exe".into(),
-            }),
-            ..Attribution::accepted(IntakeChannel::Mcp)
-        };
-        let evidence = ConnectionEvidence::new(attribution.clone(), Some("PRIVATE_CLAIM"));
-        let detail = super::attached(evidence.attribution());
-        let connection = attribution.connection_id.as_deref().unwrap();
-        assert_eq!(detail, format!("{connection} via mcp from claude.exe"));
-        assert!(!detail.contains("PRIVATE_CLAIM"));
-
-        let unseen = Attribution::accepted(IntakeChannel::Cli);
-        assert_eq!(
-            super::attached(&unseen),
-            format!("{} via cli", unseen.connection_id.as_deref().unwrap())
-        );
-    }
-
-    #[test]
-    fn an_mcp_opening_over_a_pair_is_accepted_with_the_templates_and_served() {
-        let home = TestHome::new("mcp-pair");
-        let served = serve_fake(&home);
-        let mut client = served.over_a_pair();
-        client.set_read_timeout(Some(PATIENCE)).unwrap();
-        let reply = protocol::open(&client, &mcp_opening(None), Instant::now() + PATIENCE).unwrap();
-        assert!(reply.accepted, "{reply:?}");
-        assert_eq!(reply.service.as_deref(), Some(env!("CARGO_PKG_VERSION")));
-        assert_eq!(reply.instance.as_deref(), Some(TEST_INSTANCE));
-        assert_eq!(reply.templates, Some(failure_templates()));
-
-        let (initialized, _) = initialize(&mut client);
-        assert_eq!(initialized["result"]["serverInfo"]["name"], "ghostlight");
-    }
-
-    /// The intake a session is attributed to when its `mcp` opening names `channel`.
-    fn intake_of_an_opening_naming(home: &str, channel: Option<&str>) -> IntakeChannel {
-        let home = TestHome::new(home);
-        let served = serve_fake(&home);
-        let mut opening = mcp_opening(None);
-        opening.channel = channel.map(str::to_owned);
-        let (mut socket, reply) = dial(&opening);
-        assert!(reply.accepted, "{reply:?}");
-        initialize(&mut socket);
-        eventually(|| served.intake.workspaces.summaries().len() == 1);
-        served.intake.workspaces.summaries()[0].connections[0].channel
-    }
-
-    #[test]
-    fn an_opening_with_an_unknown_channel_is_an_mcp_client() {
-        assert_eq!(
-            intake_of_an_opening_naming("unknown-channel", Some("npm")),
-            IntakeChannel::Mcp
-        );
-    }
-
-    #[test]
-    fn an_opening_with_no_channel_is_an_mcp_client() {
-        assert_eq!(
-            intake_of_an_opening_naming("no-channel", None),
-            IntakeChannel::Mcp
-        );
-    }
-
-    #[test]
-    fn an_opening_on_the_command_line_channel_is_the_command_line() {
-        assert_eq!(
-            intake_of_an_opening_naming("cli-channel", Some(protocol::CLI_CHANNEL)),
-            IntakeChannel::Cli
-        );
-    }
-
-    #[test]
-    fn only_an_mcp_stream_is_handed_the_failure_templates() {
-        let home = TestHome::new("templates-only-for-mcp");
-        let served = serve_fake(&home);
-        for role in [Role::Browser, Role::Control] {
-            let client = served.over_a_pair();
-            let mut opening = opening(role);
-            opening.control = Some(Control::Status);
-            let reply = protocol::open(&client, &opening, Instant::now() + PATIENCE).unwrap();
-            assert!(reply.accepted, "{role:?}: {reply:?}");
-            assert_eq!(reply.templates, None, "{role:?}");
-            assert_eq!(reply.instance.as_deref(), Some(TEST_INSTANCE));
-        }
-    }
-
-    #[test]
-    fn control_status_answers_the_version_the_instance_and_the_process() {
-        let home = TestHome::new("control-status");
-        let served = serve_fake(&home);
-        let status = cli_client::status().unwrap();
-        assert_eq!(
-            status,
-            control::Status {
-                service: env!("CARGO_PKG_VERSION").into(),
-                instance: TEST_INSTANCE.into(),
-                pid: std::process::id(),
-                started_by: StartReason::Agent,
-                connections: Some(crate::language::workbench::ConnectionCounts::default()),
-                workbench: None,
-                window: None,
-            }
-        );
-        drop(served);
-    }
-
-    #[test]
-    fn control_status_after_publishing_names_the_workbench_and_never_its_bearer() {
-        let home = TestHome::new("control-status-workbench");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let address = host.workbench_address().expect("the workbench is served");
-        let bearer = host
-            .intake
-            .workbench_server
-            .get()
-            .unwrap()
-            .bearer()
-            .to_owned();
-
-        let status = cli_client::status().unwrap();
-        assert_eq!(
-            status.workbench,
-            Some(control::WorkbenchStatus {
-                url: address.url().to_owned(),
-                usual_port: address.usual(),
-                watching: true,
-            })
-        );
-        assert_eq!(
-            status.connections,
-            Some(crate::language::workbench::ConnectionCounts::default())
-        );
-        let sent = serde_json::to_string(&status).unwrap();
-        assert!(!sent.contains(&bearer));
-        drop(host);
-    }
-
-    #[test]
-    fn the_desktop_and_command_roles_are_refused_as_unsupported_with_the_service_sentence() {
-        let home = TestHome::new("unsupported-roles");
-        let served = serve_fake(&home);
-        for role in [Role::Desktop, Role::Command] {
-            let client = served.over_a_pair();
-            let reply = protocol::open(&client, &opening(role), Instant::now() + PATIENCE).unwrap();
-            assert!(!reply.accepted, "{role:?}");
-            assert_eq!(reply.code, Some(RefusalCode::Unsupported), "{role:?}");
-            assert_eq!(
-                reply.say,
-                Some(OpeningRefusal::Unsupported.message()),
-                "{role:?}"
-            );
-        }
-        assert!(served.relay.connected_browsers().is_empty());
-        assert!(served.intake.workspaces.summaries().is_empty());
-    }
-
-    #[test]
-    fn an_opening_that_names_relay_3_is_refused_and_opens_nothing() {
-        let home = TestHome::new("relay-3");
-        let served = serve_fake(&home);
-        let client = served.over_a_pair();
-        let mut earlier = opening(Role::Browser);
-        earlier.relay = 3;
-        let reply = protocol::open(&client, &earlier, Instant::now() + PATIENCE).unwrap();
-        assert_eq!(reply.code, Some(RefusalCode::Unsupported));
-        assert!(served.relay.connected_browsers().is_empty());
-        assert!(served.intake.workspaces.summaries().is_empty());
     }
 
     /// The digest a resume token carries for a tab last known at `url`.
@@ -4283,94 +3550,6 @@ mod tests {
         called["result"]["structuredContent"].clone()
     }
 
-    #[test]
-    fn a_resume_token_restores_the_session_and_stales_a_missing_tab() {
-        use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalTab};
-        use crate::intake::mcp::OwnedTab;
-
-        let home = TestHome::new("resume");
-        let served = serve_fake(&home);
-        let kept = OwnedTab {
-            browser_id: FAKE_BROWSER.into(),
-            tab_id: 7,
-            handle: "tab_kept".into(),
-            url_digest: digest_of("https://example.com/"),
-        };
-        let gone = OwnedTab {
-            browser_id: FAKE_BROWSER.into(),
-            tab_id: 8,
-            handle: "tab_gone".into(),
-            url_digest: digest_of("https://example.com/gone"),
-        };
-        let token = ResumeState {
-            revision: "2025-06-18".into(),
-            claim: Some("returning client".into()),
-            owned_tabs: vec![kept.clone(), gone.clone()],
-            lives: BTreeMap::new(),
-            standby: false,
-        }
-        .encode();
-
-        // The session resumes at once and asks no browser: both tabs wait in the token.
-        let mut socket = open_mcp(Some(token));
-        let state = next_resume(&mut socket);
-        assert_eq!(state.revision, "2025-06-18");
-        assert_eq!(state.claim.as_deref(), Some("returning client"));
-        assert_eq!(
-            state.owned_tabs,
-            vec![gone, kept.clone()],
-            "sorted by handle"
-        );
-        assert!(served.browser.calls().is_empty());
-        let summaries = served.intake.workspaces.summaries();
-        assert_eq!(summaries.len(), 1);
-        assert_eq!(
-            summaries[0].opener.reported_application.as_deref(),
-            Some("returning client")
-        );
-
-        // A resumed session is initialized already: a tools call is served without initialize.
-        send_line(
-            &mut socket,
-            json!({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}),
-        );
-        let (listed, _) = response(&mut socket, 9);
-        assert!(listed["result"]["tools"].is_array(), "{listed}");
-
-        // The first call confirms each tab: the browser still has tab 7; tab 8 closed while the
-        // service was away.
-        let live = || {
-            Ok(BrowserOutcome::Tabs {
-                tabs: vec![PhysicalTab {
-                    tab_id: 7,
-                    url: "https://example.com/".into(),
-                    title: "Example".into(),
-                    active: true,
-                    readiness: BrowserReadiness::Complete,
-                }],
-            })
-        };
-        served.browser.push(live());
-        served.browser.push(live());
-        send_line(
-            &mut socket,
-            json!({"jsonrpc": "2.0", "id": 10, "method": "tools/call",
-                "params": {"name": "browser_tabs", "arguments": {"action": "list"}}}),
-        );
-        let (called, tokens) = response(&mut socket, 10);
-        let listed = &called["result"]["structuredContent"];
-        assert_eq!(listed["status"], "succeeded", "{listed}");
-        let tabs = listed["facts"]["tabs"].as_array().unwrap();
-        assert_eq!(tabs.len(), 1, "{listed}");
-        assert_eq!(tabs[0]["tab"], "tab_kept");
-        token_restoring(&mut socket, &tokens, &[kept]);
-        // One listing confirms the tabs and the list's own reads them; nothing reaches a tab.
-        assert_eq!(
-            served.browser.calls()[..2],
-            [BrowserCommand::ListTabs, BrowserCommand::ListTabs]
-        );
-    }
-
     /// The browser identity of an extension that returns after its session resumed.
     const RETURNING_BROWSER: &str = "browser_returning";
 
@@ -4404,8 +3583,8 @@ mod tests {
     /// was written, or named no life for `None`.
     fn token_in(tab: crate::intake::mcp::OwnedTab, life: Option<&str>) -> String {
         ResumeState {
-            revision: "2025-06-18".into(),
-            claim: Some("returning client".into()),
+            revision: REVISION.into(),
+            claim: Some(RETURNING_CLIENT.into()),
             lives: life
                 .map(|life| BTreeMap::from([(tab.browser_id.clone(), life.to_owned())]))
                 .unwrap_or_default(),
@@ -4504,166 +3683,244 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn a_call_before_the_tokens_browser_returns_keeps_its_tabs_in_the_token() {
-        let home = TestHome::new("resume-late");
-        let served = serve_relayed(&home);
-        let mut socket = open_mcp(Some(returning_token()));
-        // The session resumed without waiting for its browser, and its tab waits in the token.
-        assert_eq!(next_resume(&mut socket).owned_tabs, vec![returning_tab()]);
-        assert!(bound_tabs(&served).is_empty());
-
-        // A call that needs no tab completes while the browser is away, and forgets nothing.
-        let listed = call_tool(&mut socket, 2, "browser_tabs", json!({"action": "list"}));
-        assert_eq!(listed["status"], "succeeded", "{listed}");
-        assert_eq!(
-            pending_tabs(&served),
-            vec![("tab_kept".to_owned(), RETURNING_BROWSER.to_owned())]
-        );
-
-        // The browser returns, and the next call that names the tab confirms and reads it.
-        let _browser = attach_returning_browser(&served);
-        let read = call_tool(&mut socket, 3, "browser_read", json!({"tab": "tab_kept"}));
-        assert_eq!(read["status"], "succeeded", "{read}");
-        assert_eq!(
-            bound_tabs(&served),
-            vec![("tab_kept".to_owned(), RETURNING_TAB)]
-        );
-    }
-
-    #[test]
-    fn a_call_right_after_its_browser_returns_finds_its_resumed_tab() {
-        let home = TestHome::new("resume-call");
-        let served = serve_relayed(&home);
-        let mut socket = open_mcp(Some(returning_token()));
-        let McpFrame::Resume { .. } = frame::read_frame::<McpFrame>(&mut socket).unwrap().unwrap()
-        else {
-            panic!("a resumed session hands back a fresh token first");
-        };
-        assert!(bound_tabs(&served).is_empty());
-
-        let _browser = attach_returning_browser(&served);
-        // No wait for the session to notice the browser: the call itself confirms the tab.
-        let called = call_tool(&mut socket, 2, "browser_read", json!({"tab": "tab_kept"}));
-        assert_eq!(called["status"], "succeeded", "{called}");
-        assert_eq!(
-            bound_tabs(&served),
-            vec![("tab_kept".to_owned(), RETURNING_TAB)]
-        );
-    }
-
     /// The extension life the returning browser was in before the service was replaced.
     const RETURNING_LIFE: &str = "life_returning";
 
     /// The address the returning browser's single-page app routed its tab to meanwhile.
     const ROUTED_URL: &str = "https://example.com/inbox";
 
+    /// ACCEPTANCE B26 and C10, ADR-0203 Decision 1 (slice C4, 1d10bf74; and a10882c5): a resumed
+    /// tab waits, kept in the token, until its own browser confirms it by id and its life or its
+    /// page; one its browser cannot confirm reads as no longer open, and the token follows.
     #[test]
-    fn a_service_replace_in_the_same_life_keeps_a_routed_tab_and_takes_its_live_url() {
-        let home = TestHome::new("resume-same-life");
-        let served = serve_relayed(&home);
-        let mut socket = open_mcp(Some(token_in(returning_tab(), Some(RETURNING_LIFE))));
-        let resumed = next_resume(&mut socket);
-        assert_eq!(
-            resumed.lives.get(RETURNING_BROWSER).map(String::as_str),
-            Some(RETURNING_LIFE),
-            "a pending tab keeps the life its token named"
-        );
+    fn a_resumed_tab_is_confirmed_by_its_own_browser_before_its_first_use() {
+        use crate::intake::mcp::OwnedTab;
 
-        let _browser = attach_returning_browser_in(&served, Some(RETURNING_LIFE), ROUTED_URL);
-        send_line(
-            &mut socket,
-            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": {"name": "browser_read", "arguments": {"tab": "tab_kept"}}}),
-        );
-        let (called, tokens) = response(&mut socket, 2);
-        let read = &called["result"]["structuredContent"];
-        assert_eq!(read["status"], "succeeded", "{read}");
-        assert_eq!(
-            bound_tabs(&served),
-            vec![("tab_kept".to_owned(), RETURNING_TAB)]
-        );
-        // The token the confirmation changed, published during the call or right after it.
-        let token = tokens.last().map_or_else(
-            || next_resume(&mut socket),
-            |token| ResumeState::decode(token).unwrap(),
-        );
-        assert_eq!(token.owned_tabs.len(), 1);
-        assert_eq!(
-            token.owned_tabs[0].url_digest,
-            digest_of(ROUTED_URL),
-            "the confirmed tab is remembered at its live address"
-        );
-        assert_eq!(
-            token.lives.get(RETURNING_BROWSER).map(String::as_str),
-            Some(RETURNING_LIFE),
-            "a confirmed tab is in the life its browser reports"
-        );
+        let succeeded = json!(Status::Succeeded);
+
+        // The session resumes at once with its tab pending, asking no browser; a call that needs
+        // no tab completes while the browser is away and forgets nothing; and the first call
+        // after the browser returns confirms the tab and reads it, with no wait for the session to
+        // notice the browser.
+        {
+            let home = TestHome::new("resume-late");
+            let served = serve_relayed(&home);
+            let mut socket = open_mcp(Some(returning_token()));
+            let resumed = next_resume(&mut socket);
+            assert_eq!(resumed.revision, REVISION);
+            assert_eq!(resumed.claim.as_deref(), Some(RETURNING_CLIENT));
+            assert_eq!(resumed.owned_tabs, vec![returning_tab()]);
+            assert!(bound_tabs(&served).is_empty());
+            assert_eq!(
+                served.intake.workspaces.summaries()[0]
+                    .opener
+                    .reported_application
+                    .as_deref(),
+                Some(RETURNING_CLIENT)
+            );
+
+            let listed = call_tool(&mut socket, 2, "browser_tabs", json!({"action": "list"}));
+            assert_eq!(listed["status"], succeeded, "{listed}");
+            assert_eq!(
+                pending_tabs(&served),
+                vec![("tab_kept".to_owned(), RETURNING_BROWSER.to_owned())]
+            );
+
+            let _browser = attach_returning_browser(&served);
+            let read = call_tool(&mut socket, 3, "browser_read", json!({"tab": "tab_kept"}));
+            assert_eq!(read["status"], succeeded, "{read}");
+            assert_eq!(
+                bound_tabs(&served),
+                vec![("tab_kept".to_owned(), RETURNING_TAB)]
+            );
+        }
+
+        // A tab the browser no longer lists is forgotten and leaves the token, and confirming
+        // reads only the browser's tab list: nothing reaches a tab.
+        {
+            let home = TestHome::new("resume-missing");
+            let served = serve_relayed(&home);
+            let gone = OwnedTab {
+                browser_id: RETURNING_BROWSER.into(),
+                tab_id: RETURNING_TAB + 1,
+                handle: "tab_gone".into(),
+                url_digest: digest_of("https://example.com/gone"),
+            };
+            let token = ResumeState {
+                revision: REVISION.into(),
+                claim: Some(RETURNING_CLIENT.into()),
+                owned_tabs: vec![returning_tab(), gone],
+                lives: BTreeMap::new(),
+                standby: false,
+            }
+            .encode();
+            let mut socket = open_mcp(Some(token));
+            assert_eq!(next_resume(&mut socket).owned_tabs.len(), 2);
+            let browser = attach_returning_browser(&served);
+            send_line(
+                &mut socket,
+                json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "browser_tabs", "arguments": {"action": "list"}}}),
+            );
+            let (called, tokens) = response(&mut socket, 2);
+            let listed = &called["result"]["structuredContent"];
+            assert_eq!(listed["status"], succeeded, "{listed}");
+            let tabs = listed["facts"]["tabs"].as_array().unwrap();
+            assert_eq!(tabs.len(), 1, "{listed}");
+            assert_eq!(tabs[0]["tab"], "tab_kept");
+            token_restoring(&mut socket, &tokens, &[returning_tab()]);
+            let seen = browser.wait(|seen| !requests_at(seen, "list_tabs").is_empty());
+            let named_a_tab: Vec<&Value> = seen
+                .frames
+                .iter()
+                .filter(|frame| {
+                    frame["kind"] == "request" && frame["primitive"]["args"].get("tab_id").is_some()
+                })
+                .collect();
+            assert!(
+                named_a_tab.is_empty(),
+                "nothing reaches a tab: {named_a_tab:?}"
+            );
+        }
+
+        // In the same browser life the tab is kept though its page routed itself, and the token
+        // takes its live address and keeps the life.
+        {
+            let home = TestHome::new("resume-same-life");
+            let served = serve_relayed(&home);
+            let mut socket = open_mcp(Some(token_in(returning_tab(), Some(RETURNING_LIFE))));
+            let resumed = next_resume(&mut socket);
+            assert_eq!(
+                resumed.lives.get(RETURNING_BROWSER).map(String::as_str),
+                Some(RETURNING_LIFE),
+                "a pending tab keeps the life its token named"
+            );
+
+            let _browser = attach_returning_browser_in(&served, Some(RETURNING_LIFE), ROUTED_URL);
+            send_line(
+                &mut socket,
+                json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "browser_read", "arguments": {"tab": "tab_kept"}}}),
+            );
+            let (called, tokens) = response(&mut socket, 2);
+            let read = &called["result"]["structuredContent"];
+            assert_eq!(read["status"], succeeded, "{read}");
+            assert_eq!(
+                bound_tabs(&served),
+                vec![("tab_kept".to_owned(), RETURNING_TAB)]
+            );
+            // The token the confirmation changed, published during the call or right after it.
+            let token = tokens.last().map_or_else(
+                || next_resume(&mut socket),
+                |token| ResumeState::decode(token).unwrap(),
+            );
+            assert_eq!(token.owned_tabs.len(), 1);
+            assert_eq!(
+                token.owned_tabs[0].url_digest,
+                digest_of(ROUTED_URL),
+                "the confirmed tab is remembered at its live address"
+            );
+            assert_eq!(
+                token.lives.get(RETURNING_BROWSER).map(String::as_str),
+                Some(RETURNING_LIFE),
+                "a confirmed tab is in the life its browser reports"
+            );
+        }
+
+        // In a new browser life a tab at another address is forgotten.
+        {
+            let home = TestHome::new("resume-new-life");
+            let served = serve_relayed(&home);
+            let mut socket = open_mcp(Some(token_in(returning_tab(), Some(RETURNING_LIFE))));
+            next_resume(&mut socket);
+            let _browser = attach_returning_browser_in(&served, Some("life_restarted"), ROUTED_URL);
+            let read = call_tool(&mut socket, 2, "browser_read", json!({"tab": "tab_kept"}));
+            assert_ne!(read["status"], succeeded, "{read}");
+            assert!(bound_tabs(&served).is_empty());
+        }
+
+        // A token written before digests resumes with its tabs stale, even where the browser
+        // still shows a tab with that id at that address.
+        {
+            let home = TestHome::new("resume-no-digest");
+            let served = serve_relayed(&home);
+            let earlier = OwnedTab {
+                url_digest: None,
+                ..returning_tab()
+            };
+            let mut socket = open_mcp(Some(token_with(earlier)));
+            assert!(next_resume(&mut socket).owned_tabs.is_empty());
+            let _browser = attach_returning_browser(&served);
+            let read = call_tool(&mut socket, 2, "browser_read", json!({"tab": "tab_kept"}));
+            assert_ne!(read["status"], succeeded, "{read}");
+            assert!(bound_tabs(&served).is_empty());
+        }
     }
 
+    /// Defect C11 (8c216920, finding E-06) and ADR-0203 Decision 1: the edge always holds a token
+    /// its session resumes by, since a token that cannot be read still resumes an initialized
+    /// session and every answered initialize comes with a token, even after a service end.
     #[test]
-    fn a_service_replace_into_a_new_life_forgets_a_routed_tab() {
-        let home = TestHome::new("resume-new-life");
-        let served = serve_relayed(&home);
-        let mut socket = open_mcp(Some(token_in(returning_tab(), Some(RETURNING_LIFE))));
-        next_resume(&mut socket);
+    fn every_session_can_be_resumed_by_the_token_its_edge_holds() {
+        // A token that cannot be read resumes at the oldest revision with no tab, and the client,
+        // which initialized with an earlier service, is served its next call.
+        {
+            let home = TestHome::new("unreadable-token");
+            let served = serve_fake(&home);
+            let mut socket = open_mcp(Some("rs1.***".into()));
+            let resumed = next_resume(&mut socket);
+            assert_eq!(resumed.revision, crate::intake::mcp::OLDEST_REVISION);
+            assert_eq!(resumed.claim, None);
+            assert!(resumed.owned_tabs.is_empty());
+            let listed = call_tool(&mut socket, 2, "browser_tabs", json!({"action": "list"}));
+            assert_eq!(listed["status"], json!(Status::Succeeded), "{listed}");
+            assert_eq!(served.intake.workspaces.summaries().len(), 1);
+        }
 
-        let _browser = attach_returning_browser_in(&served, Some("life_restarted"), ROUTED_URL);
-        let read = call_tool(&mut socket, 2, "browser_read", json!({"tab": "tab_kept"}));
-        assert_ne!(read["status"], "succeeded", "{read}");
-        assert!(bound_tabs(&served).is_empty());
+        // A fresh session's token comes before its initialize answer, ahead of its workspace.
+        {
+            let home = TestHome::new("initialize-token-fresh");
+            let _served = serve_fake(&home);
+            let mut socket = open_mcp(None);
+            let (initialized, tokens) = initialize(&mut socket);
+            assert!(initialized["result"].is_object(), "{initialized}");
+            let state =
+                ResumeState::decode(tokens.first().expect("a token before the answer")).unwrap();
+            assert_eq!(state.revision, REVISION);
+            assert_eq!(state.claim.as_deref(), Some(CLIENT_NAME));
+            assert!(state.owned_tabs.is_empty());
+        }
+
+        // So does one that initializes after a quit handed every stream its last token.
+        {
+            let home = TestHome::new("initialize-token-quit");
+            let served = serve_fake(&home);
+            let mut socket = open_mcp(None);
+            // A ping is answered once the stream is enrolled for the quit's last tokens.
+            send_line(
+                &mut socket,
+                json!({"jsonrpc": "2.0", "id": 9, "method": "ping"}),
+            );
+            response(&mut socket, 9);
+            served
+                .intake
+                .quit
+                .begin(QuitReason::Replace, Duration::ZERO);
+            served
+                .quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("an idle service ends at once");
+            let (initialized, tokens) = initialize(&mut socket);
+            assert!(initialized["result"].is_object(), "{initialized}");
+            let state =
+                ResumeState::decode(tokens.first().expect("a token before the answer")).unwrap();
+            assert!(state.owned_tabs.is_empty());
+        }
     }
 
-    #[test]
-    fn a_token_written_before_digests_resumes_with_stale_tabs() {
-        let home = TestHome::new("resume-no-digest");
-        let served = serve_relayed(&home);
-        let earlier = crate::intake::mcp::OwnedTab {
-            url_digest: None,
-            ..returning_tab()
-        };
-        let mut socket = open_mcp(Some(token_with(earlier)));
-        assert!(next_resume(&mut socket).owned_tabs.is_empty());
-
-        // The browser still shows a tab with that id at that address, and it is not taken.
-        let _browser = attach_returning_browser(&served);
-        let read = call_tool(&mut socket, 2, "browser_read", json!({"tab": "tab_kept"}));
-        assert_ne!(read["status"], "succeeded", "{read}");
-        assert!(bound_tabs(&served).is_empty());
-    }
-
-    #[test]
-    fn readiness_is_read_only_and_opens_no_session() {
-        let home = TestHome::new("readiness");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let before = host.workbench.snapshot();
-
-        let observed = cli_client::readiness().unwrap();
-        let after = host.workbench.snapshot();
-
-        assert_eq!(observed, before.readiness);
-        assert_eq!(after.readiness, before.readiness);
-        assert!(after.sessions.is_empty());
-        assert_eq!(after.history, before.history);
-        drop(host);
-    }
-
-    #[test]
-    fn starting_clears_the_images_installs_moved_aside() {
-        let home = TestHome::new("old-images");
-        let executable = std::env::current_exe().unwrap();
-        let old = executable.with_file_name(format!(
-            "ghostlight-start-test-{}.old-1",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::write(&old, b"image").unwrap();
-        let host = ServiceHost::start(home.path()).unwrap();
-        assert!(!old.exists(), "the numbered old image was left behind");
-        drop(host);
-        let _ = std::fs::remove_file(&old);
-    }
-
+    /// The workbench origin is Ghostlight's own ceiling (ADR-0199's web apps amendment and
+    /// ADR-0203's amendment of 2026-10-19): publishing starts the workbench and bars agents from
+    /// its address before the page answers, and from nothing else.
     #[test]
     fn publishing_starts_the_workbench_and_bars_agents_from_its_address() {
         let home = TestHome::new("workbench-published");
@@ -4690,65 +3947,9 @@ mod tests {
         drop(host);
     }
 
-    #[test]
-    fn the_published_line_names_the_address_and_never_the_bearer() {
-        let home = TestHome::new("workbench-line");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let address = host.workbench_address().unwrap();
-        let bearer = host
-            .intake
-            .workbench_server
-            .get()
-            .unwrap()
-            .bearer()
-            .to_owned();
-        let line = super::published_detail(Some("endpoint"), Some(&address));
-        assert!(line.contains(&format!("workbench={}", address.url())));
-        assert!(!line.contains(&bearer));
-        assert!(!format!("{:?}", host.intake.workbench_server.get().unwrap()).contains(&bearer));
-        assert!(super::published_detail(None, None).ends_with("workbench="));
-        drop(host);
-    }
-
-    #[test]
-    fn a_stopped_host_frees_the_workbench_port() {
-        let home = TestHome::new("workbench-freed");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let port = host.workbench_address().unwrap().port();
-        drop(host);
-        assert!(
-            std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err(),
-            "nothing answers on the port after the service stops"
-        );
-    }
-
-    #[test]
-    fn the_pages_quit_is_a_persons_quit() {
-        let home = TestHome::new("workbench-quit");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        host.workbench.quit().unwrap();
-        // The same quit the tray asks for: new work is refused at once, and the latch keeps a
-        // browser that restarts from bringing Ghostlight back.
-        assert!(host.intake.quit.drain.is_quitting());
-        assert!(super::latch::is_set(
-            &crate::install::layout::Layout::new(home.path()).quit_latch()
-        ));
-        drop(host);
-    }
-
-    #[test]
-    fn readiness_never_starts_an_absent_service() {
-        let home = TestHome::new("readiness-absent");
-        assert!(cli_client::readiness().is_err());
-        assert!(cli_client::status().is_err());
-        assert!(!home.path().join("run").exists());
-    }
-
-    /// Open one MCP session, end the connection the given way, and report the sessions left.
-    fn sessions_after(name: &str, goodbye: impl FnOnce(&mut Connection)) -> usize {
+    /// Open one MCP session, end its connection the way `goodbye` does, and wait until the
+    /// session is gone.
+    fn session_is_released_after(name: &str, goodbye: impl FnOnce(&mut Connection)) {
         let home = TestHome::new(name);
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
@@ -4759,102 +3960,22 @@ mod tests {
 
         goodbye(&mut socket);
         drop(socket);
-
-        // The session teardown runs on the connection's own thread, so give it a moment.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline && !host.workbench.snapshot().sessions.is_empty() {
-            thread::sleep(Duration::from_millis(25));
-        }
-        host.workbench.snapshot().sessions.len()
+        // The teardown runs on the connection's own thread.
+        eventually(|| host.workbench.snapshot().sessions.is_empty());
     }
 
+    /// Defect 79cf4cc6: a client that goes away through the error path, with one frame that is not
+    /// JSON, still releases its session and every tab it held, as a tidy goodbye always did.
     #[test]
     fn a_client_that_goes_away_badly_still_releases_its_session() {
         // The negative control: a tidy goodbye has always worked, so if this were the only case
-        // the assertion below would prove nothing about the error path.
-        assert_eq!(sessions_after("goodbye-clean", |_| {}), 0);
-
-        // One frame that is not JSON ends the connection through the error path. The workspace
-        // and every tab it held must still be released: an unowned workspace has no owning
-        // process for the reaper.
-        assert_eq!(
-            sessions_after("goodbye-malformed", |socket| {
-                frame::write_frame_raw(socket, b"{ not json at all").unwrap();
-            }),
-            0,
-            "a session must not outlive the connection that opened it"
-        );
-    }
-
-    #[test]
-    fn a_prepared_service_binds_its_endpoint_only_at_desktop_ready() {
-        let home = TestHome::new("desktop-readiness");
-        let host = ServiceHost::start(home.path()).unwrap();
-        assert!(cli_client::readiness().is_err());
-        let contender = ServiceHost::start(home.path()).err().unwrap();
-        assert!(contender.is::<super::AuthorityAlreadyRunning>());
-        host.publish_ready().unwrap();
-        assert!(cli_client::readiness().is_ok());
-        let status = cli_client::status().unwrap();
-        assert_eq!(status.instance, host.intake.instance);
-        assert!(status.instance.starts_with("instance_"));
-        assert_eq!(status.service, env!("CARGO_PKG_VERSION"));
-        host.publish_ready().unwrap();
-        assert!(cli_client::readiness().is_ok());
-        drop(host);
-        assert!(
-            cli_client::readiness().is_err(),
-            "a stopped service leaves nothing to find"
-        );
-        let unpublished = ServiceHost::start(home.path()).unwrap();
-        assert!(
-            cli_client::readiness().is_err(),
-            "failed desktop setup binds no endpoint"
-        );
-        drop(unpublished);
-    }
-
-    #[test]
-    fn two_homes_bind_two_endpoints_and_serve_two_instances() {
-        let first = temp_home("endpoint-first");
-        let second = temp_home("endpoint-second");
-        assert_ne!(
-            Endpoint::for_home(&first).unwrap(),
-            Endpoint::for_home(&second).unwrap()
-        );
-        let one = ServiceHost::start(&first).unwrap();
-        let two = ServiceHost::start(&second).unwrap();
-        one.publish_ready().unwrap();
-        two.publish_ready().unwrap();
-        let seen_by_first = cli_client::status_at(&first).unwrap();
-        let seen_by_second = cli_client::status_at(&second).unwrap();
-        assert_eq!(seen_by_first.instance, one.intake.instance);
-        assert_eq!(seen_by_second.instance, two.intake.instance);
-        assert_ne!(seen_by_first.instance, seen_by_second.instance);
-        drop(one);
-        assert!(cli_client::status_at(&first).is_err());
-        assert!(cli_client::status_at(&second).is_ok());
-        drop(two);
-    }
-
-    #[test]
-    fn a_second_service_on_one_home_cannot_take_the_service_lock() {
-        let directory = temp_home("singleton");
-        let first = ServiceHost::start(&directory).unwrap();
-        let second = ServiceHost::start(&directory)
-            .err()
-            .expect("second authority is rejected");
-        let detail = format!("{second:#}");
-        assert!(
-            detail.contains("another Ghostlight orchestrator already owns this runtime"),
-            "{detail}"
-        );
-        assert!(!super::ServiceLock::is_free(
-            &crate::install::layout::Layout::new(directory.path()).service_lock()
-        ));
-        drop(first);
-        let replacement = ServiceHost::start(&directory).unwrap();
-        drop(replacement);
+        // the wait below would prove nothing about the error path.
+        session_is_released_after("goodbye-clean", |_| {});
+        // An unowned workspace has no owning process for the reaper, so only the connection's own
+        // teardown can release it.
+        session_is_released_after("goodbye-malformed", |socket| {
+            frame::write_frame_raw(socket, b"{ not json at all").unwrap();
+        });
     }
 
     /// The terms of a start for `reason` that waits `lock_wait` for a held lock.
@@ -4890,103 +4011,28 @@ mod tests {
         found
     }
 
+    /// ADR-0199 Decisions 9 and 10 and ACCEPTANCE C13: a start applies the quit latch, then takes
+    /// the lock, and touches nothing before it holds it, so Quit holds a browser or recover start
+    /// back, also one that waited for the lock, and any other start clears the latch.
     #[test]
-    fn a_start_that_waits_no_time_for_a_held_lock_gives_way_at_once_and_touches_no_state() {
-        let directory = temp_home("lock-held-gives-way");
-        let layout = crate::install::layout::Layout::new(directory.path());
-        let holder = start_for(&directory, agent()).unwrap();
-        super::latch::set(&layout.quit_latch()).unwrap();
-        let before = files_under(&directory);
-
-        for reason in [
+    fn a_start_applies_the_quit_latch_and_takes_the_lock_before_it_touches_any_state() {
+        const HELD_BACK: [StartReason; 2] = [StartReason::Browser, StartReason::Recover];
+        const CLEARING: [StartReason; 4] = [
             StartReason::Agent,
             StartReason::Command,
             StartReason::Person,
             StartReason::Update,
-        ] {
-            let started = Instant::now();
-            let error = start_for(&directory, StartTerms::asking_once(reason))
-                .err()
-                .expect("the lock is held");
-            assert!(error.is::<AuthorityAlreadyRunning>(), "{reason:?}");
-            assert!(started.elapsed() < Duration::from_secs(1), "{reason:?}");
-            assert!(
-                super::latch::is_set(&layout.quit_latch()),
-                "{reason:?}: a start that gives way leaves the latch alone"
-            );
-        }
-        assert_eq!(files_under(&directory), before, "no state was opened");
-        drop(holder);
-    }
+        ];
 
-    #[test]
-    fn an_update_start_takes_the_lock_when_the_old_service_releases_it_within_the_wait() {
-        let directory = temp_home("update-waits");
-        let holder = start_for(&directory, agent()).unwrap();
-        let release = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(150));
-            drop(holder);
-        });
-        let started = Instant::now();
-        let taken = start_for(&directory, waiting(StartReason::Update, PATIENCE)).unwrap();
-        assert!(
-            started.elapsed() >= Duration::from_millis(100),
-            "it waited for the holder"
-        );
-        release.join().unwrap();
-        drop(taken);
-    }
+        // With no latch, a browser start serves.
+        let directory = temp_home("latch-clear");
+        assert!(start_for(&directory, StartTerms::for_reason(StartReason::Browser)).is_ok());
 
-    #[test]
-    fn an_update_start_gives_up_when_the_lock_is_still_held_after_its_wait() {
-        let directory = temp_home("update-gives-up");
-        let holder = start_for(&directory, agent()).unwrap();
-        let started = Instant::now();
-        let error = start_for(
-            &directory,
-            waiting(StartReason::Update, Duration::from_millis(200)),
-        )
-        .err()
-        .expect("the lock stays held");
-        assert!(error.is::<AuthorityAlreadyRunning>());
-        assert!(started.elapsed() >= Duration::from_millis(200));
-        drop(holder);
-    }
-
-    #[test]
-    fn a_browser_start_that_waited_for_the_lock_is_refused_when_a_quit_began_meanwhile() {
-        let directory = temp_home("latch-set-while-waiting");
-        let layout = crate::install::layout::Layout::new(directory.path());
-        let holder = start_for(&directory, agent()).unwrap();
-        let quitting = {
-            let latch = layout.quit_latch();
-            thread::spawn(move || {
-                thread::sleep(Duration::from_millis(150));
-                super::latch::set(&latch).unwrap();
-                drop(holder);
-            })
-        };
-        let error = start_for(&directory, waiting(StartReason::Browser, PATIENCE))
-            .err()
-            .expect("Quit holds this start back");
-        assert!(error.is::<QuitLatched>());
-        assert!(
-            super::latch::is_set(&layout.quit_latch()),
-            "the latch stays"
-        );
-        quitting.join().unwrap();
-        assert!(
-            super::ServiceLock::is_free(&layout.service_lock()),
-            "the refused start released the lock"
-        );
-    }
-
-    #[test]
-    fn a_browser_or_recover_start_is_refused_while_the_latch_is_set_and_never_takes_the_lock() {
+        // A set latch holds a browser or recover start back before it takes the lock.
         let directory = temp_home("latch-refuses");
-        let layout = crate::install::layout::Layout::new(directory.path());
+        let layout = Layout::new(directory.path());
         super::latch::set(&layout.quit_latch()).unwrap();
-        for reason in [StartReason::Browser, StartReason::Recover] {
+        for reason in HELD_BACK {
             let error = start_for(&directory, StartTerms::for_reason(reason))
                 .err()
                 .expect("Quit holds this start back");
@@ -5000,43 +4046,73 @@ mod tests {
                 "{reason:?}: the lock was never taken"
             );
         }
-    }
 
-    #[test]
-    fn a_browser_start_serves_when_no_quit_is_held() {
-        let directory = temp_home("latch-clear");
-        let started = start_for(&directory, StartTerms::for_reason(StartReason::Browser));
-        assert!(started.is_ok());
-        drop(started);
-    }
-
-    #[test]
-    fn any_other_start_clears_the_latch_after_taking_the_lock_and_serves() {
-        for reason in [
-            StartReason::Agent,
-            StartReason::Command,
-            StartReason::Person,
-            StartReason::Update,
-        ] {
+        // Any other start clears it once it holds the lock, and serves.
+        for reason in CLEARING {
             let directory = temp_home("latch-cleared");
-            let layout = crate::install::layout::Layout::new(directory.path());
+            let layout = Layout::new(directory.path());
             super::latch::set(&layout.quit_latch()).unwrap();
             let started = start_for(&directory, StartTerms::for_reason(reason)).unwrap();
             assert!(!super::latch::is_set(&layout.quit_latch()), "{reason:?}");
             drop(started);
         }
-    }
 
-    #[test]
-    fn the_service_reports_the_reason_it_was_started_for() {
-        let home = TestHome::new("started-by");
-        let host = start_for(home.path(), StartTerms::for_reason(StartReason::Person)).unwrap();
-        host.publish_ready().unwrap();
-        assert_eq!(
-            cli_client::status().unwrap().started_by,
-            StartReason::Person
+        // A start that finds the lock held gives way and touches nothing, the latch included.
+        let directory = temp_home("lock-held-gives-way");
+        let layout = Layout::new(directory.path());
+        let holder = start_for(&directory, agent()).unwrap();
+        super::latch::set(&layout.quit_latch()).unwrap();
+        let before = files_under(&directory);
+        for reason in CLEARING {
+            let error = start_for(&directory, StartTerms::asking_once(reason))
+                .err()
+                .expect("the lock is held");
+            assert!(error.is::<AuthorityAlreadyRunning>(), "{reason:?}");
+            assert!(
+                super::latch::is_set(&layout.quit_latch()),
+                "{reason:?}: a start that gives way leaves the latch alone"
+            );
+        }
+        assert_eq!(files_under(&directory), before, "no state was opened");
+        drop(holder);
+
+        // A browser start that began before a Quit, and waited for the lock the quitting service
+        // held, is refused once it holds the lock.
+        let directory = temp_home("latch-set-while-waiting");
+        let layout = Layout::new(directory.path());
+        let holder = start_for(&directory, agent()).unwrap();
+        let (began, beginning) = mpsc::channel();
+        let starter = {
+            let directory = directory.path().to_path_buf();
+            thread::spawn(move || {
+                // The token check comes before the start's first look at the latch.
+                ServiceHost::start_with_token(
+                    &directory,
+                    waiting(StartReason::Browser, PATIENCE),
+                    move || {
+                        let _ = began.send(());
+                        Ok(false)
+                    },
+                )
+                .map(drop)
+            })
+        };
+        beginning.recv_timeout(PATIENCE).expect("the start began");
+        super::latch::set(&layout.quit_latch()).unwrap();
+        drop(holder);
+        let error = starter
+            .join()
+            .unwrap()
+            .expect_err("Quit holds this start back");
+        assert!(error.is::<QuitLatched>());
+        assert!(
+            super::latch::is_set(&layout.quit_latch()),
+            "the latch stays"
         );
-        drop(host);
+        assert!(
+            super::ServiceLock::is_free(&layout.service_lock()),
+            "the refused start released the lock"
+        );
     }
 
     /// How many of a browser relay's looks for a returning service a replacement may take to
@@ -5054,24 +4130,22 @@ mod tests {
     /// A home that remembers a browser, as every home a browser has connected to does.
     fn home_that_remembers_a_browser(name: &str) -> Scratch {
         let directory = temp_home(name);
-        let layout = crate::install::layout::Layout::new(directory.path());
+        let layout = Layout::new(directory.path());
         crate::install::last_browser::record(&layout.last_browser_record(), "chrome").unwrap();
         directory
     }
 
-    /// An update, or the shell's recovery of a service it lost without a goodbye, takes over from
-    /// a service whose browsers left with it. Each browser's relay looks for the new service on
-    /// its own doubling backoff, counted from the moment it lost the old one, so a replacement
-    /// that publishes just after one look waits nearly the whole next wait for the look that
-    /// finds it. A call with no browser waits for that relay until it is back, for any
-    /// replacement that publishes before the relay's fourth look, and stops at the return grace
-    /// (ADR-0196 Decision 12). The schedule is the relay's own, so a backoff that outgrows the
-    /// grace fails here.
+    /// Defect S-D2 (9c257daa) and ACCEPTANCE C19: after an update or a recovery a call with no
+    /// browser waits for the replaced service's relays, on their own backoff, up to the return
+    /// grace, while any other start, or one in a home no browser has used, waits only the short window.
     #[test]
     fn a_replacement_waits_for_the_relays_of_the_service_it_replaced() {
-        use crate::browser::{BrowserPort, RETURN_GRACE};
+        use crate::browser::{BrowserPort, RELAY_RETURN_WINDOW, RETURN_GRACE};
         use ghostlight_relay::spawn::Backoff;
 
+        // Each relay of the ended service looks again on its own doubling backoff, counted from
+        // the moment it lost the old service, so a replacement that publishes just after one look
+        // waits nearly the whole next wait for the look that finds it.
         let mut backoff = Backoff::new();
         let longest_wait = (0..REPLACEMENT_LOOKS)
             .map(|_| backoff.next_wait())
@@ -5100,15 +4174,9 @@ mod tests {
             );
             drop(host);
         }
-    }
 
-    /// A start that replaced no service, and an update in a home no browser has connected to, as
-    /// on a first install, wait only the short relay window, so a call with no browser keeps
-    /// nearly its whole budget for starting one.
-    #[test]
-    fn a_start_that_replaced_no_browser_waits_only_the_relay_return_window() {
-        use crate::browser::{BrowserPort, RELAY_RETURN_WINDOW};
-
+        // A start that replaced no service, and an update in a home no browser has connected to,
+        // as on a first install, keep nearly the whole budget of a call for starting a browser.
         for (reason, directory) in [
             (StartReason::Update, temp_home("first-install")),
             (
@@ -5135,23 +4203,13 @@ mod tests {
         }
     }
 
+    /// ADR-0199 Decision 9 step 2 and its amendment of 2026-10-16: an elevated token, or one that
+    /// cannot be read, is refused before the start takes any state, and the debug-build waiver
+    /// lets only an elevated answer through.
     #[test]
-    fn the_elevation_decision_waives_only_an_elevated_answer() {
+    fn an_elevated_or_unreadable_token_is_refused_before_any_state() {
         use super::decide_elevation;
-        let refused = decide_elevation(Ok(true), false).unwrap_err();
-        assert_eq!(format!("{refused:#}"), super::ELEVATED_SERVICE);
-        assert!(decide_elevation(Ok(true), true).is_ok());
-        assert!(decide_elevation(Ok(false), false).is_ok());
-        assert!(decide_elevation(Ok(false), true).is_ok());
-        for waived in [false, true] {
-            let unreadable =
-                decide_elevation(Err(std::io::Error::other("no token")), waived).unwrap_err();
-            assert!(format!("{unreadable:#}").contains("no token"));
-        }
-    }
 
-    #[test]
-    fn a_service_started_with_an_elevated_token_refuses_before_it_takes_any_state() {
         let directory = temp_home("elevated");
         let refused = ServiceHost::start_with_token(&directory, agent(), || Ok(true))
             .err()
@@ -5167,9 +4225,20 @@ mod tests {
         .err()
         .expect("a token that cannot be read is refused");
         assert!(format!("{unreadable:#}").contains("no token"));
-        let started = ServiceHost::start_with_token(&directory, agent(), || Ok(false));
-        assert!(started.is_ok());
-        drop(started);
+        assert!(!directory.join("run").exists());
+        assert!(ServiceHost::start_with_token(&directory, agent(), || Ok(false)).is_ok());
+
+        // The waiver: only an elevated answer can be waived.
+        let refused = decide_elevation(Ok(true), false).unwrap_err();
+        assert_eq!(format!("{refused:#}"), super::ELEVATED_SERVICE);
+        assert!(decide_elevation(Ok(true), true).is_ok());
+        assert!(decide_elevation(Ok(false), false).is_ok());
+        assert!(decide_elevation(Ok(false), true).is_ok());
+        for waived in [false, true] {
+            let unreadable =
+                decide_elevation(Err(std::io::Error::other("no token")), waived).unwrap_err();
+            assert!(format!("{unreadable:#}").contains("no token"), "{waived}");
+        }
     }
 
     /// A presentation port whose reveal waits until it is released, as one does while a shell
@@ -5177,16 +4246,26 @@ mod tests {
     #[derive(Default)]
     struct HeldReveal {
         started: AtomicUsize,
-        release: AtomicBool,
+        released: std::sync::Mutex<bool>,
+        changed: std::sync::Condvar,
+    }
+
+    impl HeldReveal {
+        /// Let every reveal finish.
+        fn release(&self) {
+            *self.released.lock().unwrap() = true;
+            self.changed.notify_all();
+        }
     }
 
     impl WorkbenchPresentationPort for HeldReveal {
         fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
             self.started.fetch_add(1, Ordering::SeqCst);
-            let until = Instant::now() + PATIENCE;
-            while !self.release.load(Ordering::SeqCst) && Instant::now() < until {
-                thread::sleep(Duration::from_millis(5));
-            }
+            let released = self.released.lock().unwrap();
+            let _waited = self
+                .changed
+                .wait_timeout_while(released, PATIENCE, |released| !*released)
+                .unwrap();
             Ok(())
         }
 
@@ -5196,175 +4275,14 @@ mod tests {
         ) -> Result<(), WorkbenchPresentationError> {
             Ok(())
         }
-    }
-
-    /// A presentation port that keeps the address of each reveal.
-    #[derive(Default)]
-    struct RevealedAt(std::sync::Mutex<Vec<Option<PageAddress>>>);
-
-    impl RevealedAt {
-        fn addresses(&self) -> Vec<Option<PageAddress>> {
-            self.0.lock().unwrap().clone()
-        }
-    }
-
-    impl WorkbenchPresentationPort for RevealedAt {
-        fn reveal(&self, address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
-            self.0.lock().unwrap().push(address);
-            Ok(())
-        }
-
-        fn notify(
-            &self,
-            _notification: WorkbenchNotification,
-        ) -> Result<(), WorkbenchPresentationError> {
-            Ok(())
-        }
-    }
-
-    #[derive(Default)]
-    struct RevealCounter(AtomicUsize);
-
-    impl WorkbenchPresentationPort for RevealCounter {
-        fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
-            self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-
-        fn notify(
-            &self,
-            _notification: WorkbenchNotification,
-        ) -> Result<(), WorkbenchPresentationError> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn show_reveals_the_existing_workbench() {
-        let home = TestHome::new("activation");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        assert!(!cli_client::activate_workbench().unwrap());
-        let reveals = Arc::new(RevealCounter::default());
-        host.workbench.attach_presentation(reveals.clone());
-        assert!(cli_client::activate_workbench().unwrap());
-        assert_eq!(reveals.0.load(Ordering::SeqCst), 1);
-        drop(host);
-    }
-
-    #[test]
-    fn a_show_control_opens_the_window_at_setup_until_setup_is_complete() {
-        use crate::install::setup_state::{self, SetupRecord};
-
-        let home = TestHome::new("show-control-address");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let revealed = Arc::new(RevealedAt::default());
-        host.workbench.attach_presentation(revealed.clone());
-
-        assert!(cli_client::activate_workbench().unwrap());
-        assert_eq!(revealed.addresses(), [Some(PageAddress::Setup)]);
-
-        // Once the setup record exists the window opens where it last was.
-        let record = crate::install::layout::Layout::new(home.path()).setup_record();
-        assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
-        host.workbench
-            .attach_setup(crate::workbench::setup::SetupProgress::load(&record));
-        assert!(cli_client::activate_workbench().unwrap());
-        assert_eq!(revealed.addresses(), [Some(PageAddress::Setup), None]);
-        drop(host);
-    }
-
-    #[test]
-    fn a_browser_stream_carries_an_extension_to_the_browser_port() {
-        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
-        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
-
-        let home = TestHome::new("browser-stream");
-        let served = serve_fake(&home);
-        // Stand in for the browser edge: carry the extension's bytes over a browser stream.
-        let (native, extension) = pair().unwrap();
-        let carrier = thread::spawn(move || {
-            let (service, reply) = dial(&opening(Role::Browser));
-            assert!(reply.accepted, "{reply:?}");
-            service.set_read_timeout(None).unwrap();
-            let mut to_service = (native.try_clone().unwrap(), service.try_clone().unwrap());
-            let mut to_extension = (service, native);
-            thread::spawn(move || {
-                let _ = std::io::copy(&mut to_extension.0, &mut to_extension.1);
-            });
-            let _ = std::io::copy(&mut to_service.0, &mut to_service.1);
-        });
-        let fake = FakeExtension::connect(
-            extension,
-            &FakeExtension::hello("browser_relayed"),
-            Box::new(|correlation, _| {
-                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
-            }),
-        );
-        let accepted = fake.wait(|seen| !seen.frames.is_empty());
-        assert_eq!(accepted.frames[0]["kind"], "hello_accepted");
-        drop(accepted);
-        eventually(|| {
-            served
-                .relay
-                .connected_browsers()
-                .iter()
-                .any(|browser| browser.id == "browser_relayed")
-        });
-        fake.close();
-        drop(fake);
-        let _ = carrier.join();
-    }
-
-    #[test]
-    fn released_tabs_clear_diagnostics_in_bounded_batches_before_close_attempts() {
-        let browser = FakeBrowser::default();
-        let released = ReleasedTabs {
-            browser: Some(FAKE_BROWSER.into()),
-            physical_ids: (1..=257).collect(),
-        };
-
-        cleanup_released_tabs(
-            &released,
-            &browser,
-            &crate::workspace::WorkspaceStore::default(),
-            None,
-        );
-
-        let calls = browser.calls();
-        assert_eq!(
-            calls[0],
-            BrowserCommand::ClearDiagnostics {
-                tab_ids: (1..=256).collect()
-            }
-        );
-        assert_eq!(
-            calls[1],
-            BrowserCommand::ClearDiagnostics { tab_ids: vec![257] }
-        );
-        assert_eq!(
-            calls[2],
-            BrowserCommand::CloseTab {
-                tab_id: 1,
-                released: true
-            }
-        );
-        assert_eq!(
-            calls.last(),
-            Some(&BrowserCommand::CloseTab {
-                tab_id: 257,
-                released: true
-            })
-        );
     }
 
     /// A host that signals through a channel instead of a desktop.
-    fn quittable_host(name: &str) -> (TestHome, ServiceHost, std::sync::mpsc::Receiver<()>) {
+    fn quittable_host(name: &str) -> (TestHome, ServiceHost, mpsc::Receiver<()>) {
         let home = TestHome::new(name);
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
-        let (quit, quit_requested) = std::sync::mpsc::channel();
+        let (quit, quit_requested) = mpsc::channel();
         host.install_quit_signal(Arc::new(move || {
             let _ = quit.send(());
         }));
@@ -5382,162 +4300,213 @@ mod tests {
         }
     }
 
+    /// Read frames from a desktop `stream` until a goodbye arrives and return its reason.
+    fn desktop_goodbye(stream: &mut Connection) -> GoodbyeReason {
+        loop {
+            match frame::read_frame::<DesktopFrame>(stream).unwrap() {
+                Some(DesktopFrame::Goodbye { reason }) => return reason,
+                Some(_) => {}
+                None => panic!("the desktop stream closed with no goodbye"),
+            }
+        }
+    }
+
+    /// ACCEPTANCE C13 and ADR-0199 Decision 10: a person's Quit, from the tray, the page, control
+    /// or the service itself, writes the quit latch as it begins, and a replace, an uninstall or
+    /// the end of the session leaves it unset.
     #[test]
-    fn a_persons_quit_sets_the_latch_and_a_replacement_or_uninstall_does_not() {
-        for (reason, latched) in [
-            (QuitReason::Quit, true),
-            (QuitReason::Replace, false),
-            (QuitReason::Uninstall, false),
+    fn only_a_persons_quit_sets_the_quit_latch() {
+        /// One way the service is asked to end.
+        #[derive(Clone, Copy, Debug)]
+        enum End {
+            /// The tray's Quit, over the desktop stream.
+            Tray,
+            /// The page's Quit, through the workbench.
+            Page,
+            /// A control quit with reason quit.
+            Control,
+            /// The service's own quit for a reason.
+            Service(QuitReason),
+            /// The end of the person's sign-in session.
+            SignOut,
+        }
+
+        for (end, latched) in [
+            (End::Tray, true),
+            (End::Page, true),
+            (End::Control, true),
+            (End::Service(QuitReason::Quit), true),
+            (End::Service(QuitReason::Replace), false),
+            (End::Service(QuitReason::Uninstall), false),
+            (End::SignOut, false),
         ] {
             let (home, host, quit_requested) = quittable_host("quit-latch");
-            let latch = home.path().join("state").join("quit");
-            assert!(!super::latch::is_set(&latch));
-            host.begin_quit(reason, Duration::from_secs(5));
+            let latch = Layout::new(home.path()).quit_latch();
+            assert!(!super::latch::is_set(&latch), "{end:?}");
+            let _shell = match end {
+                End::Tray => {
+                    let mut shell = attached_shell(&host);
+                    frame::write_frame(
+                        &mut shell,
+                        &DesktopFrame::Tray {
+                            item: TrayItemId::Quit,
+                        },
+                    )
+                    .unwrap();
+                    Some(shell)
+                }
+                End::Page => {
+                    host.workbench.quit().unwrap();
+                    None
+                }
+                End::Control => {
+                    cli_client::control(Control::Quit {
+                        reason: QuitReason::Quit,
+                    })
+                    .unwrap();
+                    None
+                }
+                End::Service(reason) => {
+                    host.begin_quit(reason, PATIENCE);
+                    None
+                }
+                End::SignOut => {
+                    host.quit_handle().session_end();
+                    None
+                }
+            };
+            // The latch is written as the quit begins, before it answers and before the service
+            // has left, so a browser that restarts meanwhile is held back too.
+            if !matches!(end, End::Tray) {
+                assert_eq!(super::latch::is_set(&latch), latched, "{end:?} at once");
+            }
             quit_requested
-                .recv_timeout(Duration::from_secs(5))
-                .expect("an idle service asks the desktop to exit");
-            assert_eq!(super::latch::is_set(&latch), latched, "{reason:?}");
+                .recv_timeout(PATIENCE)
+                .expect("the end asks the process to exit");
+            assert_eq!(super::latch::is_set(&latch), latched, "{end:?}");
             drop(host);
         }
     }
 
+    /// Relay protocol 4 contract (ADR-0199 Decisions 5 and 13, ACCEPTANCE C13): before it closes
+    /// them, the service says goodbye with its end's reason on each MCP stream and the desktop
+    /// stream, and only then asks the process to exit.
     #[test]
-    fn a_quit_over_control_with_reason_quit_sets_the_latch_before_it_answers() {
-        let home = TestHome::new("quit-control-latch");
-        let served = serve_fake(&home);
-        cli_client::control(Control::Quit {
-            reason: QuitReason::Quit,
-        })
-        .unwrap();
-        assert!(super::latch::is_set(
-            &home.path().join("state").join("quit")
-        ));
-        served
-            .quit_requested
-            .recv_timeout(Duration::from_secs(5))
-            .expect("the desktop is asked to exit");
-    }
-
-    #[test]
-    fn a_quit_says_goodbye_on_an_mcp_stream_before_the_service_closes_it() {
-        for (reason, goodbye) in [
-            (QuitReason::Quit, GoodbyeReason::Quit),
-            (QuitReason::Replace, GoodbyeReason::Replace),
-            (QuitReason::Uninstall, GoodbyeReason::Uninstall),
+    fn every_service_end_says_goodbye_with_its_reason_on_the_mcp_and_desktop_streams() {
+        for (quit, goodbye) in [
+            (Some(QuitReason::Quit), GoodbyeReason::Quit),
+            (Some(QuitReason::Replace), GoodbyeReason::Replace),
+            (Some(QuitReason::Uninstall), GoodbyeReason::Uninstall),
+            (None, GoodbyeReason::SessionEnd),
         ] {
-            let home = TestHome::new("quit-goodbye");
-            let served = serve_fake(&home);
-            let mut socket = open_mcp(None);
-            initialize(&mut socket);
+            let (_home, host, quit_requested) = quittable_host("goodbye");
+            let mut mcp = open_mcp(None);
+            initialize(&mut mcp);
+            let mut shell = attached_shell(&host);
 
-            let answer = cli_client::control(Control::Quit { reason }).unwrap();
-            assert_eq!(answer, json!({"quitting": true}));
-            assert_eq!(goodbye_on(&mut socket), goodbye);
-            served
-                .quit_requested
-                .recv_timeout(Duration::from_secs(5))
-                .expect("the desktop is asked to exit after the goodbye");
-        }
-    }
+            match quit {
+                Some(reason) => {
+                    let answer = cli_client::control(Control::Quit { reason }).unwrap();
+                    assert_eq!(
+                        answer,
+                        serde_json::to_value(control::Quitting { quitting: true }).unwrap(),
+                        "{reason:?}"
+                    );
+                }
+                None => host.quit_handle().session_end(),
+            }
 
-    #[test]
-    fn a_session_end_says_goodbye_on_an_mcp_stream_and_leaves_without_the_latch() {
-        let (home, host, quit_requested) = quittable_host("session-end-goodbye");
-        let mut socket = open_mcp(None);
-        initialize(&mut socket);
-        let running = host.intake.quit.drain.admit().unwrap();
-
-        host.quit_handle().session_end();
-
-        assert_eq!(goodbye_on(&mut socket), GoodbyeReason::SessionEnd);
-        quit_requested
-            .recv_timeout(Duration::from_secs(5))
-            .expect("the desktop is asked to exit without waiting for work in flight");
-        assert!(
-            !super::latch::is_set(&home.path().join("state").join("quit")),
-            "a sign-out is not a person's Quit"
-        );
-        assert!(
-            host.intake.quit.drain.admit().is_err(),
-            "no new work is admitted once the session is ending"
-        );
-        drop(running);
-    }
-
-    #[test]
-    fn a_quit_says_goodbye_after_in_flight_work_and_before_the_desktop_exits() {
-        let home = TestHome::new("quit-goodbye-order");
-        let served = serve_fake(&home);
-        let mut socket = open_mcp(None);
-        initialize(&mut socket);
-        let running = served.intake.quit.drain.admit().unwrap();
-
-        cli_client::control(Control::Quit {
-            reason: QuitReason::Quit,
-        })
-        .unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_millis(300)))
-            .unwrap();
-        while let Ok(Some(frame)) = frame::read_frame::<McpFrame>(&mut socket) {
-            assert!(
-                !matches!(frame, McpFrame::Goodbye { .. }),
-                "no goodbye while work is in flight"
+            assert_eq!(goodbye_on(&mut mcp), goodbye, "on the MCP stream");
+            assert_eq!(
+                desktop_goodbye(&mut shell),
+                goodbye,
+                "on the desktop stream"
             );
+            quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the process is asked to exit after the goodbyes");
+            drop(host);
         }
-        assert!(served.quit_requested.try_recv().is_err());
-
-        socket.set_read_timeout(Some(PATIENCE)).unwrap();
-        drop(running);
-        assert_eq!(goodbye_on(&mut socket), GoodbyeReason::Quit);
     }
 
+    /// ARCHITECTURE's quit and ADR-0199 Decision 13: an end admits no new work, and a quit lets
+    /// work in flight finish, for at most its grace, before its goodbye and exit, keeping the
+    /// reason it began with, while the end of the session does not wait for work at all.
     #[test]
-    fn a_quit_says_goodbye_on_a_browser_stream_with_the_fixed_bytes() {
-        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
-        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
-
-        let home = TestHome::new("quit-browser-goodbye");
-        let served = serve_fake(&home);
-        let (native, extension) = pair().unwrap();
-        let carrier = thread::spawn(move || {
-            let (service, reply) = dial(&opening(Role::Browser));
-            assert!(reply.accepted, "{reply:?}");
-            service.set_read_timeout(None).unwrap();
-            let mut to_service = (native.try_clone().unwrap(), service.try_clone().unwrap());
-            let mut to_extension = (service, native);
-            thread::spawn(move || {
-                let _ = std::io::copy(&mut to_extension.0, &mut to_extension.1);
-            });
-            let _ = std::io::copy(&mut to_service.0, &mut to_service.1);
-        });
-        let fake = FakeExtension::connect(
-            extension,
-            &FakeExtension::hello("browser_goodbye"),
-            Box::new(|correlation, _| {
-                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
-            }),
-        );
-        drop(fake.wait(|seen| !seen.frames.is_empty()));
-        eventually(|| served.relay.is_connected());
-
-        served.relay.say_goodbye(GoodbyeReason::Uninstall);
-        let seen = fake.wait(|seen| {
-            seen.frames
-                .iter()
-                .any(|frame| frame.get("goodbye").is_some())
-        });
-        let goodbye = seen
-            .frames
-            .iter()
-            .find(|frame| frame.get("goodbye").is_some())
-            .cloned()
+    fn a_quit_lets_work_in_flight_finish_within_its_grace_and_the_first_quit_wins() {
+        // Work that finishes: a quit over control answers at once, and the quit ends with the
+        // work, well before its grace would have ended it.
+        {
+            let (_home, host, quit_requested) = quittable_host("quit-drains");
+            let mut mcp = open_mcp(None);
+            initialize(&mut mcp);
+            let running = host.quit.drain.admit().unwrap();
+            let began = Instant::now();
+            let answer = cli_client::control(Control::Quit {
+                reason: QuitReason::Quit,
+            })
             .unwrap();
-        assert_eq!(goodbye, json!({"goodbye": "uninstall"}));
-        drop(seen);
-        fake.close();
-        drop(fake);
-        let _ = carrier.join();
+            assert_eq!(
+                answer,
+                serde_json::to_value(control::Quitting { quitting: true }).unwrap()
+            );
+            assert!(
+                host.quit.drain.admit().is_err(),
+                "no new work is admitted once the quit began"
+            );
+            drop(running);
+            assert_eq!(goodbye_on(&mut mcp), GoodbyeReason::Quit);
+            quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the quit ends once its work has finished");
+            assert!(
+                began.elapsed() < QUIT_GRACE,
+                "the quit ended with its work, not with its grace"
+            );
+            drop(host);
+        }
+
+        // Work that never finishes: the goodbye and the exit wait out the grace, and a second
+        // quit while one is under way changes neither the reason nor the grace.
+        {
+            const GRACE: Duration = Duration::from_millis(300);
+
+            let (_home, host, quit_requested) = quittable_host("quit-bound");
+            let mut mcp = open_mcp(None);
+            initialize(&mut mcp);
+            let _stuck = host.quit.drain.admit().unwrap();
+            let began = Instant::now();
+            host.begin_quit(QuitReason::Quit, GRACE);
+            host.begin_quit(QuitReason::Replace, Duration::ZERO);
+            assert_eq!(goodbye_on(&mut mcp), GoodbyeReason::Quit);
+            assert!(
+                began.elapsed() >= GRACE,
+                "no goodbye while work was in flight inside the grace"
+            );
+            quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the quit ends when its grace does");
+            drop(host);
+        }
+
+        // The end of the session says goodbye and leaves while work is still in flight.
+        {
+            let (_home, host, quit_requested) = quittable_host("session-end-drain");
+            let mut mcp = open_mcp(None);
+            initialize(&mut mcp);
+            let running = host.quit.drain.admit().unwrap();
+            host.quit_handle().session_end();
+            assert_eq!(goodbye_on(&mut mcp), GoodbyeReason::SessionEnd);
+            quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the end of the session does not wait for work in flight");
+            assert!(
+                host.quit.drain.admit().is_err(),
+                "no new work is admitted once the session is ending"
+            );
+            drop(running);
+            drop(host);
+        }
     }
 
     /// Call `browser_tabs` list under `id` and return its tool result and the audit lines of its
@@ -5577,7 +4546,7 @@ mod tests {
         let mut socket = open_mcp(None);
         initialize(&mut socket);
         let (opened, _) = listed_with_audit(&home, &mut socket, 2);
-        assert_eq!(opened["status"], "succeeded", "{opened}");
+        assert_eq!(opened["status"], json!(Status::Succeeded), "{opened}");
 
         let running = served.intake.quit.drain.admit().unwrap();
         served.intake.quit.begin(reason, PATIENCE);
@@ -5591,196 +4560,43 @@ mod tests {
         vec![draining, ended]
     }
 
+    /// Defect C11 (8c216920, finding E-03), ACCEPTANCE B27 and ADR-0203 Decision 4.2: a call during
+    /// a quit is a cancelled tool result with one audit line, worded for the quit's cause, so only
+    /// the causes after which a call repeated in a moment is served say to try again.
     #[test]
-    fn a_call_during_a_quit_gets_a_tool_result_and_an_audit_line() {
-        for reason in [QuitReason::Quit, QuitReason::Replace, QuitReason::Unknown] {
+    fn a_call_during_a_quit_is_cancelled_with_an_audit_line_and_a_next_step_for_its_reason() {
+        for (reason, cause) in [
+            (QuitReason::Quit, QuitCause::Quit),
+            (QuitReason::Replace, QuitCause::Replace),
+            (QuitReason::Unknown, QuitCause::Unknown),
+            (QuitReason::Uninstall, QuitCause::Uninstall),
+        ] {
+            let refusal = Refusal::CancelledBeforeStart {
+                by: CancelCause::Quit(cause),
+            };
+            let steps = refusal.next_steps();
             for (result, records) in calls_during_a_quit(reason) {
-                assert_eq!(result["status"], "cancelled", "{reason:?}: {result}");
-                assert_eq!(result["effect"], "none", "{result}");
+                assert_eq!(
+                    result["status"],
+                    json!(Status::Cancelled),
+                    "{reason:?}: {result}"
+                );
+                assert_eq!(result["effect"], json!(Effect::None), "{result}");
                 assert_eq!(result["repeat_safe"], true, "{result}");
-                assert_eq!(
-                    result["summary"],
-                    "Ghostlight quit before the browser job started."
-                );
-                assert_eq!(
-                    result["next_steps"],
-                    json!(["Try the call again in a moment."]),
-                    "{reason:?}"
-                );
+                assert_eq!(result["summary"], refusal.summary(), "{reason:?}");
+                if steps.is_empty() {
+                    assert!(result.get("next_steps").is_none(), "{reason:?}: {result}");
+                } else {
+                    assert_eq!(result["next_steps"], json!(steps), "{reason:?}");
+                }
                 assert_eq!(records.len(), 1, "{reason:?}: {records:?}");
-                assert_eq!(records[0]["status"], "cancelled", "{records:?}");
+                assert_eq!(
+                    records[0]["status"],
+                    Status::Cancelled.stored_name(),
+                    "{records:?}"
+                );
             }
         }
-    }
-
-    #[test]
-    fn a_call_during_an_uninstall_gets_no_retry_step() {
-        for (result, records) in calls_during_a_quit(QuitReason::Uninstall) {
-            assert_eq!(result["status"], "cancelled", "{result}");
-            assert_eq!(
-                result["summary"],
-                "Ghostlight quit before the browser job started."
-            );
-            assert!(result.get("next_steps").is_none(), "{result}");
-            assert_eq!(records.len(), 1, "{records:?}");
-        }
-    }
-
-    #[test]
-    fn a_quitting_service_takes_no_new_connection() {
-        let (_home, host, quit_requested) = quittable_host("quit-refuses");
-        host.begin_quit(QuitReason::Quit, Duration::from_secs(5));
-        quit_requested
-            .recv_timeout(Duration::from_secs(5))
-            .expect("an idle service asks the desktop to exit at once");
-        let mut readiness = opening(Role::Control);
-        readiness.control = Some(Control::Readiness);
-        let (_, reply) = dial(&readiness);
-        assert!(!reply.accepted, "{reply:?}");
-        assert_eq!(reply.code, Some(RefusalCode::ShuttingDown));
-        drop(host);
-    }
-
-    #[test]
-    fn an_unreadable_token_resumes_an_initialized_session_without_tabs() {
-        let home = TestHome::new("unreadable-token");
-        let served = serve_fake(&home);
-        let mut socket = open_mcp(Some("rs1.***".into()));
-        let resumed = next_resume(&mut socket);
-        assert_eq!(resumed.revision, crate::intake::mcp::OLDEST_REVISION);
-        assert_eq!(resumed.claim, None);
-        assert!(resumed.owned_tabs.is_empty());
-
-        // The client initialized with an earlier service, so its next line is a call.
-        send_line(
-            &mut socket,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
-            }),
-        );
-        let (called, _) = response(&mut socket, 2);
-        let result = &called["result"];
-        assert_eq!(
-            result["structuredContent"]["status"], "succeeded",
-            "{called}"
-        );
-        assert!(
-            result["content"][0]["text"]
-                .as_str()
-                .is_some_and(|text| text.contains("Result: ")),
-            "the oldest revision also reads the result as text: {called}"
-        );
-        assert_eq!(served.intake.workspaces.summaries().len(), 1);
-    }
-
-    #[test]
-    fn an_answered_initialize_always_has_a_token() {
-        // Before the session opens its workspace, which follows the answer.
-        let home = TestHome::new("initialize-token-fresh");
-        let served = serve_fake(&home);
-        let mut socket = open_mcp(None);
-        let (initialized, tokens) = initialize(&mut socket);
-        assert!(initialized["result"].is_object(), "{initialized}");
-        let state =
-            ResumeState::decode(tokens.first().expect("a token before the answer")).unwrap();
-        assert_eq!(state.revision, "2025-06-18");
-        assert_eq!(state.claim.as_deref(), Some("relay test"));
-        assert!(state.owned_tabs.is_empty());
-        drop(socket);
-        drop(served);
-        drop(home);
-
-        // After a quit handed every stream its last token, to a stream not yet initialized.
-        let home = TestHome::new("initialize-token-quit");
-        let served = serve_fake(&home);
-        let mut socket = open_mcp(None);
-        // A ping is answered once the stream is enrolled for the quit's last tokens.
-        send_line(
-            &mut socket,
-            json!({"jsonrpc": "2.0", "id": 9, "method": "ping"}),
-        );
-        response(&mut socket, 9);
-        served
-            .intake
-            .quit
-            .begin(QuitReason::Replace, Duration::ZERO);
-        served
-            .quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("an idle service ends at once");
-        let (initialized, tokens) = initialize(&mut socket);
-        assert!(initialized["result"].is_object(), "{initialized}");
-        let state =
-            ResumeState::decode(tokens.first().expect("a token before the answer")).unwrap();
-        assert!(state.owned_tabs.is_empty());
-    }
-
-    #[test]
-    fn a_quit_over_control_answers_and_drains() {
-        let home = TestHome::new("quit-control");
-        let served = serve_fake(&home);
-        let running = served.intake.quit.drain.admit().unwrap();
-
-        let answer = cli_client::control(Control::Quit {
-            reason: QuitReason::Quit,
-        })
-        .unwrap();
-        assert_eq!(answer, json!({"quitting": true}));
-        assert!(
-            served
-                .quit_requested
-                .recv_timeout(Duration::from_millis(300))
-                .is_err(),
-            "the desktop is not asked to exit while work is in flight"
-        );
-        drop(running);
-        served
-            .quit_requested
-            .recv_timeout(Duration::from_secs(5))
-            .expect("the desktop is asked to exit once the work finishes");
-    }
-
-    #[test]
-    fn a_quit_waits_for_work_in_flight_and_then_asks_the_desktop_to_exit() {
-        let (_home, host, quit_requested) = quittable_host("quit-drains");
-        // The fake executor: an invocation the service has admitted and not yet finished.
-        let running = host.quit.drain.admit().unwrap();
-
-        host.begin_quit(QuitReason::Quit, Duration::from_secs(30));
-        assert!(
-            quit_requested
-                .recv_timeout(Duration::from_millis(300))
-                .is_err(),
-            "the desktop is not asked to exit while work is in flight"
-        );
-        // A second quit while one is under way changes nothing.
-        host.begin_quit(QuitReason::Quit, Duration::ZERO);
-        assert!(quit_requested
-            .recv_timeout(Duration::from_millis(100))
-            .is_err());
-
-        drop(running);
-        quit_requested
-            .recv_timeout(Duration::from_secs(5))
-            .expect("the desktop is asked to exit once the work finishes");
-        drop(host);
-    }
-
-    #[test]
-    fn a_quit_stops_waiting_for_work_after_the_grace() {
-        let (_home, host, quit_requested) = quittable_host("quit-bound");
-        let _stuck = host.quit.drain.admit().unwrap();
-
-        let started = Instant::now();
-        host.begin_quit(QuitReason::Quit, Duration::from_millis(200));
-        quit_requested
-            .recv_timeout(Duration::from_secs(5))
-            .expect("the desktop is asked to exit when the grace ends");
-        assert!(started.elapsed() >= Duration::from_millis(200));
-        drop(host);
     }
 
     /// How an extension at a service end answers the page work a call sends it.
@@ -5957,42 +4773,52 @@ mod tests {
         tabs
     }
 
+    /// ACCEPTANCE B27 and ADR-0203 Decision 3 (slice C5, 9beb7976): a service end decides every
+    /// session's tabs once, by its reason and the session's kind, and the end of the session and
+    /// the idle exit forget every tab without a browser command.
     #[test]
-    fn a_replace_keeps_a_live_sessions_tabs_bound_grouped_and_resumable() {
-        let home = TestHome::new("end-replace");
-        let served = serve_relayed(&home);
-        let browser = attach_ending_browser(&served, PageWork::Answered);
-        let (mut socket, workspace) = open_session(&served);
-        let handle = bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+    fn a_service_end_decides_each_sessions_tabs_once_by_its_reason() {
+        // A replace keeps a live session's tab bound, closes and ungroups nothing, and hands the
+        // tab to the session's last token for its edge's resume.
+        {
+            let home = TestHome::new("end-replace");
+            let served = serve_relayed(&home);
+            let browser = attach_ending_browser(&served, PageWork::Answered);
+            let (mut socket, workspace) = open_session(&served);
+            let handle = bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
 
-        served
-            .intake
-            .quit
-            .begin(QuitReason::Replace, Duration::ZERO);
+            served
+                .intake
+                .quit
+                .begin(QuitReason::Replace, Duration::ZERO);
 
-        let (tokens, goodbye) = until_goodbye(&mut socket);
-        assert_eq!(goodbye, GoodbyeReason::Replace);
-        let last = tokens
-            .last()
-            .expect("a last token comes before the goodbye");
-        assert_eq!(handles_in(last), [handle.as_str()]);
-        assert!(last.owned_tabs[0].url_digest.is_some(), "{last:?}");
-        served
-            .quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the replace finishes");
-        assert_eq!(
-            closed_before_goodbye(&browser),
-            Vec::<u64>::new(),
-            "nothing closes or ungroups a live session's tab"
-        );
-        assert!(requests_at(&browser.wait(|_| true), "diagnostics").is_empty());
-        assert_eq!(bound_tabs(&served), vec![(handle, RETURNING_TAB)]);
-    }
+            let (tokens, goodbye) = until_goodbye(&mut socket);
+            assert_eq!(goodbye, GoodbyeReason::Replace);
+            let last = tokens
+                .last()
+                .expect("a last token comes before the goodbye");
+            assert_eq!(handles_in(last), [handle.as_str()]);
+            assert!(last.owned_tabs[0].url_digest.is_some(), "{last:?}");
+            served
+                .quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the replace finishes");
+            assert_eq!(
+                closed_before_goodbye(&browser),
+                Vec::<u64>::new(),
+                "nothing closes or ungroups a live session's tab"
+            );
+            assert!(requests_at(&browser.wait(|_| true), "diagnostics").is_empty());
+            assert_eq!(bound_tabs(&served), vec![(handle, RETURNING_TAB)]);
+        }
 
-    #[test]
-    fn a_quit_releases_every_session_and_hands_each_stream_a_token_without_tabs() {
-        for reason in [QuitReason::Quit, QuitReason::Uninstall, QuitReason::Unknown] {
+        // A quit, an uninstall or a reason this build does not know releases every session, and
+        // each stream's last token carries no tab.
+        for (reason, said) in [
+            (QuitReason::Quit, GoodbyeReason::Quit),
+            (QuitReason::Uninstall, GoodbyeReason::Uninstall),
+            (QuitReason::Unknown, GoodbyeReason::Unknown),
+        ] {
             let home = TestHome::new("end-quit");
             let served = serve_relayed(&home);
             let browser = attach_ending_browser(&served, PageWork::Answered);
@@ -6014,7 +4840,7 @@ mod tests {
 
             for socket in [&mut first, &mut second] {
                 let (tokens, goodbye) = until_goodbye(socket);
-                assert_eq!(goodbye, super::goodbye_for(reason));
+                assert_eq!(goodbye, said);
                 let last = tokens
                     .last()
                     .expect("a last token comes before the goodbye");
@@ -6031,10 +4857,8 @@ mod tests {
             );
             assert!(served.intake.workspaces.ids().is_empty(), "{reason:?}");
         }
-    }
 
-    #[test]
-    fn a_command_line_session_is_released_at_every_service_end() {
+        // A command-line session is released at every end, because nothing can resume it.
         for reason in [
             QuitReason::Quit,
             QuitReason::Replace,
@@ -6093,136 +4917,134 @@ mod tests {
             assert!(served.intake.workspaces.ids().is_empty());
             assert!(requests_at(&browser.wait(|_| true), "close_tab").is_empty());
         }
-    }
 
-    #[test]
-    fn a_session_whose_client_left_during_the_drain_is_released_on_replace() {
-        let home = TestHome::new("end-replace-left");
-        let served = serve_relayed(&home);
-        let browser = attach_ending_browser(&served, PageWork::Answered);
-        let (left, left_workspace) = open_session(&served);
-        let (mut stays, stays_workspace) = open_session(&served);
-        bind_tab(&served.intake.workspaces, &left_workspace, RETURNING_TAB);
-        let kept = bind_tab(
-            &served.intake.workspaces,
-            &stays_workspace,
-            RETURNING_TAB + 1,
-        );
-        let running = served.intake.quit.drain.admit().unwrap();
+        // On a replace, a session whose client left during the drain is released, and the
+        // session that stays keeps its tab.
+        {
+            let home = TestHome::new("end-replace-left");
+            let served = serve_relayed(&home);
+            let browser = attach_ending_browser(&served, PageWork::Answered);
+            let (left, left_workspace) = open_session(&served);
+            let (mut stays, stays_workspace) = open_session(&served);
+            bind_tab(&served.intake.workspaces, &left_workspace, RETURNING_TAB);
+            let kept = bind_tab(
+                &served.intake.workspaces,
+                &stays_workspace,
+                RETURNING_TAB + 1,
+            );
+            let running = served.intake.quit.drain.admit().unwrap();
 
-        served.intake.quit.begin(QuitReason::Replace, PATIENCE);
-        drop(left);
-        eventually(|| served.intake.workspaces.ids() == [stays_workspace.clone()]);
-        drop(running);
+            served.intake.quit.begin(QuitReason::Replace, PATIENCE);
+            drop(left);
+            eventually(|| served.intake.workspaces.ids() == [stays_workspace.clone()]);
+            drop(running);
 
-        let (tokens, goodbye) = until_goodbye(&mut stays);
-        assert_eq!(goodbye, GoodbyeReason::Replace);
-        assert_eq!(handles_in(tokens.last().unwrap()), [kept.as_str()]);
-        served
-            .quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the replace finishes");
-        assert_eq!(closed_before_goodbye(&browser), [RETURNING_TAB]);
-        assert_eq!(bound_tabs(&served), vec![(kept, RETURNING_TAB + 1)]);
-    }
-
-    #[test]
-    fn a_leased_workspace_is_cancelled_before_its_release() {
-        let home = TestHome::new("end-leased");
-        let served = serve_relayed(&home);
-        let browser = attach_ending_browser(&served, PageWork::HeldUntilCancelled);
-        let (mut socket, workspace) = open_session(&served);
-        let handle = bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
-        send_line(
-            &mut socket,
-            json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                "params": {"name": "browser_read", "arguments": {"tab": handle}}}),
-        );
-        drop(browser.wait(|seen| {
-            !requests_at(seen, "frames").is_empty() || !requests_at(seen, "call").is_empty()
-        }));
-
-        // The drain gives up on the call, so the end meets the workspace still leased.
-        served
-            .intake
-            .quit
-            .begin(QuitReason::Quit, Duration::from_millis(100));
-
-        let (_, goodbye) = until_goodbye(&mut socket);
-        assert_eq!(goodbye, GoodbyeReason::Quit);
-        served
-            .quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the quit finishes");
-        assert_eq!(closed_before_goodbye(&browser), [RETURNING_TAB]);
-        let seen = browser.wait(|_| true);
-        let cancelled = seen
-            .frames
-            .iter()
-            .position(|frame| frame["kind"] == "cancel")
-            .expect("the running call is cancelled");
-        let closed = requests_at(&seen, "close_tab")[0].0;
-        assert!(cancelled < closed, "{:?}", seen.frames);
-        drop(seen);
-        assert!(served.intake.workspaces.ids().is_empty());
-    }
-
-    #[test]
-    fn a_session_end_says_goodbye_inside_the_fallback_with_many_tabs() {
-        const TABS: u64 = 300;
-
-        let home = TestHome::new("end-session-many");
-        let served = serve_relayed(&home);
-        let browser = attach_ending_browser(&served, PageWork::Silent);
-        let (mut socket, workspace) = open_session(&served);
-        for tab in 0..TABS {
-            bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB + tab);
+            let (tokens, goodbye) = until_goodbye(&mut stays);
+            assert_eq!(goodbye, GoodbyeReason::Replace);
+            assert_eq!(handles_in(tokens.last().unwrap()), [kept.as_str()]);
+            served
+                .quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the replace finishes");
+            assert_eq!(closed_before_goodbye(&browser), [RETURNING_TAB]);
+            assert_eq!(bound_tabs(&served), vec![(kept, RETURNING_TAB + 1)]);
         }
 
-        let began = Instant::now();
-        served.intake.quit.session_end();
+        // A workspace a call still holds is cancelled before its tabs close.
+        {
+            let home = TestHome::new("end-leased");
+            let served = serve_relayed(&home);
+            let browser = attach_ending_browser(&served, PageWork::HeldUntilCancelled);
+            let (mut socket, workspace) = open_session(&served);
+            let handle = bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+            send_line(
+                &mut socket,
+                json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                    "params": {"name": "browser_read", "arguments": {"tab": handle}}}),
+            );
+            drop(browser.wait(|seen| {
+                !requests_at(seen, "frames").is_empty() || !requests_at(seen, "call").is_empty()
+            }));
 
-        let (_, goodbye) = until_goodbye(&mut socket);
-        assert_eq!(goodbye, GoodbyeReason::SessionEnd);
-        let seen = browser.wait(|seen| goodbye_at(seen).is_some());
-        assert!(
-            began.elapsed() < ghostlight_relay::os::session::FALLBACK_EXIT,
-            "both goodbyes come before the fallback exit: {:?}",
-            began.elapsed()
-        );
-        assert!(requests_at(&seen, "close_tab").is_empty());
-        assert!(requests_at(&seen, "diagnostics").is_empty());
-        drop(seen);
-        assert!(served.intake.workspaces.ids().is_empty());
+            // The drain gives up on the call, so the end meets the workspace still leased.
+            served
+                .intake
+                .quit
+                .begin(QuitReason::Quit, Duration::from_millis(100));
+
+            let (_, goodbye) = until_goodbye(&mut socket);
+            assert_eq!(goodbye, GoodbyeReason::Quit);
+            served
+                .quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the quit finishes");
+            assert_eq!(closed_before_goodbye(&browser), [RETURNING_TAB]);
+            let seen = browser.wait(|_| true);
+            let cancelled = seen
+                .frames
+                .iter()
+                .position(|frame| frame["kind"] == "cancel")
+                .expect("the running call is cancelled");
+            let closed = requests_at(&seen, "close_tab")[0].0;
+            assert!(cancelled < closed, "{:?}", seen.frames);
+            drop(seen);
+            assert!(served.intake.workspaces.ids().is_empty());
+        }
+
+        // However many tabs a session holds, the end of the session says both goodbyes inside its
+        // fallback exit and sends the browser nothing.
+        {
+            const TABS: u64 = 300;
+
+            let home = TestHome::new("end-session-many");
+            let served = serve_relayed(&home);
+            let browser = attach_ending_browser(&served, PageWork::Silent);
+            let (mut socket, workspace) = open_session(&served);
+            for tab in 0..TABS {
+                bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB + tab);
+            }
+
+            let began = Instant::now();
+            served.intake.quit.session_end();
+
+            let (_, goodbye) = until_goodbye(&mut socket);
+            assert_eq!(goodbye, GoodbyeReason::SessionEnd);
+            let seen = browser.wait(|seen| goodbye_at(seen).is_some());
+            assert!(
+                began.elapsed() < ghostlight_relay::os::session::FALLBACK_EXIT,
+                "both goodbyes come before the fallback exit: {:?}",
+                began.elapsed()
+            );
+            assert!(requests_at(&seen, "close_tab").is_empty());
+            assert!(requests_at(&seen, "diagnostics").is_empty());
+            drop(seen);
+            assert!(served.intake.workspaces.ids().is_empty());
+        }
     }
 
+    /// ADR-0199 Decision 9 step 6: a start that does not accept openings in time stops by itself,
+    /// and becoming ready settles that limit, so a ready service never stops for it.
     #[test]
-    fn a_start_that_never_becomes_ready_stops_by_itself() {
-        let directory = temp_home("ready-stalls");
-        let host = ServiceHost::start(&directory).unwrap();
-        let (expired, fired) = std::sync::mpsc::channel();
-        host.expect_ready_by(Instant::now() + Duration::from_millis(100), move || {
-            let _ = expired.send(());
-        })
-        .unwrap();
-        assert!(fired.recv_timeout(Duration::from_secs(5)).is_ok());
-        drop(host);
-    }
-
-    #[test]
-    fn becoming_ready_cancels_the_stop() {
+    fn becoming_ready_cancels_the_stop_of_a_stalled_start() {
         let directory = temp_home("ready-published");
         let host = ServiceHost::start(&directory).unwrap();
-        let (expired, fired) = std::sync::mpsc::channel();
-        host.expect_ready_by(Instant::now() + Duration::from_millis(200), move || {
+        let (expired, fired) = mpsc::channel::<()>();
+        // A limit far past what this test waits, armed before the endpoint is bound, as serve does.
+        host.expect_ready_by(Instant::now() + PATIENCE * 6, move || {
             let _ = expired.send(());
         })
         .unwrap();
         host.publish_ready().unwrap();
-        assert!(fired.recv_timeout(Duration::from_millis(600)).is_err());
+        // A settled limit ends its watcher without a stop, which drops the stop unmade.
+        assert_eq!(
+            fired.recv_timeout(PATIENCE),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        );
         drop(host);
     }
 
+    /// ACCEPTANCE Gov21: the session watch tells a client its tool list changed once, and only when
+    /// a policy change changes the catalog it was given, including one an earlier service gave.
     #[test]
     fn the_session_watch_tells_the_client_only_when_a_policy_change_changes_the_catalog() {
         use crate::governance::GovernanceFacade;
@@ -6335,23 +5157,62 @@ mod tests {
         (status, answer)
     }
 
+    /// The desktop-role contract (ADR-0199 Decision 7 and its shell milestone 2 amendment),
+    /// ACCEPTANCE D1 and D11, and defect 17ec7571: the shell that takes the one desktop place gets
+    /// the workbench and its bearer, and one that finds it taken is told so, with the holder shown
+    /// only for a shell that wanted a window.
     #[test]
-    fn a_shell_of_this_build_is_handed_the_workbench_and_its_bearer() {
-        let home = TestHome::new("desktop-handover");
+    fn a_shell_that_attaches_gets_the_workbench_and_its_bearer_or_is_told_the_place_is_taken() {
+        let home = TestHome::new("desktop-place");
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
         let address = host.workbench_address().unwrap();
 
-        let (_stream, handed) = open_desktop();
+        // The shell that takes the place is handed the workbench and the tray the service
+        // describes.
+        let (mut first, handed) = open_desktop();
         let (url, bearer, tray) = handed_over(handed);
-
         assert_eq!(url, address.url());
         assert_eq!(
             tray,
             host.workbench.tray_model(),
             "the workbench frame carries the tray the service describes"
         );
-        assert_eq!(tray.state, crate::intake::desktop::TrayState::Ready);
+        eventually(|| host.quit.shells().attached() == 1);
+
+        // A second shell is told the place is taken and leaves, and the first is shown.
+        let (mut second, handed) = open_desktop();
+        assert_eq!(handed, DesktopFrame::AlreadyOpen);
+        assert_eq!(next_frame(&mut first), DesktopFrame::Show { address: None });
+        assert!(
+            matches!(
+                frame::read_frame::<DesktopFrame>(&mut second),
+                Ok(None) | Err(_)
+            ),
+            "the stream of the shell that was turned away ends"
+        );
+        assert_eq!(host.quit.shells().attached(), 1);
+
+        // Presence's own tray shell that finds the place taken brings no window forward: the next
+        // frame the holder hears is a later show.
+        let mut tray_opening = desktop_opening();
+        tray_opening.channel = Some(ShellView::Tray.as_str().to_owned());
+        let (mut tray_shell, reply) = dial(&tray_opening);
+        assert!(reply.accepted, "{reply:?}");
+        assert_eq!(
+            frame::read_frame::<DesktopFrame>(&mut tray_shell).unwrap(),
+            Some(DesktopFrame::AlreadyOpen)
+        );
+        host.workbench.reveal(Some(PageAddress::About)).unwrap();
+        assert_eq!(
+            next_frame(&mut first),
+            DesktopFrame::Show {
+                address: Some(PageAddress::About)
+            },
+            "the first shell still serves, and the tray shell asked it to show nothing"
+        );
+
+        // The bearer makes the shell's page the window's; without it a screen cannot act as one.
         let hold = r#"{"intent":"hold"}"#;
         let (status, _) = workbench_call(
             address.port(),
@@ -6369,144 +5230,15 @@ mod tests {
         let (status, _) =
             workbench_call(address.port(), "POST", "/api/runtime", None, Some(resume));
         assert_eq!(status, 401, "without the bearer a screen cannot resume");
-        drop(host);
-    }
 
-    #[test]
-    fn a_pause_sends_the_shell_one_tray_model_with_resume_enabled() {
-        let home = TestHome::new("desktop-tray-model");
-        let host =
-            ServiceHost::start_in_world(home.path(), |_, _| Fake::default().into_world()).unwrap();
-        host.publish_ready().unwrap();
-        let (mut stream, handed) = open_desktop();
-        let (_, _, tray) = handed_over(handed);
-        assert_eq!(tray.state, crate::intake::desktop::TrayState::Ready);
-
-        host.workbench
-            .apply_runtime_control(RuntimeControlIntent::Hold, RuntimeSource::Window);
-
-        let DesktopFrame::TrayModel { model } = next_frame(&mut stream) else {
-            panic!("the first frame after a pause is the new tray");
-        };
-        // A pause shows on the icon with or without a browser, as it does on the band; the entries
-        // follow the runtime.
-        assert_eq!(model.state, crate::intake::desktop::TrayState::Paused);
-        let enabled: Vec<(&str, bool)> = model
-            .items
-            .iter()
-            .map(|item| (item.id.as_str(), item.enabled))
-            .collect();
-        assert_eq!(
-            enabled,
-            [
-                ("open", true),
-                ("hold", false),
-                ("resume", true),
-                ("quit", true)
-            ]
-        );
-        // Asking again with nothing changed sends nothing; the next frame is a later change.
-        host.workbench.refresh_live_parts();
-        host.workbench
-            .apply_runtime_control(RuntimeControlIntent::Resume, RuntimeSource::Window);
-        let DesktopFrame::TrayModel { model } = next_frame(&mut stream) else {
-            panic!("a resume is the next change, not a repeat of the pause");
-        };
-        assert!(model
-            .items
-            .iter()
-            .any(|item| item.id == TrayItemId::Hold && item.enabled));
-        drop(host);
-    }
-
-    #[test]
-    fn tray_clicks_hold_and_resume_the_agents_and_an_open_click_changes_nothing() {
-        let home = TestHome::new("desktop-tray-clicks");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let (mut stream, _) = open_desktop();
-        let state = || host.workbench.snapshot().configuration.runtime_state;
-
-        for (item, expected) in [
-            (TrayItemId::Open, RuntimeControlState::Active),
-            (TrayItemId::Hold, RuntimeControlState::Held),
-            (TrayItemId::Open, RuntimeControlState::Held),
-        ] {
-            frame::write_frame(&mut stream, &DesktopFrame::Tray { item }).unwrap();
-            eventually(|| state() == expected);
-        }
+        // The place is free again once the holder goes.
+        drop(first);
+        eventually(|| host.quit.shells().attached() == 0);
+        let (_third, handed) = open_desktop();
         assert!(
-            host.workbench.snapshot().runtime_note.is_some(),
-            "a pause says where it came from"
+            matches!(handed, DesktopFrame::Workbench { .. }),
+            "the place is free again: {handed:?}"
         );
-
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Tray {
-                item: TrayItemId::Resume,
-            },
-        )
-        .unwrap();
-        eventually(|| state() == RuntimeControlState::Active);
-        eventually(|| host.workbench.snapshot().runtime_note.is_none());
-        drop(host);
-    }
-
-    #[test]
-    fn a_tray_quit_is_the_persons_quit() {
-        let (home, host, quit_requested) = quittable_host("desktop-tray-quit");
-        let (mut stream, _) = open_desktop();
-
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Tray {
-                item: TrayItemId::Quit,
-            },
-        )
-        .unwrap();
-
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the desktop is asked to exit");
-        assert!(super::latch::is_set(
-            &home.path().join("state").join("quit")
-        ));
-        drop(host);
-    }
-
-    #[test]
-    fn a_quit_says_goodbye_on_the_desktop_stream_before_it_closes() {
-        for (reason, goodbye) in [
-            (QuitReason::Quit, GoodbyeReason::Quit),
-            (QuitReason::Replace, GoodbyeReason::Replace),
-            (QuitReason::Uninstall, GoodbyeReason::Uninstall),
-        ] {
-            let (_home, host, _quit_requested) = quittable_host("desktop-goodbye");
-            let (mut stream, _) = open_desktop();
-
-            host.quit_handle().begin(reason, Duration::from_secs(5));
-
-            match frame::read_frame::<DesktopFrame>(&mut stream).unwrap() {
-                Some(DesktopFrame::Goodbye { reason }) => assert_eq!(reason, goodbye),
-                other => panic!("expected a goodbye, got {other:?}"),
-            }
-            drop(host);
-        }
-    }
-
-    #[test]
-    fn a_session_end_says_goodbye_on_the_desktop_stream() {
-        let (_home, host, _quit_requested) = quittable_host("desktop-session-end");
-        let (mut stream, _) = open_desktop();
-
-        host.quit_handle().session_end();
-
-        assert!(matches!(
-            frame::read_frame::<DesktopFrame>(&mut stream).unwrap(),
-            Some(DesktopFrame::Goodbye {
-                reason: GoodbyeReason::SessionEnd
-            })
-        ));
         drop(host);
     }
 
@@ -6542,423 +5274,138 @@ mod tests {
     /// Run `request` on a thread of its own and give back what it answers.
     fn in_background<T: Send + 'static>(
         request: impl FnOnce() -> T + Send + 'static,
-    ) -> std::sync::mpsc::Receiver<T> {
-        let (answered, answers) = std::sync::mpsc::channel();
+    ) -> mpsc::Receiver<T> {
+        let (answered, answers) = mpsc::channel();
         thread::spawn(move || {
             let _ = answered.send(request());
         });
         answers
     }
 
+    /// ACCEPTANCE C16, ADR-0200 Decision 11 and defect c4c05e24 (JQ11): every way a person asks to
+    /// see Ghostlight shows the window at setup until setup is complete, and with no shell
+    /// attached starts one that shows the window at the address asked.
     #[test]
-    fn showing_the_window_writes_a_show_frame_with_the_address_to_the_shell() {
-        let home = TestHome::new("shell-show");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
+    fn a_persons_request_for_the_window_shows_it_at_setup_until_setup_is_complete() {
+        use crate::browser::adapter::BrowserEvent;
+        use crate::browser::BrowserEventSink;
+        use crate::install::setup_state::{self, SetupRecord};
+        use crate::workbench::setup::SetupProgress;
 
-        host.workbench
-            .reveal(Some(PageAddress::SettingsDiagnostics))
+        {
+            let home = TestHome::new("show-setup");
+            let host = ServiceHost::start(home.path()).unwrap();
+            host.publish_ready().unwrap();
+            let mut shell = attached_shell(&host);
+            let browser = super::ServiceBrowserEvents::new(
+                host.workbench.clone(),
+                host.intake.workspaces.clone(),
+            );
+            let click = |shell: &mut Connection, item| {
+                frame::write_frame(shell, &DesktopFrame::Tray { item }).unwrap();
+            };
+            let at_setup = DesktopFrame::Show {
+                address: Some(PageAddress::Setup),
+            };
+
+            // While setup is incomplete, the tray's Open, a control show (the install and
+            // `ghostlight open`) and the browser's show request (the extension's Open Ghostlight)
+            // each bring the window to setup.
+            click(&mut shell, TrayItemId::Open);
+            assert_eq!(next_frame(&mut shell), at_setup, "the tray's Open");
+            assert!(cli_client::activate_workbench().unwrap());
+            assert_eq!(next_frame(&mut shell), at_setup, "a control show");
+            browser.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+            assert_eq!(
+                next_frame(&mut shell),
+                at_setup,
+                "the browser's show request"
+            );
+            eventually(|| !browser.showing.load(Ordering::SeqCst));
+
+            // With setup complete the window opens where it last was, and the tray's Open asks for
+            // nothing more than the shell already does: a Hold click is answered after it, by a
+            // tray model, and the next show is a later one.
+            let record = host.intake.layout.setup_record();
+            assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
+            host.workbench.attach_setup(SetupProgress::load(&record));
+            click(&mut shell, TrayItemId::Open);
+            click(&mut shell, TrayItemId::Hold);
+            while !matches!(next_frame(&mut shell), DesktopFrame::TrayModel { .. }) {}
+            host.workbench.reveal(Some(PageAddress::About)).unwrap();
+            assert_eq!(
+                next_frame(&mut shell),
+                DesktopFrame::Show {
+                    address: Some(PageAddress::About)
+                },
+                "no show was written for the open"
+            );
+            assert!(cli_client::activate_workbench().unwrap());
+            assert_eq!(
+                next_frame(&mut shell),
+                DesktopFrame::Show { address: None },
+                "a control show"
+            );
+            browser.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+            assert_eq!(
+                next_frame(&mut shell),
+                DesktopFrame::Show { address: None },
+                "the browser's show request"
+            );
+            drop(host);
+        }
+
+        // With no shell attached, the request starts one without the tray argument and shows the
+        // window at the address asked once it attaches.
+        {
+            let home = TestHome::new("show-launch");
+            let fake = Arc::new(Fake::default());
+            let host = ServiceHost::start_in_world(home.path(), {
+                let fake = Arc::clone(&fake);
+                move |_, _| fake.world()
+            })
             .unwrap();
-        host.workbench.reveal(None).unwrap();
+            host.publish_ready().unwrap();
 
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Show {
-                address: Some(PageAddress::SettingsDiagnostics)
-            }
-        );
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Show { address: None }
-        );
-        drop(host);
-    }
+            let asked = {
+                let workbench = host.workbench.clone();
+                in_background(move || workbench.reveal(Some(PageAddress::SettingsSharing)))
+            };
+            eventually(|| fake.launches() == [false]);
+            let (mut stream, handed) = open_desktop();
+            assert!(matches!(handed, DesktopFrame::Workbench { .. }));
 
-    #[test]
-    fn a_notice_is_written_to_the_shell_as_the_service_worded_it() {
-        let home = TestHome::new("shell-notice");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
-
-        host.workbench.test_notification().unwrap();
-
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Notice {
-                title: crate::language::workbench::NOTICE_CHECKUP_TITLE.to_owned(),
-                body: crate::language::workbench::NOTICE_CHECKUP_BODY.to_owned(),
-            }
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn picking_a_file_waits_for_the_shell_and_returns_what_the_person_chose() {
-        let home = TestHome::new("shell-pick");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
-        let route = host.route();
-
-        let picked = in_background(move || route.pick_file("Choose a file"));
-        let (id, act) = next_act(&mut stream);
-        assert_eq!(
-            act,
-            NativeAct::PickFile {
-                title: "Choose a file".to_owned()
-            }
-        );
-        assert!(
-            picked.recv_timeout(Duration::from_millis(200)).is_err(),
-            "the pick waits for the person"
-        );
-        answer(
-            &mut stream,
-            id,
-            ActOutcome::Picked {
-                path: "chosen.json".to_owned(),
-            },
-        );
-        assert_eq!(
-            picked.recv_timeout(PATIENCE).unwrap().unwrap(),
-            Some(std::path::PathBuf::from("chosen.json"))
-        );
-
-        let route = host.route();
-        let closed = in_background(move || route.pick_file("Again"));
-        let (id, _) = next_act(&mut stream);
-        answer(&mut stream, id, ActOutcome::Cancelled);
-        assert_eq!(closed.recv_timeout(PATIENCE).unwrap().unwrap(), None);
-
-        let route = host.route();
-        let refused = in_background(move || route.pick_file("Once more"));
-        let (id, _) = next_act(&mut stream);
-        answer(&mut stream, id, ActOutcome::Failed);
-        assert!(matches!(
-            refused.recv_timeout(PATIENCE).unwrap(),
-            Err(WorkbenchPresentationError::ActFailed(_))
-        ));
-        drop(host);
-    }
-
-    #[test]
-    fn a_link_and_a_folder_are_opened_by_the_shell_and_their_failure_is_told() {
-        let home = TestHome::new("shell-open");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
-
-        for (outcome, opened) in [(ActOutcome::Done, true), (ActOutcome::Failed, false)] {
-            let route = host.route();
-            let link = in_background(move || route.open_url("https://example.com/docs"));
-            let (id, act) = next_act(&mut stream);
             assert_eq!(
-                act,
-                NativeAct::OpenUrl {
-                    url: "https://example.com/docs".to_owned()
-                }
+                next_frame(&mut stream),
+                DesktopFrame::Show {
+                    address: Some(PageAddress::SettingsSharing)
+                },
+                "the address asked for before the shell attached is shown when it does"
             );
-            answer(&mut stream, id, outcome.clone());
-            assert_eq!(link.recv_timeout(PATIENCE).unwrap().is_ok(), opened);
-
-            let route = host.route();
-            let folder = in_background(move || route.open_folder(std::path::Path::new("logs")));
-            let (id, act) = next_act(&mut stream);
+            assert!(asked
+                .recv_timeout(PATIENCE)
+                .expect("the request is answered once the shell is attached")
+                .is_ok());
             assert_eq!(
-                act,
-                NativeAct::OpenFolder {
-                    path: "logs".to_owned()
-                }
+                fake.launches(),
+                [false],
+                "one launch, and not a tray one: the window is asked for"
             );
-            answer(&mut stream, id, outcome);
-            assert_eq!(folder.recv_timeout(PATIENCE).unwrap().is_ok(), opened);
+            drop(host);
         }
-        drop(host);
     }
 
+    /// ACCEPTANCE D13 and defects c51808e7 and a034fc2d: status names the window by what the shell
+    /// last reported and a person last did, and a reason the shell gave for a window it cannot
+    /// build stands, also after the shell goes, until a person acts.
     #[test]
-    fn an_answer_for_an_act_nobody_asked_is_ignored() {
-        let home = TestHome::new("shell-stray-result");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
-
-        answer(&mut stream, 99, ActOutcome::Done);
-        host.workbench.reveal(None).unwrap();
-
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Show { address: None },
-            "the stream goes on"
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn a_pick_is_released_when_the_shells_stream_ends() {
-        let home = TestHome::new("shell-pick-ends");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
-        let route = host.route();
-
-        let picked = in_background(move || route.pick_file("Choose"));
-        next_act(&mut stream);
-        drop(stream);
-
-        assert!(matches!(
-            picked.recv_timeout(PATIENCE).unwrap(),
-            Err(WorkbenchPresentationError::Unavailable)
-        ));
-        eventually(|| host.quit.shells().attached() == 0);
-        drop(host);
-    }
-
-    #[test]
-    fn a_pick_is_released_by_a_goodbye() {
-        let home = TestHome::new("shell-pick-goodbye");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
-        let route = host.route();
-
-        let picked = in_background(move || route.pick_file("Choose"));
-        next_act(&mut stream);
-        host.quit.shells().say_goodbye(GoodbyeReason::Replace);
-
-        assert!(matches!(
-            picked.recv_timeout(PATIENCE).unwrap(),
-            Err(WorkbenchPresentationError::Unavailable)
-        ));
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Goodbye {
-                reason: GoodbyeReason::Replace
-            }
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn a_quit_releases_a_pick_at_once_and_does_not_wait_for_it() {
-        let (_home, host, quit_requested) = quittable_host("shell-pick-quit");
-        let mut stream = attached_shell(&host);
-        let route = host.route();
-
-        let picked = in_background(move || route.pick_file("Choose"));
-        next_act(&mut stream);
-        let began = Instant::now();
-        host.quit_handle().begin(QuitReason::Quit, QUIT_GRACE);
-
-        assert!(matches!(
-            picked.recv_timeout(PATIENCE).unwrap(),
-            Err(WorkbenchPresentationError::Unavailable)
-        ));
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the desktop is asked to exit");
-        assert!(
-            began.elapsed() < QUIT_GRACE,
-            "a person's open dialog does not hold the quit"
-        );
-        assert!(
-            matches!(
-                host.route().pick_file("Too late"),
-                Err(WorkbenchPresentationError::Unavailable)
-            ),
-            "no act starts once a quit has begun"
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn a_session_end_releases_a_pick() {
-        let (_home, host, _quit_requested) = quittable_host("shell-pick-session-end");
-        let mut stream = attached_shell(&host);
-        let route = host.route();
-
-        let picked = in_background(move || route.pick_file("Choose"));
-        next_act(&mut stream);
-        host.quit_handle().session_end();
-
-        assert!(matches!(
-            picked.recv_timeout(PATIENCE).unwrap(),
-            Err(WorkbenchPresentationError::Unavailable)
-        ));
-        drop(host);
-    }
-
-    #[test]
-    fn a_second_shell_is_told_it_is_already_open_and_the_first_is_shown() {
-        let home = TestHome::new("shell-already-open");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut first = attached_shell(&host);
-
-        let (mut second, handed) = open_desktop();
-
-        assert_eq!(handed, DesktopFrame::AlreadyOpen);
-        assert_eq!(next_frame(&mut first), DesktopFrame::Show { address: None });
-        assert!(
-            matches!(
-                frame::read_frame::<DesktopFrame>(&mut second),
-                Ok(None) | Err(_)
-            ),
-            "the stream of the shell that was turned away ends"
-        );
-        assert_eq!(host.quit.shells().attached(), 1);
-
-        host.workbench.reveal(Some(PageAddress::About)).unwrap();
-        assert_eq!(
-            next_frame(&mut first),
-            DesktopFrame::Show {
-                address: Some(PageAddress::About)
-            },
-            "the first shell still serves"
-        );
-
-        drop(first);
-        eventually(|| host.quit.shells().attached() == 0);
-        let (_third, handed) = open_desktop();
-        assert!(
-            matches!(handed, DesktopFrame::Workbench { .. }),
-            "the place is free again: {handed:?}"
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn a_shell_started_for_the_tray_that_finds_the_place_taken_brings_no_window_forward() {
-        let home = TestHome::new("shell-tray-already-open");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut first = attached_shell(&host);
-
-        let mut tray = desktop_opening();
-        tray.channel = Some(ShellView::Tray.as_str().to_owned());
-        let (mut second, reply) = dial(&tray);
-        assert!(reply.accepted, "{reply:?}");
-        assert_eq!(
-            frame::read_frame::<DesktopFrame>(&mut second).unwrap(),
-            Some(DesktopFrame::AlreadyOpen)
-        );
-
-        host.workbench.reveal(Some(PageAddress::About)).unwrap();
-        assert_eq!(
-            next_frame(&mut first),
-            DesktopFrame::Show {
-                address: Some(PageAddress::About)
-            },
-            "the first frame the holder hears is this show: the tray shell asked for none"
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn with_no_shell_a_notice_and_an_act_are_unavailable_and_a_show_has_no_shell_to_start() {
-        let home = TestHome::new("shell-none");
-        // A test home has no shell file, so presence starts nothing.
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        for result in [
-            host.workbench.reveal(None),
-            host.workbench.test_notification(),
-        ] {
-            assert!(
-                matches!(
-                    result,
-                    Err(crate::workbench::WorkbenchError::PresentationUnavailable)
-                ),
-                "{result:?}"
-            );
-        }
-        assert!(host
-            .workbench
-            .open_destination(crate::workbench::WorkbenchDestination::Home)
-            .is_err());
-        drop(host);
-    }
-
-    #[test]
-    fn showing_the_window_with_no_shell_starts_one_without_tray_and_shows_it_when_it_attaches() {
-        let home = TestHome::new("shell-show-launch");
-        let fake = Arc::new(Fake::default());
-        let host = ServiceHost::start_in_world(home.path(), {
-            let fake = Arc::clone(&fake);
-            move |_, _| fake.world()
-        })
-        .unwrap();
-        host.publish_ready().unwrap();
-
-        let asked = {
-            let workbench = host.workbench.clone();
-            in_background(move || workbench.reveal(Some(PageAddress::SettingsSharing)))
-        };
-        eventually(|| fake.launches() == [false]);
-        let (mut stream, handed) = open_desktop();
-        assert!(matches!(handed, DesktopFrame::Workbench { .. }));
-
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Show {
-                address: Some(PageAddress::SettingsSharing)
-            },
-            "the address asked for before the shell attached is shown when it does"
-        );
-        assert!(asked
-            .recv_timeout(PATIENCE)
-            .expect("the request is answered once the shell is attached")
-            .is_ok());
-        assert_eq!(
-            fake.launches(),
-            [false],
-            "one launch, and not a tray one: the window is asked for"
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn the_status_names_the_window_by_what_presence_knows() {
+    fn the_status_names_the_window_by_what_the_shell_last_reported() {
+        use crate::install::setup_state::{self, SetupRecord};
+        use crate::intake::desktop::UnavailableReason;
         use crate::language::workbench::WindowReason;
+        use crate::workbench::setup::SetupProgress;
 
         let home = TestHome::new("status-window");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let window = || cli_client::status_at(home.path()).unwrap().window;
-        assert_eq!(window(), None, "presence has nothing to say yet");
-
-        let (mut stream, _) = open_desktop();
-        eventually(|| window() == Some(WindowReason::Shown));
-        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: true }).unwrap();
-        eventually(|| window() == Some(WindowReason::Tray));
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Unavailable {
-                reason: crate::intake::desktop::UnavailableReason::NoWebview,
-            },
-        )
-        .unwrap();
-        // A click is answered after the frame before it was read, so the reason is recorded.
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Tray {
-                item: TrayItemId::Hold,
-            },
-        )
-        .unwrap();
-        while !matches!(next_frame(&mut stream), DesktopFrame::TrayModel { .. }) {}
-        drop(stream);
-        eventually(|| window() == Some(WindowReason::NoWebview));
-        drop(host);
-    }
-
-    #[test]
-    fn a_tray_open_after_an_agent_started_shell_or_a_close_that_stays_reads_shown() {
-        use crate::language::workbench::WindowReason;
-
-        let home = TestHome::new("status-open");
         let fake = Arc::new(Fake::default());
         let host = ServiceHost::start_in_world(home.path(), {
             let fake = Arc::clone(&fake);
@@ -6966,236 +5413,209 @@ mod tests {
         })
         .unwrap();
         host.publish_ready().unwrap();
+        // With setup complete a tray Open only says the person has the window open.
+        let record = host.intake.layout.setup_record();
+        assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
+        host.workbench.attach_setup(SetupProgress::load(&record));
         let window = || cli_client::status_at(home.path()).unwrap().window;
-        let open = |stream: &mut _| {
-            frame::write_frame(
-                stream,
-                &DesktopFrame::Tray {
-                    item: TrayItemId::Open,
-                },
-            )
-            .unwrap();
+        let send = |stream: &mut Connection, sent: DesktopFrame| {
+            frame::write_frame(stream, &sent).unwrap();
         };
+        let open = DesktopFrame::Tray {
+            item: TrayItemId::Open,
+        };
+        let cannot_build = DesktopFrame::Unavailable {
+            reason: UnavailableReason::NoWebview,
+        };
+        assert_eq!(window(), None, "presence has nothing to say yet");
 
-        // Presence's own tray launch attaches with the icon only.
-        host.intake.presence.published();
+        // Presence's own tray launch attaches with the icon only, and a tray Open is a person
+        // opening the window.
         fake.advance(super::presence::LAUNCH_DELAY);
         host.intake.presence.tick();
         assert_eq!(fake.launches(), [true]);
         let (mut stream, _) = open_desktop();
         eventually(|| window() == Some(WindowReason::Tray));
-        open(&mut stream);
+        send(&mut stream, open.clone());
         eventually(|| window() == Some(WindowReason::Shown));
 
-        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: true }).unwrap();
-        eventually(|| window() == Some(WindowReason::Tray));
-        open(&mut stream);
-        eventually(|| window() == Some(WindowReason::Shown));
-        drop(host);
-    }
-
-    #[test]
-    fn a_tray_open_brings_the_window_to_setup_until_setup_is_complete() {
-        use crate::install::setup_state::{self, SetupRecord};
-        use crate::workbench::setup::SetupProgress;
-
-        let home = TestHome::new("tray-open-setup");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
-        let open = |stream: &mut _| {
-            frame::write_frame(
-                stream,
-                &DesktopFrame::Tray {
-                    item: TrayItemId::Open,
-                },
-            )
-            .unwrap();
-        };
-
-        open(&mut stream);
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Show {
-                address: Some(PageAddress::Setup)
-            },
-            "an open window comes back to setup"
-        );
-
-        // With setup complete the tray asks for nothing more than the shell already does.
-        let record = host.intake.layout.setup_record();
-        assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
-        host.workbench.attach_setup(SetupProgress::load(&record));
-        open(&mut stream);
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Tray {
-                item: TrayItemId::Hold,
-            },
-        )
-        .unwrap();
-        while !matches!(next_frame(&mut stream), DesktopFrame::TrayModel { .. }) {}
-        host.workbench.reveal(Some(PageAddress::About)).unwrap();
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Show {
-                address: Some(PageAddress::About)
-            },
-            "no show was written for the open"
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn a_show_the_shell_cannot_build_reads_as_the_reason_while_the_shell_is_attached() {
-        use crate::intake::desktop::UnavailableReason;
-        use crate::language::workbench::WindowReason;
-
-        let home = TestHome::new("status-show-fails");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let window = || cli_client::status_at(home.path()).unwrap().window;
-        let (mut stream, _) = open_desktop();
-        eventually(|| window() == Some(WindowReason::Shown));
-
+        // A show the shell cannot build reads as its reason while the shell stays attached, and a
+        // later show the shell builds ends it.
         host.workbench.reveal(Some(PageAddress::About)).unwrap();
         assert!(matches!(next_frame(&mut stream), DesktopFrame::Show { .. }));
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Unavailable {
-                reason: UnavailableReason::NoWebview,
-            },
-        )
-        .unwrap();
+        send(&mut stream, cannot_build.clone());
         eventually(|| window() == Some(WindowReason::NoWebview));
         assert_eq!(host.quit.shells().attached(), 1, "the shell is still there");
-        drop(host);
-    }
-
-    #[test]
-    fn a_later_show_the_shell_builds_clears_the_reason_it_gave_before() {
-        use crate::intake::desktop::UnavailableReason;
-        use crate::language::workbench::WindowReason;
-
-        let home = TestHome::new("status-show-recovers");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let window = || cli_client::status_at(home.path()).unwrap().window;
-        let (mut stream, _) = open_desktop();
-        eventually(|| window() == Some(WindowReason::Shown));
-
-        host.workbench.reveal(Some(PageAddress::About)).unwrap();
-        assert!(matches!(next_frame(&mut stream), DesktopFrame::Show { .. }));
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Unavailable {
-                reason: UnavailableReason::NoWebview,
-            },
-        )
-        .unwrap();
-        eventually(|| window() == Some(WindowReason::NoWebview));
-
         host.workbench.reveal(None).unwrap();
         assert!(matches!(next_frame(&mut stream), DesktopFrame::Show { .. }));
         eventually(|| window() == Some(WindowReason::Shown));
-        drop(host);
-    }
 
-    #[test]
-    fn the_first_close_that_stays_is_explained_once_and_never_again() {
-        let home = TestHome::new("tray-hint");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let hint = home.path().join("state").join("tray-hint");
-        let (mut stream, _) = open_desktop();
+        // A close that stays leaves the icon, and the tray's Open brings the window back.
+        send(&mut stream, DesktopFrame::Closed { stays: true });
+        eventually(|| window() == Some(WindowReason::Tray));
+        send(&mut stream, open);
+        eventually(|| window() == Some(WindowReason::Shown));
 
-        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: true }).unwrap();
-        assert_eq!(
-            next_frame(&mut stream),
-            DesktopFrame::Notice {
-                title: crate::language::workbench::TRAY_HINT_TITLE.to_owned(),
-                body: crate::language::workbench::TRAY_HINT_BODY.to_owned(),
-            }
-        );
-        assert!(hint.is_file(), "the marker is written");
-
-        // A second close says nothing: a Hold click is answered by a tray model, not a notice.
-        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: true }).unwrap();
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Tray {
-                item: TrayItemId::Hold,
-            },
-        )
-        .unwrap();
-        assert!(
-            matches!(next_frame(&mut stream), DesktopFrame::TrayModel { .. }),
-            "no second notice"
-        );
-        drop(host);
-    }
-
-    #[test]
-    fn a_close_that_does_not_stay_says_nothing_and_leaves_no_marker() {
-        let home = TestHome::new("tray-hint-none");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let (mut stream, _) = open_desktop();
-        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: false }).unwrap();
-        frame::write_frame(
-            &mut stream,
-            &DesktopFrame::Tray {
-                item: TrayItemId::Hold,
-            },
-        )
-        .unwrap();
-        assert!(matches!(
-            next_frame(&mut stream),
-            DesktopFrame::TrayModel { .. }
-        ));
-        assert!(!home.path().join("state").join("tray-hint").exists());
-        drop(host);
-    }
-
-    #[test]
-    fn a_service_with_no_workbench_refuses_the_desktop_role_as_unsupported() {
-        let home = TestHome::new("desktop-no-workbench");
-        let served = serve_fake(&home);
-        let client = served.over_a_pair();
-
-        let reply = protocol::open(&client, &desktop_opening(), Instant::now() + PATIENCE).unwrap();
-
-        assert!(!reply.accepted);
-        assert_eq!(reply.code, Some(RefusalCode::Unsupported));
-        assert_eq!(reply.say, Some(OpeningRefusal::Unsupported.message()));
-    }
-
-    #[test]
-    fn a_desktop_stream_that_sends_a_frame_it_cannot_read_ends_alone() {
-        let home = TestHome::new("desktop-garbage");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let mut stream = attached_shell(&host);
-
-        frame::write_frame_raw(&mut stream, b"{ not json at all").unwrap();
-
-        assert!(matches!(
-            frame::read_frame::<DesktopFrame>(&mut stream),
-            Ok(None) | Err(_)
-        ));
+        // The reason a shell gave outlives it, until a person starts a shell again.
+        send(&mut stream, cannot_build);
+        eventually(|| window() == Some(WindowReason::NoWebview));
+        drop(stream);
         eventually(|| host.quit.shells().attached() == 0);
-        let (mut other, _) = open_desktop();
-        frame::write_frame(
-            &mut other,
-            &DesktopFrame::Tray {
-                item: TrayItemId::Hold,
-            },
-        )
-        .unwrap();
-        eventually(|| {
-            host.workbench.snapshot().configuration.runtime_state == RuntimeControlState::Held
-        });
+        assert_eq!(window(), Some(WindowReason::NoWebview));
+        let (_person, _) = open_desktop();
+        eventually(|| window() == Some(WindowReason::Shown));
         drop(host);
+    }
+
+    /// ADR-0199 Decision 7 and its shell milestone 2 amendment (079727e9): every native act the
+    /// service asks of the shell gets one answer, the person's choice or the shell's failure, or
+    /// unavailable once the shell or the service goes, and no open dialog holds a quit.
+    #[test]
+    fn every_native_act_gets_one_answer_from_the_shell_or_unavailable_when_it_goes() {
+        {
+            let home = TestHome::new("shell-acts");
+            let host = ServiceHost::start(home.path()).unwrap();
+            host.publish_ready().unwrap();
+            let mut stream = attached_shell(&host);
+
+            // An answer for an act nobody asked is ignored, and the acts that follow are answered.
+            answer(&mut stream, 99, ActOutcome::Done);
+
+            // A pick returns what the person chose, nothing when they cancelled, and a failure.
+            let route = host.route();
+            let picked = in_background(move || route.pick_file("Choose a file"));
+            let (id, act) = next_act(&mut stream);
+            assert_eq!(
+                act,
+                NativeAct::PickFile {
+                    title: "Choose a file".to_owned()
+                }
+            );
+            answer(
+                &mut stream,
+                id,
+                ActOutcome::Picked {
+                    path: "chosen.json".to_owned(),
+                },
+            );
+            assert_eq!(
+                picked.recv_timeout(PATIENCE).unwrap().unwrap(),
+                Some(PathBuf::from("chosen.json"))
+            );
+
+            let route = host.route();
+            let closed = in_background(move || route.pick_file("Again"));
+            let (id, _) = next_act(&mut stream);
+            answer(&mut stream, id, ActOutcome::Cancelled);
+            assert_eq!(closed.recv_timeout(PATIENCE).unwrap().unwrap(), None);
+
+            let route = host.route();
+            let refused = in_background(move || route.pick_file("Once more"));
+            let (id, _) = next_act(&mut stream);
+            answer(&mut stream, id, ActOutcome::Failed);
+            assert!(matches!(
+                refused.recv_timeout(PATIENCE).unwrap(),
+                Err(WorkbenchPresentationError::ActFailed(_))
+            ));
+
+            // A link and a folder are opened by the shell, and their failure is told.
+            for (outcome, opened) in [(ActOutcome::Done, true), (ActOutcome::Failed, false)] {
+                let route = host.route();
+                let link = in_background(move || route.open_url("https://example.com/docs"));
+                let (id, act) = next_act(&mut stream);
+                assert_eq!(
+                    act,
+                    NativeAct::OpenUrl {
+                        url: "https://example.com/docs".to_owned()
+                    }
+                );
+                answer(&mut stream, id, outcome.clone());
+                assert_eq!(link.recv_timeout(PATIENCE).unwrap().is_ok(), opened);
+
+                let route = host.route();
+                let folder = in_background(move || route.open_folder(Path::new("logs")));
+                let (id, act) = next_act(&mut stream);
+                assert_eq!(
+                    act,
+                    NativeAct::OpenFolder {
+                        path: "logs".to_owned()
+                    }
+                );
+                answer(&mut stream, id, outcome);
+                assert_eq!(folder.recv_timeout(PATIENCE).unwrap().is_ok(), opened);
+            }
+
+            // A pick is released when the shell's stream ends.
+            let route = host.route();
+            let picked = in_background(move || route.pick_file("Choose"));
+            next_act(&mut stream);
+            drop(stream);
+            assert!(matches!(
+                picked.recv_timeout(PATIENCE).unwrap(),
+                Err(WorkbenchPresentationError::Unavailable)
+            ));
+            eventually(|| host.quit.shells().attached() == 0);
+
+            // A pick is released by a goodbye, which the shell hears.
+            let mut stream = attached_shell(&host);
+            let route = host.route();
+            let picked = in_background(move || route.pick_file("Choose"));
+            next_act(&mut stream);
+            host.quit.shells().say_goodbye(GoodbyeReason::Replace);
+            assert!(matches!(
+                picked.recv_timeout(PATIENCE).unwrap(),
+                Err(WorkbenchPresentationError::Unavailable)
+            ));
+            assert_eq!(
+                next_frame(&mut stream),
+                DesktopFrame::Goodbye {
+                    reason: GoodbyeReason::Replace
+                }
+            );
+            drop(host);
+        }
+
+        // A quit releases a pick at once and does not wait for it, and no act starts after it
+        // began. Its grace is far longer than this test waits, so a quit that waited for the
+        // person's dialog would not end in time.
+        {
+            let (_home, host, quit_requested) = quittable_host("shell-acts-quit");
+            let mut stream = attached_shell(&host);
+            let route = host.route();
+            let picked = in_background(move || route.pick_file("Choose"));
+            next_act(&mut stream);
+            host.quit_handle().begin(QuitReason::Quit, PATIENCE * 6);
+            assert!(matches!(
+                picked.recv_timeout(PATIENCE).unwrap(),
+                Err(WorkbenchPresentationError::Unavailable)
+            ));
+            quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("a person's open dialog does not hold the quit");
+            assert!(
+                matches!(
+                    host.route().pick_file("Too late"),
+                    Err(WorkbenchPresentationError::Unavailable)
+                ),
+                "no act starts once a quit has begun"
+            );
+            drop(host);
+        }
+
+        // The end of the session releases a pick.
+        {
+            let (_home, host, _quit_requested) = quittable_host("shell-acts-session-end");
+            let mut stream = attached_shell(&host);
+            let route = host.route();
+            let picked = in_background(move || route.pick_file("Choose"));
+            next_act(&mut stream);
+            host.quit_handle().session_end();
+            assert!(matches!(
+                picked.recv_timeout(PATIENCE).unwrap(),
+                Err(WorkbenchPresentationError::Unavailable)
+            ));
+            drop(host);
+        }
     }
 
     /// The idle limit of the tests of the idle exit. It is judged on a clock the test moves, so
@@ -7239,7 +5659,7 @@ mod tests {
         host: ServiceHost,
         home: TestHome,
         clock: HandClock,
-        quit_requested: std::sync::mpsc::Receiver<()>,
+        quit_requested: mpsc::Receiver<()>,
     }
 
     impl Idling {
@@ -7287,7 +5707,7 @@ mod tests {
             Arc::new(clock.clone()),
         )
         .unwrap();
-        let (quit, quit_requested) = std::sync::mpsc::channel();
+        let (quit, quit_requested) = mpsc::channel();
         host.install_quit_signal(Arc::new(move || {
             let _ = quit.send(());
         }));
@@ -7300,182 +5720,166 @@ mod tests {
         }
     }
 
+    /// ACCEPTANCE C22 (ADR-0199 Decision 12): a stream of any role, or work in flight, keeps an
+    /// idle service, and its idle exit says nothing, latches nothing, starts no shell and adds
+    /// nothing to another end, so the next browser start is served.
     #[test]
-    fn a_service_with_no_stream_exits_and_a_browser_start_after_it_is_not_refused() {
-        let idling = idling_host("idle-exit", &Arc::default());
-        idling.leaves_past_the_limit("the idle service asks the process to exit");
-        let Idling { host, home, .. } = idling;
-        assert!(
-            !super::latch::is_set(&home.path().join("state").join("quit")),
-            "an idle exit is not a person's Quit"
-        );
-        assert!(
-            host.intake.quit.drain.admit().is_err(),
-            "no new work is admitted once the service is leaving"
-        );
-        assert!(
-            host.intake.streams.admit().is_none(),
-            "no stream is admitted once the service is leaving"
-        );
-        drop(host);
-
-        let browser = start_for(home.path(), StartTerms::for_reason(StartReason::Browser));
-        assert!(browser.is_ok(), "the next browser start serves");
-    }
-
-    #[test]
-    fn an_open_stream_keeps_the_service_and_the_last_close_arms_the_limit_again() {
-        let idling = idling_host("idle-stream", &Arc::default());
-        let socket = open_mcp(None);
-        idling.stays_past_the_limit("an open stream holds the service");
-        drop(socket);
-        idling.leaves_past_the_limit("the last close arms the limit and the service leaves");
-    }
-
-    #[test]
-    fn a_control_call_restarts_the_span() {
-        let idling = idling_host("idle-control", &Arc::default());
-        for _ in 0..4 {
-            idling.clock.advance(IDLE_LIMIT * 9 / 10);
-            idling.looked_and_stayed("the last call came less than a limit ago");
-            cli_client::status().expect("the service answers a status call");
-            eventually(|| idling.host.intake.streams.open() == 0);
-        }
-        idling.leaves_past_the_limit("the service leaves a limit after the last call");
-    }
-
-    #[test]
-    fn an_attached_shell_is_a_stream_and_keeps_the_service() {
-        let idling = idling_host("idle-shell", &Arc::default());
-        let (shell, _handed) = open_desktop();
-        idling.stays_past_the_limit("an attached shell holds the service");
-        drop(shell);
-        idling.leaves_past_the_limit("the service leaves once the shell has gone");
-    }
-
-    #[test]
-    fn work_the_executor_still_holds_re_arms_the_limit() {
-        let idling = idling_host("idle-work", &Arc::default());
-        let running = idling.host.quit.drain.admit().unwrap();
-        idling.stays_past_the_limit("held work keeps the service");
-        drop(running);
-        idling.leaves_past_the_limit("the service leaves a limit after the work finished");
-    }
-
-    #[test]
-    fn a_browser_stream_opened_through_the_intake_keeps_the_service_until_it_ends() {
+    fn the_idle_exit_waits_for_every_stream_and_work_and_leaves_quietly() {
         use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
         use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
 
-        let idling = idling_host("idle-browser", &Arc::default());
-        let host = &idling.host;
-        // Stand in for the browser edge: carry the extension's bytes over a browser stream.
-        let (native, extension) = pair().unwrap();
-        let carrier = thread::spawn(move || {
-            let (service, reply) = dial(&opening(Role::Browser));
-            assert!(reply.accepted, "{reply:?}");
-            service.set_read_timeout(None).unwrap();
-            let mut to_service = (native.try_clone().unwrap(), service.try_clone().unwrap());
-            let mut to_extension = (service, native);
-            thread::spawn(move || {
-                let _ = std::io::copy(&mut to_extension.0, &mut to_extension.1);
-            });
-            let _ = std::io::copy(&mut to_service.0, &mut to_service.1);
-            // The extension is gone: end the stream the service holds as the edge would.
-            to_service.1.shutdown();
-        });
-        let fake = FakeExtension::connect(
-            extension,
-            &FakeExtension::hello("browser_idle"),
-            Box::new(|correlation, _| {
-                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
-            }),
-        );
-        drop(fake.wait(|seen| !seen.frames.is_empty()));
-        eventually(|| {
-            host.browser
-                .connected_browsers()
-                .iter()
-                .any(|browser| browser.id == "browser_idle")
-        });
-        // The opening is counted out once the browser is attached: from here only the browser
-        // holds the service.
-        eventually(|| host.intake.streams.open() == 1);
-        idling.stays_past_the_limit("an attached browser holds the service");
-        fake.close();
-        drop(fake);
-        idling.leaves_past_the_limit("the service leaves once the browser has gone");
-        let _ = carrier.join();
-    }
-
-    #[test]
-    fn the_browser_that_connected_is_remembered_by_the_next_service_of_the_home() {
-        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
-        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
-        use crate::browser::BrowserPort as _;
-
-        let home = TestHome::new("last-browser");
-        let record = crate::install::layout::Layout::new(home.path()).last_browser_record();
+        // An open MCP stream holds the service, and the last close arms the limit again.
         {
-            let host = ServiceHost::start(home.path()).unwrap();
-            assert_eq!(host.browser.last_connected_browser(), None);
-            let (service, extension) = pair().unwrap();
-            // The fake reports the name Chrome, which is the chrome browser.
+            let idling = idling_host("idle-stream", &Arc::default());
+            let socket = open_mcp(None);
+            idling.stays_past_the_limit("an open stream holds the service");
+            drop(socket);
+            idling.leaves_past_the_limit("the last close arms the limit and the service leaves");
+        }
+
+        // A control call is an opening, so each one restarts the span.
+        {
+            let idling = idling_host("idle-control", &Arc::default());
+            for _ in 0..4 {
+                idling.clock.advance(IDLE_LIMIT * 9 / 10);
+                idling.looked_and_stayed("the last call came less than a limit ago");
+                cli_client::status().expect("the service answers a status call");
+                eventually(|| idling.host.intake.streams.open() == 0);
+            }
+            idling.leaves_past_the_limit("the service leaves a limit after the last call");
+        }
+
+        // An attached shell is a stream.
+        {
+            let idling = idling_host("idle-shell", &Arc::default());
+            let (shell, _handed) = open_desktop();
+            idling.stays_past_the_limit("an attached shell holds the service");
+            drop(shell);
+            idling.leaves_past_the_limit("the service leaves once the shell has gone");
+        }
+
+        // Work the executor still holds re-arms the limit instead of leaving.
+        {
+            let idling = idling_host("idle-work", &Arc::default());
+            let running = idling.host.quit.drain.admit().unwrap();
+            idling.stays_past_the_limit("held work keeps the service");
+            drop(running);
+            idling.leaves_past_the_limit("the service leaves a limit after the work finished");
+        }
+
+        // A browser stream opened through the intake holds the service until it ends.
+        {
+            let idling = idling_host("idle-browser", &Arc::default());
+            let host = &idling.host;
+            // Stand in for the browser edge: carry the extension's bytes over a browser stream.
+            let (native, extension) = pair().unwrap();
+            let carrier = thread::spawn(move || {
+                let (service, reply) = dial(&opening(Role::Browser));
+                assert!(reply.accepted, "{reply:?}");
+                service.set_read_timeout(None).unwrap();
+                let mut to_service = (native.try_clone().unwrap(), service.try_clone().unwrap());
+                let mut to_extension = (service, native);
+                thread::spawn(move || {
+                    let _ = std::io::copy(&mut to_extension.0, &mut to_extension.1);
+                });
+                let _ = std::io::copy(&mut to_service.0, &mut to_service.1);
+                // The extension is gone: end the stream the service holds as the edge would.
+                to_service.1.shutdown();
+            });
             let fake = FakeExtension::connect(
                 extension,
-                &FakeExtension::hello("browser_last"),
+                &FakeExtension::hello("browser_idle"),
                 Box::new(|correlation, _| {
                     FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
                 }),
             );
-            host.browser.attach(service).unwrap();
-            assert_eq!(
-                host.browser.last_connected_browser().as_deref(),
-                Some("chrome")
-            );
+            drop(fake.wait(|seen| !seen.frames.is_empty()));
+            eventually(|| {
+                host.browser
+                    .connected_browsers()
+                    .iter()
+                    .any(|browser| browser.id == "browser_idle")
+            });
+            // The opening is counted out once the browser is attached: from here only the browser
+            // holds the service.
+            eventually(|| host.intake.streams.open() == 1);
+            idling.stays_past_the_limit("an attached browser holds the service");
             fake.close();
+            drop(fake);
+            idling.leaves_past_the_limit("the service leaves once the browser has gone");
+            let _ = carrier.join();
         }
-        let fresh = ServiceHost::start(home.path()).unwrap();
-        assert_eq!(
-            fresh.browser.last_connected_browser().as_deref(),
-            Some("chrome")
-        );
-        std::fs::write(&record, b"{").unwrap();
-        assert_eq!(fresh.browser.last_connected_browser(), None);
+
+        // The idle exit sets no latch, admits nothing more, starts no shell when one falls due,
+        // and the next browser start is served.
+        {
+            let fake = Arc::new(Fake::default());
+            let idling = idling_host("idle-exit", &fake);
+            idling.leaves_past_the_limit("the idle service asks the process to exit");
+            fake.advance(super::presence::LAUNCH_DELAY);
+            idling.host.intake.presence.tick();
+            assert!(
+                fake.launches().is_empty(),
+                "a service that is leaving starts no shell"
+            );
+            let Idling { host, home, .. } = idling;
+            assert!(
+                !super::latch::is_set(&Layout::new(home.path()).quit_latch()),
+                "an idle exit is not a person's Quit"
+            );
+            assert!(
+                host.intake.quit.drain.admit().is_err(),
+                "no new work is admitted once the service is leaving"
+            );
+            assert!(
+                host.intake.streams.admit().is_none(),
+                "no stream is admitted once the service is leaving"
+            );
+            drop(host);
+            let browser = start_for(home.path(), StartTerms::for_reason(StartReason::Browser));
+            assert!(browser.is_ok(), "the next browser start serves");
+        }
+
+        // The control: on a service that stays, presence starts the tray shell when it falls due.
+        {
+            let live = Arc::new(Fake::default());
+            let idling = idling_host("idle-exit-control", &live);
+            live.advance(super::presence::LAUNCH_DELAY);
+            idling.host.intake.presence.tick();
+            assert_eq!(live.launches(), [true]);
+        }
+
+        // Once the end of the session is under way, the idle limit passing adds nothing.
+        {
+            let idling = idling_host("idle-session-end", &Arc::default());
+            idling.host.quit_handle().session_end();
+            idling
+                .quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the session end asks the process to exit");
+            idling.clock.advance(IDLE_LIMIT * 3);
+            let streams = Arc::clone(&idling.host.intake.streams);
+            let before = streams.looks();
+            eventually(|| streams.looks() > before);
+            let Idling {
+                host,
+                quit_requested,
+                ..
+            } = idling;
+            // Dropping the host joins the idle watch, so what that look decided has been done, and
+            // the quit signal, with its sender, is gone.
+            drop(host);
+            assert_eq!(
+                quit_requested.recv_timeout(PATIENCE),
+                Err(mpsc::RecvTimeoutError::Disconnected),
+                "the idle limit passing during the exit makes no second request"
+            );
+        }
     }
 
-    #[test]
-    fn a_browser_that_reports_no_name_is_remembered_as_chromium() {
-        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
-        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
-        use crate::browser::BrowserPort as _;
-
-        let home = TestHome::new("last-browser-unnamed");
-        let host = ServiceHost::start(home.path()).unwrap();
-        let (service, extension) = pair().unwrap();
-        // Plain Chromium's brands are all generic, so its extension reports no name.
-        let mut hello = FakeExtension::hello("browser_plain");
-        hello.as_object_mut().unwrap().remove("browser_name");
-        let fake = FakeExtension::connect(
-            extension,
-            &hello,
-            Box::new(|correlation, _| {
-                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
-            }),
-        );
-        host.browser.attach(service).unwrap();
-        assert_eq!(
-            host.browser.last_connected_browser().as_deref(),
-            Some("chromium")
-        );
-        assert_eq!(
-            host.browser.browsers()[0].name.as_deref(),
-            Some("Chromium"),
-            "the model reads a name, not null"
-        );
-        fake.close();
-    }
-
+    /// Defect m2-06 (987fe943, ADR-0199 amendment of 2026-10-16): a start that arrives while the
+    /// service is leaving on idle waits for the lock the leaving service still holds and serves,
+    /// instead of giving way to a service that is about to exit.
     #[test]
     fn a_start_that_arrives_while_the_service_is_leaving_on_idle_waits_for_it_and_serves() {
         let idling = idling_host("idle-exit-race", &Arc::default());
@@ -7483,62 +5887,99 @@ mod tests {
         let Idling { host, home, .. } = idling;
         // The old service still holds the lock and the endpoint while it tears down.
         let directory = home.path().to_path_buf();
+        let (began, beginning) = mpsc::channel();
         let starter = thread::spawn(move || {
             let started = Instant::now();
-            let served =
-                start_for(&directory, StartTerms::for_reason(StartReason::Browser)).map(drop);
+            // The token check comes before the start first asks for the lock.
+            let served = ServiceHost::start_with_token(
+                &directory,
+                StartTerms::for_reason(StartReason::Browser),
+                move || {
+                    let _ = began.send(());
+                    Ok(false)
+                },
+            )
+            .map(drop);
             (served, started.elapsed())
         });
-        thread::sleep(Duration::from_millis(250));
-        assert!(
-            !starter.is_finished(),
-            "the start waits for the leaving service instead of giving way"
-        );
+        beginning.recv_timeout(PATIENCE).expect("the start began");
         drop(host);
         let (served, waited) = starter.join().unwrap();
         served.expect("the start takes the lock the old service released");
         assert!(waited < super::lifetime::LEAVING_LOCK_WAIT);
     }
 
+    /// ACCEPTANCE B22 and defect a241b633: a browser that connects is remembered for the next
+    /// service of the home by the installed browser its name names, one that reports no name is
+    /// Chromium by that name, and a record that cannot be read is no memory.
     #[test]
-    fn the_end_of_the_session_leaves_once_and_the_idle_path_adds_nothing() {
-        let idling = idling_host("idle-session-end", &Arc::default());
-        idling.host.quit_handle().session_end();
-        idling
-            .quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the session end asks the process to exit");
-        idling.clock.advance(IDLE_LIMIT * 3);
-        let streams = &idling.host.intake.streams;
-        let before = streams.looks();
-        eventually(|| streams.looks() > before);
-        // That look decided to leave and makes its request on the same thread at once; ten of
-        // the watch's real poll periods cover it.
-        assert!(
-            idling.quit_requested.recv_timeout(IDLE_LIMIT).is_err(),
-            "the idle limit passing during the exit makes no second request"
-        );
-    }
+    fn a_connected_browser_is_remembered_for_the_next_service_by_its_name() {
+        use crate::browser::adapter::chromium::protocol4::fake::{
+            FakeExtension, Reply as FakeReply, Script,
+        };
+        use crate::browser::{BrowserPort as _, BrowserSummary};
+        use crate::install::native_host::browser_id_named;
 
-    #[test]
-    fn presence_launches_no_shell_after_an_idle_stop() {
-        let fake = Arc::new(Fake::default());
-        let idling = idling_host("idle-presence", &fake);
-        idling.leaves_past_the_limit("the idle service asks the process to exit");
-        let Idling { host, home, .. } = idling;
-        fake.advance(Duration::from_secs(10));
-        thread::sleep(Duration::from_millis(1200));
-        assert!(
-            fake.launches().is_empty(),
-            "a service that is leaving starts no shell"
-        );
-        drop(host);
-        drop(home);
+        let listing = || -> Script {
+            Box::new(|correlation, _| {
+                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
+            })
+        };
+        let home = temp_home("last-browser");
+        let record = Layout::new(home.path()).last_browser_record();
 
-        // The control's idle clock never moves, so it stays however long presence takes.
-        let live = Arc::new(Fake::default());
-        let _idling = idling_host("idle-presence-control", &live);
-        live.advance(Duration::from_secs(10));
-        eventually(|| live.launches() == vec![true]);
+        // A browser that reports its name is remembered as the installed browser it names, and
+        // the next service of the home reads it.
+        let hello = FakeExtension::hello("browser_last");
+        let named = browser_id_named(hello["browser_name"].as_str().unwrap());
+        assert!(named.is_some(), "{hello}");
+        {
+            let host = ServiceHost::start(home.path()).unwrap();
+            assert_eq!(host.browser.last_connected_browser(), None);
+            let (service, extension) = pair().unwrap();
+            let fake = FakeExtension::connect(extension, &hello, listing());
+            host.browser.attach(service).unwrap();
+            assert_eq!(host.browser.last_connected_browser().as_deref(), named);
+            fake.close();
+        }
+        let fresh = ServiceHost::start(home.path()).unwrap();
+        assert_eq!(
+            fresh.browser.last_connected_browser().as_deref(),
+            named,
+            "the next service of the home remembers it"
+        );
+
+        // Plain Chromium's brands are all generic, so its extension reports no name: it is
+        // Chromium, the family every adapter belongs to, remembered and read by that name.
+        let family = BrowserSummary {
+            id: String::new(),
+            name: None,
+            adapter_version: String::new(),
+            attended: false,
+        }
+        .display_name();
+        let mut hello = FakeExtension::hello("browser_plain");
+        hello.as_object_mut().unwrap().remove("browser_name");
+        let (service, extension) = pair().unwrap();
+        let fake = FakeExtension::connect(extension, &hello, listing());
+        fresh.browser.attach(service).unwrap();
+        assert_eq!(
+            fresh.browser.last_connected_browser().as_deref(),
+            browser_id_named(&family)
+        );
+        assert!(
+            fresh
+                .browser
+                .browsers()
+                .iter()
+                .any(|browser| browser.id == "browser_plain"
+                    && browser.name.as_deref() == Some(family.as_str())),
+            "the model reads a name, not null"
+        );
+        fake.close();
+
+        // A record that cannot be read is no memory.
+        std::fs::write(&record, b"{").unwrap();
+        assert_eq!(fresh.browser.last_connected_browser(), None);
     }
 }
