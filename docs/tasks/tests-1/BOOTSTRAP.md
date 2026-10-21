@@ -86,3 +86,7 @@ coordinator names.
 The batch closes when the workspace holds at most 500 Rust tests, each lane's ledger says what its
 kept tests protect, the guard has landed (ADR-0204 Decision 4), CI is green on both systems, and
 the coordinator has proposed the JavaScript ceiling to the owner.
+
+Closed on 2026-10-21 at 462 Rust tests, with the guard in CI. The JavaScript ceiling was not set:
+the owner deferred it past 2.0.1 to save tokens, with the page assets' plan in the adapter ledger
+and the extension's classification stopped unfinished.

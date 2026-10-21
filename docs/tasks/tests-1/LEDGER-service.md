@@ -33,7 +33,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T3 | test(service): `service/`'s other modules keep the 8 that are a rule's last proof | 52 | 8 | 7 promise, 1 defect | landed (this commit) |
 | T4 | test(edge): `crates/edge` keeps the 20 tests that are a forwarding rule's last proof | 66 | 20 | 13 promise, 6 defect, 1 contract | landed (this commit) |
 | T5 | test(relay): `crates/relay` keeps the 31 tests that are a rule's last proof | 157 | 31 | 9 promise, 9 contract, 6 defect, 7 unsafe | landed (this commit) |
-| G | test(guards): the Rust test ceiling, `tests/guards/test-budget.test.mjs` (ADR-0204 Decision 4) | - | - | - | todo, after every area is under its budget |
+| G | test(guards): the Rust test ceiling, `tests/guards/test-budget.test.mjs` (ADR-0204 Decision 4), run in CI's Rust job | 462 | 462 | the ceiling | landed (this commit) |
 
 ## Notes
 

@@ -66,6 +66,7 @@ jobs:
       - run: cargo test --workspace --locked --no-fail-fast
       - run: cargo fetch --locked
       - run: node --test tests/guards/connectors.test.mjs
+      - run: node --test tests/guards/test-budget.test.mjs
 
   extension:
     strategy:

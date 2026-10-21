@@ -253,9 +253,12 @@ Now:
 - tests-1 opened on 2026-10-21 (ADR-0204, the owner's mandate of meaningful tests): the 2,851
   Rust tests are cut to at most 500 before the 2.0.1 candidate, in five lanes on the test
   machines and the coordinator's ([BOOTSTRAP](tasks/tests-1/BOOTSTRAP.md)). arch-1's refactor
-  slices wait for it; core-work's W-D4 and W-D5 and install's I-D4 go first. The coordinator's
-  service lane has cut 396 tests to 113 so far; the four test-machine lanes started on 2026-10-21,
-  when the owner powered the machines on.
+  slices wait for it; core-work's W-D4 and W-D5 and install's I-D4 go first. It closed the same day
+  at 462 Rust tests, with `tests/guards/test-budget.test.mjs` holding the ceiling in CI. The cut
+  found and fixed S-D7, S-D8, P-D6, A-D1, A-D4, G-D1 (a trailing dot stepped around deny lists),
+  G-D2 to G-D4, L-D7, U-D5 and U-D6. The owner, on token spend, deferred S-D9, A-D2, A-D3 and the
+  JavaScript ceiling past 2.0.1; the page assets' plan (69 of 275 under a proposed 75) is in the
+  adapter ledger.
 - Release order for 2.0.1, from test-01's reading of the 2.0.0 package (2026-10-21): publish the
   2.0.1 extension before the service, or with it. A 2.0.0 extension beside a 2.0.1 service matches
   groups by exact title, so it opens a ghost-titled group beside the agent's old "Ghostlight - ..."
