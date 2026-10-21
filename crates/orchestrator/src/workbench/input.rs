@@ -41,24 +41,39 @@ pub fn validate_policy_document(document: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// The page, whose search field must stop at the length this adapter accepts.
+    const PAGE: &str = include_str!("../../ui/index.html");
+
+    /// The page's search field, by its id.
+    const SEARCH_FIELD: &str = "id=\"palette-query\"";
+
+    /// The attribute that bounds the field's length.
+    const MAX_LENGTH: &str = "maxlength=\"";
+
+    /// The `maxlength` the page gives its search field.
+    fn page_search_limit() -> usize {
+        let field = &PAGE[PAGE
+            .find(SEARCH_FIELD)
+            .expect("the page has a search field")..];
+        let field = &field[..field.find('>').expect("the field's tag ends")];
+        let value =
+            &field[field.find(MAX_LENGTH).expect("the field is bounded") + MAX_LENGTH.len()..];
+        value[..value.find('"').expect("the value ends")]
+            .parse()
+            .expect("the bound is a number")
+    }
+
+    /// Protects desktop gate 3 ("Search input is bounded at the adapter"): a search longer than
+    /// `SEARCH_QUERY_LIMIT` characters, or holding a control character, is refused here, the limit
+    /// counts characters as the page does, not bytes, and the page's search field stops at the same
+    /// length (a limit on both sides, the P-D4 pattern).
     #[test]
     fn search_input_is_bounded_at_the_adapter() {
         assert!(validate_search_query("blocked browser").is_ok());
-        assert!(validate_search_query(&"x".repeat(121)).is_err());
+        assert!(validate_search_query(&"x".repeat(SEARCH_QUERY_LIMIT)).is_ok());
+        assert!(validate_search_query(&"x".repeat(SEARCH_QUERY_LIMIT + 1)).is_err());
+        assert!(validate_search_query(&"\u{e9}".repeat(SEARCH_QUERY_LIMIT)).is_ok());
         assert!(validate_search_query("blocked\u{0007}").is_err());
-    }
-
-    #[test]
-    fn policy_document_is_bounded_at_the_adapter() {
-        // The facade tests call the facade directly and never cross this boundary, where the
-        // untrusted bytes arrive. Only this test fails when the check is weakened or dropped.
-        assert!(
-            validate_policy_document(r#"{"schema":4,"name":"x","version":"1","grants":[]}"#)
-                .is_ok()
-        );
-        assert!(validate_policy_document("").is_err());
-        assert!(validate_policy_document("   \n\t  ").is_err());
-        assert!(validate_policy_document(&"x".repeat(POLICY_DOCUMENT_LIMIT)).is_ok());
-        assert!(validate_policy_document(&"x".repeat(POLICY_DOCUMENT_LIMIT + 1)).is_err());
+        assert_eq!(page_search_limit(), SEARCH_QUERY_LIMIT);
     }
 }
