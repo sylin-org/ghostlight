@@ -70,13 +70,20 @@ impl ManagedPaths {
     /// layers an organization policy the one way an administrator publishes it.
     #[cfg(test)]
     pub(crate) fn signed(root: &Path, manifest: &str) -> Self {
+        Self::signed_at(root, manifest, 1)
+    }
+
+    /// [`Self::signed`] at publish `sequence`. Calling it again under the same `root` re-signs
+    /// the one local bundle in place, the way an administrator publishes the next sequence.
+    #[cfg(test)]
+    pub(crate) fn signed_at(root: &Path, manifest: &str, sequence: u64) -> Self {
         const SEED: [u8; 32] = [43; 32];
         const SOURCE: &str = "org.bundle";
         let paths = Self::under(root);
         let manifest = serde_json::from_str(manifest).expect("a test manifest is JSON");
         fs::write(
             root.join(SOURCE),
-            bundle::sign(&SEED, None, 1, manifest, None),
+            bundle::sign(&SEED, None, sequence, manifest, None),
         )
         .expect("the test bundle is written");
         let bootstrap = serde_json::json!({
@@ -694,16 +701,35 @@ fn unix_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::ErrorKind;
+    use std::net::TcpListener;
+    use std::path::Path;
+    use std::time::Duration;
 
-    use super::{bundle, crypto, encode_hex, Bootstrap, ManagedAuthority, ManagedPaths};
+    use serde_json::{json, Value};
+
+    use super::super::{
+        Capability, GovernanceFacade, ManagedPolicyFreshness, ManagedPolicySource, ReasonCode,
+    };
+    use super::{bundle, crypto, encode_hex, ManagedAuthority, ManagedPaths};
+    use crate::install::record::assert_owner_only;
     use crate::scratch::Scratch;
+
+    /// The key the bootstrap names and every publication is signed with, unless a row says not.
+    const SEED: [u8; 32] = [31; 32];
+    /// A key no bootstrap names.
+    const OTHER_SEED: [u8; 32] = [32; 32];
+    /// The local bundle the bootstrap names, beside it.
+    const SOURCE: &str = "org.bundle";
+    /// A local source no file holds.
+    const MISSING_SOURCE: &str = "missing.bundle";
 
     fn directory(name: &str) -> Scratch {
         Scratch::named(&format!("managed-{name}"))
     }
 
-    fn manifest(name: &str, capability: &str) -> serde_json::Value {
-        serde_json::json!({
+    fn manifest(name: &str, capability: &str) -> Value {
+        json!({
             "schema": 4,
             "name": name,
             "version": "1",
@@ -715,357 +741,204 @@ mod tests {
         })
     }
 
-    fn write_bootstrap(path: &std::path::Path, source: &str, seed: &[u8; 32]) {
-        let bootstrap = serde_json::json!({
+    /// A bootstrap naming `source` under [`SEED`]'s public key.
+    fn bootstrap(source: &str) -> Value {
+        json!({
             "source": source,
-            "pubkey_ed25519": encode_hex(&crypto::signing::ed25519_public(seed))
-        });
-        fs::write(path, serde_json::to_vec_pretty(&bootstrap).unwrap()).unwrap();
+            "pubkey_ed25519": encode_hex(&crypto::signing::ed25519_public(&SEED))
+        })
     }
 
+    fn write_json(path: &Path, value: &Value) {
+        fs::write(path, serde_json::to_vec_pretty(value).unwrap()).unwrap();
+    }
+
+    /// `manifest` signed under [`SEED`] at `sequence`.
+    fn signed(sequence: u64, manifest: Value) -> Vec<u8> {
+        bundle::sign(&SEED, None, sequence, manifest, None)
+    }
+
+    /// Replace a watched file and move its modified time past the last read, so the refresher
+    /// sees the change whatever the new size and however coarse the clock.
+    fn replace(path: &Path, content: impl AsRef<[u8]>) {
+        let before = fs::metadata(path).and_then(|metadata| metadata.modified());
+        fs::write(path, content).unwrap();
+        if let Ok(before) = before {
+            fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(before + Duration::from_secs(2))
+                .unwrap();
+        }
+    }
+
+    fn presentation(name: &str, rationale: &str, contact: &str) -> bundle::Presentation {
+        bundle::Presentation {
+            org_name: Some(name.into()),
+            rationale: Some(rationale.into()),
+            contacts: vec![bundle::Contact {
+                kind: "email".into(),
+                value: contact.into(),
+                label: None,
+            }],
+        }
+    }
+
+    /// ACCEPTANCE Governance 18, ADR-0028 and docs/trust/continuity.md: without an
+    /// administrator's managed.json, the managed authority fetches nothing, writes nothing and
+    /// leaves policy all-open.
     #[test]
-    fn no_bootstrap_has_no_network_or_policy_effect() {
+    fn no_bootstrap_means_no_policy_network_work_and_nothing_written() {
         let root = directory("absent");
         let mut authority = ManagedAuthority::new(ManagedPaths::under(&root));
+
         authority.refresh();
+        authority.refresh();
+
         assert!(!authority.configured());
         assert!(authority.valid());
         assert!(authority.manifest().is_none());
+        let passport = authority.passport();
+        assert_eq!(passport.freshness, ManagedPolicyFreshness::NotConfigured);
+        assert_eq!(passport.source_class, ManagedPolicySource::None);
+        assert_eq!(
+            passport.last_attempt_ms, None,
+            "an attempt is stamped before any fetch"
+        );
+        assert!(!authority.needs_refresh());
+        assert_eq!(
+            fs::read_dir(&root).unwrap().count(),
+            0,
+            "neither a cache nor a status file is written"
+        );
     }
 
-    #[cfg(unix)]
+    /// docs/trust/security-overview.md (Signed managed policy, "a customer-owned file or HTTPS
+    /// source"): a bootstrap whose source is a URL but not a plain HTTPS one is refused before any
+    /// fetch, and the machine fails closed. Plain HTTP, other schemes and embedded credentials
+    /// never reach the network.
     #[test]
-    fn the_cache_and_the_status_are_private() {
-        use std::os::unix::fs::PermissionsExt;
+    fn a_managed_source_is_a_local_path_or_an_https_url_and_nothing_else_is_fetched() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let plain_http = format!(
+            "http://127.0.0.1:{}/policy",
+            listener.local_addr().unwrap().port()
+        );
+        for source in [
+            plain_http.as_str(),
+            "ftp://policy.example/bundle",
+            "file:///etc/ghostlight/org.bundle",
+            "https://user:secret@policy.example/bundle",
+        ] {
+            let root = directory("scheme");
+            let paths = ManagedPaths::under(&root);
+            write_json(&paths.bootstrap, &bootstrap(source));
+            let mut authority = ManagedAuthority::new(paths);
 
-        let root = directory("private");
-        let paths = ManagedPaths::under(&root);
-        let seed = [31_u8; 32];
-        fs::write(
-            root.join("org.bundle"),
-            bundle::sign(&seed, None, 4, manifest("org", "read"), None),
-        )
-        .unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        ManagedAuthority::new(paths.clone()).refresh();
-        let mode =
-            |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(paths.cache.as_deref().unwrap()), 0o600);
-        assert_eq!(mode(paths.status.as_deref().unwrap()), 0o600);
+            authority.refresh();
+
+            assert!(authority.configured(), "{source}");
+            assert!(!authority.valid(), "{source}");
+            let passport = authority.passport();
+            assert!(!passport.verified, "{source}");
+            assert_eq!(passport.last_attempt_ms, None, "{source} was fetched");
+        }
+        assert_eq!(
+            listener.accept().err().map(|error| error.kind()),
+            Some(ErrorKind::WouldBlock),
+            "the plain HTTP source was connected to"
+        );
     }
 
+    /// ADR-0055 Decision 8 (the version-1 status sidecar administrators script against),
+    /// docs/trust/data-flows.md and 97ddf868: the sidecar carries verification, sequence,
+    /// freshness, source class, timing, organization and contacts, and never the source address,
+    /// the bearer token, a verification key or a rule. The cache and the sidecar are readable only
+    /// by the user.
     #[test]
-    fn a_signed_local_bundle_activates_and_populates_verified_cache() {
-        let root = directory("local");
+    fn the_status_sidecar_and_cache_hold_no_source_credential_key_or_rule_and_only_the_user_reads_them(
+    ) {
+        const SOURCE_NAME: &str = "org-source-name.bundle";
+        const BEARER: &str = "bearer-secret-value";
+        const GRANT: &str = "org-grant";
+        const RULES_KEY: &str = "grants";
+        const SEQUENCE: u64 = 4;
+        const ORGANIZATION: &str = "Example Org";
+        const CONTACT: &str = "security@example.com";
+        let root = directory("sidecar");
         let paths = ManagedPaths::under(&root);
-        let seed = [31_u8; 32];
+        let mut policy = manifest("org", "read");
+        policy[RULES_KEY][0]["id"] = json!(GRANT);
         fs::write(
-            root.join("org.bundle"),
+            root.join(SOURCE_NAME),
             bundle::sign(
-                &seed,
+                &SEED,
                 None,
-                4,
-                manifest("org", "read"),
-                Some(bundle::Presentation {
-                    org_name: Some("Example Org".into()),
-                    rationale: Some("Keeps browser work inside approved sites.".into()),
-                    contacts: vec![bundle::Contact {
-                        kind: "email".into(),
-                        value: "security@example.com".into(),
-                        label: Some("Security team".into()),
-                    }],
-                }),
+                SEQUENCE,
+                policy,
+                Some(presentation(
+                    ORGANIZATION,
+                    "Keeps browser work inside approved sites.",
+                    CONTACT,
+                )),
             ),
         )
         .unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        let mut authority = ManagedAuthority::new(paths.clone());
+        let mut descriptor = bootstrap(SOURCE_NAME);
+        descriptor["bearer_token"] = json!(BEARER);
+        write_json(&paths.bootstrap, &descriptor);
 
-        authority.refresh();
+        ManagedAuthority::new(paths.clone()).refresh();
 
-        assert!(authority.configured());
-        assert!(authority.valid());
-        assert_eq!(authority.sequence(), Some(4));
-        assert_eq!(authority.manifest().unwrap().name, "org");
-        let passport = authority.passport();
-        assert!(passport.verified);
-        assert_eq!(passport.organization.as_deref(), Some("Example Org"));
-        assert_eq!(
-            passport.rationale.as_deref(),
-            Some("Keeps browser work inside approved sites.")
-        );
-        assert_eq!(passport.contacts[0].value, "security@example.com");
-        assert!(paths.cache.unwrap().exists());
+        let cache = paths.cache.unwrap();
         let status_path = paths.status.unwrap();
-        assert!(status_path.exists());
-        let status = fs::read_to_string(status_path).unwrap();
-        assert!(status.contains("\"sequence\": 4"));
-        assert!(status.contains("Example Org"));
-        assert!(status.contains("security@example.com"));
-        assert!(!status.contains("pubkey"));
-        assert!(!status.contains("grants"));
-    }
-
-    #[test]
-    fn a_bootstrap_that_goes_missing_after_being_configured_fails_closed_not_open() {
-        // Every other failure path -- unreachable source, malformed bootstrap, bad signature --
-        // keeps the last verified policy active. A deployment tool that updates the bootstrap
-        // descriptor by delete-then-recreate leaves a real window where the file is transiently
-        // absent, and this machine was already managed: it must stay exactly as governed as it
-        // was a moment before, not revert to "never configured".
-        let root = directory("vanishing-bootstrap");
-        let paths = ManagedPaths::under(&root);
-        let seed = [37_u8; 32];
-        fs::write(
-            root.join("org.bundle"),
-            bundle::sign(&seed, None, 4, manifest("org", "read"), None),
-        )
-        .unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        let mut authority = ManagedAuthority::new(paths.clone());
-        authority.refresh();
-        assert!(authority.configured());
-        assert!(authority.valid());
-        assert_eq!(authority.sequence(), Some(4));
-
-        fs::remove_file(&paths.bootstrap).unwrap();
-        authority.refresh();
-
-        assert!(
-            authority.configured(),
-            "a managed machine must not silently become unmanaged"
-        );
-        assert!(
-            authority.valid(),
-            "the last verified policy must remain active, not vanish into all-open"
-        );
-        assert_eq!(authority.sequence(), Some(4));
-        assert_eq!(authority.manifest().unwrap().name, "org");
-    }
-
-    #[test]
-    fn the_governance_facade_enforces_the_signed_managed_manifest_and_stamps_sequence() {
-        let root = directory("facade");
-        let paths = ManagedPaths::under(&root);
-        let seed = [34_u8; 32];
-        fs::write(
-            root.join("org.bundle"),
-            bundle::sign(&seed, None, 12, manifest("read-only", "read"), None),
-        )
-        .unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        let facade = super::super::GovernanceFacade::with_managed_paths(None, paths);
-
-        let snapshot = facade.snapshot();
-
-        assert!(
-            snapshot
-                .authorize_capability(super::super::Capability::Read)
-                .allowed
-        );
-        assert!(
-            !snapshot
-                .authorize_capability(super::super::Capability::Action)
-                .allowed
-        );
-        assert_eq!(snapshot.managed_sequence, Some(12));
-    }
-
-    #[test]
-    fn bad_updates_and_rollbacks_keep_the_verified_last_known_good() {
-        let root = directory("lkg");
-        let paths = ManagedPaths::under(&root);
-        let seed = [32_u8; 32];
-        let source = root.join("org.bundle");
-        fs::write(
-            &source,
-            bundle::sign(&seed, None, 8, manifest("current", "read"), None),
-        )
-        .unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        let mut authority = ManagedAuthority::new(paths);
-        authority.refresh();
-
-        fs::write(&source, b"half written").unwrap();
-        authority.source_fingerprint = None;
-        authority.refresh();
-        assert_eq!(authority.sequence(), Some(8));
-        assert_eq!(authority.manifest().unwrap().name, "current");
-
-        fs::write(
-            &source,
-            bundle::sign(&seed, None, 3, manifest("older", "action"), None),
-        )
-        .unwrap();
-        authority.source_fingerprint = None;
-        authority.refresh();
-        assert_eq!(authority.sequence(), Some(8));
-        assert_eq!(authority.manifest().unwrap().name, "current");
-    }
-
-    #[test]
-    fn a_cold_invalid_source_fails_closed_but_a_verified_cache_recovers_offline() {
-        let root = directory("cold");
-        let paths = ManagedPaths::under(&root);
-        let seed = [33_u8; 32];
-        write_bootstrap(&paths.bootstrap, "missing.bundle", &seed);
-        let mut cold = ManagedAuthority::new(paths.clone());
-        cold.refresh();
-        assert!(cold.configured());
-        assert!(!cold.valid());
-
-        fs::write(
-            paths.cache.as_ref().unwrap(),
-            bundle::sign(&seed, None, 9, manifest("cached", "read"), None),
-        )
-        .unwrap();
-        let mut recovered = ManagedAuthority::new(paths);
-        recovered.refresh();
-        assert!(recovered.valid());
-        assert_eq!(recovered.sequence(), Some(9));
-        assert_eq!(recovered.manifest().unwrap().name, "cached");
-    }
-
-    #[test]
-    fn bootstrap_is_strict_and_plain_http_is_not_a_production_source() {
-        assert!(serde_json::from_str::<Bootstrap>(
-            r#"{"source":"x","pubkey_ed25519":"00","typo":true}"#
-        )
-        .is_err());
-        let bootstrap = Bootstrap {
-            source: "http://policy.example/bundle".into(),
-            pubkey_ed25519: "00".repeat(32),
-            ..Bootstrap::default()
-        };
-        assert!(super::validate_bootstrap(&bootstrap).is_err());
-    }
-
-    fn set_modified(path: &std::path::Path, time: std::time::SystemTime) {
-        fs::File::options()
-            .write(true)
-            .open(path)
-            .unwrap()
-            .set_modified(time)
-            .unwrap();
-    }
-
-    #[test]
-    fn a_changed_local_bundle_republishes_on_the_next_tick_and_an_unchanged_file_is_not_read() {
-        let root = directory("tick");
-        let paths = ManagedPaths::under(&root);
-        let seed = [38_u8; 32];
-        let source = root.join("org.bundle");
-        let signed =
-            |sequence, name| bundle::sign(&seed, None, sequence, manifest(name, "read"), None);
-        fs::write(&source, signed(12, "org-a")).unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        let facade = super::super::GovernanceFacade::with_managed_paths(None, paths);
-        let first = facade.snapshot();
-        assert_eq!(first.managed_sequence, Some(12));
-
-        facade.refresh_tick();
-        assert!(
-            std::sync::Arc::ptr_eq(&first, &facade.snapshot()),
-            "a tick that finds nothing changed publishes nothing"
-        );
-
-        let state = fs::metadata(&source).unwrap();
-        let replacement = signed(13, "org-b");
-        assert_eq!(replacement.len() as u64, state.len());
-        fs::write(&source, &replacement).unwrap();
-        set_modified(&source, state.modified().unwrap());
-        facade.refresh_tick();
-        assert_eq!(
-            facade.snapshot().managed_sequence,
-            Some(12),
-            "a file whose existence, modified time and size are unchanged is not read again"
-        );
-
-        set_modified(
-            &source,
-            state.modified().unwrap() + std::time::Duration::from_secs(2),
-        );
-        assert_eq!(facade.snapshot().managed_sequence, Some(12));
-        facade.refresh_tick();
-        let republished = facade.snapshot();
-        assert_eq!(republished.managed_sequence, Some(13));
-        assert_ne!(republished.id(), first.id());
-    }
-
-    #[test]
-    fn an_offline_load_enforces_the_verified_cache_and_leaves_the_fetch_to_the_refresher() {
-        let root = directory("offline");
-        let paths = ManagedPaths::under(&root);
-        let seed = [39_u8; 32];
-        write_bootstrap(&paths.bootstrap, "https://policy.invalid/bundle", &seed);
-        fs::write(
-            paths.cache.as_ref().unwrap(),
-            bundle::sign(&seed, None, 9, manifest("cached", "read"), None),
-        )
-        .unwrap();
-        let mut authority = ManagedAuthority::new(paths);
-
-        authority.load_offline();
-
-        assert!(authority.valid());
-        assert_eq!(authority.sequence(), Some(9));
-        assert_eq!(authority.passport().last_attempt_ms, None);
-        assert!(
-            authority.needs_refresh(),
-            "the first poll is still owed to the refresher"
-        );
-    }
-
-    #[test]
-    fn nothing_needs_refreshing_while_the_bootstrap_and_a_local_source_are_unchanged() {
-        let root = directory("idle");
-        let paths = ManagedPaths::under(&root);
-        let seed = [40_u8; 32];
-        fs::write(
-            root.join("org.bundle"),
-            bundle::sign(&seed, None, 2, manifest("org", "read"), None),
-        )
-        .unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        let mut authority = ManagedAuthority::new(paths.clone());
-        assert!(authority.needs_refresh(), "a first look is always owed");
-        authority.refresh();
-        assert!(!authority.needs_refresh());
-
-        fs::write(root.join("org.bundle"), b"changed").unwrap();
-        assert!(authority.needs_refresh());
-        authority.refresh();
-        assert!(!authority.needs_refresh());
-
-        fs::remove_file(&paths.bootstrap).unwrap();
-        assert!(authority.needs_refresh());
+        let text = fs::read_to_string(&status_path).unwrap();
+        let status: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(status["v"], 1);
+        assert_eq!(status["verified"], true);
+        assert_eq!(status["freshness"], "fresh");
+        assert_eq!(status["sequence"], SEQUENCE);
+        assert_eq!(status["organization"], ORGANIZATION);
+        assert_eq!(status["contacts"][0]["value"], CONTACT);
+        assert_eq!(status["source_class"], "file");
+        assert!(status["last_success_ms"].is_u64(), "{text}");
+        let public_key = encode_hex(&crypto::signing::ed25519_public(&SEED));
+        for withheld in [SOURCE_NAME, BEARER, public_key.as_str(), RULES_KEY, GRANT] {
+            assert!(
+                !text.contains(withheld),
+                "the sidecar holds {withheld}: {text}"
+            );
+        }
+        assert_owner_only(&cache);
+        assert_owner_only(&status_path);
     }
 
     /// A facade enforcing one signed bundle, and the status file the managed authority wrote.
     fn published(
         name: &str,
-        manifest: serde_json::Value,
+        manifest: Value,
         presentation: Option<bundle::Presentation>,
-    ) -> (Scratch, super::super::GovernanceFacade, String) {
+    ) -> (Scratch, GovernanceFacade, String) {
         let root = directory(name);
         let paths = ManagedPaths::under(&root);
-        let seed = [41_u8; 32];
         fs::write(
-            root.join("org.bundle"),
-            bundle::sign(&seed, None, 3, manifest, presentation),
+            root.join(SOURCE),
+            bundle::sign(&SEED, None, 3, manifest, presentation),
         )
         .unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
+        write_json(&paths.bootstrap, &bootstrap(SOURCE));
         let status = paths.status.clone().unwrap();
-        let facade = super::super::GovernanceFacade::with_managed_paths(None, paths);
+        let facade = GovernanceFacade::with_managed_paths(None, paths);
         let status = fs::read_to_string(status).unwrap();
         (root, facade, status)
     }
 
     /// An organization manifest that turns MCP agents off, so the switch sentence names it too.
-    fn switched(organization: Option<serde_json::Value>) -> serde_json::Value {
+    fn switched(organization: Option<Value>) -> Value {
         let mut manifest = manifest("org", "read");
-        manifest["config"] = serde_json::json!([{
+        manifest["config"] = json!([{
             "key": crate::governance::manifest::PolicySetting::McpChannelEnabled.key(),
             "value": false,
             "level": "mandatory"
@@ -1076,202 +949,422 @@ mod tests {
         manifest
     }
 
-    fn contact(value: &str) -> bundle::Contact {
-        bundle::Contact {
-            kind: "email".into(),
-            value: value.into(),
-            label: None,
+    /// One way a publication names its organization, and what every surface then shows.
+    struct Naming {
+        row: &'static str,
+        /// The manifest's own `organization` block.
+        block: Option<Value>,
+        /// The signed presentation.
+        presentation: Option<bundle::Presentation>,
+        name: &'static str,
+        statement: &'static str,
+        url: Option<&'static str>,
+        /// The one contact shown.
+        contact: &'static str,
+        /// What the status file must not hold.
+        withheld: &'static [&'static str],
+    }
+
+    /// c2c958ff, ADR-0203 P4 and ADR-0122 Decision 3: a publication resolves its organization
+    /// once, the signed presentation winning and the manifest's block filling what it lacks, and
+    /// every surface names that one organization: the snapshot, the compiled view, the channel
+    /// sentence, the chip, the passports and the status file.
+    #[test]
+    fn a_publication_names_one_organization_on_every_surface_the_signed_presentation_first() {
+        const SIGNED_NAME: &str = "Example Org";
+        const SIGNED_STATEMENT: &str = "The signed presentation's words.";
+        const SIGNED_CONTACT: &str = "security@example.com";
+        const BLOCK_NAME: &str = "Northwind";
+        const BLOCK_STATEMENT: &str = "The manifest's own words.";
+        const BLOCK_URL: &str = "https://northwind.example/policy";
+        const BLOCK_CONTACT: &str = "it@northwind.example";
+        let block = json!({
+            "name": BLOCK_NAME,
+            "statement": BLOCK_STATEMENT,
+            "url": BLOCK_URL,
+            "contacts": [{"kind": "email", "value": BLOCK_CONTACT}]
+        });
+        let signed = presentation(SIGNED_NAME, SIGNED_STATEMENT, SIGNED_CONTACT);
+        let rows = [
+            Naming {
+                row: "presentation only",
+                block: None,
+                presentation: Some(signed.clone()),
+                name: SIGNED_NAME,
+                statement: SIGNED_STATEMENT,
+                url: None,
+                contact: SIGNED_CONTACT,
+                withheld: &[],
+            },
+            Naming {
+                row: "manifest block only",
+                block: Some(block.clone()),
+                presentation: None,
+                name: BLOCK_NAME,
+                statement: BLOCK_STATEMENT,
+                url: Some(BLOCK_URL),
+                contact: BLOCK_CONTACT,
+                withheld: &[],
+            },
+            Naming {
+                row: "both",
+                block: Some(block),
+                presentation: Some(signed),
+                name: SIGNED_NAME,
+                statement: SIGNED_STATEMENT,
+                url: Some(BLOCK_URL),
+                contact: SIGNED_CONTACT,
+                withheld: &[BLOCK_NAME, BLOCK_CONTACT],
+            },
+        ];
+        for Naming {
+            row,
+            block,
+            presentation,
+            name,
+            statement,
+            url,
+            contact,
+            withheld,
+        } in rows
+        {
+            let (_root, facade, status_text) =
+                published("organization", switched(block), presentation);
+            let snapshot = facade.snapshot();
+            let authority = facade.effective_authority();
+
+            let organization = snapshot.organization().expect(row);
+            assert_eq!(organization.name.as_deref(), Some(name), "{row}");
+            assert_eq!(organization.statement.as_deref(), Some(statement), "{row}");
+            assert_eq!(organization.url.as_deref(), url, "{row}");
+            let contacts: Vec<_> = organization
+                .contacts
+                .iter()
+                .map(|contact| contact.value.as_str())
+                .collect();
+            assert_eq!(contacts, [contact], "{row}");
+            assert_eq!(authority.organization.as_ref(), Some(organization), "{row}");
+            assert_eq!(snapshot.channels_off().organization, Some(name), "{row}");
+            assert_eq!(facade.policy_chip().detail, authority.headline, "{row}");
+            assert!(
+                authority.headline.contains(name),
+                "{row}: {}",
+                authority.headline
+            );
+            assert_eq!(authority.layers[0].title, name, "{row}");
+            for passport in [&authority.passport, &facade.diagnostics().managed_policy] {
+                assert_eq!(passport.organization.as_deref(), Some(name), "{row}");
+                assert_eq!(passport.rationale.as_deref(), Some(statement), "{row}");
+                assert_eq!(passport.contacts[0].value, contact, "{row}");
+            }
+            let status: Value = serde_json::from_str(&status_text).unwrap();
+            assert_eq!(status["organization"], name, "{row}");
+            assert_eq!(status["contacts"][0]["value"], contact, "{row}");
+            for withheld in withheld {
+                assert!(!status_text.contains(withheld), "{row}: {status_text}");
+            }
         }
     }
 
-    #[test]
-    fn a_bundle_named_only_in_its_presentation_names_the_organization_on_every_surface() {
-        let (_root, facade, status) = published(
-            "presentation-only",
-            switched(None),
-            Some(bundle::Presentation {
-                org_name: Some("Example Org".into()),
-                rationale: Some("Keeps browser work inside approved sites.".into()),
-                contacts: vec![contact("security@example.com")],
-            }),
-        );
-        let snapshot = facade.snapshot();
-        let authority = facade.effective_authority();
+    /// One change to a published organization's files: its paths and its local source.
+    type Change = &'static dyn Fn(&ManagedPaths, &Path);
 
-        let organization = snapshot.organization().expect("the presentation names it");
-        assert_eq!(organization.name.as_deref(), Some("Example Org"));
-        assert_eq!(authority.organization.as_ref(), Some(organization));
-        assert_eq!(snapshot.channels_off().organization, Some("Example Org"));
-        assert_eq!(
-            authority.headline,
-            "Example Org sets the rules on this machine. MCP agents are turned off. Command-line work may continue."
-        );
-        assert_eq!(facade.policy_chip().detail, authority.headline);
-        assert_eq!(authority.layers[0].title, "Example Org");
-        for passport in [&authority.passport, &facade.diagnostics().managed_policy] {
-            assert_eq!(passport.organization.as_deref(), Some("Example Org"));
-            assert_eq!(passport.contacts[0].value, "security@example.com");
+    /// ACCEPTANCE Governance 6 and 19, ADR-0121 Decision 2, docs/trust/continuity.md and
+    /// security-overview.md: once a policy is in force, a replacement that does not validate never
+    /// displaces it. An edit to the user file that does not parse keeps the last valid user policy
+    /// enforced. A malformed, wrongly signed, older, sequence-reusing or unreachable organization
+    /// update keeps the verified publication, shown as last-known-good, and a removed bootstrap
+    /// keeps the machine managed (6c138338). The next valid replacement still takes effect.
+    #[test]
+    fn once_a_policy_is_in_force_only_a_valid_replacement_takes_its_place() {
+        const CURRENT: u64 = 8;
+        const NEWER: u64 = 9;
+        const OLDER: u64 = 3;
+        let rows: [(&str, Change); 6] = [
+            ("malformed", &|_, source| replace(source, b"half written")),
+            ("another key", &|_, source| {
+                replace(
+                    source,
+                    bundle::sign(&OTHER_SEED, None, NEWER, manifest("newer", "action"), None),
+                );
+            }),
+            ("rollback", &|_, source| {
+                replace(source, signed(OLDER, manifest("older", "action")));
+            }),
+            ("sequence reused", &|_, source| {
+                replace(source, signed(CURRENT, manifest("other", "action")));
+            }),
+            ("unreachable", &|_, source| fs::remove_file(source).unwrap()),
+            ("bootstrap removed", &|paths, _| {
+                fs::remove_file(&paths.bootstrap).unwrap();
+            }),
+        ];
+        for (row, change) in rows {
+            let root = directory("last-known-good");
+            let paths = ManagedPaths::under(&root);
+            let source = root.join(SOURCE);
+            fs::write(&source, signed(CURRENT, manifest("current", "read"))).unwrap();
+            write_json(&paths.bootstrap, &bootstrap(SOURCE));
+            let facade = GovernanceFacade::with_managed_paths(None, paths.clone());
+            assert_eq!(facade.snapshot().managed_sequence, Some(CURRENT), "{row}");
+
+            change(&paths, &source);
+            facade.refresh_tick();
+
+            let kept = facade.snapshot();
+            assert_eq!(kept.managed_sequence, Some(CURRENT), "{row}");
+            assert!(kept.authorize_capability(Capability::Read).allowed, "{row}");
+            assert!(
+                !kept.authorize_capability(Capability::Action).allowed,
+                "{row}"
+            );
+            let diagnostics = facade.diagnostics();
+            assert!(diagnostics.managed_authority_configured, "{row}");
+            assert!(diagnostics.authority_valid, "{row}");
+            assert!(diagnostics.managed_policy.verified, "{row}");
+            assert_eq!(
+                diagnostics.managed_policy.freshness,
+                ManagedPolicyFreshness::LastKnownGood,
+                "{row}"
+            );
+
+            if !paths.bootstrap.exists() {
+                write_json(&paths.bootstrap, &bootstrap(SOURCE));
+            }
+            replace(&source, signed(NEWER, manifest("newer", "action")));
+            facade.refresh_tick();
+
+            let replaced = facade.snapshot();
+            assert_eq!(replaced.managed_sequence, Some(NEWER), "{row}");
+            assert!(
+                replaced.authorize_capability(Capability::Action).allowed,
+                "{row}"
+            );
+            assert_eq!(
+                facade.diagnostics().managed_policy.freshness,
+                ManagedPolicyFreshness::Fresh,
+                "{row}"
+            );
         }
-        assert!(status.contains("Example Org"), "{status}");
-    }
 
-    #[test]
-    fn a_manifest_block_alone_names_the_refusal_row() {
-        let (_root, facade, status) = published(
-            "block-only",
-            switched(Some(serde_json::json!({
-                "name": "Northwind",
-                "statement": "Keeps support work on support sites.",
-                "contacts": [{"kind": "email", "value": "it@northwind.example"}]
-            }))),
-            None,
+        let user = Scratch::file("user-last-known-good.json");
+        fs::write(&user, manifest("read", "read").to_string()).unwrap();
+        let unmanaged = directory("unmanaged");
+        let facade = GovernanceFacade::with_managed_paths(
+            Some(user.to_path_buf()),
+            ManagedPaths::under(&unmanaged),
         );
-        let authority = facade.effective_authority();
-
-        // The refusal row names whoever the passport names, and lists its contacts.
-        let passport = &authority.passport;
-        assert_eq!(passport.organization.as_deref(), Some("Northwind"));
-        assert_eq!(
-            passport.rationale.as_deref(),
-            Some("Keeps support work on support sites.")
-        );
-        assert_eq!(passport.contacts[0].value, "it@northwind.example");
-        assert_eq!(
-            authority
-                .organization
-                .as_ref()
-                .and_then(|organization| organization.name.as_deref()),
-            Some("Northwind")
-        );
-        assert_eq!(
-            facade.snapshot().channels_off().organization,
-            Some("Northwind")
-        );
-        assert!(status.contains("Northwind"), "{status}");
-        assert!(status.contains("it@northwind.example"), "{status}");
-    }
-
-    #[test]
-    fn on_conflict_the_signed_presentation_wins() {
-        let (_root, facade, status) = published(
-            "conflict",
-            switched(Some(serde_json::json!({
-                "name": "Northwind",
-                "statement": "The manifest's own words.",
-                "url": "https://northwind.example/policy",
-                "contacts": [{"kind": "email", "value": "it@northwind.example"}]
-            }))),
-            Some(bundle::Presentation {
-                org_name: Some("Example Org".into()),
-                rationale: Some("The signed presentation's words.".into()),
-                contacts: vec![contact("security@example.com")],
-            }),
-        );
-        let authority = facade.effective_authority();
-
-        let organization = authority.organization.as_ref().expect("both name it");
-        assert_eq!(organization.name.as_deref(), Some("Example Org"));
-        assert_eq!(
-            organization.statement.as_deref(),
-            Some("The signed presentation's words.")
-        );
-        // The presentation carries no address, so the manifest fills it.
-        assert_eq!(
-            organization.url.as_deref(),
-            Some("https://northwind.example/policy")
-        );
-        assert_eq!(organization.contacts.len(), 1);
-        assert_eq!(organization.contacts[0].value, "security@example.com");
-        assert_eq!(facade.snapshot().organization(), Some(organization));
-        assert_eq!(
-            facade.snapshot().channels_off().organization,
-            Some("Example Org")
-        );
-        assert!(facade.policy_chip().detail.starts_with("Example Org sets"));
-        assert_eq!(
-            authority.passport.organization.as_deref(),
-            Some("Example Org")
-        );
-        assert_eq!(
-            authority.passport.rationale.as_deref(),
-            Some("The signed presentation's words.")
-        );
-        assert!(status.contains("Example Org"), "{status}");
-        assert!(!status.contains("Northwind"), "{status}");
-        assert!(!status.contains("it@northwind.example"), "{status}");
-    }
-
-    /// A facade under the bootstrap at `paths`, and whether every read is refused for invalid
-    /// authority, as the facade enforces and as it reports.
-    fn fails_closed(paths: ManagedPaths) -> (super::super::GovernanceFacade, bool) {
-        let facade = super::super::GovernanceFacade::with_managed_paths(None, paths);
-        let refused = facade
-            .snapshot()
-            .authorize_capability(super::super::Capability::Read)
-            .reason
-            == super::super::ReasonCode::InvalidAuthority;
-        let reported = !facade.diagnostics().authority_valid;
-        (facade, refused && reported)
-    }
-
-    #[test]
-    fn invalid_managed_authority_fails_closed() {
-        let root = directory("invalid");
-        let paths = ManagedPaths::under(&root);
-        fs::write(root.join("org.bundle"), br#"{"version":1,"managed":false}"#).unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &[44_u8; 32]);
-        assert!(fails_closed(paths).1);
-    }
-
-    #[test]
-    fn an_unreachable_managed_authority_fails_closed_from_cold_start() {
-        let root = directory("unreachable");
-        let paths = ManagedPaths::under(&root);
-        write_bootstrap(&paths.bootstrap, "missing.bundle", &[45_u8; 32]);
-        assert!(fails_closed(paths).1);
-    }
-
-    #[test]
-    fn a_signed_schema_three_manifest_fails_closed_and_its_bundle_is_never_rewritten() {
-        let root = directory("schema-three");
-        let paths = ManagedPaths::under(&root);
-        let seed = [46_u8; 32];
-        let signed = bundle::sign(
-            &seed,
-            None,
-            1,
-            serde_json::json!({"schema": 3, "name": "theirs", "version": "1", "grants": []}),
-            None,
-        );
-        fs::write(root.join("org.bundle"), &signed).unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        assert!(fails_closed(paths).1);
-        assert_eq!(fs::read(root.join("org.bundle")).unwrap(), signed);
-    }
-
-    #[test]
-    fn a_passport_never_reports_an_unsigned_file_as_verified() {
-        let root = directory("unsigned");
-        let paths = ManagedPaths::under(&root);
-        let unsigned = serde_json::to_vec(&manifest("org", "read")).unwrap();
-        fs::write(root.join("org.bundle"), &unsigned).unwrap();
-        fs::write(paths.cache.as_ref().unwrap(), &unsigned).unwrap();
-        write_bootstrap(&paths.bootstrap, "org.bundle", &[47_u8; 32]);
-
-        let (facade, closed) = fails_closed(paths);
-
-        assert!(closed);
+        replace(&user, "{half-written");
+        facade.refresh_tick();
+        let kept = facade.snapshot();
+        assert!(kept.authorize_capability(Capability::Read).allowed);
+        assert!(!kept.authorize_capability(Capability::Action).allowed);
         let diagnostics = facade.diagnostics();
-        assert!(diagnostics.managed_authority_configured);
-        assert!(!diagnostics.managed_authority_active);
-        for passport in [
-            &diagnostics.managed_policy,
-            &facade.effective_authority().passport,
-        ] {
-            assert!(passport.configured);
-            assert!(!passport.verified);
-            assert_eq!(passport.freshness, super::ManagedPolicyFreshness::NoPolicy);
-            assert_eq!(passport.sequence, None);
+        assert!(diagnostics.local_policy_active);
+        assert!(!diagnostics.local_policy_valid);
+        assert!(
+            diagnostics.authority_valid,
+            "the kept user policy is enforced, so authority is not failing closed"
+        );
+
+        replace(&user, manifest("action", "action").to_string());
+        facade.refresh_tick();
+        let replaced = facade.snapshot();
+        assert!(!replaced.authorize_capability(Capability::Read).allowed);
+        assert!(replaced.authorize_capability(Capability::Action).allowed);
+        let diagnostics = facade.diagnostics();
+        assert!(diagnostics.local_policy_valid);
+        assert!(diagnostics.authority_valid);
+    }
+
+    /// One cold start under an administrator's bootstrap.
+    struct ColdStart {
+        row: &'static str,
+        bootstrap: Value,
+        /// What the local [`SOURCE`] holds, if anything.
+        source: Option<Vec<u8>>,
+        /// What the verified cache holds, if anything.
+        cache: Option<Vec<u8>>,
+        /// The sequence enforced from the cache, or `None` when the start fails closed.
+        enforced: Option<u64>,
+    }
+
+    /// ACCEPTANCE Governance 6, 19 and 22, ADR-0121 Decision 2, ADR-0197, ADR-0055 Decision 5
+    /// (the cache is verified on read) and docs/trust/continuity.md: a configured service starts
+    /// from what is on the machine, without touching the network. An organization's verified cache
+    /// is enforced before the first poll and through a source outage. A user policy file, or an
+    /// organization source, that holds no valid policy and has no verified cache refuses every
+    /// read for invalid authority, reported exactly as it is enforced, and the passport says
+    /// nothing is verified.
+    #[test]
+    fn a_cold_start_enforces_only_a_valid_source_or_verified_cache_and_otherwise_fails_closed() {
+        const CACHED: u64 = 9;
+        const HTTPS_SOURCE: &str = "https://policy.invalid/bundle";
+        let cache = signed(CACHED, manifest("cached", "read"));
+        let mut misspelled = bootstrap(SOURCE);
+        misspelled["pubkey_mldsa65"] = misspelled["pubkey_ed25519"].clone();
+        let rows = [
+            ColdStart {
+                row: "an https source with a verified cache",
+                bootstrap: bootstrap(HTTPS_SOURCE),
+                source: None,
+                cache: Some(cache.clone()),
+                enforced: Some(CACHED),
+            },
+            ColdStart {
+                row: "an unreachable source with a verified cache",
+                bootstrap: bootstrap(MISSING_SOURCE),
+                source: None,
+                cache: Some(cache),
+                enforced: Some(CACHED),
+            },
+            ColdStart {
+                row: "an unreachable source and no cache",
+                bootstrap: bootstrap(MISSING_SOURCE),
+                source: None,
+                cache: None,
+                enforced: None,
+            },
+            ColdStart {
+                row: "an unsigned manifest as the source",
+                bootstrap: bootstrap(SOURCE),
+                source: Some(serde_json::to_vec(&manifest("org", "read")).unwrap()),
+                cache: None,
+                enforced: None,
+            },
+            ColdStart {
+                row: "a cache signed by another key",
+                bootstrap: bootstrap(MISSING_SOURCE),
+                source: None,
+                cache: Some(bundle::sign(
+                    &OTHER_SEED,
+                    None,
+                    CACHED,
+                    manifest("cached", "read"),
+                    None,
+                )),
+                enforced: None,
+            },
+            ColdStart {
+                row: "a signed schema-3 manifest",
+                bootstrap: bootstrap(SOURCE),
+                source: Some(signed(
+                    1,
+                    json!({"schema": 3, "name": "theirs", "version": "1", "grants": []}),
+                )),
+                cache: None,
+                enforced: None,
+            },
+            ColdStart {
+                row: "a misspelled key name beside a valid source",
+                bootstrap: misspelled,
+                source: Some(signed(1, manifest("org", "read"))),
+                cache: None,
+                enforced: None,
+            },
+        ];
+        for ColdStart {
+            row,
+            bootstrap,
+            source,
+            cache,
+            enforced,
+        } in rows
+        {
+            let root = directory("cold-start");
+            let paths = ManagedPaths::under(&root);
+            write_json(&paths.bootstrap, &bootstrap);
+            if let Some(source) = &source {
+                fs::write(root.join(SOURCE), source).unwrap();
+            }
+            if let Some(cache) = &cache {
+                fs::write(paths.cache.as_ref().unwrap(), cache).unwrap();
+            }
+
+            let facade = GovernanceFacade::with_managed_paths(None, paths.clone());
+
+            let snapshot = facade.snapshot();
+            let diagnostics = facade.diagnostics();
+            let passports = [
+                diagnostics.managed_policy.clone(),
+                facade.effective_authority().passport,
+            ];
+            assert!(diagnostics.managed_authority_configured, "{row}");
+            match enforced {
+                Some(sequence) => {
+                    assert_eq!(snapshot.managed_sequence, Some(sequence), "{row}");
+                    assert!(
+                        snapshot.authorize_capability(Capability::Read).allowed,
+                        "{row}"
+                    );
+                    assert!(diagnostics.authority_valid, "{row}");
+                    for passport in &passports {
+                        assert!(passport.verified, "{row}");
+                        assert_eq!(passport.sequence, Some(sequence), "{row}");
+                        assert_eq!(
+                            passport.freshness,
+                            ManagedPolicyFreshness::LastKnownGood,
+                            "{row}"
+                        );
+                    }
+                }
+                None => {
+                    assert_eq!(
+                        snapshot.authorize_capability(Capability::Read).reason,
+                        ReasonCode::InvalidAuthority,
+                        "{row}"
+                    );
+                    assert!(!diagnostics.authority_valid, "{row}");
+                    assert!(!diagnostics.managed_authority_active, "{row}");
+                    for passport in &passports {
+                        assert!(passport.configured, "{row}");
+                        assert!(!passport.verified, "{row}");
+                        assert_eq!(
+                            passport.freshness,
+                            ManagedPolicyFreshness::NoPolicy,
+                            "{row}"
+                        );
+                        assert_eq!(passport.sequence, None, "{row}");
+                    }
+                }
+            }
+            if bootstrap["source"] == HTTPS_SOURCE {
+                for passport in &passports {
+                    assert_eq!(passport.last_attempt_ms, None, "{row}: a start fetched");
+                }
+                let mut authority = ManagedAuthority::new(paths);
+                authority.load_offline();
+                assert!(
+                    authority.needs_refresh(),
+                    "{row}: the first poll is owed to the refresher"
+                );
+            }
+            if let Some(source) = source {
+                assert_eq!(
+                    fs::read(root.join(SOURCE)).unwrap(),
+                    source,
+                    "{row}: an administrator's file is never rewritten"
+                );
+            }
         }
+
+        let user = Scratch::file("never-valid.json");
+        fs::write(&user, "{half-written").unwrap();
+        let unmanaged = directory("unmanaged");
+        let facade = GovernanceFacade::with_managed_paths(
+            Some(user.to_path_buf()),
+            ManagedPaths::under(&unmanaged),
+        );
+        assert_eq!(
+            facade
+                .snapshot()
+                .authorize_capability(Capability::Read)
+                .reason,
+            ReasonCode::InvalidAuthority
+        );
+        let diagnostics = facade.diagnostics();
+        assert!(!diagnostics.authority_valid);
+        assert!(diagnostics.local_policy_configured);
+        assert!(!diagnostics.local_policy_active);
     }
 }

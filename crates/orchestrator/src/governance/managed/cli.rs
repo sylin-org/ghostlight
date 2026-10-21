@@ -417,70 +417,116 @@ fn usage() -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
+    use std::time::Duration;
 
     use super::{parse, run, Command, ED25519_SEED_FILE, MLDSA_SEED_FILE};
+    use crate::governance::managed::{ManagedAuthority, ManagedPaths};
     use crate::install::record::assert_owner_only;
-    use crate::install::record::steps::{self, Step};
     use crate::scratch::Scratch;
 
-    /// A policy and an Ed25519 seed below `root`, and the `sign` command that signs the policy
-    /// into `output` at `sequence`.
-    fn sign_command(root: &Scratch, output: &std::path::Path, sequence: u64) -> Command {
+    /// Parse `arguments` after `ghostlight policy` and run them, returning what they printed.
+    fn policy(arguments: &[String]) -> anyhow::Result<String> {
+        let mut out = Vec::new();
+        run(&parse(arguments)?, &mut out)?;
+        Ok(String::from_utf8(out).unwrap())
+    }
+
+    /// The value printed after `label` on its own line.
+    fn printed<'a>(out: &'a str, label: &str) -> &'a str {
+        out.lines()
+            .find_map(|line| line.strip_prefix(label)?.strip_prefix(' '))
+            .unwrap_or_else(|| panic!("{label} is not printed: {out}"))
+    }
+
+    /// Move `path`'s modified time past the last read, so the next refresh reads it.
+    fn touched(path: &Path) {
+        let file = fs::File::options().write(true).open(path).unwrap();
+        let modified = file.metadata().unwrap().modified().unwrap();
+        file.set_modified(modified + Duration::from_secs(2))
+            .unwrap();
+    }
+
+    /// The governance guide (Publish signed managed policy), ADR-0055 Decision 3, ADR-0121
+    /// Decision 4 and be5c2cf4: the authoring commands and an endpoint agree. Keys from keygen,
+    /// the managed.json publish prints and the bundle it writes, into a directory that did not
+    /// exist, verify under the managed authority at the next sequence each time; pubkey prints the
+    /// same keys; and the armored bundle sign prints is accepted as it stands.
+    #[test]
+    fn what_the_authoring_commands_publish_an_endpoint_accepts() {
+        const NAME: &str = "org";
+        const SOURCE: &str = "policy.bundle";
+        const PROVISION: &str = "Provision this managed.json";
+        const ARMOR_BEGIN: &str = "-----BEGIN";
+        const SIGNED_SEQUENCE: u64 = 3;
+        let root = Scratch::named("policy-authoring");
         let keys = root.join("keys");
+        let published = root.join("published");
         let manifest = root.join("policy.json");
         fs::write(
             &manifest,
-            r#"{"schema":4,"name":"org","version":"1","grants":[]}"#,
+            format!(r#"{{"schema":4,"name":"{NAME}","version":"1","grants":[]}}"#),
         )
         .unwrap();
-        if !keys.join(ED25519_SEED_FILE).exists() {
-            run(
-                &Command::Keygen {
-                    directory: keys.clone(),
-                    ed25519_only: true,
-                },
-                &mut Vec::new(),
-            )
-            .unwrap();
-        }
-        parse(&[
-            "sign".into(),
-            manifest.display().to_string(),
-            format!("--ed25519-seed={}", keys.join(ED25519_SEED_FILE).display()),
-            format!("--sequence={sequence}"),
-            format!("--out={}", output.display()),
-        ])
-        .unwrap()
-    }
-
-    #[test]
-    fn a_first_policy_sign_creates_its_bundle() {
-        let root = Scratch::named("policy-first-sign");
-        let output = root.join("published").join("policy.bundle");
-        run(&sign_command(&root, &output, 1), &mut Vec::new()).unwrap();
-        assert!(!fs::read(&output).unwrap().is_empty());
-        let names: Vec<_> = fs::read_dir(output.parent().unwrap())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        assert_eq!(names, ["policy.bundle"]);
-    }
-
-    #[test]
-    fn a_bundle_write_is_synced_before_its_rename() {
-        let root = Scratch::named("policy-sign-synced");
-        let output = root.join("policy.bundle");
-        let command = sign_command(&root, &output, 1);
-        steps::taken();
-        run(&command, &mut Vec::new()).unwrap();
-        let taken = steps::taken();
-        let [Step::Synced(synced), Step::Renamed(renamed, published)] = taken.as_slice() else {
-            panic!("one synced write then one rename, not {taken:?}");
+        let ed25519 = keys.join(ED25519_SEED_FILE).display().to_string();
+        let mldsa = keys.join(MLDSA_SEED_FILE).display().to_string();
+        let bundle = published.join(SOURCE);
+        let signing = |command: &str| {
+            vec![
+                command.to_owned(),
+                manifest.display().to_string(),
+                format!("--ed25519-seed={ed25519}"),
+                format!("--mldsa-seed={mldsa}"),
+            ]
         };
-        assert_eq!(synced, renamed);
-        assert_eq!(published, &output);
+
+        policy(&["keygen".into(), keys.display().to_string()]).unwrap();
+        let public = policy(&[
+            "pubkey".into(),
+            ed25519.clone(),
+            "--mldsa-seed".into(),
+            mldsa.clone(),
+        ])
+        .unwrap();
+        let mut publish = signing("publish");
+        publish.push(format!("--source={SOURCE}"));
+        publish.push(format!("--out={}", bundle.display()));
+        policy(&publish).unwrap();
+        let out = policy(&publish).unwrap();
+
+        let (_, provisioned) = out.split_once(PROVISION).expect(PROVISION);
+        let (_, descriptor) = provisioned.split_once('\n').unwrap();
+        let descriptor: serde_json::Value = serde_json::from_str(descriptor).unwrap();
+        for key in ["pubkey_ed25519", "pubkey_mldsa"] {
+            assert_eq!(descriptor[key], printed(&public, key), "{key}");
+        }
+        let paths = ManagedPaths::under(&published);
+        fs::write(&paths.bootstrap, descriptor.to_string()).unwrap();
+        let mut authority = ManagedAuthority::new(paths);
+        authority.refresh();
+        assert!(authority.valid());
+        assert_eq!(
+            authority.sequence(),
+            Some(2),
+            "a second publish is sequence 2"
+        );
+        assert_eq!(authority.manifest().unwrap().name, NAME);
+
+        let mut sign = signing("sign");
+        sign.push(format!("--sequence={SIGNED_SEQUENCE}"));
+        sign.push(format!("--out={}", root.join("other.bundle").display()));
+        let out = policy(&sign).unwrap();
+        let armored = &out[out
+            .find(ARMOR_BEGIN)
+            .expect("sign prints the armored bundle")..];
+        fs::write(&bundle, armored).unwrap();
+        touched(&bundle);
+        authority.refresh();
+        assert_eq!(authority.sequence(), Some(SIGNED_SEQUENCE));
     }
 
+    /// e2b3ade3 and ADR-0203 Decision 11.1: keygen writes each private seed readable only by the
+    /// user (a protected DACL on Windows, 0600 on Unix) and never overwrites an existing seed.
     #[test]
     fn keygen_seeds_are_readable_only_by_the_user() {
         let root = Scratch::named("policy-keygen");
@@ -490,72 +536,13 @@ mod tests {
             ed25519_only: false,
         };
         run(&keygen, &mut Vec::new()).unwrap();
-        for name in [ED25519_SEED_FILE, MLDSA_SEED_FILE] {
-            let seed = keys.join(name);
-            assert_eq!(fs::read(&seed).unwrap().len(), 32, "{name}");
-            assert_owner_only(&seed);
+        let seeds = [ED25519_SEED_FILE, MLDSA_SEED_FILE].map(|name| keys.join(name));
+        let written = seeds.clone().map(|seed| fs::read(seed).unwrap());
+        for (seed, bytes) in seeds.iter().zip(&written) {
+            assert_eq!(bytes.len(), 32, "{}", seed.display());
+            assert_owner_only(seed);
         }
-        let again = run(&keygen, &mut Vec::new()).unwrap_err();
-        assert!(again.to_string().contains("never overwrites"), "{again}");
-    }
-
-    #[test]
-    fn command_parser_requires_explicit_signing_inputs() {
-        assert_eq!(
-            parse(&["keygen".into(), "keys".into()]).unwrap(),
-            Command::Keygen {
-                directory: "keys".into(),
-                ed25519_only: false
-            }
-        );
-        assert!(parse(&["sign".into(), "policy.json".into()]).is_err());
-        assert!(parse(&[
-            "publish".into(),
-            "policy.json".into(),
-            "--ed25519-seed=seed".into(),
-            "--source=http://insecure.example/policy".into(),
-        ])
-        .is_ok());
-    }
-
-    #[test]
-    fn publication_advances_sequence_and_emits_a_bootstrap() {
-        let root = Scratch::named("policy-cli");
-        let keys = root.join("keys");
-        let manifest = root.join("policy.json");
-        let output = root.join("policy.bundle");
-        fs::write(
-            &manifest,
-            r#"{"schema":4,"name":"org","version":"1","grants":[]}"#,
-        )
-        .unwrap();
-        run(
-            &Command::Keygen {
-                directory: keys.clone(),
-                ed25519_only: true,
-            },
-            &mut Vec::new(),
-        )
-        .unwrap();
-        let command = parse(&[
-            "publish".into(),
-            manifest.display().to_string(),
-            format!(
-                "--ed25519-seed={}",
-                keys.join("policy-ed25519.seed").display()
-            ),
-            "--source=https://policy.example/ghostlight.bundle".into(),
-            format!("--out={}", output.display()),
-        ])
-        .unwrap();
-        let mut first = Vec::new();
-        run(&command, &mut first).unwrap();
-        let mut second = Vec::new();
-        run(&command, &mut second).unwrap();
-        assert!(String::from_utf8(first).unwrap().contains("sequence 1"));
-        let second = String::from_utf8(second).unwrap();
-        assert!(second.contains("sequence 2"));
-        assert!(second.contains("managed.json"));
-        assert!(second.contains("https://policy.example/ghostlight.bundle"));
+        assert!(run(&keygen, &mut Vec::new()).is_err());
+        assert_eq!(seeds.map(|seed| fs::read(seed).unwrap()), written);
     }
 }

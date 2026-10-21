@@ -227,96 +227,111 @@ mod tests {
     use base64::Engine as _;
     use serde_json::json;
 
-    use super::{armor, sign, verify, Envelope, POLICY_CONTEXT};
-    use crate::governance::managed::crypto::{self, verification_key};
+    use super::{sign, verify, BundleError, Envelope, POLICY_CONTEXT};
+    use crate::governance::managed::crypto::{signing, verification_key};
 
-    fn manifest() -> serde_json::Value {
-        serde_json::json!({"schema":4,"name":"org","version":"1","grants":[]})
+    /// The sibling signing domain ADR-0055 reserves beside policy.
+    const LICENSE_CONTEXT: &[u8] = b"ghostlight/license";
+
+    /// An envelope carrying `claims` under the Ed25519 signature `sig`.
+    fn envelope(claims: &[u8], sig: &[u8]) -> Vec<u8> {
+        serde_json::to_vec(&Envelope {
+            v: 1,
+            claims: BASE64.encode(claims),
+            sig: BASE64.encode(sig),
+            sig_mldsa: None,
+        })
+        .unwrap()
     }
 
+    /// docs/trust/security-overview.md, the questionnaire's CEK answers, ADR-0055 Decisions 3 and
+    /// 9(a) and 6c138338: a bundle verifies as policy only when the bootstrap's key signed these
+    /// exact claims in the ghostlight/policy domain and the claims are policy. Tampered claims,
+    /// another key, another domain and a context/message split that concatenates to the same
+    /// bytes are refused as a bad signature. A validly signed claim of any other kind is refused
+    /// as that kind. Claims signed before the kind field existed are policy.
     #[test]
-    fn ed25519_and_composite_bundles_round_trip() {
-        let ed_seed = [21_u8; 32];
-        let mldsa_seed = [22_u8; 32];
-        let ed_key = verification_key(&crypto::signing::ed25519_public(&ed_seed), None).unwrap();
-        let composite_key = verification_key(
-            &crypto::signing::ed25519_public(&ed_seed),
-            Some(&crypto::signing::mldsa_public(&mldsa_seed)),
-        )
-        .unwrap();
+    fn a_bundle_is_policy_only_when_the_bootstraps_key_signed_these_exact_policy_claims() {
+        const SEED: [u8; 32] = [24; 32];
+        const OTHER_SEED: [u8; 32] = [25; 32];
+        const SEQUENCE: u64 = 8;
+        const OTHER_KIND: &str = "break_glass";
+        let key = verification_key(&signing::ed25519_public(&SEED), None).unwrap();
+        let manifest = json!({"schema": 4, "name": "org", "version": "1", "grants": []});
+        let claims = |seq: u64| {
+            serde_json::to_vec(&json!({"kind": "policy", "seq": seq, "manifest": manifest}))
+                .unwrap()
+        };
+        let signed = claims(SEQUENCE);
+        let sig = signing::ed25519(&SEED, POLICY_CONTEXT, &signed);
 
         assert_eq!(
-            verify(&sign(&ed_seed, None, 4, manifest(), None), &ed_key)
-                .unwrap()
-                .sequence,
-            4
+            verify(&sign(&SEED, None, SEQUENCE, manifest.clone(), None), &key)
+                .map(|bundle| bundle.sequence),
+            Ok(SEQUENCE)
         );
+        assert_eq!(
+            verify(&envelope(&signed, &sig), &key).map(|bundle| bundle.sequence),
+            Ok(SEQUENCE),
+            "the control envelope verifies"
+        );
+
+        let (split_context, split_prefix) = POLICY_CONTEXT.split_at(b"ghostlight".len());
+        let split_message = [split_prefix, signed.as_slice()].concat();
+        for (row, bytes) in [
+            ("tampered claims", envelope(&claims(SEQUENCE + 1), &sig)),
+            (
+                "another key",
+                envelope(
+                    &signed,
+                    &signing::ed25519(&OTHER_SEED, POLICY_CONTEXT, &signed),
+                ),
+            ),
+            (
+                "another domain",
+                envelope(&signed, &signing::ed25519(&SEED, LICENSE_CONTEXT, &signed)),
+            ),
+            (
+                "the same bytes split differently",
+                envelope(
+                    &signed,
+                    &signing::ed25519(&SEED, split_context, &split_message),
+                ),
+            ),
+        ] {
+            assert_eq!(
+                verify(&bytes, &key).map(|bundle| bundle.sequence),
+                Err(BundleError::Signature),
+                "{row}"
+            );
+        }
+
+        let other_kind =
+            serde_json::to_vec(&json!({"kind": OTHER_KIND, "seq": SEQUENCE, "manifest": manifest}))
+                .unwrap();
         assert_eq!(
             verify(
-                &sign(&ed_seed, Some(&mldsa_seed), 5, manifest(), None),
-                &composite_key
+                &envelope(
+                    &other_kind,
+                    &signing::ed25519(&SEED, POLICY_CONTEXT, &other_kind)
+                ),
+                &key
             )
-            .unwrap()
-            .sequence,
-            5
+            .map(|bundle| bundle.sequence),
+            Err(BundleError::Kind(OTHER_KIND.into()))
         );
-        assert!(verify(&sign(&ed_seed, None, 6, manifest(), None), &composite_key).is_err());
-    }
-
-    #[test]
-    fn armor_preserves_the_exact_signed_envelope() {
-        let seed = [23_u8; 32];
-        let bytes = sign(&seed, None, 7, manifest(), None);
-        let key = verification_key(&crypto::signing::ed25519_public(&seed), None).unwrap();
-        assert_eq!(verify(armor(&bytes).as_bytes(), &key).unwrap().sequence, 7);
-    }
-
-    #[test]
-    fn tampering_is_rejected() {
-        let seed = [24_u8; 32];
-        let mut bytes = sign(&seed, None, 8, manifest(), None);
-        let key = verification_key(&crypto::signing::ed25519_public(&seed), None).unwrap();
-        let index = bytes.len() / 2;
-        bytes[index] ^= 1;
-        assert!(verify(&bytes, &key).is_err());
-    }
-
-    #[test]
-    fn version_08_claims_without_a_kind_remain_compatible() {
-        let seed = [25_u8; 32];
-        let claims = serde_json::to_vec(&json!({
-            "seq": 9,
-            "manifest": manifest()
-        }))
-        .unwrap();
-        let envelope = Envelope {
-            v: 1,
-            claims: BASE64.encode(&claims),
-            sig: BASE64.encode(crypto::signing::ed25519(&seed, POLICY_CONTEXT, &claims)),
-            sig_mldsa: None,
-        };
-        let bytes = serde_json::to_vec(&envelope).unwrap();
-        let key = verification_key(&crypto::signing::ed25519_public(&seed), None).unwrap();
-        assert_eq!(verify(&bytes, &key).unwrap().sequence, 9);
-    }
-
-    #[test]
-    fn a_valid_signature_cannot_turn_an_unknown_bundle_kind_into_policy() {
-        let seed = [26_u8; 32];
-        let claims = serde_json::to_vec(&json!({
-            "kind": "break_glass",
-            "seq": 10,
-            "manifest": manifest()
-        }))
-        .unwrap();
-        let envelope = Envelope {
-            v: 1,
-            claims: BASE64.encode(&claims),
-            sig: BASE64.encode(crypto::signing::ed25519(&seed, POLICY_CONTEXT, &claims)),
-            sig_mldsa: None,
-        };
-        let bytes = serde_json::to_vec(&envelope).unwrap();
-        let key = verification_key(&crypto::signing::ed25519_public(&seed), None).unwrap();
-        assert!(verify(&bytes, &key).is_err());
+        let kindless = serde_json::to_vec(&json!({"seq": SEQUENCE, "manifest": manifest})).unwrap();
+        assert_eq!(
+            verify(
+                &envelope(
+                    &kindless,
+                    &signing::ed25519(&SEED, POLICY_CONTEXT, &kindless)
+                ),
+                &key
+            )
+            .map(|bundle| bundle.sequence),
+            Ok(SEQUENCE),
+            "claims signed before the kind field existed are policy"
+        );
     }
 }

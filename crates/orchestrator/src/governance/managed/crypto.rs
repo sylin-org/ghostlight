@@ -115,91 +115,62 @@ pub(super) mod signing {
 
 #[cfg(test)]
 mod tests {
-    use super::{signing, verification_key, verify, VerificationKey, MLDSA_SIGNATURE_BYTES};
+    use super::{signing, verification_key, verify, MLDSA_SIGNATURE_BYTES};
 
+    /// ACCEPTANCE Governance 18 and docs/trust/security-overview.md: Ed25519 is required, and
+    /// with an ML-DSA-65 key configured both legs must verify. With Ed25519 alone, a second leg is
+    /// refused rather than ignored.
     #[test]
-    fn composite_verification_requires_both_signature_legs() {
-        let ed_seed = [7_u8; 32];
-        let mldsa_seed = [9_u8; 32];
-        let message = b"signed policy claims";
-        let context = b"ghostlight/policy";
-        let key = verification_key(
-            &signing::ed25519_public(&ed_seed),
-            Some(&signing::mldsa_public(&mldsa_seed)),
+    fn a_configured_ml_dsa_key_makes_both_legs_mandatory() {
+        const ED_SEED: [u8; 32] = [7; 32];
+        const OTHER_ED_SEED: [u8; 32] = [8; 32];
+        const MLDSA_SEED: [u8; 32] = [9; 32];
+        const CONTEXT: &[u8] = b"ghostlight/policy";
+        const MESSAGE: &[u8] = b"signed policy claims";
+        let composite = verification_key(
+            &signing::ed25519_public(&ED_SEED),
+            Some(&signing::mldsa_public(&MLDSA_SEED)),
         )
         .unwrap();
-        let ed = signing::ed25519(&ed_seed, context, message);
-        let mldsa = signing::mldsa(&mldsa_seed, context, message);
+        let ed25519_only = verification_key(&signing::ed25519_public(&ED_SEED), None).unwrap();
+        let ed = signing::ed25519(&ED_SEED, CONTEXT, MESSAGE);
+        let other_ed = signing::ed25519(&OTHER_ED_SEED, CONTEXT, MESSAGE);
+        let mldsa = signing::mldsa(&MLDSA_SEED, CONTEXT, MESSAGE);
+        let zeros = [0_u8; MLDSA_SIGNATURE_BYTES];
 
-        assert!(verify(&key, context, message, &ed, Some(&mldsa)));
-        assert!(!verify(&key, context, message, &ed, None));
-        assert!(!verify(
-            &key,
-            context,
-            message,
-            &ed,
-            Some(&[0_u8; MLDSA_SIGNATURE_BYTES])
-        ));
-        assert!(matches!(key, VerificationKey::Composite { .. }));
-    }
-
-    #[test]
-    fn ed25519_only_rejects_an_unexpected_second_leg() {
-        let seed = [3_u8; 32];
-        let message = b"signed policy claims";
-        let key = verification_key(&signing::ed25519_public(&seed), None).unwrap();
-        let signature = signing::ed25519(&seed, b"ghostlight/policy", message);
-        assert!(verify(
-            &key,
-            b"ghostlight/policy",
-            message,
-            &signature,
-            None
-        ));
-        assert!(!verify(
-            &key,
-            b"ghostlight/policy",
-            message,
-            &signature,
-            Some(&[0_u8; MLDSA_SIGNATURE_BYTES])
-        ));
-    }
-
-    #[test]
-    fn ed25519_leg_is_bound_to_its_context_not_just_the_message() {
-        // The Ed25519 leg signs the context with the message, so a signature made for one
-        // context fails under every other, even when the message bytes match.
-        let seed = [11_u8; 32];
-        let message = b"signed policy claims";
-        let key = verification_key(&signing::ed25519_public(&seed), None).unwrap();
-        let signature = signing::ed25519(&seed, b"ghostlight/policy", message);
-
-        assert!(verify(
-            &key,
-            b"ghostlight/policy",
-            message,
-            &signature,
-            None
-        ));
-        assert!(!verify(
-            &key,
-            b"some/other/context",
-            message,
-            &signature,
-            None
-        ));
-        assert!(!verify(&key, b"", message, &signature, None));
-
-        // The length prefix also rules out `(context, message)` being reinterpreted as a
-        // differently-split pair that happens to concatenate to the same bytes.
-        let split_signature =
-            signing::ed25519(&seed, b"ghostlight", b"/policysigned policy claims");
-        assert!(!verify(
-            &key,
-            b"ghostlight/policy",
-            message,
-            &split_signature,
-            None
-        ));
+        for (row, key, ed, mldsa, verifies) in [
+            (
+                "composite, both legs",
+                &composite,
+                &ed,
+                Some(&mldsa[..]),
+                true,
+            ),
+            ("composite, no second leg", &composite, &ed, None, false),
+            (
+                "composite, a forged second leg",
+                &composite,
+                &ed,
+                Some(&zeros[..]),
+                false,
+            ),
+            (
+                "composite, another Ed25519 key",
+                &composite,
+                &other_ed,
+                Some(&mldsa[..]),
+                false,
+            ),
+            ("Ed25519 alone", &ed25519_only, &ed, None, true),
+            (
+                "Ed25519 alone, a second leg",
+                &ed25519_only,
+                &ed,
+                Some(&mldsa[..]),
+                false,
+            ),
+        ] {
+            assert_eq!(verify(key, CONTEXT, MESSAGE, ed, mldsa), verifies, "{row}");
+        }
     }
 }

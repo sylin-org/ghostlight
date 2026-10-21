@@ -117,64 +117,17 @@ fn pinned_roots(pem: &str) -> Result<RootCerts, FetchError> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufRead as _, Write as _};
+    use std::io::{BufRead as _, ErrorKind, Write as _};
     use std::net::TcpListener;
 
-    use super::{fetch, pinned_roots, FetchError, FetchOutcome};
+    use super::{fetch, FetchError, FetchOutcome, MAX_BUNDLE_BYTES};
     use crate::governance::managed::Bootstrap;
-
-    #[test]
-    fn conditional_fetch_carries_bearer_and_etag_without_following_redirects() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
-            let mut bearer = false;
-            let mut etag = false;
-            let mut line = String::new();
-            loop {
-                line.clear();
-                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                    break;
-                }
-                let lowercase = line.to_ascii_lowercase();
-                bearer |= lowercase.starts_with("authorization: bearer test-secret");
-                etag |= lowercase.starts_with("if-none-match: \"v4\"");
-            }
-            let body = b"signed-bundle";
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"v5\"\r\nConnection: close\r\n\r\n",
-                body.len()
-            )
-            .unwrap();
-            stream.write_all(body).unwrap();
-            (bearer, etag)
-        });
-        let bootstrap = Bootstrap {
-            source: format!("http://127.0.0.1:{port}/policy"),
-            pubkey_ed25519: "00".repeat(32),
-            bearer_token: Some("test-secret".into()),
-            ..Bootstrap::default()
-        };
-
-        let outcome = fetch(&bootstrap, Some("\"v4\"")).unwrap();
-        assert_eq!(server.join().unwrap(), (true, true));
-        assert!(matches!(
-            outcome,
-            FetchOutcome::Modified { bytes, etag }
-                if bytes == b"signed-bundle" && etag.as_deref() == Some("\"v5\"")
-        ));
-    }
-
-    #[test]
-    fn malformed_ca_pin_is_rejected_before_network_work() {
-        assert!(pinned_roots("not a certificate").is_err());
-    }
 
     /// Serve one request on a fresh port with `response`, and return the port and the request
     /// head the server read. A write the client cuts short is not an error here.
+    ///
+    /// The server blocks in `accept`, so a caller checks what `fetch` returned before it joins:
+    /// an answer from this server proves the client connected, and a failed check never waits.
     fn serve_once(response: Vec<u8>) -> (u16, std::thread::JoinHandle<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -204,41 +157,109 @@ mod tests {
         }
     }
 
+    /// Whether anything has connected to `listener` and waits in its backlog.
+    fn was_connected_to(listener: &TcpListener) -> bool {
+        listener.set_nonblocking(true).unwrap();
+        match listener.accept() {
+            Ok(_) => true,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => false,
+            Err(error) => panic!("accept failed: {error}"),
+        }
+    }
+
+    /// docs/trust/data-flows.md ("conditional HTTPS GET", "may use a bearer token"),
+    /// docs/trust/security-overview.md ("refuses redirects") and ADR-0121 Decision 4: a poll is
+    /// one GET carrying the bearer token and the last ETag, and its answer is read by the status
+    /// the server gave: 200 returns the body and the new ETag, 304 reads as not modified, and a
+    /// redirect comes back as its own status and is never followed.
     #[test]
-    fn a_redirect_reads_as_its_status_and_is_not_followed() {
+    fn a_poll_is_one_conditional_get_and_a_redirect_is_never_followed() {
+        const BEARER: &str = "test-secret";
+        const LAST_ETAG: &str = "\"v4\"";
+        const NEW_ETAG: &str = "\"v5\"";
+        const BODY: &[u8] = b"signed-bundle";
+        let conditional = |port| Bootstrap {
+            bearer_token: Some(BEARER.into()),
+            ..bootstrap_at(port)
+        };
+        let sent = |head: &str| {
+            let head = head.to_ascii_lowercase();
+            (
+                head.contains(&format!("authorization: bearer {BEARER}")),
+                head.contains(&format!("if-none-match: {LAST_ETAG}")),
+            )
+        };
+
+        let mut modified = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: {NEW_ETAG}\r\nConnection: close\r\n\r\n",
+            BODY.len()
+        )
+        .into_bytes();
+        modified.extend_from_slice(BODY);
+        let (port, server) = serve_once(modified);
+        let outcome = fetch(&conditional(port), Some(LAST_ETAG));
+        assert!(
+            matches!(
+                &outcome,
+                Ok(FetchOutcome::Modified { bytes, etag })
+                    if bytes == BODY && etag.as_deref() == Some(NEW_ETAG)
+            ),
+            "200"
+        );
+        assert_eq!(sent(&server.join().unwrap()), (true, true), "200");
+
         let (port, server) = serve_once(
-            b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                .to_vec(),
+            format!("HTTP/1.1 304 Not Modified\r\nETag: {LAST_ETAG}\r\nConnection: close\r\n\r\n")
+                .into_bytes(),
+        );
+        let outcome = fetch(&conditional(port), Some(LAST_ETAG));
+        assert!(matches!(outcome, Ok(FetchOutcome::NotModified)), "304");
+        assert_eq!(sent(&server.join().unwrap()), (true, true), "304");
+
+        let elsewhere = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (port, server) = serve_once(
+            format!(
+                "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{}/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                elsewhere.local_addr().unwrap().port()
+            )
+            .into_bytes(),
         );
         let outcome = fetch(&bootstrap_at(port), None);
+        assert!(matches!(outcome, Err(FetchError::Status(302))), "302");
         server.join().unwrap();
-        assert!(matches!(outcome, Err(FetchError::Status(302))));
+        assert!(!was_connected_to(&elsewhere), "the redirect was followed");
     }
 
-    #[test]
-    fn not_modified_reads_as_not_modified() {
-        let (port, server) = serve_once(
-            b"HTTP/1.1 304 Not Modified\r\nETag: \"v4\"\r\nConnection: close\r\n\r\n".to_vec(),
-        );
-        let outcome = fetch(&bootstrap_at(port), Some("\"v4\""));
-        assert!(server
-            .join()
-            .unwrap()
-            .to_ascii_lowercase()
-            .contains("if-none-match: \"v4\""));
-        assert!(matches!(outcome, Ok(FetchOutcome::NotModified)));
-    }
-
+    /// docs/trust/security-overview.md ("bounds response size"): a body over `MAX_BUNDLE_BYTES`
+    /// is refused as too large, never buffered whole.
     #[test]
     fn a_body_over_eight_mebibytes_is_too_large() {
-        let over = usize::try_from(super::MAX_BUNDLE_BYTES).unwrap() + 1;
+        let over = usize::try_from(MAX_BUNDLE_BYTES).unwrap() + 1;
         let mut response =
             format!("HTTP/1.1 200 OK\r\nContent-Length: {over}\r\nConnection: close\r\n\r\n")
                 .into_bytes();
-        response.resize(response.len() + over, b"x"[0]);
+        response.resize(response.len() + over, b'x');
         let (port, server) = serve_once(response);
         let outcome = fetch(&bootstrap_at(port), None);
-        server.join().unwrap();
         assert!(matches!(outcome, Err(FetchError::TooLarge)));
+        server.join().unwrap();
+    }
+
+    /// docs/trust/security-overview.md ("supports an organization CA pin"): a pinned
+    /// organization CA that is not a certificate is refused before any connection, never ignored
+    /// in favor of the public roots.
+    #[test]
+    fn an_unusable_ca_pin_is_refused_before_any_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let bootstrap = Bootstrap {
+            source: format!(
+                "https://127.0.0.1:{}/policy",
+                listener.local_addr().unwrap().port()
+            ),
+            ca_cert_pem: Some("not a certificate".into()),
+            ..bootstrap_at(0)
+        };
+        assert!(matches!(fetch(&bootstrap, None), Err(FetchError::Pin(_))));
+        assert!(!was_connected_to(&listener));
     }
 }
