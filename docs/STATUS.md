@@ -225,6 +225,20 @@ Now:
   Proven live on 2026-10-21. On leo-desktop-02, 54 s after a Quit, an agent call attached the open
   Chrome 57 ms after the service was ready, with no second window. On Bluefin, 48 s after a Quit,
   the browser edge attached 27 ms after the start, with no `browser_startup_manual`.
+- The night of 2026-10-21 fixed two more defects found while proving S-D3. S-D4: a start
+  relaunches itself once, so an agent host that kills its MCP server's process tree on exit (the
+  Copilot CLI on Windows) no longer takes the service and its window with it (ADR-0199 amendment
+  of 2026-10-21; `taskkill /T` on leo-desktop-02 now leaves both running). P-D2: an extension
+  command the service cancelled while it waited no longer runs late, which had opened tabs and a
+  window after a held dialog cleared (f5c01ca6).
+- Second sweep state after that night. core-language and adapter are done, and so is the policy
+  lane. package: EXT-6, EXT-12 and B-final are next. core-work: W-D4 is next: after a Quit, closing
+  a handle the Quit released says "That tab was already closed." while the tab stays open.
+  install: INST-5 is next. core-service: C19c-s is next, then the cli journey's no-browser
+  language checks, which lost their call when a session with no recording began answering at
+  once. dev 0b04e5b5 passed the full gate and is deployed on the owner's machine. One look is
+  owed: a window seen once on leo-desktop-02 stayed at "Starting" after an update. It did not
+  happen again there or on the owner's machine.
 - The public one-liner on the real installations, which the cutover went on without: done on
   CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
   service is kept until `--restore`, so a second candidate of one version is installed after an

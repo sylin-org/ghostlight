@@ -53,7 +53,7 @@ In order. "After" names what a slice waits for.
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | landed (6f37117f) |
 | SERV-6 | refactor(cli): the command line reads the service's own vocabulary | - | SERV-6 with its skeptic's correction, moved from core-service; cross-lane into `cli/` and `intake/mcp.rs` | landed (15b38451) |
 | SERV-12 | refactor(diagnostics): one typed record, written by the service and read by `diagnostics show`, with the edge's line pinned | - | SERV-12 with its skeptic's correction, moved from core-service; cross-lane into `crates/bridge`, `cli/diagnostics.rs` and `crates/relay/src/log.rs` (coordinator's go) | landed (40e4ff71) |
-| BROW-2 | refactor(browser): the dead recovery decisions go | test-03's C16 | BROW-2, moved from core-service; cross-lane into `browser/recovery.rs` and `work/mod.rs` | landed (4c20823b before its rebase) |
+| BROW-2 | refactor(browser): the dead recovery decisions go | test-03's C16 | BROW-2, moved from core-service; cross-lane into `browser/recovery.rs` and `work/mod.rs` | landed (a0082cef) |
 
 ## Notes
 
