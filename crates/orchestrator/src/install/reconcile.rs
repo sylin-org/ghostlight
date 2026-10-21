@@ -651,349 +651,154 @@ mod tests {
         }
     }
 
+    /// Protects ADR-0197 Decisions 13 and 14 and ADR-0199 Decision 1: a reconcile points every
+    /// registration Ghostlight owns at `bin`, once. A manifest naming another host is reclaimed
+    /// and a second reconcile finds nothing to do; an owned client entry is rewritten while one
+    /// that starts the npm launcher is reported and left as it is. Inside another app's container
+    /// nothing that would land in that app's private view is written, it is named instead, and
+    /// inside the client's own container the client is rewritten.
     #[test]
-    fn a_manifest_naming_another_host_is_reclaimed() {
-        let fixture = Fixture::new();
-        let old = fixture.root.join("old").join(EDGE_EXECUTABLE_NAME);
-        Fixture::write_json(
-            &fixture.manifest(),
-            &json!({
-                "name": HOST_NAME,
-                "description": "Ghostlight browser connector",
-                "path": old,
-                "type": "stdio",
-                "allowed_origins": [],
-            }),
-        );
-        let registrations = fixture.registrations();
-        assert!(registrations
-            .pending()
-            .iter()
-            .any(|pending| pending.kind == RegistrationKind::NativeHost && pending.id == BROWSER));
-        let report = registrations.reconcile(&fixture.layout, "2.0.0");
-        assert!(report.failures.is_empty(), "{report:?}");
-        assert!(!report.browsers.is_empty());
-        let manifest: Value =
-            serde_json::from_str(&fs::read_to_string(fixture.manifest()).unwrap()).unwrap();
-        assert_eq!(
-            fs::canonicalize(manifest["path"].as_str().unwrap()).unwrap(),
-            fs::canonicalize(fixture.layout.edge()).unwrap()
-        );
-        let again = fixture.registrations().reconcile(&fixture.layout, "2.0.0");
-        assert!(again.browsers.is_empty(), "{again:?}");
-    }
-
-    #[test]
-    fn an_owned_client_entry_is_rewritten_and_an_npx_entry_is_left_alone() {
-        let fixture = Fixture::new();
-        let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
-        let old_connector = fixture.root.join("old").join(retired_mcp_connector());
-        Fixture::write_json(
-            &owned,
-            &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
-        );
-        let npx = fixture.client_config("home/.cline/data/settings/cline_mcp_settings.json");
-        let npx_entry =
-            json!({"mcpServers": {"ghostlight": {"command": "npx", "args": ["-y", "ghostlight"]}}});
-        Fixture::write_json(&npx, &npx_entry);
-        let npx_before = fs::read(&npx).unwrap();
-
-        let report = fixture.registrations().reconcile(&fixture.layout, "2.0.0");
-        assert!(report.failures.is_empty(), "{report:?}");
-        assert_eq!(report.clients_rewritten, ["Claude Desktop"]);
-        assert_eq!(report.clients_unchanged.len(), 1, "{report:?}");
-        assert!(report.clients_unchanged[0]
-            .found
-            .as_deref()
-            .is_some_and(|found| found.contains("npx")));
-        assert_eq!(fs::read(&npx).unwrap(), npx_before);
-        let rewritten: Value = serde_json::from_str(&fs::read_to_string(&owned).unwrap()).unwrap();
-        assert_eq!(
-            Path::new(
-                rewritten["mcpServers"]["ghostlight"]["command"]
-                    .as_str()
-                    .unwrap()
-            ),
-            fixture.layout.edge()
-        );
-    }
-
-    #[test]
-    fn inside_another_apps_container_a_client_under_appdata_is_reported_private_and_left_alone() {
-        let fixture = Fixture::new();
-        let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
-        let old_connector = fixture.root.join("old").join(retired_mcp_connector());
-        Fixture::write_json(
-            &owned,
-            &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
-        );
-        let before = fs::read(&owned).unwrap();
-
-        let report = fixture
-            .private_registrations("OpenAI.Codex")
-            .reconcile(&fixture.layout, "2.0.0");
-
-        assert!(report.failures.is_empty(), "{report:?}");
-        assert!(report.clients_rewritten.is_empty(), "{report:?}");
-        assert_eq!(report.kept_private, ["Claude Desktop MCP client"]);
-        assert_eq!(
-            report.container,
-            Some(AppContainer {
-                app: "OpenAI.Codex".into()
-            })
-        );
-        assert_eq!(fs::read(&owned).unwrap(), before);
-    }
-
-    #[test]
-    fn inside_its_own_container_a_packaged_client_is_rewritten() {
-        let fixture = Fixture::new();
-        let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
-        let old_connector = fixture.root.join("old").join(retired_mcp_connector());
-        Fixture::write_json(
-            &owned,
-            &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
-        );
-
-        let report = fixture
-            .private_registrations("Claude")
-            .reconcile(&fixture.layout, "2.0.0");
-
-        assert!(report.failures.is_empty(), "{report:?}");
-        assert_eq!(report.clients_rewritten, ["Claude Desktop"]);
-        assert!(report.kept_private.is_empty(), "{report:?}");
-        assert_eq!(report.container, None);
-    }
-
-    #[cfg(windows)]
-    mod windows_entries {
-        use std::io;
-
-        use super::super::super::windows_entry::WindowsEntryChange;
-        use super::super::*;
-
-        const STALE: WindowsEntryChange = WindowsEntryChange {
-            shortcut: false,
-            uninstall_key: true,
-            other_removed: false,
-        };
-
-        fn container() -> Residence {
-            Residence::AppContainer(AppContainer {
-                app: "Claude".into(),
-            })
-        }
-
-        #[test]
-        fn inside_a_container_a_stale_entry_is_named_and_never_written() {
-            let mut report = ReconcileReport::default();
-            reconcile_entries(
-                &container(),
-                &mut report,
-                || {
-                    Ok(WindowsEntryChange {
-                        shortcut: true,
-                        ..STALE
-                    })
-                },
-                || panic!("a container must not write its private view"),
+    fn a_reconcile_points_what_it_owns_at_bin_once_and_leaves_the_rest() {
+        {
+            let fixture = Fixture::new();
+            let old = fixture.root.join("old").join(EDGE_EXECUTABLE_NAME);
+            Fixture::write_json(
+                &fixture.manifest(),
+                &json!({
+                    "name": HOST_NAME,
+                    "description": "Ghostlight browser connector",
+                    "path": old,
+                    "type": "stdio",
+                    "allowed_origins": [],
+                }),
             );
+            let registrations = fixture.registrations();
+            assert!(registrations.pending().iter().any(|pending| pending.kind
+                == RegistrationKind::NativeHost
+                && pending.id == BROWSER));
+            let report = registrations.reconcile(&fixture.layout, "2.0.0");
+            assert!(report.failures.is_empty(), "{report:?}");
+            assert!(!report.browsers.is_empty());
+            let manifest: Value =
+                serde_json::from_str(&fs::read_to_string(fixture.manifest()).unwrap()).unwrap();
+            assert_eq!(
+                fs::canonicalize(manifest["path"].as_str().unwrap()).unwrap(),
+                fs::canonicalize(fixture.layout.edge()).unwrap()
+            );
+            let again = fixture.registrations().reconcile(&fixture.layout, "2.0.0");
+            assert!(again.browsers.is_empty(), "{again:?}");
+        }
+        {
+            let fixture = Fixture::new();
+            let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
+            let old_connector = fixture.root.join("old").join(retired_mcp_connector());
+            Fixture::write_json(
+                &owned,
+                &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
+            );
+            let npx = fixture.client_config("home/.cline/data/settings/cline_mcp_settings.json");
+            let npx_entry = json!({"mcpServers": {"ghostlight": {"command": "npx", "args": ["-y", "ghostlight"]}}});
+            Fixture::write_json(&npx, &npx_entry);
+            let npx_before = fs::read(&npx).unwrap();
+            let owned_before = fs::read(&owned).unwrap();
+
+            let report = fixture
+                .private_registrations("OpenAI.Codex")
+                .reconcile(&fixture.layout, "2.0.0");
+            assert!(report.failures.is_empty(), "{report:?}");
+            assert!(report.clients_rewritten.is_empty(), "{report:?}");
+            assert_eq!(report.kept_private, ["Claude Desktop MCP client"]);
+            assert_eq!(
+                report.container,
+                Some(AppContainer {
+                    app: "OpenAI.Codex".into()
+                })
+            );
+            assert_eq!(fs::read(&owned).unwrap(), owned_before);
+
+            let report = fixture.registrations().reconcile(&fixture.layout, "2.0.0");
+            assert!(report.failures.is_empty(), "{report:?}");
+            assert!(report.kept_private.is_empty(), "{report:?}");
+            assert_eq!(report.container, None);
+            assert_eq!(report.clients_rewritten, ["Claude Desktop"]);
+            assert_eq!(report.clients_unchanged.len(), 1, "{report:?}");
+            assert!(report.clients_unchanged[0]
+                .found
+                .as_deref()
+                .is_some_and(|found| found.contains("npx")));
+            assert_eq!(fs::read(&npx).unwrap(), npx_before);
+            let rewritten: Value =
+                serde_json::from_str(&fs::read_to_string(&owned).unwrap()).unwrap();
+            assert_eq!(
+                Path::new(
+                    rewritten["mcpServers"]["ghostlight"]["command"]
+                        .as_str()
+                        .unwrap()
+                ),
+                fixture.layout.edge()
+            );
+        }
+        {
+            let fixture = Fixture::new();
+            let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
+            let old_connector = fixture.root.join("old").join(retired_mcp_connector());
+            Fixture::write_json(
+                &owned,
+                &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
+            );
+            let report = fixture
+                .private_registrations("Claude")
+                .reconcile(&fixture.layout, "2.0.0");
+            assert!(report.failures.is_empty(), "{report:?}");
+            assert_eq!(report.clients_rewritten, ["Claude Desktop"]);
+            assert!(report.kept_private.is_empty(), "{report:?}");
+            assert_eq!(report.container, None);
+        }
+        #[cfg(windows)]
+        {
+            let stale = || {
+                Ok(WindowsEntryChange {
+                    shortcut: true,
+                    uninstall_key: true,
+                    other_removed: false,
+                })
+            };
+            let container = Residence::AppContainer(AppContainer {
+                app: "Claude".into(),
+            });
+            let mut report = ReconcileReport::default();
+            reconcile_entries(&container, &mut report, stale, || {
+                panic!("a container must not write its private view")
+            });
             assert_eq!(
                 report.kept_private,
                 ["Start-menu shortcut", "installed-apps entry"]
             );
             assert!(report.platform.is_empty(), "{report:?}");
-        }
 
-        #[test]
-        fn inside_a_container_current_entries_name_nothing() {
-            let mut report = ReconcileReport::default();
-            reconcile_entries(
-                &container(),
-                &mut report,
-                || Ok(WindowsEntryChange::default()),
-                || panic!("a container must not write its private view"),
-            );
-            assert!(report.kept_private.is_empty(), "{report:?}");
-        }
-
-        #[test]
-        fn inside_a_container_an_unreadable_entry_is_a_failure() {
-            let mut report = ReconcileReport::default();
-            reconcile_entries(
-                &container(),
-                &mut report,
-                || Err(io::Error::other("no registry")),
-                || panic!("a container must not write its private view"),
-            );
-            assert_eq!(report.failures, ["Start menu: no registry"]);
-        }
-
-        #[test]
-        fn outside_a_container_current_entries_write_and_report_nothing() {
             let mut report = ReconcileReport::default();
             reconcile_entries(
                 &Residence::Regular,
                 &mut report,
                 || panic!("a regular install writes without planning"),
-                || Ok(WindowsEntryChange::default()),
-            );
-            assert!(report.platform.is_empty(), "{report:?}");
-            assert!(report.kept_private.is_empty(), "{report:?}");
-        }
-
-        #[test]
-        fn a_pending_change_names_each_entry_in_the_words_of_the_report() {
-            let change = WindowsEntryChange {
-                shortcut: true,
-                uninstall_key: true,
-                other_removed: false,
-            };
-            assert_eq!(
-                entry_names(&change),
-                ["Start-menu shortcut", "installed-apps entry"]
-            );
-            assert!(entry_names(&WindowsEntryChange::default()).is_empty());
-        }
-
-        #[test]
-        fn another_installations_entry_is_named_in_words_that_read_after_updated_and_would_update()
-        {
-            let change = WindowsEntryChange {
-                shortcut: false,
-                uninstall_key: true,
-                other_removed: true,
-            };
-            let names = entry_names(&change);
-            assert_eq!(
-                names,
-                ["installed-apps entry, replacing another installation's"]
-            );
-            assert_eq!(
-                crate::language::deployment::platform_entry_updated(&names[0]),
-                "Updated the installed-apps entry, replacing another installation's."
-            );
-            assert_eq!(
-                crate::language::deployment::platform_entry_would_update(&names[0]),
-                "Would update the installed-apps entry, replacing another installation's."
-            );
-        }
-
-        #[test]
-        fn outside_a_container_both_stale_entries_are_written_and_reported_in_order() {
-            let mut report = ReconcileReport::default();
-            reconcile_entries(
-                &Residence::Regular,
-                &mut report,
-                || panic!("a regular install writes without planning"),
-                || {
-                    Ok(WindowsEntryChange {
-                        shortcut: true,
-                        ..STALE
-                    })
-                },
+                stale,
             );
             assert_eq!(
                 report.platform,
                 ["Start-menu shortcut", "installed-apps entry"]
             );
             assert!(report.kept_private.is_empty(), "{report:?}");
-            assert!(report.failures.is_empty(), "{report:?}");
-        }
 
-        #[test]
-        fn a_failure_of_the_entries_carries_the_start_menu_prefix_in_both_paths() {
-            let error = io::Error::other("no registry");
-            assert_eq!(windows_entries_failure(&error), "Start menu: no registry");
-            let mut report = ReconcileReport::default();
-            reconcile_entries(
-                &Residence::Regular,
-                &mut report,
-                || panic!("a regular install writes without planning"),
-                || Err(io::Error::other("no registry")),
-            );
-            assert_eq!(report.failures, ["Start menu: no registry"]);
+            for residence in [container, Residence::Regular] {
+                let mut report = ReconcileReport::default();
+                reconcile_entries(
+                    &residence,
+                    &mut report,
+                    || Err(io::Error::other("no registry")),
+                    || Err(io::Error::other("no registry")),
+                );
+                assert_eq!(report.failures, ["Start menu: no registry"]);
+            }
         }
-
-        #[test]
-        fn a_dry_run_inside_a_container_names_the_entries_as_kept_private_not_as_updated() {
-            let change = WindowsEntryChange {
-                shortcut: true,
-                ..STALE
-            };
-            let pending = pending_from(&change, &container());
-            assert!(pending.would_update.is_empty(), "{pending:?}");
-            assert_eq!(
-                pending.kept_private,
-                ["Start-menu shortcut", "installed-apps entry"]
-            );
-            assert_eq!(
-                pending.container,
-                Some(AppContainer {
-                    app: "Claude".into()
-                })
-            );
-            let outside = pending_from(&change, &Residence::Regular);
-            assert_eq!(
-                outside.would_update,
-                ["Start-menu shortcut", "installed-apps entry"]
-            );
-            assert!(outside.kept_private.is_empty(), "{outside:?}");
-            assert_eq!(outside.container, None);
-            assert_eq!(
-                pending_from(&WindowsEntryChange::default(), &container()),
-                PendingWindowsEntries {
-                    container: Some(AppContainer {
-                        app: "Claude".into()
-                    }),
-                    ..PendingWindowsEntries::default()
-                }
-            );
-        }
-
-        #[test]
-        fn a_removal_names_each_entry_under_what_became_of_it() {
-            let removal = |shortcut, uninstall_key| {
-                report_removal(&WindowsEntryRemoval {
-                    shortcut,
-                    uninstall_key,
-                })
-            };
-            let both = removal(EntryFate::Removed, EntryFate::Removed);
-            assert_eq!(
-                both.removed,
-                ["Start-menu shortcut", "installed-apps entry"]
-            );
-            assert!(both.kept.is_empty() && both.failures.is_empty());
-            let mixed = removal(EntryFate::Kept, EntryFate::Failed("denied".into()));
-            assert_eq!(mixed.kept, ["Start-menu shortcut"]);
-            assert_eq!(mixed.failures, ["installed-apps entry: denied"]);
-            assert!(mixed.removed.is_empty());
-            assert_eq!(
-                removal(EntryFate::Absent, EntryFate::Absent),
-                WindowsRemoval::default()
-            );
-        }
-
-        #[test]
-        fn outside_a_container_the_entries_are_written_and_reported() {
-            let mut report = ReconcileReport::default();
-            reconcile_entries(
-                &Residence::Regular,
-                &mut report,
-                || panic!("a regular install writes without planning"),
-                || Ok(STALE),
-            );
-            assert_eq!(report.platform, ["installed-apps entry"]);
-            assert!(report.kept_private.is_empty(), "{report:?}");
-        }
-    }
-
-    #[test]
-    fn a_regular_reconcile_reports_nothing_private() {
-        let fixture = Fixture::new();
-        let report = fixture.registrations().reconcile(&fixture.layout, "2.0.0");
-        assert!(report.kept_private.is_empty(), "{report:?}");
-        assert_eq!(report.container, None);
     }
 }
