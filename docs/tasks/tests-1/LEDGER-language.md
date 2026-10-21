@@ -6,19 +6,20 @@ Machine: test-01 (CachyOS). Paths without a crate are under `crates/orchestrator
 
 ## RESUME HERE
 
-`language/` closed on 2026-10-21 at 55 of 349, its budget, in TL1-TL23. Every test in `language/`
-and `workbench/` was first classified read-only (keep, rewrite or delete, each with what it
-protects), and one review fitted all of `language/` into 55 with no promise or named defect left
-without its test. The gate-2 control found a decoder defect, which landed first as arch-1 L-D7.
-Next: `workbench/` (253 now, budget 35). Its plan is ready and fits 35. Arch-1's U-D5 and U-D6,
-found by that classification, landed first. Then cut it file by file.
+Both areas are cut, on 2026-10-21. `language/` closed at 55 of 349, its budget, in TL1-TL23.
+`workbench/` closed at 37 of 252 in TW1-TW6: its budget of 35, plus the U-D5 and U-D6
+reproductions, which landed after the allocation was written. The lane asked the coordinator for 2
+from the reserve for them. Every test was first classified read-only (keep, rewrite or delete,
+each with what it protects), and one review per area fitted the plans into the budget without
+merging unrelated behaviors. The cut found three product defects, each fixed first with one test:
+arch-1 L-D7 (decoder), U-D5 and U-D6 (the loopback workbench). Nothing is open in this lane.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `language/` | 349 | 55 | 55 |
-| `workbench/` | 252 | 35 | 36 |
+| `workbench/` | 252 | 35 + 2 reserve (asked) | 37 |
 
 ## Slices
 
@@ -50,12 +51,12 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL21 | test(language): settlement.rs keeps one table of what settles | 1 | 1 | 1 promise | landed (e9d4889c) |
 | TL22 | test(language): setup.rs words join the shared words test, and the listing URL is built from the id | 11 | 8 | 4 promise, 3 contract, 1 defect | landed (4d3eae13) |
 | TL23 | test(language): readiness.rs folds the sentence into the precedence table | 2 | 1 | 1 promise | landed (7fea1702) |
-| TW1 | test(workbench): the loopback server keeps the 14 tests of its promises and gates | 105 | 14 | 5 promise, 5 contract, 4 defect | landed (debcc8df) |
-| TW2 | test(workbench): the facade keeps the 14 tests of what the window shows | 83 | 14 | 10 promise, 3 contract, 1 defect | landed (e5f0438a) |
-| TW3 | test(workbench): history.rs keeps the two grouped-history promises | 6 | 2 | 2 promise | landed (dac5c6c5) |
-| TW4 | test(workbench): setup.rs keeps the 5 tests of the setup journey, and parts/ its none | 54 | 5 | 4 promise, 1 defect | landed (878404a8) |
-| TW5 | test(workbench): watching.rs keeps the marker rule | 3 | 1 | 1 promise | landed (0d276c77) |
-| TW6 | test(workbench): input.rs keeps the search bound, checked against the page | 2 | 1 | 1 promise | landed (this commit) |
+| TW1 | test(workbench): the loopback server keeps the 14 tests of its promises and gates | 105 | 14 | 5 promise, 5 contract, 4 defect | landed (c0be969a) |
+| TW2 | test(workbench): the facade keeps the 14 tests of what the window shows | 83 | 14 | 10 promise, 3 contract, 1 defect | landed (9737dc14) |
+| TW3 | test(workbench): history.rs keeps the two grouped-history promises | 6 | 2 | 2 promise | landed (d0265970) |
+| TW4 | test(workbench): setup.rs keeps the 5 tests of the setup journey, and parts/ its none | 54 | 5 | 4 promise, 1 defect | landed (15cf6d1a) |
+| TW5 | test(workbench): watching.rs keeps the marker rule | 3 | 1 | 1 promise | landed (3e477cde) |
+| TW6 | test(workbench): input.rs keeps the search bound, checked against the page | 2 | 1 | 1 promise | landed (f7b86902) |
 
 ## Notes
 
@@ -76,7 +77,24 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   `a_fill_the_page_partly_undid_is_a_partial_failure_with_no_dialog_advice`;
   `protocol4/merge/tests.rs` `a_cut_keeps_page_content_over_chrome_over_hidden_in_document_order`
   (the tier cut order); one end-to-end group-title assertion in `work/tests/tabs.rs`.
-- Gaps found, not closed here: no test plants a claim sentinel and checks that serialized audit and
-  diagnostics exclude it (ACCEPTANCE Connection reporting), and be54ad44 (a stopped recording read
-  as running) lost its only test with the outcome table. Both are reserve candidates for the
-  lanes that own those paths.
+- Gaps found while cutting `language/`. The claim sentinel was already covered:
+  `tests/provenance-journey.mjs` plants claim canaries and asserts they are absent from the audit
+  and from diagnostics. be54ad44 (a stopped recording read as running) lost its only test with the
+  outcome table, and the coordinator granted the work lane 1 from the reserve for an executor-level
+  test of it.
+- `workbench/` kept for, by main kind: 23 promise, 8 contract, 6 defect, 0 unsafe. The two
+  `workbench/tests.rs` tests the `language/` cut relies on were renamed in TW2:
+  `a_control_confirmation_states_the_authority_and_never_browser_delivery` is now
+  `a_runtime_control_is_offered_and_applied_by_the_authority_with_or_without_a_browser` (still
+  asserting no `browser_notified` on the wire), and
+  `agents_are_counted_as_at_a_glance_groups_them_and_connections_by_intake` is now
+  `the_window_the_tray_and_status_count_agents_one_way` (still asserting the ADR's sentence).
+- `workbench/`'s page and server contracts now read the page's own files: the route table equals
+  `ui/lib/transport.js` `ROUTES` (both ways, methods included), the sequence header, the stale code
+  and the closed-context word come from `transport.js`, the address list from `words.js`, and the
+  search bound from the page's `maxlength`.
+- Accepted losses in `workbench/`, none of them a docs/1.0 promise, a docs/trust claim or a named
+  defect's only test: the connection cap's 33rd connection (U-D5's test proves the window's share),
+  the watcher rate limits, the stream keep-alive against the page's dead timer, the stream places
+  per audience, and the facade with no server attached. `WorkbenchServer::start` is now called
+  only by the test fixture.
