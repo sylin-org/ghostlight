@@ -56,11 +56,6 @@ fn within_patience<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static)
 fn the_first_bind_owns_the_endpoint_and_admits_each_client_to_an_end_of_its_own() {
     let home = TempHome::new();
     let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
-    assert_eq!(
-        Listener::bind_first(home.path()).unwrap_err().kind(),
-        io::ErrorKind::AddrInUse,
-        "the first bind owns the endpoint"
-    );
 
     let mut early = home.connect().unwrap();
     write_frame(&mut early, &json!({"n": 0})).unwrap();
@@ -110,6 +105,12 @@ fn the_first_bind_owns_the_endpoint_and_admits_each_client_to_an_end_of_its_own(
         within_patience(move || server.join().unwrap()),
         [1, 2],
         "each later client gets an end of its own"
+    );
+    // Last, because on Linux a second bind probes the socket with a connection of its own.
+    assert_eq!(
+        Listener::bind_first(home.path()).unwrap_err().kind(),
+        io::ErrorKind::AddrInUse,
+        "the first bind owns the endpoint"
     );
 }
 
