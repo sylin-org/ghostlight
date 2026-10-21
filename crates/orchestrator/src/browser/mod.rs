@@ -294,7 +294,7 @@ pub trait BrowserPort: Send + Sync {
             if availability == Availability::Available
                 || cancelled.load(Ordering::SeqCst)
                 || Instant::now() >= until
-                || (availability == Availability::Absent && !self.browser_returning())
+                || (availability == Availability::Absent && !self.returning_of(browser))
             {
                 return availability;
             }
@@ -331,6 +331,16 @@ pub trait BrowserPort: Send + Sync {
     /// returning.
     fn browser_returning(&self) -> bool {
         false
+    }
+
+    /// Whether `browser`'s own installed browser is evidently on its way back: one of its
+    /// connections is silent, one left within the return grace, or an earlier service's relays are
+    /// still expected. Another browser's evidence never holds a pinned wait (C3b), while another
+    /// profile of the same installed browser does. A browser whose installed kind is unknown
+    /// reads every browser's evidence.
+    fn returning_of(&self, browser: &str) -> bool {
+        let _ = browser;
+        self.browser_returning()
     }
 
     /// Publish authoritative content-free runtime state to every browser without awaiting a
@@ -484,12 +494,13 @@ struct AdapterRegistry {
     /// reconnects keeps the place its last reported attention earned. Connection order never
     /// enters this list (ADR-0084 D2).
     attention: Vec<String>,
-    /// When the last connection ended without a successor.
+    /// When the last connection of each installed browser ended without a successor, keyed by the
+    /// installed browser it reported (`None` for one that reported no single supported browser).
     ///
     /// A browser that left moments ago, such as an extension worker restarting its native port,
     /// is likely to come back. One that left longer ago than the return grace is evidence of
     /// nothing.
-    departed: Option<Instant>,
+    departed: HashMap<Option<&'static str>, Instant>,
     /// The installed browser (`chrome`, `edge`, ...) each browser identity reported when it
     /// connected, kept for the service's life in memory only, so a session whose browser closed
     /// can start that same browser again.
@@ -510,7 +521,8 @@ impl AdapterRegistry {
             return None;
         }
         let removed = self.connections.remove(browser)?;
-        self.departed = Some(Instant::now());
+        let installed = self.installed.get(browser).copied();
+        self.departed.insert(installed, Instant::now());
         Some(removed)
     }
 
@@ -519,14 +531,21 @@ impl AdapterRegistry {
     /// Each piece of evidence lapses on its own: a registered connection that is silent lasts as
     /// long as the connection, a departure lasts the return grace, and the relays of an earlier
     /// service are expected until `relays_until`.
-    fn returning(&self, now: Instant, relays_until: Instant, timeout: Duration) -> bool {
-        let silent = self
-            .connections
-            .values()
-            .any(|connection| !connection.available(now, timeout));
-        let departed_recently = self
-            .departed
-            .is_some_and(|departed| now.saturating_duration_since(departed) < RETURN_GRACE);
+    /// With `installed`, only that installed browser's connections and departures count.
+    fn returning(
+        &self,
+        now: Instant,
+        relays_until: Instant,
+        timeout: Duration,
+        installed: Option<&str>,
+    ) -> bool {
+        let ours = |kind: Option<&str>| installed.is_none_or(|wanted| kind == Some(wanted));
+        let silent = self.connections.iter().any(|(browser, connection)| {
+            ours(self.installed.get(browser).copied()) && !connection.available(now, timeout)
+        });
+        let departed_recently = self.departed.iter().any(|(kind, departed)| {
+            ours(*kind) && now.saturating_duration_since(*departed) < RETURN_GRACE
+        });
         let relays_reconnecting = now < relays_until;
         silent || departed_recently || relays_reconnecting
     }
@@ -838,7 +857,9 @@ impl RelayBrowserPort {
             *relays_until = earlier(*relays_until);
         }
         let mut adapters = lock(&self.adapters);
-        adapters.departed = adapters.departed.map(earlier);
+        for departed in adapters.departed.values_mut() {
+            *departed = earlier(*departed);
+        }
     }
 
     /// Install the direct typed event reaction target.
@@ -1190,7 +1211,19 @@ impl BrowserPort for RelayBrowserPort {
     /// needs.
     fn browser_returning(&self) -> bool {
         let relays_until = *lock(&self.relays_until);
-        lock(&self.adapters).returning(Instant::now(), relays_until, self.heartbeat.timeout)
+        lock(&self.adapters).returning(Instant::now(), relays_until, self.heartbeat.timeout, None)
+    }
+
+    fn returning_of(&self, browser: &str) -> bool {
+        let relays_until = *lock(&self.relays_until);
+        let adapters = lock(&self.adapters);
+        let installed = adapters.installed.get(browser).copied();
+        adapters.returning(
+            Instant::now(),
+            relays_until,
+            self.heartbeat.timeout,
+            installed,
+        )
     }
 
     /// Runtime control is a property of Ghostlight, not of one browser, so every connected

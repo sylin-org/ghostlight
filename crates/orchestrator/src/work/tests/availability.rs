@@ -133,6 +133,9 @@ impl BrowserPort for ArrivesWhenAwaited {
     fn browser_returning(&self) -> bool {
         self.inner.browser_returning()
     }
+    fn returning_of(&self, browser: &str) -> bool {
+        self.inner.returning_of(browser)
+    }
     fn publish_control_state(
         &self,
         state: crate::browser::adapter::RuntimeControlState,
@@ -880,4 +883,45 @@ fn a_session_binds_its_browser_with_its_first_tab_and_leaves_it_only_when_it_is_
         Some("browser_edge")
     );
     assert_eq!(workspaces.physical_tabs(workspace.as_str()), vec![7]);
+}
+
+/// Defect C3b (ADR-0203): a wait pinned to one browser reads only its own installed browser's
+/// evidence. Another installed browser's departure does not hold it, so a pinned start keeps its
+/// budget, while another profile of the same installed browser still does.
+#[test]
+fn a_pinned_wait_reads_only_its_own_browsers_departures() {
+    let port = RelayBrowserPort::new("service_test".into(), page_assets());
+    let leave = |browser_id: &str, name: &str| {
+        let (service, extension) = ghostlight_relay::endpoint::pair().unwrap();
+        let mut hello = FakeExtension::hello(browser_id);
+        hello["browser_name"] = json!(name);
+        let fake = FakeExtension::connect(
+            extension,
+            &hello,
+            Box::new(|correlation, primitive| Reply::Now(ordinary(correlation, primitive))),
+        );
+        port.attach(service).unwrap();
+        fake.close();
+        let until = Instant::now() + Duration::from_secs(5);
+        while port.is_registered(browser_id) {
+            assert!(Instant::now() < until, "{browser_id} stayed registered");
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    leave("browser_pinned", "Google Chrome");
+    port.backdate(RETURN_GRACE);
+    assert!(!port.returning_of("browser_pinned"), "nothing is returning");
+
+    leave("browser_edge", "Microsoft Edge");
+    assert!(port.browser_returning(), "a browser left moments ago");
+    assert!(
+        !port.returning_of("browser_pinned"),
+        "another browser's departure does not hold the pinned wait"
+    );
+
+    leave("browser_other_profile", "Google Chrome");
+    assert!(
+        port.returning_of("browser_pinned"),
+        "another profile of the same browser still holds it"
+    );
 }

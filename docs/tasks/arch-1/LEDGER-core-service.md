@@ -37,7 +37,7 @@ In order. "After" names what a slice waits for.
 | S-D9 | fix(edge): a client line over the relay bound is answered, in the service's words | S-D8 | the coordinator's relay and edge classification, 2026-10-21 (Notes) | blocked (after 2.0.1, the owner, 2026-10-21) |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | landed (this commit); no new test: diagnostics wording, ADR-0204 keeps the ceiling for promises |
 | BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
-| C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
+| C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | landed (this commit) |
 | C3c | refactor(browser): one browser start, recorded in the launch guard | C3b, BROW-2 | ADR-0203 C3c, moved from core | todo |
 | C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | - | ADR-0203 C18, moved from core; SURF-4's label half; EXT-5's pins | moved to test-02 (LEDGER-package.md), 2026-10-20 |
 | C19b | feat(audit): the record names the browser | I1 | ADR-0203 C19b, moved from core | todo |
