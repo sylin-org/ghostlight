@@ -12,7 +12,7 @@ In progress since 2026-10-21. Every test in `language/` and `workbench/` was cla
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `language/` | 349 | 55 | 67 |
+| `language/` | 349 | 55 | 60 |
 | `workbench/` | 252 | 35 | 252 |
 
 ## Slices
@@ -39,7 +39,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL15 | test(language): handle.rs keeps the prefix contract with the extension | 2 | 1 | 1 contract | landed (234a35e4) |
 | TL16 | test(language): provenance.rs folds its live and record tables into one | 3 | 2 | 2 promise | landed (3666d60e) |
 | TL17 | test(language): outcome.rs and audit.rs keep the 8 tests of what happened | 57 | 8 | 4 promise, 2 contract, 2 defect | landed (6b472ef4) |
-| TL18 | test(language): history.rs keeps the window words and the outcome class | 8 | 2 | 2 promise | landed (this commit) |
+| TL18 | test(language): history.rs keeps the window words and the outcome class | 8 | 2 | 2 promise | landed (41b52bc6) |
+| TL19 | test(language): page_refusal.rs and composition.rs drop tests the executor proves | 7 | 0 | - | landed (this commit) |
 
 ## Notes
 

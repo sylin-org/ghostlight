@@ -194,39 +194,3 @@ impl CompositionProgress {
         steps
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn progress_language_names_success_and_mixed_failure_concisely() {
-        let mut progress = CompositionProgress {
-            counts: StepCounts {
-                total: 5,
-                succeeded: 3,
-                failed: 2,
-                ..StepCounts::default()
-            },
-            effects: EffectCounts {
-                none: 5,
-                ..EffectCounts::default()
-            },
-            issue: Some(StepIssue {
-                step: 2,
-                cause: StepCause::Failed,
-            }),
-            stopped: false,
-        };
-        assert_eq!(progress.summary(), "Completed 3 of 5 steps. 2 failed.");
-        progress.counts = StepCounts {
-            total: 1,
-            succeeded: 1,
-            ..StepCounts::default()
-        };
-        progress.effects.none = 1;
-        progress.issue = None;
-        assert_eq!(progress.summary(), "Completed 1 step.");
-        assert!(progress.next_steps().is_empty());
-    }
-}
