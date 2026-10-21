@@ -195,7 +195,7 @@ fn files(row: &AgentRow, context: &HarnessContext, platform: Platform) -> String
 }
 
 /// The entry Ghostlight keeps for `row`, by the path to it in the file.
-fn entry(row: &AgentRow) -> String {
+fn entry(row: &'static AgentRow) -> String {
     match row.dialect {
         ConfigDialect::Json(dialect) => format!("{} ({JSON})", json_key(dialect)),
         ConfigDialect::OpenCode => format!(
@@ -230,7 +230,7 @@ fn json_path(value: &Value) -> Option<Vec<String>> {
 }
 
 /// The path to Ghostlight's entry in the TOML document a person would paste for `row`.
-fn toml_key(row: &AgentRow) -> String {
+fn toml_key(row: &'static AgentRow) -> String {
     let context = Platform::Linux.context(false);
     let document = manual_setup(&context, &row.on(&context, &Packages::none()))
         .expect("a TOML dialect has a setup document");

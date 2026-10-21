@@ -440,7 +440,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | INST-8 | refactor(install): `inspect` reads its state once | - | INST-8 | landed (this commit) |
 | INST-6 | refactor(install): one `edit` for every dialect | INST-8 | INST-6 | landed (this commit) |
 | INST-7 | refactor(install): each dialect names its keys once | INST-6 | INST-7 | landed (this commit) |
-| INST-12 | refactor(install): the roster rows share one base | - | INST-12 | todo |
+| INST-12 | refactor(install): the roster rows share one base | - | INST-12 | landed (this commit) |
 | INST-13 | refactor(install): one per-agent catalog loop, and `AppPlace` | - | INST-13 | todo |
 | INST-14 | refactor(install): one program-file helper, one manifest name, and files and paths modules | - | INST-14 as corrected | todo |
 | INST-10 | refactor(install): `InstallOutcome` | - | INST-10 | todo |

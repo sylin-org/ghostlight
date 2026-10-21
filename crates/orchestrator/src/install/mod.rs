@@ -880,33 +880,28 @@ fn harness_roots(
     }
 }
 
+/// One roster row as it stands on one computer: the row, and what this look resolved for it.
+/// The row's fields read through it ([`std::ops::Deref`]).
 #[derive(Clone)]
 struct HarnessDefinition {
-    id: &'static str,
-    /// The agent's catalog id, shared by every host of one agent.
-    agent_id: &'static str,
-    product_id: &'static str,
-    name: &'static str,
+    row: &'static AgentRow,
     /// The name a person reads: `name`, with the host added when several targets share the name.
     label: String,
-    target: &'static str,
-    /// The agent's packaged monogram tile.
-    monogram: Monogram,
-    download_url: Option<&'static str>,
     path: PathBuf,
     default_path: PathBuf,
-    /// The file names the agent reads beside its configuration file ([`AgentRow::candidates`]).
-    candidates: &'static [&'static str],
     located_executable: Option<PathBuf>,
     located_stale: bool,
-    executables: &'static [&'static str],
-    dialect: ConfigDialect,
-    /// The package name of the packaged app that reads this configuration, when the client is
-    /// one. Inside that app's own container the private view is the one the client reads.
-    own_package: Option<&'static str>,
     /// Every place this look found the agent's settings may be, the one it reads first leading
     /// ([`Packages::copies`]): the Store packages' private copies, then the plain path.
     copies: Vec<SettingsCopy>,
+}
+
+impl std::ops::Deref for HarnessDefinition {
+    type Target = AgentRow;
+
+    fn deref(&self) -> &AgentRow {
+        self.row
+    }
 }
 
 impl HarnessDefinition {
@@ -1093,6 +1088,21 @@ struct AgentRow {
 /// Where every Cline host keeps its MCP settings below its own storage directory.
 const CLINE_SETTINGS: &str = "settings/cline_mcp_settings.json";
 
+/// The id of the Cline extension, which names its storage directory in every editor.
+const CLINE_EXTENSION: &str = "saoudrizwan.claude-dev";
+
+/// Where Cline's installation guide is, for the editors whose own store does not list it.
+const CLINE_INSTALL_URL: &str = "https://docs.cline.bot/getting-started/installing-cline";
+
+/// Cline's settings file inside `editor`'s configuration, written as one join so the path keeps
+/// the separators the editors' own paths use.
+fn cline_settings(context: &HarnessContext, editor: &str) -> PathBuf {
+    context
+        .config_root
+        .join(format!("{editor}/User/globalStorage/{CLINE_EXTENSION}"))
+        .join(CLINE_SETTINGS)
+}
+
 /// The files OpenCode reads in its configuration directory, in the order it prefers them.
 const OPENCODE_FILES: &[&str] = &["opencode.jsonc", "opencode.json"];
 
@@ -1192,465 +1202,360 @@ const ANTIGRAVITY_ICONS: &[IconSource] = &[
 /// Every agent Ghostlight can set up, one row per host.
 const ROSTER: &[AgentRow] = &[
     AgentRow {
-        id: "codex",
-        agent_id: "codex",
-        product_id: "codex",
-        name: "Codex",
         aliases: &["codex-mcp-client"],
-        target: "User",
-        monogram: monogram!("codex.svg"),
         download_url: Some("https://developers.openai.com/codex/cli/"),
-        path: |context| context.codex_config.clone(),
-        candidates: &[],
         executables: &["codex"],
-        dialect: ConfigDialect::CodexToml,
-        own_package: None,
         icons: CODEX_ICONS,
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "codex",
+            "Codex",
+            "User",
+            monogram!("codex.svg"),
+            |context| context.codex_config.clone(),
+            ConfigDialect::CodexToml,
+        )
     },
     AgentRow {
-        id: "claude-code",
-        agent_id: "claude-code",
-        product_id: "claude-code",
-        name: "Claude Code",
-        aliases: &[],
-        target: "User",
-        monogram: monogram!("claude-code.svg"),
         download_url: Some("https://claude.com/product/claude-code"),
-        path: |context| {
-            context
-                .claude_config_dir
-                .as_ref()
-                .unwrap_or(&context.home)
-                .join(CLAUDE_CODE_FILE)
-        },
-        candidates: &[],
         executables: &["claude"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
-        icons: &[],
         icon_family: Some("claude-desktop"),
         runs_inside: &["claude-desktop"],
+        ..AgentRow::new(
+            "claude-code",
+            "Claude Code",
+            "User",
+            monogram!("claude-code.svg"),
+            |context| {
+                context
+                    .claude_config_dir
+                    .as_ref()
+                    .unwrap_or(&context.home)
+                    .join(CLAUDE_CODE_FILE)
+            },
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "claude-desktop",
-        agent_id: "claude-desktop",
-        product_id: "claude-desktop",
-        name: "Claude Desktop",
         aliases: &["claude-ai"],
-        target: "User",
-        monogram: monogram!("claude-desktop.svg"),
-        download_url: None,
-        path: |context| {
-            context
-                .config_root
-                .join("Claude/claude_desktop_config.json")
-        },
-        candidates: &[],
-        executables: &[],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: Some(CLAUDE_DESKTOP_PACKAGE),
         icons: CLAUDE_DESKTOP_ICONS,
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "claude-desktop",
+            "Claude Desktop",
+            "User",
+            monogram!("claude-desktop.svg"),
+            |context| {
+                context
+                    .config_root
+                    .join("Claude/claude_desktop_config.json")
+            },
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "cursor",
-        agent_id: "cursor",
-        product_id: "cursor",
-        name: "Cursor",
         aliases: &["cursor-vscode"],
-        target: "User",
-        monogram: monogram!("cursor.svg"),
         download_url: Some("https://cursor.com/downloads"),
-        path: |context| context.home.join(".cursor/mcp.json"),
-        candidates: &[],
         executables: &["cursor", "cursor-agent"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
         icons: CURSOR_ICONS,
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "cursor",
+            "Cursor",
+            "User",
+            monogram!("cursor.svg"),
+            |context| context.home.join(".cursor/mcp.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "vscode",
-        agent_id: "vscode",
-        product_id: "vscode",
-        name: "Visual Studio Code",
-        aliases: &[],
-        target: "User",
-        monogram: monogram!("vscode.svg"),
         download_url: Some("https://code.visualstudio.com/download"),
-        path: |context| context.config_root.join("Code/User/mcp.json"),
-        candidates: &[],
         executables: &["code"],
-        dialect: ConfigDialect::Json(JsonDialect::Servers),
-        own_package: None,
         icons: VSCODE_ICONS,
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "vscode",
+            "Visual Studio Code",
+            "User",
+            monogram!("vscode.svg"),
+            |context| context.config_root.join("Code/User/mcp.json"),
+            ConfigDialect::Json(JsonDialect::Servers),
+        )
     },
     AgentRow {
-        id: "windsurf",
-        agent_id: "windsurf",
-        product_id: "windsurf",
-        name: "Windsurf",
-        aliases: &[],
-        target: "User",
-        monogram: monogram!("windsurf.svg"),
         download_url: Some("https://windsurf.com/editor/download"),
-        path: |context| context.home.join(".codeium/windsurf/mcp_config.json"),
-        candidates: &[],
         executables: &["windsurf"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
         icons: WINDSURF_ICONS,
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "windsurf",
+            "Windsurf",
+            "User",
+            monogram!("windsurf.svg"),
+            |context| context.home.join(".codeium/windsurf/mcp_config.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
-    // Windsurf's current official distribution is named Devin and moved its user MCP
-    // configuration. Keep the historical target above so either installed generation can be
-    // managed without guessing one path from the other (ADR-0148).
     AgentRow {
-        id: "devin",
-        agent_id: "devin",
         product_id: "windsurf",
-        name: "Devin",
-        aliases: &[],
-        target: "Devin user",
-        monogram: monogram!("windsurf.svg"),
         download_url: Some("https://windsurf.com/editor/download"),
-        path: |context| context.config_root.join("devin/mcp_config.json"),
-        candidates: &[],
         executables: &["devin", "devin-desktop", "surf"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "devin",
+            "Devin",
+            "Devin user",
+            monogram!("windsurf.svg"),
+            |context| context.config_root.join("devin/mcp_config.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "zed",
-        agent_id: "zed",
-        product_id: "zed",
-        name: "Zed",
-        aliases: &[],
-        target: "User",
-        monogram: monogram!("zed.svg"),
         download_url: Some("https://zed.dev/download"),
-        path: |context| {
-            if context.windows {
-                context.config_root.join("Zed/settings.json")
-            } else {
-                context.config_root.join("zed/settings.json")
-            }
-        },
-        candidates: &[],
         executables: &["zed", "zeditor"],
-        dialect: ConfigDialect::Json(JsonDialect::ContextServers),
-        own_package: None,
         icons: ZED_ICONS,
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "zed",
+            "Zed",
+            "User",
+            monogram!("zed.svg"),
+            |context| {
+                if context.windows {
+                    context.config_root.join("Zed/settings.json")
+                } else {
+                    context.config_root.join("zed/settings.json")
+                }
+            },
+            ConfigDialect::Json(JsonDialect::ContextServers),
+        )
     },
-    // ZCode's MCP registration lives in its shared CLI configuration under `mcp.servers`
-    // (ADR-0141). No official download destination is pinned until one is verified.
     AgentRow {
-        id: "zcode",
-        agent_id: "zcode",
-        product_id: "zcode",
-        name: "ZCode",
-        aliases: &[],
-        target: "User",
-        monogram: monogram!("zcode.svg"),
-        download_url: None,
-        path: |context| context.home.join(".zcode/cli/config.json"),
-        candidates: &[],
         executables: &["zcode"],
-        dialect: ConfigDialect::Json(JsonDialect::ZCode),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "zcode",
+            "ZCode",
+            "User",
+            monogram!("zcode.svg"),
+            |context| context.home.join(".zcode/cli/config.json"),
+            ConfigDialect::Json(JsonDialect::ZCode),
+        )
     },
     AgentRow {
-        id: "opencode",
-        agent_id: "opencode",
-        product_id: "opencode",
-        name: "OpenCode",
-        aliases: &[],
-        target: "User",
-        monogram: monogram!("opencode.svg"),
         download_url: Some("https://opencode.ai/docs"),
-        path: |context| context.home.join(".config/opencode/opencode.json"),
         candidates: OPENCODE_FILES,
         executables: &["opencode", "opencode2"],
-        dialect: ConfigDialect::OpenCode,
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "opencode",
+            "OpenCode",
+            "User",
+            monogram!("opencode.svg"),
+            |context| context.home.join(".config/opencode/opencode.json"),
+            ConfigDialect::OpenCode,
+        )
     },
     AgentRow {
-        id: "crush",
-        agent_id: "crush",
-        product_id: "crush",
-        name: "Crush",
-        aliases: &[],
-        target: "User",
-        monogram: monogram!("crush.svg"),
         download_url: Some("https://github.com/charmbracelet/crush"),
-        path: |context| {
-            context
-                .crush_config
-                .clone()
-                .unwrap_or_else(|| context.home.join(".config/crush/crush.json"))
-        },
-        candidates: &[],
         executables: &["crush"],
-        dialect: ConfigDialect::Json(JsonDialect::Crush),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "crush",
+            "Crush",
+            "User",
+            monogram!("crush.svg"),
+            |context| {
+                context
+                    .crush_config
+                    .clone()
+                    .unwrap_or_else(|| context.home.join(".config/crush/crush.json"))
+            },
+            ConfigDialect::Json(JsonDialect::Crush),
+        )
     },
     AgentRow {
-        id: "copilot-cli",
-        agent_id: "copilot-cli",
-        product_id: "copilot-cli",
-        name: "GitHub Copilot CLI",
-        aliases: &[],
-        target: "CLI",
-        monogram: monogram!("copilot-cli.svg"),
         download_url: Some("https://github.com/github/copilot-cli"),
-        path: |context| context.home.join(".copilot/mcp-config.json"),
-        candidates: &[],
         executables: &["copilot"],
-        dialect: ConfigDialect::Json(JsonDialect::Copilot),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "copilot-cli",
+            "GitHub Copilot CLI",
+            "CLI",
+            monogram!("copilot-cli.svg"),
+            |context| context.home.join(".copilot/mcp-config.json"),
+            ConfigDialect::Json(JsonDialect::Copilot),
+        )
     },
     AgentRow {
-        id: "cline-cli",
         agent_id: "cline",
         product_id: "cline",
-        name: "Cline",
-        aliases: &[],
-        target: "CLI",
-        monogram: monogram!("cline.svg"),
         download_url: Some("https://docs.cline.bot/cline-cli/overview"),
-        path: |context| context.home.join(".cline/data").join(CLINE_SETTINGS),
-        candidates: &[],
         executables: &["cline"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "cline-cli",
+            "Cline",
+            "CLI",
+            monogram!("cline.svg"),
+            |context| context.home.join(".cline/data").join(CLINE_SETTINGS),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "cline-vscode",
         agent_id: "cline",
         product_id: "cline",
-        name: "Cline",
-        aliases: &[],
-        target: "Visual Studio Code",
-        monogram: monogram!("cline.svg"),
         download_url: Some(
             "https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev",
         ),
-        path: |context| {
-            context
-                .config_root
-                .join("Code/User/globalStorage/saoudrizwan.claude-dev")
-                .join(CLINE_SETTINGS)
-        },
-        candidates: &[],
-        executables: &[],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
         runs_inside: &["vscode"],
+        ..AgentRow::new(
+            "cline-vscode",
+            "Cline",
+            "Visual Studio Code",
+            monogram!("cline.svg"),
+            |context| cline_settings(context, "Code"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "cline-cursor",
         agent_id: "cline",
         product_id: "cline",
-        name: "Cline",
-        aliases: &[],
-        target: "Cursor",
-        monogram: monogram!("cline.svg"),
-        download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
-        path: |context| {
-            context
-                .config_root
-                .join("Cursor/User/globalStorage/saoudrizwan.claude-dev")
-                .join(CLINE_SETTINGS)
-        },
-        candidates: &[],
-        executables: &[],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
+        download_url: Some(CLINE_INSTALL_URL),
         runs_inside: &["cursor"],
+        ..AgentRow::new(
+            "cline-cursor",
+            "Cline",
+            "Cursor",
+            monogram!("cline.svg"),
+            |context| cline_settings(context, "Cursor"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "cline-windsurf",
         agent_id: "cline",
         product_id: "cline",
-        name: "Cline",
-        aliases: &[],
-        target: "Windsurf",
-        monogram: monogram!("cline.svg"),
-        download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
-        path: |context| {
-            context
-                .config_root
-                .join("Windsurf/User/globalStorage/saoudrizwan.claude-dev")
-                .join(CLINE_SETTINGS)
-        },
-        candidates: &[],
-        executables: &[],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
+        download_url: Some(CLINE_INSTALL_URL),
         runs_inside: &["windsurf"],
+        ..AgentRow::new(
+            "cline-windsurf",
+            "Cline",
+            "Windsurf",
+            monogram!("cline.svg"),
+            |context| cline_settings(context, "Windsurf"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "kiro",
-        agent_id: "kiro",
-        product_id: "kiro",
-        name: "Kiro",
-        aliases: &[],
-        target: "CLI and IDE",
-        monogram: monogram!("kiro.svg"),
         download_url: Some("https://kiro.dev/downloads/"),
-        path: |context| context.home.join(".kiro/settings/mcp.json"),
-        candidates: &[],
         executables: &["kiro", "kiro-cli"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
         icons: KIRO_ICONS,
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "kiro",
+            "Kiro",
+            "CLI and IDE",
+            monogram!("kiro.svg"),
+            |context| context.home.join(".kiro/settings/mcp.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "qwen-code",
-        agent_id: "qwen-code",
-        product_id: "qwen-code",
-        name: "Qwen Code",
-        aliases: &[],
-        target: "CLI",
-        monogram: monogram!("qwen-code.svg"),
         download_url: Some("https://qwenlm.github.io/qwen-code-docs/en/users/installation/"),
-        path: |context| context.home.join(".qwen/settings.json"),
-        candidates: &[],
         executables: &["qwen"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "qwen-code",
+            "Qwen Code",
+            "CLI",
+            monogram!("qwen-code.svg"),
+            |context| context.home.join(".qwen/settings.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "junie",
-        agent_id: "junie",
-        product_id: "junie",
-        name: "Junie",
-        aliases: &[],
-        target: "CLI and JetBrains",
-        monogram: monogram!("junie.svg"),
         download_url: Some("https://junie.jetbrains.com/docs/get-started-with-junie-cli.html"),
-        path: |context| context.home.join(".junie/mcp/mcp.json"),
-        candidates: &[],
         executables: &["junie"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "junie",
+            "Junie",
+            "CLI and JetBrains",
+            monogram!("junie.svg"),
+            |context| context.home.join(".junie/mcp/mcp.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
     AgentRow {
-        id: "kilo-code",
-        agent_id: "kilo-code",
-        product_id: "kilo-code",
-        name: "Kilo Code",
-        aliases: &[],
-        target: "CLI",
-        monogram: monogram!("kilo-code.svg"),
         download_url: Some("https://kilo.ai/"),
-        path: |context| context.config_root.join("kilo").join("kilo.json"),
         candidates: KILO_FILES,
         executables: &["kilo"],
-        dialect: ConfigDialect::Json(JsonDialect::OpenCodeV1),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "kilo-code",
+            "Kilo Code",
+            "CLI",
+            monogram!("kilo-code.svg"),
+            |context| context.config_root.join("kilo").join("kilo.json"),
+            ConfigDialect::Json(JsonDialect::OpenCodeV1),
+        )
     },
     AgentRow {
-        id: "goose",
-        agent_id: "goose",
-        product_id: "goose",
-        name: "goose",
-        aliases: &[],
-        target: "CLI and desktop",
-        monogram: monogram!("goose.svg"),
         download_url: Some("https://block.github.io/goose/docs/getting-started/installation/"),
-        path: |context| context.config_root.join("goose/config.yaml"),
-        candidates: &[],
         executables: &["goose"],
-        dialect: ConfigDialect::Manual(ManualDialect::Goose),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "goose",
+            "goose",
+            "CLI and desktop",
+            monogram!("goose.svg"),
+            |context| context.config_root.join("goose/config.yaml"),
+            ConfigDialect::Manual(ManualDialect::Goose),
+        )
     },
     AgentRow {
-        id: "continue",
-        agent_id: "continue",
-        product_id: "continue",
-        name: "Continue",
-        aliases: &[],
-        target: "CLI and IDE",
-        monogram: monogram!("continue.svg"),
         download_url: Some("https://docs.continue.dev/cli/quickstart"),
-        path: |context| context.home.join(".continue/config.yaml"),
-        candidates: &[],
         executables: &["cn"],
-        dialect: ConfigDialect::Manual(ManualDialect::Continue),
-        own_package: None,
-        icons: &[],
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "continue",
+            "Continue",
+            "CLI and IDE",
+            monogram!("continue.svg"),
+            |context| context.home.join(".continue/config.yaml"),
+            ConfigDialect::Manual(ManualDialect::Continue),
+        )
     },
     AgentRow {
-        id: "antigravity",
-        agent_id: "antigravity",
-        product_id: "antigravity",
-        name: "Antigravity",
-        aliases: &[],
-        target: "CLI",
-        monogram: monogram!("antigravity.svg"),
         download_url: Some("https://antigravity.google/download?platform=linux"),
-        path: |context| context.home.join(".gemini/config/mcp_config.json"),
-        candidates: &[],
         executables: &["agy"],
-        dialect: ConfigDialect::Json(JsonDialect::McpServers),
-        own_package: None,
         icons: ANTIGRAVITY_ICONS,
-        icon_family: None,
-        runs_inside: &[],
+        ..AgentRow::new(
+            "antigravity",
+            "Antigravity",
+            "CLI",
+            monogram!("antigravity.svg"),
+            |context| context.home.join(".gemini/config/mcp_config.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
     },
 ];
 
 impl AgentRow {
+    /// The row of agent `id` on one host, named `name` there: the agent and its product share the
+    /// id, and it has no aliases, candidates, programs, package, icons or host app. A row states
+    /// what differs from this with struct update.
+    const fn new(
+        id: &'static str,
+        name: &'static str,
+        target: &'static str,
+        monogram: Monogram,
+        path: fn(&HarnessContext) -> PathBuf,
+        dialect: ConfigDialect,
+    ) -> Self {
+        Self {
+            id,
+            agent_id: id,
+            product_id: id,
+            name,
+            aliases: &[],
+            target,
+            monogram,
+            download_url: None,
+            path,
+            candidates: &[],
+            executables: &[],
+            dialect,
+            own_package: None,
+            icons: &[],
+            icon_family: None,
+            runs_inside: &[],
+        }
+    }
+
     /// Whether the agent's client calls itself `reported`: its catalog id, its harness id, its
     /// product name or one of its aliases, ignoring case. The product id is not matched, because
     /// two products can share one: Devin's product id is Windsurf's id.
@@ -1705,28 +1610,18 @@ impl AgentRow {
 
     /// The row as it stands on the computer `context` describes, among the Store `packages` of
     /// this look, before any location the person chose.
-    fn on(&self, context: &HarnessContext, packages: &Packages) -> HarnessDefinition {
+    fn on(&'static self, context: &HarnessContext, packages: &Packages) -> HarnessDefinition {
         let copies = self.copies_on(context, packages);
         let path = copies
             .first()
             .map_or_else(|| (self.path)(context), |copy| copy.file.clone());
         HarnessDefinition {
-            id: self.id,
-            agent_id: self.agent_id,
-            product_id: self.product_id,
-            name: self.name,
+            row: self,
             label: self.name.to_owned(),
-            target: self.target,
-            monogram: self.monogram,
-            download_url: self.download_url,
             default_path: path.clone(),
             path,
-            candidates: self.candidates,
             located_executable: None,
             located_stale: false,
-            executables: self.executables,
-            dialect: self.dialect,
-            own_package: self.own_package,
             copies,
         }
     }
