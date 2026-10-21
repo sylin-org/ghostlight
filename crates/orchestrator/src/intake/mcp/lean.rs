@@ -176,68 +176,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::project;
-
-    #[test]
-    fn each_default_is_dropped() {
-        let view = project(&json!({
-            "status": "succeeded", "history_storage": "saved",
-            "readiness": "not_applicable", "next_steps": [],
-        }));
-        assert_eq!(view, json!({"status": "succeeded"}));
-    }
-
-    #[test]
-    fn a_value_off_its_default_stays() {
-        let envelope = json!({
-            "history_storage": "unconfirmed", "readiness": "complete",
-            "next_steps": ["Inspect the current page."],
-        });
-        assert_eq!(project(&envelope), envelope);
-    }
-
-    #[test]
-    fn the_always_kept_keys_stay_at_any_value() {
-        let envelope = json!({
-            "status": "saved", "effect": "not_applicable", "repeat_safe": false,
-            "summary": "", "invocation": "", "facts": {"tab": "[]"},
-        });
-        assert_eq!(project(&envelope), envelope);
-    }
-
-    #[test]
-    fn a_default_of_the_wrong_type_stays() {
-        let envelope = json!({"history_storage": ["saved"], "next_steps": "", "readiness": null});
-        assert_eq!(project(&envelope), envelope);
-    }
-
-    #[test]
-    fn flow_rows_and_their_results_recurse() {
-        let child = json!({
-            "status": "succeeded", "history_storage": "saved", "readiness": "not_applicable",
-            "next_steps": [], "facts": {"tab": "tab_a"},
-        });
-        let envelope = json!({
-            "history_storage": "saved",
-            "facts": {"steps": [
-                {"position": 1, "history_storage": "saved", "result": child},
-                {"position": 2, "history_storage": "unconfirmed",
-                 "result": {"history_storage": "unconfirmed", "next_steps": []}},
-                {"position": 3, "status": "not_run"},
-            ]},
-        });
-        assert_eq!(
-            project(&envelope),
-            json!({
-                "facts": {"steps": [
-                    {"position": 1,
-                     "result": {"status": "succeeded", "facts": {"tab": "tab_a"}}},
-                    {"position": 2, "history_storage": "unconfirmed",
-                     "result": {"history_storage": "unconfirmed"}},
-                    {"position": 3, "status": "not_run"},
-                ]},
-            })
-        );
-    }
+    use crate::language::coverage::Coverage;
 
     fn coverage(overrides: Value) -> Value {
         let mut block = json!({
@@ -251,8 +190,14 @@ mod tests {
         block
     }
 
+    /// ACCEPTANCE C21 and DB3: the model view keeps a coverage block exactly when it withholds
+    /// something, at the top level and in each flow step result, so an absent block truthfully
+    /// means nothing was withheld. Whether a block withholds is the coverage type's own answer,
+    /// so a limitation the type learns reaches the model without a second list here (1b693758);
+    /// a coverage value that is not a block, and a block on a step row rather than in its
+    /// result, are left as they are.
     #[test]
-    fn an_unlimited_coverage_block_is_dropped() {
+    fn coverage_reaches_the_model_exactly_when_it_withholds() {
         for scope in [
             json!({}),
             json!({"targeted": true, "inspected_documents": 0}),
@@ -260,10 +205,6 @@ mod tests {
             let view = project(&json!({"facts": {"tab": "t", "coverage": coverage(scope)}}));
             assert_eq!(view, json!({"facts": {"tab": "t"}}));
         }
-    }
-
-    #[test]
-    fn each_limitation_keeps_the_full_block() {
         for limit in [
             json!({"excluded_documents": 1}),
             json!({"page_excluded_documents": 3}),
@@ -273,31 +214,7 @@ mod tests {
             let envelope = json!({"facts": {"coverage": coverage(limit)}});
             assert_eq!(project(&envelope), envelope);
         }
-    }
 
-    #[test]
-    fn coverage_recurses_into_flow_step_results() {
-        let limited = coverage(json!({"excluded_documents": 1}));
-        let envelope = json!({"facts": {"steps": [
-            {"position": 1, "result": {"facts": {"coverage": coverage(json!({}))}}},
-            {"position": 2, "result": {"facts": {"coverage": limited.clone()}}},
-            {"position": 3, "omitted": true, "coverage": limited.clone()},
-        ]}});
-        assert_eq!(
-            project(&envelope),
-            json!({"facts": {"steps": [
-                {"position": 1, "result": {"facts": {}}},
-                {"position": 2, "result": {"facts": {"coverage": limited.clone()}}},
-                {"position": 3, "omitted": true, "coverage": limited},
-            ]}})
-        );
-    }
-
-    /// The lean view asks the coverage type what withholds content, so a limitation the type
-    /// learns reaches the model without a second list here.
-    #[test]
-    fn a_new_limitation_field_reaches_the_lean_view() {
-        use crate::language::coverage::Coverage;
         let shapes = [
             Coverage::default(),
             Coverage {
@@ -327,44 +244,30 @@ mod tests {
             let kept = project(&envelope)["facts"].get("coverage").is_some();
             assert_eq!(kept, coverage.withholds(), "{coverage:?}");
         }
-    }
 
-    #[test]
-    fn a_coverage_value_that_is_not_a_block_stays() {
+        let limited = coverage(json!({"excluded_documents": 1}));
+        let envelope = json!({"facts": {"steps": [
+            {"position": 1, "result": {"facts": {"coverage": coverage(json!({}))}}},
+            {"position": 2, "result": {"facts": {"coverage": limited.clone()}}},
+            {"position": 3, "omitted": true, "coverage": limited.clone()},
+        ]}});
+        assert_eq!(
+            project(&envelope),
+            json!({"facts": {"steps": [
+                {"position": 1, "result": {"facts": {}}},
+                {"position": 2, "result": {"facts": {"coverage": limited.clone()}}},
+                {"position": 3, "omitted": true, "coverage": limited},
+            ]}})
+        );
+
         let envelope = json!({"facts": {"coverage": "none"}});
         assert_eq!(project(&envelope), envelope);
     }
 
-    #[test]
-    fn item_defaults_are_dropped_from_items_and_matches() {
-        let item = json!({"credential_class": false, "name": "Email", "role": "textbox",
-            "state": [], "target": "target_h4n2"});
-        let view = project(&json!({"facts": {"items": [item.clone()], "matches": [item]}}));
-        let lean = json!({"name": "Email", "role": "textbox", "target": "target_h4n2"});
-        assert_eq!(
-            view,
-            json!({"facts": {"items": [lean.clone()], "matches": [lean]}})
-        );
-    }
-
-    #[test]
-    fn a_repeated_control_keeps_its_context_and_nth() {
-        let envelope = json!({"facts": {"matches": [
-            {"target": "t1", "name": "More options", "context": "Alpha", "nth": 1, "state": ["collapsed"]},
-            {"target": "t2", "name": "More options", "context": "Alpha", "nth": 2, "state": ["collapsed"]},
-        ]}});
-        assert_eq!(project(&envelope), envelope);
-    }
-
-    #[test]
-    fn item_facts_stay() {
-        let envelope = json!({"facts": {"items": [
-            {"target": "t1", "credential_class": true, "state": ["disabled"], "value": ""},
-            {"target": "t2", "value": "[hidden]"},
-        ]}});
-        assert_eq!(project(&envelope), envelope);
-    }
-
+    /// Defect a199794e (the model view read any object with a string `target` under `facts` as
+    /// an item, so a script result lost its `state`), and ACCEPTANCE C21: page data such as a
+    /// script's `facts.value` is never rewritten, at the top level or inside a flow step result;
+    /// only the items Ghostlight mints lose their defaults.
     #[test]
     fn page_data_that_looks_like_an_item_stays() {
         let page_data = json!([{"href": "/a", "target": "_blank", "state": [],
@@ -374,58 +277,5 @@ mod tests {
         assert_eq!(project(&envelope), envelope);
         let flow = json!({"facts": {"steps": [{"position": 1, "result": envelope}]}});
         assert_eq!(project(&flow), flow);
-    }
-
-    #[test]
-    fn tree_nodes_are_pruned_at_every_depth() {
-        let view = project(
-            &json!({"facts": {"tree": {"kind": "document", "label": "", "children": [
-                {"kind": "heading", "label": "Title", "children": []},
-                {"kind": "group", "label": "", "children": [
-                    {"kind": "link", "label": "", "children": []}]},
-            ]}}}),
-        );
-        assert_eq!(
-            view,
-            json!({"facts": {"tree": {"kind": "document", "children": [
-                {"kind": "heading", "label": "Title"},
-                {"kind": "group", "children": [{"kind": "link"}]},
-            ]}}})
-        );
-    }
-
-    #[test]
-    fn item_and_tree_defaults_recurse_into_flow_steps() {
-        let view = project(&json!({"facts": {"steps": [
-            {"position": 1, "result": {"facts": {
-                "items": [{"target": "t", "state": [], "credential_class": false}],
-                "tree": {"kind": "document", "label": "", "children": []}}}},
-        ]}}));
-        assert_eq!(
-            view,
-            json!({"facts": {"steps": [{"position": 1, "result": {"facts": {
-                "items": [{"target": "t"}], "tree": {"kind": "document"}}}}]}})
-        );
-    }
-
-    #[test]
-    fn projection_is_idempotent() {
-        let envelope = json!({
-            "history_storage": "saved", "readiness": "not_applicable", "next_steps": [],
-            "facts": {"steps": [{"history_storage": "saved",
-                "result": {"history_storage": "saved", "next_steps": []}}]},
-        });
-        let once = project(&envelope);
-        assert_eq!(project(&once), once);
-        let envelope = json!({"facts": {"items": [{"target": "t", "state": []}],
-            "tree": {"kind": "document", "label": "", "children": []}}});
-        let once = project(&envelope);
-        assert_eq!(project(&once), once);
-    }
-
-    #[test]
-    fn a_value_that_is_not_an_object_passes_through() {
-        assert_eq!(project(&Value::Null), Value::Null);
-        assert_eq!(project(&json!([1])), json!([1]));
     }
 }

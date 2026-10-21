@@ -85,39 +85,3 @@ fn secure_runtime_directory(path: &Path, effective_uid: u32) -> io::Result<bool>
         && metadata.uid() == effective_uid
         && metadata.permissions().mode() & 0o077 == 0)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_launch_environment_is_an_overlay_not_a_scrub() {
-        let environment = GraphicalSessionEnvironment {
-            values: vec![(OsString::from("DISPLAY"), OsString::from(":1"))],
-        };
-        assert_eq!(
-            environment.values().collect::<Vec<_>>(),
-            vec![(OsStr::new("DISPLAY"), OsStr::new(":1"))]
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_runtime_directory_must_be_real_private_and_same_user() {
-        use std::os::unix::fs::{symlink, MetadataExt as _, PermissionsExt as _};
-
-        let scratch = crate::scratch::Scratch::named("session");
-        let root = scratch.join("runtime");
-        std::fs::create_dir(&root).unwrap();
-        let uid = std::fs::metadata(&root).unwrap().uid();
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(secure_runtime_directory(&root, uid).unwrap());
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o750)).unwrap();
-        assert!(!secure_runtime_directory(&root, uid).unwrap());
-        assert!(!secure_runtime_directory(&root, uid.saturating_add(1)).unwrap());
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let link = root.with_extension("link");
-        symlink(&root, &link).unwrap();
-        assert!(!secure_runtime_directory(&link, uid).unwrap());
-    }
-}

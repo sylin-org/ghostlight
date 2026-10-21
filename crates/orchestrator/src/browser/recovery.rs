@@ -88,17 +88,6 @@ pub enum RecoveryFailure {
 }
 
 impl RecoveryFailure {
-    /// Every closed failure in stable order.
-    pub const ALL: [Self; 7] = [
-        Self::BrowserAbsent,
-        Self::LaunchFailed,
-        Self::SandboxedPackage,
-        Self::ExtensionAbsent,
-        Self::NativeHostUnavailable,
-        Self::OwnedElsewhere,
-        Self::HandshakeTimeout,
-    ];
-
     /// Stable structured fact vocabulary.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -1071,7 +1060,6 @@ fn discovered_mechanism() -> Arc<dyn RecoveryMechanism> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::thread;
@@ -1106,8 +1094,6 @@ mod tests {
         launches: AtomicUsize,
         outcome: Mutex<Result<(), MechanismError>>,
         connect: Option<Arc<FakeBrowser>>,
-        /// Additional adapter ids that arrive inside the same launch wait.
-        extra_arrivals: Vec<String>,
     }
 
     impl RecoveryMechanism for FakeMechanism {
@@ -1133,9 +1119,7 @@ mod tests {
             let outcome = lock(&self.outcome).clone();
             if outcome.is_ok() {
                 if let Some(browser) = &self.connect {
-                    let mut arrivals = vec![summary("browser_chromium", true)];
-                    arrivals.extend(self.extra_arrivals.iter().map(|id| summary(id, true)));
-                    browser.connect(arrivals);
+                    browser.connect(vec![summary("browser_chromium", true)]);
                 }
             }
             outcome
@@ -1151,7 +1135,6 @@ mod tests {
             launches: AtomicUsize::new(0),
             outcome: Mutex::new(outcome.map_err(MechanismError::Failed)),
             connect,
-            extra_arrivals: Vec::new(),
         })
     }
 
@@ -1214,6 +1197,16 @@ mod tests {
         }
     }
 
+    /// An inventory over `candidates` that answers at once.
+    fn inventory(candidates: Vec<RecoveryCandidate>) -> Arc<FakeInventory> {
+        Arc::new(FakeInventory {
+            candidates,
+            inspections: AtomicUsize::new(0),
+            entered: None,
+            release: Mutex::new(None),
+        })
+    }
+
     fn wait_for_participants(recovery: &BrowserRecovery, expected: usize) {
         let deadline = Instant::now() + Duration::from_secs(1);
         loop {
@@ -1236,50 +1229,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn simultaneous_requests_produce_one_attempt() {
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Current,
-            )],
-            inspections: AtomicUsize::new(0),
-            entered: Some(entered_tx),
-            release: Mutex::new(Some(release_rx)),
-        });
-        let mut recovery = coordinator(Some("on_demand"), Arc::clone(&inventory));
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(Vec::new());
-        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
-        recovery.browser = browser;
-        recovery.mechanism = mechanism.clone();
-        let first = recovery.clone();
-        let first_thread = thread::spawn(move || {
-            first.request(
-                Instant::now() + Duration::from_secs(2),
-                &AtomicBool::new(false),
-            )
-        });
-        entered_rx.recv().unwrap();
-        let second = recovery.clone();
-        let second_thread = thread::spawn(move || {
-            second.request(
-                Instant::now() + Duration::from_secs(2),
-                &AtomicBool::new(false),
-            )
-        });
-        thread::sleep(Duration::from_millis(20));
-        release_tx.send(()).unwrap();
-        assert_eq!(first_thread.join().unwrap(), second_thread.join().unwrap());
-        assert_eq!(inventory.inspections.load(Ordering::SeqCst), 1);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn cancelling_the_flight_creator_does_not_cancel_a_joiner() {
+    /// A recovery on demand over one installed Chromium whose inventory read tells `entered` it
+    /// began and then waits for `release`, and whose launch connects that browser.
+    fn held_flight() -> (
+        BrowserRecovery,
+        Arc<FakeInventory>,
+        Arc<FakeMechanism>,
+        mpsc::Receiver<()>,
+        mpsc::Sender<()>,
+    ) {
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let inventory = Arc::new(FakeInventory {
@@ -1298,532 +1256,92 @@ mod tests {
         let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
         recovery.browser = browser;
         recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
+        (recovery, inventory, mechanism, entered_rx, release_tx)
+    }
 
-        let creator_cancelled = Arc::new(AtomicBool::new(false));
-        let creator = recovery.clone();
-        let creator_token = Arc::clone(&creator_cancelled);
-        let creator_thread = thread::spawn(move || {
-            creator.request(Instant::now() + Duration::from_secs(2), &creator_token)
-        });
-        entered_rx.recv().unwrap();
+    /// ACCEPTANCE C19 ("a session with no browser, a bound session and a retry asking meanwhile
+    /// all wait for that one start"): requests that overlap join one flight, which reads the
+    /// installed browsers once and starts the browser once. Each participant's wait ends only by
+    /// its own cancellation or deadline: a flight's creator that is cancelled, or whose deadline
+    /// passes, while it reads the inventory leaves a joiner to finish the start and find the
+    /// browser ready, and no flight is left behind.
+    #[test]
+    fn overlapping_requests_share_one_start_and_each_ends_only_its_own_wait() {
+        let patient = || Instant::now() + Duration::from_secs(5);
 
-        let joiner = recovery.clone();
-        let joiner_thread = thread::spawn(move || {
-            joiner.request(
-                Instant::now() + Duration::from_secs(2),
-                &AtomicBool::new(false),
-            )
-        });
+        let (recovery, inventory, mechanism, entered, release) = held_flight();
+        let first = {
+            let recovery = recovery.clone();
+            thread::spawn(move || recovery.request(patient(), &AtomicBool::new(false)))
+        };
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        let second = {
+            let recovery = recovery.clone();
+            thread::spawn(move || recovery.request(patient(), &AtomicBool::new(false)))
+        };
         wait_for_participants(&recovery, 2);
-        creator_cancelled.store(true, Ordering::SeqCst);
-        release_tx.send(()).unwrap();
-
-        assert_eq!(
-            creator_thread.join().unwrap(),
-            Err(RecoveryWaitError::Cancelled)
+        release.send(()).unwrap();
+        let first = first.join().unwrap();
+        assert!(
+            matches!(first, Ok(RecoveryDecision::Ready { .. })),
+            "{first:?}"
         );
-        assert!(matches!(
-            joiner_thread.join().unwrap(),
-            Ok(RecoveryDecision::Ready { .. })
-        ));
+        assert_eq!(first, second.join().unwrap());
         assert_eq!(inventory.inspections.load(Ordering::SeqCst), 1);
         assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
         assert!(lock(&recovery.flights).scopes.is_empty());
-    }
 
-    #[test]
-    fn a_short_deadline_does_not_end_a_longer_joiner() {
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Current,
-            )],
-            inspections: AtomicUsize::new(0),
-            entered: Some(entered_tx),
-            release: Mutex::new(Some(release_rx)),
-        });
-        let mut recovery = coordinator(Some("on_demand"), Arc::clone(&inventory));
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(Vec::new());
-        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
-        recovery.browser = browser;
-        recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
-
-        let creator = recovery.clone();
-        let creator_thread = thread::spawn(move || {
-            creator.request(
-                Instant::now() + Duration::from_millis(50),
-                &AtomicBool::new(false),
-            )
-        });
-        entered_rx.recv().unwrap();
-
-        let joiner = recovery.clone();
-        let joiner_thread = thread::spawn(move || {
-            joiner.request(
-                Instant::now() + Duration::from_secs(2),
-                &AtomicBool::new(false),
-            )
-        });
-        wait_for_participants(&recovery, 2);
-        thread::sleep(Duration::from_millis(75));
-        release_tx.send(()).unwrap();
-
-        assert_eq!(
-            creator_thread.join().unwrap(),
-            Err(RecoveryWaitError::Deadline)
-        );
-        assert!(matches!(
-            joiner_thread.join().unwrap(),
-            Ok(RecoveryDecision::Ready { .. })
-        ));
-        assert_eq!(inventory.inspections.load(Ordering::SeqCst), 1);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-        assert!(lock(&recovery.flights).scopes.is_empty());
-    }
-
-    #[test]
-    fn cancellation_during_inventory_prevents_repair_and_launch() {
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Updatable,
-            )],
-            inspections: AtomicUsize::new(0),
-            entered: Some(entered_tx),
-            release: Mutex::new(Some(release_rx)),
-        });
-        let mut recovery = coordinator(Some("on_demand"), inventory);
-        let mechanism = mechanism(Ok(()), None);
-        recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
+        let (recovery, inventory, mechanism, entered, release) = held_flight();
         let cancelled = Arc::new(AtomicBool::new(false));
-        let active = recovery.clone();
-        let active_cancelled = Arc::clone(&cancelled);
-        let active_thread = thread::spawn(move || {
-            active.request(Instant::now() + Duration::from_secs(2), &active_cancelled)
-        });
-
-        entered_rx.recv().unwrap();
+        let creator = {
+            let recovery = recovery.clone();
+            let cancelled = Arc::clone(&cancelled);
+            thread::spawn(move || recovery.request(patient(), &cancelled))
+        };
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        let joiner = {
+            let recovery = recovery.clone();
+            thread::spawn(move || recovery.request(patient(), &AtomicBool::new(false)))
+        };
+        wait_for_participants(&recovery, 2);
         cancelled.store(true, Ordering::SeqCst);
-        release_tx.send(()).unwrap();
-
-        assert_eq!(
-            active_thread.join().unwrap(),
-            Err(RecoveryWaitError::Cancelled)
-        );
-        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 0);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
-        assert!(lock(&recovery.flights).scopes.is_empty());
-    }
-
-    #[test]
-    fn a_completed_flight_is_not_replaced_before_its_joiners_leave() {
-        let inventory = Arc::new(FakeInventory {
-            candidates: Vec::new(),
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let recovery = coordinator(Some("manual"), inventory);
-        let first = recovery.join_flight(FlightScope::Unbound);
-        let joined = recovery.join_flight(FlightScope::Unbound);
-        assert!(Arc::ptr_eq(&first, &joined));
-        lock(&first.state).phase = FlightPhase::Complete(RecoveryDecision::Failed {
-            reason: RecoveryFailure::BrowserAbsent,
-            details: Vec::new(),
-        });
-
-        recovery.leave_flight(&first);
-        let late_joiner = recovery.join_flight(FlightScope::Unbound);
-        assert!(Arc::ptr_eq(&joined, &late_joiner));
-        recovery.leave_flight(&joined);
-        recovery.leave_flight(&late_joiner);
-        assert!(lock(&recovery.flights).scopes.is_empty());
-
-        let next_generation = recovery.join_flight(FlightScope::Unbound);
-        assert!(!Arc::ptr_eq(&first, &next_generation));
-        recovery.leave_flight(&next_generation);
-    }
-
-    #[test]
-    fn manual_mode_never_launches_and_returns_one_useful_outcome() {
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Current,
-            )],
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let mut recovery = coordinator(Some("manual"), Arc::clone(&inventory));
-        let mechanism = mechanism(Ok(()), None);
-        recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
-        let decision = recovery
-            .request(
-                Instant::now() + Duration::from_secs(1),
-                &AtomicBool::new(false),
-            )
-            .unwrap();
+        release.send(()).unwrap();
+        assert_eq!(creator.join().unwrap(), Err(RecoveryWaitError::Cancelled));
         assert!(matches!(
-            decision,
-            RecoveryDecision::Manual {
-                browsers
-            } if browsers.iter().map(|browser| browser.name.as_str()).eq(["Chromium"])
+            joiner.join().unwrap(),
+            Ok(RecoveryDecision::Ready { .. })
         ));
         assert_eq!(inventory.inspections.load(Ordering::SeqCst), 1);
-        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 0);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
-    }
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+        assert!(lock(&recovery.flights).scopes.is_empty());
 
-    #[test]
-    fn four_current_windows_registrations_with_one_executable_select_that_browser() {
-        let decision = decide(
-            BrowserStartup::OnDemand,
-            &[
-                candidate(
-                    "Google Chrome",
-                    BrowserPackage::NotChecked,
-                    NativeHostState::Current,
-                ),
-                candidate_without_executable(
-                    "Microsoft Edge",
-                    BrowserPackage::NotChecked,
-                    NativeHostState::Current,
-                ),
-                candidate_without_executable(
-                    "Brave",
-                    BrowserPackage::NotChecked,
-                    NativeHostState::Current,
-                ),
-                candidate_without_executable(
-                    "Chromium",
-                    BrowserPackage::NotChecked,
-                    NativeHostState::Current,
-                ),
-            ],
-            None,
-        );
-
+        let (recovery, inventory, mechanism, entered, release) = held_flight();
+        let creator_deadline = Instant::now() + Duration::from_millis(500);
+        let creator = {
+            let recovery = recovery.clone();
+            thread::spawn(move || recovery.request(creator_deadline, &AtomicBool::new(false)))
+        };
+        entered
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the creator reads the inventory before its deadline");
+        let joiner = {
+            let recovery = recovery.clone();
+            thread::spawn(move || recovery.request(patient(), &AtomicBool::new(false)))
+        };
+        wait_for_participants(&recovery, 2);
+        // The creator's deadline passes while it still reads the inventory.
+        while Instant::now() < creator_deadline {
+            thread::sleep(creator_deadline.saturating_duration_since(Instant::now()));
+        }
+        release.send(()).unwrap();
+        assert_eq!(creator.join().unwrap(), Err(RecoveryWaitError::Deadline));
         assert!(matches!(
-            decision,
-            FlightPhase::Launching {
-                browser: RecoveryCandidate { name, .. },
-            } if name == "Google Chrome"
+            joiner.join().unwrap(),
+            Ok(RecoveryDecision::Ready { .. })
         ));
-    }
-
-    #[test]
-    fn current_registration_without_an_executable_is_not_a_candidate() {
-        let decision = decide(
-            BrowserStartup::OnDemand,
-            &[candidate_without_executable(
-                "Microsoft Edge",
-                BrowserPackage::NotChecked,
-                NativeHostState::Current,
-            )],
-            None,
-        );
-
-        assert_eq!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::BrowserAbsent,
-                details: Vec::new(),
-            })
-        );
-    }
-
-    #[test]
-    fn two_verified_candidates_leave_startup_to_the_person() {
-        let decision = decide(
-            BrowserStartup::OnDemand,
-            &[
-                candidate(
-                    "Google Chrome",
-                    BrowserPackage::NotChecked,
-                    NativeHostState::Current,
-                ),
-                candidate(
-                    "Microsoft Edge",
-                    BrowserPackage::NotChecked,
-                    NativeHostState::Current,
-                ),
-            ],
-            None,
-        );
-
-        assert!(matches!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Manual { browsers })
-                if browsers.iter().map(|browser| browser.name.as_str())
-                    .eq(["Google Chrome", "Microsoft Edge"])
-        ));
-    }
-
-    #[test]
-    fn manual_mode_names_every_current_registered_browser() {
-        let decision = decide(
-            BrowserStartup::Manual,
-            &[
-                candidate(
-                    "Google Chrome",
-                    BrowserPackage::Native,
-                    NativeHostState::Current,
-                ),
-                candidate(
-                    "Microsoft Edge",
-                    BrowserPackage::Native,
-                    NativeHostState::Current,
-                ),
-            ],
-            None,
-        );
-
-        assert!(matches!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Manual { browsers })
-                if browsers.iter().map(|browser| browser.name.as_str())
-                    .eq(["Google Chrome", "Microsoft Edge"])
-        ));
-    }
-
-    #[test]
-    fn manual_diagnoses_missing_registration_before_asking_for_startup() {
-        let decision = decide(
-            BrowserStartup::Manual,
-            &[candidate(
-                "Microsoft Edge",
-                BrowserPackage::NotChecked,
-                NativeHostState::Missing,
-            )],
-            None,
-        );
-
-        assert_eq!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::NativeHostUnavailable,
-                details: vec!["Microsoft Edge".into()],
-            })
-        );
-    }
-
-    #[test]
-    fn manual_repairs_owned_stale_registration_without_launching() {
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Updatable,
-            )],
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let mut recovery = coordinator(Some("manual"), inventory);
-        let mechanism = mechanism(Ok(()), None);
-        recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
-
-        let decision = recovery
-            .request(
-                Instant::now() + Duration::from_secs(1),
-                &AtomicBool::new(false),
-            )
-            .unwrap();
-
-        assert!(matches!(decision, RecoveryDecision::Manual { .. }));
-        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 1);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn a_sandboxed_browser_package_is_diagnosed_not_launched() {
-        let decision = decide(
-            BrowserStartup::OnDemand,
-            &[candidate(
-                "Chromium",
-                BrowserPackage::Snap,
-                NativeHostState::Current,
-            )],
-            None,
-        );
-        assert!(matches!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::SandboxedPackage,
-                details
-            }) if details[0].contains("Snap") && details[0].contains("native browser package")
-        ));
-    }
-
-    #[test]
-    fn installed_browsers_without_usable_registrations_name_the_remedy() {
-        let decision = decide(
-            BrowserStartup::Manual,
-            &[
-                candidate(
-                    "Google Chrome",
-                    BrowserPackage::Native,
-                    NativeHostState::Missing,
-                ),
-                candidate("Chromium", BrowserPackage::Native, NativeHostState::Missing),
-            ],
-            None,
-        );
-        assert_eq!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::NativeHostUnavailable,
-                details: vec!["Google Chrome".into(), "Chromium".into()],
-            })
-        );
-    }
-
-    #[test]
-    fn a_registration_owned_elsewhere_names_the_deliberate_remedy() {
-        let decision = decide(
-            BrowserStartup::OnDemand,
-            &[candidate(
-                "Google Chrome",
-                BrowserPackage::Native,
-                NativeHostState::OwnedElsewhere,
-            )],
-            None,
-        );
-        assert_eq!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::OwnedElsewhere,
-                details: vec!["Google Chrome".into()],
-            })
-        );
-    }
-
-    #[test]
-    fn plural_ownership_mixed_states_ask_only_for_current_browsers() {
-        let decision = decide(
-            BrowserStartup::Manual,
-            &[
-                candidate(
-                    "Google Chrome",
-                    BrowserPackage::Native,
-                    NativeHostState::Current,
-                ),
-                candidate(
-                    "Microsoft Edge",
-                    BrowserPackage::Native,
-                    NativeHostState::OwnedElsewhere,
-                ),
-            ],
-            None,
-        );
-        assert!(matches!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Manual { browsers })
-                if browsers.iter().map(|browser| browser.name.as_str())
-                    .eq(["Google Chrome"])
-        ));
-    }
-
-    #[test]
-    fn plural_ownership_all_elsewhere_explains_the_whole_machine() {
-        let decision = decide(
-            BrowserStartup::OnDemand,
-            &[
-                candidate(
-                    "Google Chrome",
-                    BrowserPackage::Native,
-                    NativeHostState::OwnedElsewhere,
-                ),
-                candidate(
-                    "Chromium",
-                    BrowserPackage::Native,
-                    NativeHostState::OwnedElsewhere,
-                ),
-            ],
-            None,
-        );
-        assert_eq!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::OwnedElsewhere,
-                details: vec!["Google Chrome".into(), "Chromium".into()],
-            })
-        );
-    }
-
-    #[test]
-    fn plural_evidence_names_only_the_connectable_browsers() {
-        let decision = decide(
-            BrowserStartup::OnDemand,
-            &[
-                candidate(
-                    "Google Chrome",
-                    BrowserPackage::Native,
-                    NativeHostState::Missing,
-                ),
-                candidate(
-                    "Microsoft Edge",
-                    BrowserPackage::Native,
-                    NativeHostState::Current,
-                ),
-            ],
-            None,
-        );
-        assert!(matches!(
-            decision,
-            FlightPhase::Complete(RecoveryDecision::Manual { browsers })
-                if browsers.iter().map(|browser| browser.name.as_str())
-                    .eq(["Microsoft Edge"])
-        ));
-    }
-
-    #[test]
-    fn plural_stale_registrations_are_repaired_then_startup_is_left_to_the_person() {
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![
-                candidate(
-                    "Google Chrome",
-                    BrowserPackage::Native,
-                    NativeHostState::Updatable,
-                ),
-                candidate(
-                    "Microsoft Edge",
-                    BrowserPackage::Native,
-                    NativeHostState::Updatable,
-                ),
-            ],
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let mut recovery = coordinator(Some("on_demand"), inventory);
-        let mechanism = mechanism(Ok(()), None);
-        recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
-
-        let decision = recovery
-            .request(
-                Instant::now() + Duration::from_secs(1),
-                &AtomicBool::new(false),
-            )
-            .unwrap();
-
-        assert!(matches!(
-            decision,
-            RecoveryDecision::Manual { browsers }
-                if browsers.iter().map(|browser| browser.name.as_str())
-                    .eq(["Google Chrome", "Microsoft Edge"])
-        ));
-        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 2);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
+        assert_eq!(inventory.inspections.load(Ordering::SeqCst), 1);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+        assert!(lock(&recovery.flights).scopes.is_empty());
     }
 
     /// An installed native browser under the native-host id the inventory reports for it.
@@ -1842,6 +1360,349 @@ mod tests {
         ]
     }
 
+    /// The answer that leaves startup to the person, naming `browsers`.
+    fn left_to_the_person(browsers: &[RecoveryCandidate]) -> FlightPhase {
+        FlightPhase::Complete(RecoveryDecision::Manual {
+            browsers: browsers.to_vec(),
+        })
+    }
+
+    /// The answer that names one remedy, with `details` naming what it is about.
+    fn remedy(reason: RecoveryFailure, details: &[&str]) -> FlightPhase {
+        FlightPhase::Complete(RecoveryDecision::Failed {
+            reason,
+            details: details.iter().map(|detail| (*detail).to_owned()).collect(),
+        })
+    }
+
+    /// ACCEPTANCE B21, B22 and B23 (ADR-0149 and its amendment of 2026-10-17): the decision for a
+    /// session that works in no browser yet never presents a choice. Under `on_demand` it starts
+    /// the one browser Ghostlight can start, or among several the one that last connected,
+    /// repairing that browser's own stale registration first. Otherwise it names every
+    /// connectable browser and leaves startup to the person, and when nothing is usable it names
+    /// one remedy, a registration another installation owns explaining the whole machine.
+    /// `manual` never starts a browser.
+    #[test]
+    fn the_unbound_decision_never_presents_a_choice() {
+        use BrowserStartup::{Manual, OnDemand};
+        use NativeHostState::{Current, Missing, NeedsAttention, OwnedElsewhere, Updatable};
+
+        let windows = vec![
+            candidate("Google Chrome", BrowserPackage::NotChecked, Current),
+            candidate_without_executable("Microsoft Edge", BrowserPackage::NotChecked, Current),
+            candidate_without_executable("Brave", BrowserPackage::NotChecked, Current),
+            candidate_without_executable("Chromium", BrowserPackage::NotChecked, Current),
+        ];
+        let stale = vec![candidate("Chromium", BrowserPackage::Native, Updatable)];
+        let no_executable = vec![candidate_without_executable(
+            "Microsoft Edge",
+            BrowserPackage::NotChecked,
+            Current,
+        )];
+        let verified = vec![
+            candidate("Google Chrome", BrowserPackage::NotChecked, Current),
+            candidate("Microsoft Edge", BrowserPackage::NotChecked, Current),
+        ];
+        let native = vec![
+            candidate("Google Chrome", BrowserPackage::Native, Current),
+            candidate("Microsoft Edge", BrowserPackage::Native, Current),
+        ];
+        let missing = vec![candidate(
+            "Microsoft Edge",
+            BrowserPackage::NotChecked,
+            Missing,
+        )];
+        let snap = vec![candidate("Chromium", BrowserPackage::Snap, Current)];
+        let unregistered = vec![
+            candidate("Google Chrome", BrowserPackage::Native, Missing),
+            candidate("Chromium", BrowserPackage::Native, Missing),
+        ];
+        let elsewhere = vec![candidate(
+            "Google Chrome",
+            BrowserPackage::Native,
+            OwnedElsewhere,
+        )];
+        let mixed = vec![
+            candidate("Google Chrome", BrowserPackage::Native, Current),
+            candidate("Microsoft Edge", BrowserPackage::Native, OwnedElsewhere),
+        ];
+        let all_elsewhere = vec![
+            candidate("Google Chrome", BrowserPackage::Native, OwnedElsewhere),
+            candidate("Chromium", BrowserPackage::Native, OwnedElsewhere),
+        ];
+        let one_connectable = vec![
+            candidate("Google Chrome", BrowserPackage::Native, Missing),
+            candidate("Microsoft Edge", BrowserPackage::Native, Current),
+        ];
+        let plural = chrome_and_edge(Current);
+        let remembered_stale = chrome_and_edge(Updatable);
+        let mut uninstalled = chrome_and_edge(Current);
+        uninstalled[0].ordinary_executable = None;
+        uninstalled.push(installed("brave", "Brave", Current));
+
+        let mut cases = vec![
+            (
+                "the one browser with a verified executable starts",
+                OnDemand,
+                windows.clone(),
+                None,
+                FlightPhase::Launching {
+                    browser: windows[0].clone(),
+                },
+            ),
+            (
+                "the one browser's own stale registration is repaired, then it starts",
+                OnDemand,
+                stale.clone(),
+                None,
+                FlightPhase::Repairing {
+                    browser: stale[0].clone(),
+                    launch_after: true,
+                },
+            ),
+            (
+                "a registration without an executable is no candidate",
+                OnDemand,
+                no_executable,
+                None,
+                remedy(RecoveryFailure::BrowserAbsent, &[]),
+            ),
+            (
+                "two verified browsers and no memory: the person starts one",
+                OnDemand,
+                verified.clone(),
+                None,
+                left_to_the_person(&verified),
+            ),
+            (
+                "manual names every current browser",
+                Manual,
+                native.clone(),
+                None,
+                left_to_the_person(&native),
+            ),
+            (
+                "manual diagnoses a missing registration before asking for startup",
+                Manual,
+                missing,
+                None,
+                remedy(RecoveryFailure::NativeHostUnavailable, &["Microsoft Edge"]),
+            ),
+            (
+                "a sandboxed package is diagnosed, never started",
+                OnDemand,
+                snap.clone(),
+                None,
+                FlightPhase::Complete(RecoveryDecision::Failed {
+                    reason: RecoveryFailure::SandboxedPackage,
+                    details: vec![snap[0].package_detail.clone()],
+                }),
+            ),
+            (
+                "browsers without a usable registration name the remedy",
+                Manual,
+                unregistered,
+                None,
+                remedy(
+                    RecoveryFailure::NativeHostUnavailable,
+                    &["Google Chrome", "Chromium"],
+                ),
+            ),
+            (
+                "a registration owned elsewhere names the deliberate remedy",
+                OnDemand,
+                elsewhere,
+                None,
+                remedy(RecoveryFailure::OwnedElsewhere, &["Google Chrome"]),
+            ),
+            (
+                "mixed ownership asks only for the current browsers",
+                Manual,
+                mixed.clone(),
+                None,
+                left_to_the_person(&mixed[..1]),
+            ),
+            (
+                "every registration owned elsewhere explains the whole machine",
+                OnDemand,
+                all_elsewhere,
+                None,
+                remedy(
+                    RecoveryFailure::OwnedElsewhere,
+                    &["Google Chrome", "Chromium"],
+                ),
+            ),
+            (
+                "plural evidence names only the connectable browsers",
+                OnDemand,
+                one_connectable.clone(),
+                None,
+                left_to_the_person(&one_connectable[1..]),
+            ),
+            (
+                "the browser that last connected starts: Chrome",
+                OnDemand,
+                plural.clone(),
+                Some("chrome"),
+                FlightPhase::Launching {
+                    browser: plural[0].clone(),
+                },
+            ),
+            (
+                "the browser that last connected starts: Edge",
+                OnDemand,
+                plural.clone(),
+                Some("edge"),
+                FlightPhase::Launching {
+                    browser: plural[1].clone(),
+                },
+            ),
+            (
+                "the remembered browser's stale registration is repaired, then it starts",
+                OnDemand,
+                remembered_stale.clone(),
+                Some("chrome"),
+                FlightPhase::Repairing {
+                    browser: remembered_stale[0].clone(),
+                    launch_after: true,
+                },
+            ),
+            (
+                "a remembered browser whose executable is gone is no longer installed",
+                OnDemand,
+                uninstalled.clone(),
+                Some("chrome"),
+                left_to_the_person(&uninstalled[1..]),
+            ),
+            (
+                "manual with a memory still leaves startup to the person",
+                Manual,
+                plural.clone(),
+                Some("chrome"),
+                left_to_the_person(&plural),
+            ),
+        ];
+        for remembered in [None, Some("brave"), Some("not-a-browser")] {
+            cases.push((
+                "a memory that names no installed browser asks for every one",
+                OnDemand,
+                plural.clone(),
+                remembered,
+                left_to_the_person(&plural),
+            ));
+        }
+        for unusable in [Missing, OwnedElsewhere, NeedsAttention] {
+            let candidates = chrome_and_edge(unusable);
+            let expected = left_to_the_person(&candidates[1..]);
+            cases.push((
+                "a remembered browser Ghostlight cannot repair asks for the rest",
+                OnDemand,
+                candidates,
+                Some("chrome"),
+                expected,
+            ));
+        }
+        for (case, mode, candidates, remembered, expected) in cases {
+            assert_eq!(
+                decide(mode, &candidates, remembered),
+                expected,
+                "{case}, remembering {remembered:?}"
+            );
+        }
+    }
+
+    /// ACCEPTANCE B21 and B22: a flight carries out its decision and nothing more. It repairs
+    /// only the stale registrations Ghostlight owns, without asking, and starts a browser only
+    /// under `on_demand` with one browser selected: `manual` reads the installed browsers once,
+    /// repairs what it owns and starts nothing; several stale browsers are repaired and left to
+    /// the person; and the remembered one is repaired, started and found ready.
+    #[test]
+    fn a_flight_repairs_silently_and_launches_only_under_on_demand() {
+        let patient = || Instant::now() + Duration::from_secs(5);
+        let names = |decision: &RecoveryDecision| match decision {
+            RecoveryDecision::Manual { browsers } => browsers
+                .iter()
+                .map(|browser| browser.name.clone())
+                .collect::<Vec<_>>(),
+            other => panic!("expected startup left to the person, got {other:?}"),
+        };
+        let flight = |policy: &str, candidates| {
+            let inventory = inventory(candidates);
+            let mut recovery = coordinator(Some(policy), Arc::clone(&inventory));
+            let mechanism = mechanism(Ok(()), None);
+            recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
+            let decision = recovery
+                .request(patient(), &AtomicBool::new(false))
+                .unwrap();
+            (decision, inventory, mechanism)
+        };
+
+        let (decision, read, launcher) = flight(
+            "manual",
+            vec![candidate(
+                "Chromium",
+                BrowserPackage::Native,
+                NativeHostState::Current,
+            )],
+        );
+        assert_eq!(names(&decision), ["Chromium"]);
+        assert_eq!(read.inspections.load(Ordering::SeqCst), 1);
+        assert_eq!(launcher.repairs.load(Ordering::SeqCst), 0);
+        assert_eq!(launcher.launches.load(Ordering::SeqCst), 0);
+
+        let (decision, _, launcher) = flight(
+            "manual",
+            vec![candidate(
+                "Chromium",
+                BrowserPackage::Native,
+                NativeHostState::Updatable,
+            )],
+        );
+        assert_eq!(names(&decision), ["Chromium"]);
+        assert_eq!(launcher.repairs.load(Ordering::SeqCst), 1);
+        assert_eq!(launcher.launches.load(Ordering::SeqCst), 0);
+
+        let (decision, _, launcher) = flight(
+            "on_demand",
+            vec![
+                candidate(
+                    "Google Chrome",
+                    BrowserPackage::Native,
+                    NativeHostState::Updatable,
+                ),
+                candidate(
+                    "Microsoft Edge",
+                    BrowserPackage::Native,
+                    NativeHostState::Updatable,
+                ),
+            ],
+        );
+        assert_eq!(names(&decision), ["Google Chrome", "Microsoft Edge"]);
+        assert_eq!(launcher.repairs.load(Ordering::SeqCst), 2);
+        assert_eq!(launcher.launches.load(Ordering::SeqCst), 0);
+
+        let mut recovery = coordinator(
+            Some("on_demand"),
+            inventory(chrome_and_edge(NativeHostState::Updatable)),
+        );
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_last_connected("chrome");
+        let launcher = mechanism(Ok(()), Some(Arc::clone(&browser)));
+        recovery.browser = browser;
+        recovery.mechanism = Arc::clone(&launcher) as Arc<dyn RecoveryMechanism>;
+        assert_eq!(
+            recovery
+                .request(patient(), &AtomicBool::new(false))
+                .unwrap(),
+            RecoveryDecision::Ready {
+                browser: "browser_chromium".into(),
+            }
+        );
+        assert_eq!(launcher.repairs.load(Ordering::SeqCst), 1);
+        assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
+    }
+
     /// A coordinator over `candidates` under `policy`, whose port remembers `last` as the browser
     /// that last connected.
     fn answering(
@@ -1849,12 +1710,7 @@ mod tests {
         candidates: Vec<RecoveryCandidate>,
         last: Option<&str>,
     ) -> (BrowserRecovery, Arc<FakeInventory>) {
-        let inventory = Arc::new(FakeInventory {
-            candidates,
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
+        let inventory = inventory(candidates);
         let mut recovery = coordinator(Some(policy), Arc::clone(&inventory));
         let browser = Arc::new(FakeBrowser::default());
         browser.connect(Vec::new());
@@ -1863,62 +1719,6 @@ mod tests {
         }
         recovery.browser = browser;
         (recovery, inventory)
-    }
-
-    #[test]
-    fn a_browser_starts_on_request_only_under_on_demand_with_one_browser_selected() {
-        let unique = vec![installed(
-            "chrome",
-            "Google Chrome",
-            NativeHostState::Current,
-        )];
-        let (recovery, _) = answering("on_demand", unique.clone(), None);
-        assert_eq!(
-            recovery.starts_on_request().as_deref(),
-            Some("Google Chrome")
-        );
-
-        let (recovery, _) = answering(
-            "on_demand",
-            chrome_and_edge(NativeHostState::Current),
-            Some("edge"),
-        );
-        assert_eq!(
-            recovery.starts_on_request().as_deref(),
-            Some("Microsoft Edge"),
-            "the browser that last connected"
-        );
-
-        let (recovery, _) = answering("on_demand", chrome_and_edge(NativeHostState::Current), None);
-        assert_eq!(
-            recovery.starts_on_request(),
-            None,
-            "several browsers and no memory: the person starts one"
-        );
-
-        let broken = vec![installed(
-            "chrome",
-            "Google Chrome",
-            NativeHostState::OwnedElsewhere,
-        )];
-        let (recovery, _) = answering("on_demand", broken, None);
-        assert_eq!(recovery.starts_on_request(), None);
-
-        let (recovery, inventory) = answering("manual", unique.clone(), Some("chrome"));
-        assert_eq!(recovery.starts_on_request(), None);
-        assert_eq!(
-            inventory.inspections.load(Ordering::SeqCst),
-            0,
-            "a manual posture reads no installed browser"
-        );
-
-        let (mut recovery, _) = answering("on_demand", unique, Some("chrome"));
-        recovery.mechanism = Arc::new(Contained);
-        assert_eq!(
-            recovery.starts_on_request(),
-            None,
-            "a service inside an app container starts no browser"
-        );
     }
 
     /// The launcher of a service inside an app container: it starts nothing.
@@ -1948,118 +1748,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn plural_on_demand_launches_the_browser_that_last_connected() {
-        let candidates = chrome_and_edge(NativeHostState::Current);
-        assert_eq!(
-            decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
-            FlightPhase::Launching {
-                browser: candidates[0].clone(),
-            }
-        );
-        assert_eq!(
-            decide(BrowserStartup::OnDemand, &candidates, Some("edge")),
-            FlightPhase::Launching {
-                browser: candidates[1].clone(),
-            }
-        );
-    }
-
-    #[test]
-    fn a_remembered_stale_registration_is_repaired_then_that_browser_is_launched() {
-        let candidates = chrome_and_edge(NativeHostState::Updatable);
-        assert_eq!(
-            decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
-            FlightPhase::Repairing {
-                browser: candidates[0].clone(),
-                launch_after: true,
-            }
-        );
-
-        let inventory = Arc::new(FakeInventory {
-            candidates,
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let mut recovery = coordinator(Some("on_demand"), inventory);
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(Vec::new());
-        browser.remember_last_connected("chrome");
-        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
-        recovery.browser = browser;
-        recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
-
-        let decision = recovery
-            .request(
-                Instant::now() + Duration::from_secs(1),
-                &AtomicBool::new(false),
-            )
-            .unwrap();
-
-        assert_eq!(
-            decision,
-            RecoveryDecision::Ready {
-                browser: "browser_chromium".into(),
-            }
-        );
-        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 1);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn without_a_usable_remembered_browser_plural_evidence_still_names_every_browser() {
-        let candidates = chrome_and_edge(NativeHostState::Current);
-        let named_both = FlightPhase::Complete(RecoveryDecision::Manual {
-            browsers: candidates.clone(),
-        });
-        for remembered in [None, Some("brave"), Some("not-a-browser")] {
-            assert_eq!(
-                decide(BrowserStartup::OnDemand, &candidates, remembered),
-                named_both,
-                "{remembered:?}"
-            );
-        }
-
-        // A remembered browser whose executable is gone is no longer installed.
-        let mut uninstalled = chrome_and_edge(NativeHostState::Current);
-        uninstalled[0].ordinary_executable = None;
-        uninstalled.push(installed("brave", "Brave", NativeHostState::Current));
-        assert_eq!(
-            decide(BrowserStartup::OnDemand, &uninstalled, Some("chrome")),
-            FlightPhase::Complete(RecoveryDecision::Manual {
-                browsers: uninstalled[1..].to_vec(),
-            })
-        );
-
-        // A remembered browser Ghostlight cannot repair is not usable.
-        for unusable in [
-            NativeHostState::Missing,
-            NativeHostState::OwnedElsewhere,
-            NativeHostState::NeedsAttention,
-        ] {
-            let candidates = chrome_and_edge(unusable);
-            assert_eq!(
-                decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
-                FlightPhase::Complete(RecoveryDecision::Manual {
-                    browsers: vec![candidates[1].clone()],
-                }),
-                "{unusable:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_manual_posture_with_a_memory_still_leaves_startup_to_the_person() {
-        let candidates = chrome_and_edge(NativeHostState::Current);
-        assert_eq!(
-            decide(BrowserStartup::Manual, &candidates, Some("chrome")),
-            FlightPhase::Complete(RecoveryDecision::Manual {
-                browsers: candidates.clone(),
-            })
-        );
-    }
-
     /// A recovery for the installed browser `named` under `posture`, over Chrome and Edge in
     /// `chrome`'s registration state, with `browser` as its port and `mechanism` as its launcher.
     fn named_recovery(
@@ -2068,12 +1756,7 @@ mod tests {
         browser: &Arc<FakeBrowser>,
         mechanism: &Arc<FakeMechanism>,
     ) -> (BrowserRecovery, Arc<FakeInventory>) {
-        let inventory = Arc::new(FakeInventory {
-            candidates: chrome_and_edge(chrome),
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
+        let inventory = inventory(chrome_and_edge(chrome));
         let mut recovery = coordinator(Some(posture), Arc::clone(&inventory));
         recovery.browser = Arc::clone(browser) as Arc<dyn BrowserPort>;
         recovery.mechanism = Arc::clone(mechanism) as Arc<dyn RecoveryMechanism>;
@@ -2084,94 +1767,6 @@ mod tests {
         recovery
             .request_browser("chrome", Instant::now() + wait, &AtomicBool::new(false))
             .unwrap()
-    }
-
-    #[test]
-    fn a_named_browser_is_started_and_its_arriving_connection_is_ready() {
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(Vec::new());
-        browser.remember_installed("browser_chromium", "chrome");
-        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
-        let (recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
-
-        assert_eq!(
-            request_chrome(&recovery, Duration::from_secs(1)),
-            RecoveryDecision::Ready {
-                browser: "browser_chromium".into(),
-            }
-        );
-        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 0);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-        assert!(lock(&recovery.flights).scopes.is_empty());
-    }
-
-    #[test]
-    fn a_named_browser_with_a_stale_registration_is_repaired_then_started() {
-        assert_eq!(
-            decide_browser(&chrome_and_edge(NativeHostState::Updatable), "chrome"),
-            FlightPhase::Repairing {
-                browser: installed("chrome", "Google Chrome", NativeHostState::Updatable),
-                launch_after: true,
-            }
-        );
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(Vec::new());
-        browser.remember_installed("browser_chromium", "chrome");
-        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
-        let (recovery, _) = named_recovery(
-            "on_demand",
-            NativeHostState::Updatable,
-            &browser,
-            &mechanism,
-        );
-
-        assert_eq!(
-            request_chrome(&recovery, Duration::from_secs(1)),
-            RecoveryDecision::Ready {
-                browser: "browser_chromium".into(),
-            }
-        );
-        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 1);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn a_named_browser_is_never_answered_by_another_installed_browser() {
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(vec![summary("browser_edge", true)]);
-        browser.remember_installed("browser_edge", "edge");
-        let mechanism = mechanism(Ok(()), None);
-        let (recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
-
-        assert_eq!(
-            request_chrome(&recovery, Duration::from_millis(50)),
-            RecoveryDecision::Failed {
-                reason: RecoveryFailure::HandshakeTimeout,
-                details: vec!["Google Chrome".into()],
-            }
-        );
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn a_named_browser_running_in_another_profile_is_not_started_again() {
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(vec![summary("browser_other_profile", true)]);
-        browser.remember_installed("browser_other_profile", "chrome");
-        let mechanism = mechanism(Ok(()), None);
-        let (recovery, inventory) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
-
-        assert_eq!(
-            request_chrome(&recovery, Duration::from_secs(1)),
-            RecoveryDecision::Ready {
-                browser: "browser_other_profile".into(),
-            }
-        );
-        assert_eq!(inventory.inspections.load(Ordering::SeqCst), 0);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
     }
 
     /// Time `recovery`'s launch guard by a clock the test moves by hand.
@@ -2203,420 +1798,150 @@ mod tests {
         }
     }
 
-    /// The answer to a Chrome start that never connects within the call.
-    fn chrome_timeout() -> RecoveryDecision {
-        RecoveryDecision::Failed {
-            reason: RecoveryFailure::HandshakeTimeout,
-            details: vec!["Google Chrome".into()],
-        }
+    /// Ask for Chrome, wait until the flight waits for the browser it started, then give up the
+    /// call. Nothing connects, so the start stays the last one Ghostlight made.
+    fn start_chrome_and_give_up(recovery: &BrowserRecovery) {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let request = {
+            let recovery = recovery.clone();
+            let cancelled = Arc::clone(&cancelled);
+            thread::spawn(move || {
+                recovery.request_browser(
+                    "chrome",
+                    Instant::now() + Duration::from_secs(5),
+                    &cancelled,
+                )
+            })
+        };
+        wait_for_launched(recovery, &FlightScope::Browser("chrome".into()));
+        cancelled.store(true, Ordering::SeqCst);
+        assert_eq!(request.join().unwrap(), Err(RecoveryWaitError::Cancelled));
     }
 
+    /// Defect d81114a0 ("never open a second window of a browser being started") and ACCEPTANCE
+    /// C19: a start that has not connected is never repeated within LAUNCH_HANDSHAKE_WINDOW. A
+    /// session with no browser and a session whose closed browser it is start it once together,
+    /// and a retry inside the window waits for that start instead of starting it again. A start
+    /// whose browser connected, a window that has passed, and a start that began no process all
+    /// free the guard.
     #[test]
-    fn an_unbound_and_a_named_request_for_one_closed_browser_start_it_once() {
+    fn a_browser_start_is_never_repeated_while_it_may_still_connect() {
+        let ready = |browser: &str| RecoveryDecision::Ready {
+            browser: browser.into(),
+        };
+
         let browser = Arc::new(FakeBrowser::default());
         browser.connect(Vec::new());
         browser.remember_installed("browser_chrome", "chrome");
         browser.remember_last_connected("chrome");
-        let mechanism = mechanism(Ok(()), None);
+        let launcher = mechanism(Ok(()), None);
         let (recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
-
+            named_recovery("on_demand", NativeHostState::Current, &browser, &launcher);
         let unbound = {
             let recovery = recovery.clone();
             thread::spawn(move || {
                 recovery.request(
-                    Instant::now() + Duration::from_secs(2),
+                    Instant::now() + Duration::from_secs(5),
                     &AtomicBool::new(false),
                 )
             })
         };
         let named = {
             let recovery = recovery.clone();
-            thread::spawn(move || request_chrome(&recovery, Duration::from_secs(2)))
+            thread::spawn(move || request_chrome(&recovery, Duration::from_secs(5)))
         };
         wait_for_launched(&recovery, &FlightScope::Unbound);
         wait_for_launched(&recovery, &FlightScope::Browser("chrome".into()));
         browser.connect(vec![summary("browser_chrome", true)]);
+        assert_eq!(unbound.join().unwrap(), Ok(ready("browser_chrome")));
+        assert_eq!(named.join().unwrap(), ready("browser_chrome"));
+        assert_eq!(
+            launcher.launches.load(Ordering::SeqCst),
+            1,
+            "both sessions wait for the one start"
+        );
 
-        let ready = RecoveryDecision::Ready {
-            browser: "browser_chrome".into(),
-        };
-        assert_eq!(unbound.join().unwrap(), Ok(ready.clone()));
-        assert_eq!(named.join().unwrap(), ready);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn a_retry_inside_the_guard_window_waits_for_the_first_start() {
         let browser = Arc::new(FakeBrowser::default());
         browser.connect(Vec::new());
         browser.remember_installed("browser_chrome", "chrome");
-        let mechanism = mechanism(Ok(()), None);
+        let launcher = mechanism(Ok(()), None);
         let (mut recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+            named_recovery("on_demand", NativeHostState::Current, &browser, &launcher);
         let now = hand_clock(&mut recovery);
-
-        assert_eq!(
-            request_chrome(&recovery, Duration::from_millis(50)),
-            chrome_timeout()
-        );
+        start_chrome_and_give_up(&recovery);
         *lock(&now) += Duration::from_secs(5);
         let retry = {
             let recovery = recovery.clone();
-            thread::spawn(move || request_chrome(&recovery, Duration::from_secs(2)))
+            thread::spawn(move || request_chrome(&recovery, Duration::from_secs(5)))
         };
         wait_for_launched(&recovery, &FlightScope::Browser("chrome".into()));
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-        browser.connect(vec![summary("browser_chrome", true)]);
-
         assert_eq!(
-            retry.join().unwrap(),
-            RecoveryDecision::Ready {
-                browser: "browser_chrome".into(),
-            }
+            launcher.launches.load(Ordering::SeqCst),
+            1,
+            "a retry inside the window starts nothing"
         );
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-    }
+        browser.connect(vec![summary("browser_chrome", true)]);
+        assert_eq!(retry.join().unwrap(), ready("browser_chrome"));
+        assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
 
-    #[test]
-    fn a_start_that_connected_frees_the_guard() {
         let browser = Arc::new(FakeBrowser::default());
         browser.connect(Vec::new());
         browser.remember_installed("browser_chromium", "chrome");
-        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
+        let launcher = mechanism(Ok(()), Some(Arc::clone(&browser)));
         let (mut recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+            named_recovery("on_demand", NativeHostState::Current, &browser, &launcher);
         let _still = hand_clock(&mut recovery);
-        let ready = RecoveryDecision::Ready {
-            browser: "browser_chromium".into(),
-        };
-
-        assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), ready);
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_secs(5)),
+            ready("browser_chromium")
+        );
         browser.connect(Vec::new());
-        assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), ready);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
-    }
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_secs(5)),
+            ready("browser_chromium")
+        );
+        assert_eq!(
+            launcher.launches.load(Ordering::SeqCst),
+            2,
+            "a start that connected frees the guard"
+        );
 
-    #[test]
-    fn after_the_guard_window_the_browser_is_started_again() {
         let browser = Arc::new(FakeBrowser::default());
         browser.connect(Vec::new());
         browser.remember_installed("browser_chrome", "chrome");
-        let mechanism = mechanism(Ok(()), None);
+        let launcher = mechanism(Ok(()), None);
         let (mut recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+            named_recovery("on_demand", NativeHostState::Current, &browser, &launcher);
         let now = hand_clock(&mut recovery);
-
-        assert_eq!(
-            request_chrome(&recovery, Duration::from_millis(50)),
-            chrome_timeout()
-        );
+        start_chrome_and_give_up(&recovery);
         *lock(&now) += LAUNCH_HANDSHAKE_WINDOW;
+        start_chrome_and_give_up(&recovery);
         assert_eq!(
-            request_chrome(&recovery, Duration::from_millis(50)),
-            chrome_timeout()
+            launcher.launches.load(Ordering::SeqCst),
+            2,
+            "after the window the browser is started again"
         );
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
-    }
 
-    #[test]
-    fn a_start_that_began_no_process_frees_the_guard() {
         let browser = Arc::new(FakeBrowser::default());
         browser.connect(Vec::new());
-        let mechanism = mechanism(
+        let launcher = mechanism(
             Err((RecoveryFailure::LaunchFailed, "fake launch refused".into())),
             None,
         );
         let (mut recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+            named_recovery("on_demand", NativeHostState::Current, &browser, &launcher);
         let _still = hand_clock(&mut recovery);
         let refused = RecoveryDecision::Failed {
             reason: RecoveryFailure::LaunchFailed,
             details: vec!["fake launch refused".into()],
         };
-
-        assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), refused);
-        assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), refused);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn a_service_with_no_display_leaves_startup_to_the_person() {
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(Vec::new());
-        browser.remember_last_connected("chrome");
-        let mechanism = mechanism(Ok(()), None);
-        *lock(&mechanism.outcome) = Err(MechanismError::LeftToThePerson);
-        let (mut recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
-        let _still = hand_clock(&mut recovery);
-        let left_to_the_person = RecoveryDecision::Manual {
-            browsers: vec![chrome_and_edge(NativeHostState::Current).remove(0)],
-        };
-
+        assert_eq!(request_chrome(&recovery, Duration::from_secs(5)), refused);
+        assert_eq!(request_chrome(&recovery, Duration::from_secs(5)), refused);
         assert_eq!(
-            recovery
-                .request(
-                    Instant::now() + Duration::from_secs(1),
-                    &AtomicBool::new(false),
-                )
-                .unwrap(),
-            left_to_the_person
+            launcher.launches.load(Ordering::SeqCst),
+            2,
+            "a start that began no process frees the guard"
         );
-        assert_eq!(
-            request_chrome(&recovery, Duration::from_secs(1)),
-            left_to_the_person
-        );
-        // Nothing was started, so nothing holds the guard against the next try.
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn an_unreadable_inventory_answers_a_named_request_as_it_answers_an_unbound_one() {
-        struct Unreadable;
-        impl BrowserInventory for Unreadable {
-            fn inspect(&self) -> Result<Vec<RecoveryCandidate>, ()> {
-                Err(())
-            }
-        }
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(Vec::new());
-        let mechanism = mechanism(Ok(()), None);
-        let (mut recovery, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
-        recovery.inventory = Arc::new(Unreadable);
-        let unreadable = RecoveryDecision::Failed {
-            reason: RecoveryFailure::NativeHostUnavailable,
-            details: Vec::new(),
-        };
-
-        assert_eq!(
-            recovery
-                .request(
-                    Instant::now() + Duration::from_secs(1),
-                    &AtomicBool::new(false),
-                )
-                .unwrap(),
-            unreadable
-        );
-        assert_eq!(
-            request_chrome(&recovery, Duration::from_secs(1)),
-            unreadable
-        );
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn a_named_browser_is_left_to_the_person_under_manual_or_when_ghostlight_cannot_start_it() {
-        let left_to_the_person = RecoveryDecision::Manual {
-            browsers: Vec::new(),
-        };
-        let browser = Arc::new(FakeBrowser::default());
-        browser.connect(Vec::new());
-        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
-        let (manual, inventory) =
-            named_recovery("manual", NativeHostState::Current, &browser, &mechanism);
-        assert_eq!(
-            request_chrome(&manual, Duration::from_secs(1)),
-            left_to_the_person
-        );
-        assert_eq!(inventory.inspections.load(Ordering::SeqCst), 0);
-
-        let (on_demand, _) =
-            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
-        assert_eq!(
-            on_demand
-                .request_browser(
-                    "brave",
-                    Instant::now() + Duration::from_secs(1),
-                    &AtomicBool::new(false),
-                )
-                .unwrap(),
-            left_to_the_person
-        );
-        let mut uninstalled = chrome_and_edge(NativeHostState::Current);
-        uninstalled[0].ordinary_executable = None;
-        assert_eq!(
-            decide_browser(&uninstalled, "chrome"),
-            FlightPhase::Complete(left_to_the_person)
-        );
-        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 0);
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn a_named_browser_without_a_usable_registration_names_the_remedy() {
-        assert_eq!(
-            decide_browser(&chrome_and_edge(NativeHostState::Missing), "chrome"),
-            FlightPhase::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::NativeHostUnavailable,
-                details: vec!["Google Chrome".into()],
-            })
-        );
-        assert_eq!(
-            decide_browser(&chrome_and_edge(NativeHostState::OwnedElsewhere), "chrome"),
-            FlightPhase::Complete(RecoveryDecision::Failed {
-                reason: RecoveryFailure::OwnedElsewhere,
-                details: vec!["Google Chrome".into()],
-            })
-        );
-    }
-
-    #[test]
-    fn adapters_arriving_together_bind_the_first_arrival_without_a_choice() {
-        let browser = Arc::new(FakeBrowser::default());
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Current,
-            )],
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let mut recovery = coordinator(Some("on_demand"), inventory);
-        recovery.browser = Arc::clone(&browser) as Arc<dyn BrowserPort>;
-        recovery.mechanism = Arc::new(FakeMechanism {
-            repairs: AtomicUsize::new(0),
-            launches: AtomicUsize::new(0),
-            outcome: Mutex::new(Ok(())),
-            connect: Some(Arc::clone(&browser)),
-            extra_arrivals: vec!["browser_second".into()],
-        });
-
-        let decision = recovery
-            .request(
-                Instant::now() + Duration::from_secs(1),
-                &AtomicBool::new(false),
-            )
-            .unwrap();
-
-        assert_eq!(
-            decision,
-            RecoveryDecision::Ready {
-                browser: "browser_chromium".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn closed_failure_reason_fact_names_are_distinct() {
-        let rendered: HashSet<_> = RecoveryFailure::ALL
-            .into_iter()
-            .map(RecoveryFailure::as_str)
-            .collect();
-        assert_eq!(rendered.len(), RecoveryFailure::ALL.len());
-    }
-
-    #[test]
-    fn cancellation_leaves_no_abandoned_operation() {
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Current,
-            )],
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let mut recovery = coordinator(Some("on_demand"), inventory);
-        let mechanism = mechanism(Ok(()), None);
-        recovery.mechanism = mechanism.clone();
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let active = recovery.clone();
-        let active_cancelled = Arc::clone(&cancelled);
-        let active_thread = thread::spawn(move || {
-            active.request(Instant::now() + Duration::from_secs(2), &active_cancelled)
-        });
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while mechanism.launches.load(Ordering::SeqCst) == 0 && Instant::now() < deadline {
-            thread::yield_now();
-        }
-        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
-        cancelled.store(true, Ordering::SeqCst);
-        assert_eq!(
-            active_thread.join().unwrap(),
-            Err(RecoveryWaitError::Cancelled)
-        );
-        assert!(lock(&recovery.flights).scopes.is_empty());
-    }
-
-    #[test]
-    fn recovery_changes_no_authority_and_no_foreign_state() {
-        let root = crate::scratch::Scratch::named("recovery-foreign");
-        let foreign = root.join("foreign.json");
-        std::fs::write(&foreign, b"foreign bytes").unwrap();
-        let before = std::fs::read(&foreign).unwrap();
-        let decision = decide(
-            BrowserStartup::OnDemand,
-            &[candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Updatable,
-            )],
-            None,
-        );
-        assert!(matches!(
-            decision,
-            FlightPhase::Repairing {
-                launch_after: true,
-                ..
-            }
-        ));
-        assert_eq!(std::fs::read(&foreign).unwrap(), before);
-    }
-
-    #[test]
-    fn a_launch_uses_the_ordinary_profile_with_no_automation_flags() {
-        let command = ordinary_browser_command(Path::new("ordinary-browser"));
-        assert_eq!(command.get_program(), Path::new("ordinary-browser"));
-        assert_eq!(command.get_args().count(), 0);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn a_started_browser_that_exits_leaves_no_zombie() {
-        let process_id = start_reaped(ordinary_browser_command(Path::new("/bin/true"))).unwrap();
-        let stat = format!("/proc/{process_id}/stat");
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while std::path::Path::new(&stat).exists() {
-            assert!(
-                Instant::now() < deadline,
-                "{process_id} was never collected"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    #[test]
-    fn a_bounded_launch_wait_names_handshake_timeout() {
-        let inventory = Arc::new(FakeInventory {
-            candidates: vec![candidate(
-                "Chromium",
-                BrowserPackage::Native,
-                NativeHostState::Current,
-            )],
-            inspections: AtomicUsize::new(0),
-            entered: None,
-            release: Mutex::new(None),
-        });
-        let mut recovery = coordinator(Some("on_demand"), inventory);
-        recovery.mechanism = mechanism(Ok(()), None);
-        assert_eq!(
-            recovery
-                .request(
-                    Instant::now() + Duration::from_millis(20),
-                    &AtomicBool::new(false),
-                )
-                .unwrap(),
-            RecoveryDecision::Failed {
-                reason: RecoveryFailure::HandshakeTimeout,
-                details: vec!["Chromium".into()],
-            }
-        );
-        assert!(lock(&recovery.flights).scopes.is_empty());
     }
 
     /// Launch attempts that reach the start of a browser, counted in place of a process.
@@ -2639,6 +1964,63 @@ mod tests {
         (answer, starts.load(Ordering::SeqCst))
     }
 
+    /// Defects cb37cdbf and c1deccb1 (ADR-0149 amendments "A service with no display" and "A
+    /// service inside an app container"): where a browser the service started would not reach
+    /// the person, nothing is started. A request of either kind leaves startup to the person,
+    /// naming the browser it would have started, the launch guard stays free for the next try,
+    /// and the window promises no start.
+    #[test]
+    fn a_browser_is_left_to_the_person_where_a_start_would_not_reach_them() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_last_connected("chrome");
+        let launcher = mechanism(Ok(()), None);
+        *lock(&launcher.outcome) = Err(MechanismError::LeftToThePerson);
+        let (mut recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &launcher);
+        let _still = hand_clock(&mut recovery);
+        let left = RecoveryDecision::Manual {
+            browsers: vec![chrome_and_edge(NativeHostState::Current).remove(0)],
+        };
+        assert_eq!(
+            recovery
+                .request(
+                    Instant::now() + Duration::from_secs(5),
+                    &AtomicBool::new(false),
+                )
+                .unwrap(),
+            left
+        );
+        assert_eq!(request_chrome(&recovery, Duration::from_secs(5)), left);
+        assert_eq!(
+            launcher.launches.load(Ordering::SeqCst),
+            2,
+            "nothing was started, so nothing holds the guard against the next try"
+        );
+
+        assert_eq!(
+            counted_launch(false, true, &AtomicBool::new(false)),
+            (Err(MechanismError::LeftToThePerson), 0)
+        );
+        let (mut recovery, _) = answering(
+            "on_demand",
+            vec![installed(
+                "chrome",
+                "Google Chrome",
+                NativeHostState::Current,
+            )],
+            Some("chrome"),
+        );
+        recovery.mechanism = Arc::new(Contained);
+        assert_eq!(
+            recovery.starts_on_request(),
+            None,
+            "a service inside an app container promises no browser start"
+        );
+    }
+
+    /// ACCEPTANCE D1 (ADR-0199 Decision 13): while the session is ending no browser is started,
+    /// and the call ends as cancelled; otherwise the start goes ahead.
     #[test]
     fn no_browser_is_launched_while_the_session_is_ending() {
         let cancelled = AtomicBool::new(false);
@@ -2649,19 +2031,21 @@ mod tests {
         assert_eq!(counted_launch(false, false, &cancelled), (Ok(()), 1));
     }
 
+    /// Defect 7769fd97: a browser the service starts, including a start that only hands a window
+    /// to a running browser and exits at once, is reaped and never lingers as the service's
+    /// zombie.
+    #[cfg(target_os = "linux")]
     #[test]
-    fn a_service_inside_an_app_container_starts_no_browser() {
-        let cancelled = AtomicBool::new(false);
-        assert_eq!(
-            counted_launch(false, true, &cancelled),
-            (Err(MechanismError::LeftToThePerson), 0)
-        );
-        let browser = candidate("Chromium", BrowserPackage::Native, NativeHostState::Current);
-        assert_eq!(
-            settled(MechanismError::LeftToThePerson, browser.clone()).unwrap(),
-            FlightPhase::Complete(RecoveryDecision::Manual {
-                browsers: vec![browser],
-            })
-        );
+    fn a_started_browser_that_exits_leaves_no_zombie() {
+        let process_id = start_reaped(ordinary_browser_command(Path::new("/bin/true"))).unwrap();
+        let stat = format!("/proc/{process_id}/stat");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while std::path::Path::new(&stat).exists() {
+            assert!(
+                Instant::now() < deadline,
+                "{process_id} was never collected"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 }

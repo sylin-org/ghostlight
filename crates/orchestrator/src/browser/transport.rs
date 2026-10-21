@@ -260,6 +260,9 @@ impl Write for SocketWrite<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+    use std::thread;
+
     use super::*;
     use ghostlight_relay::endpoint::pair as connection_pair;
     use serde_json::{json, Value};
@@ -269,123 +272,42 @@ mod tests {
         connection_pair().unwrap()
     }
 
-    fn assert_expired(result: Result<Option<Value>, FrameError>) {
-        match result {
-            Err(FrameError::Io(error))
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-                ) => {}
-            other => panic!("expected the frame clock to expire, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn abandoned_and_partial_native_openings_expire() {
-        for prefix in [vec![], vec![10], vec![10, 0, 0, 0, b'{']] {
-            let (stream, mut peer) = pair();
-            peer.write_all(&prefix).unwrap();
-            let mut reader = SocketReader::new(stream);
-            assert!(reader
-                .native::<Value>(Some(Instant::now() + Duration::from_millis(60)))
-                .is_err());
-        }
-    }
-
-    #[test]
-    fn idle_sessions_survive_but_buffered_partial_frames_expire() {
-        let (stream, mut peer) = pair();
-        let mut reader = SocketReader::new(stream);
-        reader.frame_timeout = Duration::from_millis(60);
-        std::thread::scope(|scope| {
-            scope.spawn(move || {
-                std::thread::sleep(Duration::from_millis(150));
-                peer.write_all(&[2, 0, 0, 0, b'{', b'}']).unwrap();
-                peer.write_all(&[20, 0, 0, 0, b'{', b'"']).unwrap();
-                std::thread::sleep(Duration::from_millis(200));
-            });
-            assert_eq!(reader.native::<Value>(None).unwrap(), Some(json!({})));
-            let started = Instant::now();
-            assert_expired(reader.native::<Value>(None));
-            assert!(started.elapsed() < Duration::from_millis(180));
-        });
-    }
-
-    #[test]
-    fn incremental_progress_does_not_restart_the_frame_clock() {
-        let (stream, mut peer) = pair();
-        let mut reader = SocketReader::new(stream);
-        reader.frame_timeout = Duration::from_millis(100);
-        std::thread::scope(|scope| {
-            scope.spawn(move || {
-                peer.write_all(&[64, 0, 0, 0]).unwrap();
-                for _ in 0..12 {
-                    if peer.write_all(b" ").is_err() {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-            });
-            let started = Instant::now();
-            assert_expired(reader.native::<Value>(None));
-            assert!(started.elapsed() < Duration::from_millis(250));
-        });
-    }
-
+    /// ACCEPTANCE C17 ("no single call's deadline fails another call in flight") and ADR-0160: a
+    /// call whose deadline passes while it waits for the writer gives up alone. The connection
+    /// stays alive, so the holder of the writer still delivers whole frames, and closing it
+    /// needs no writer lock: the peer reads the end at once while the writer is still held.
     #[test]
     fn caller_expiry_does_not_disconnect_another_writer_and_close_needs_no_lock() {
         let (stream, mut peer) = pair();
         let writer = SocketWriter::new(stream).unwrap();
-        let _held = writer
+        let mut held = writer
             .until(Instant::now() + Duration::from_secs(2))
             .unwrap();
         assert!(writer
             .until(Instant::now() + Duration::from_millis(30))
             .is_err());
-        peer.set_read_timeout(Some(Duration::from_millis(30)))
-            .unwrap();
-        assert!(
-            peer.read(&mut [0]).is_err(),
-            "a waiting call's deadline leaves the connection alive"
+        let sent = json!({"after": "the waiting call gave up"});
+        frame::write_frame(&mut held, &sent).unwrap();
+        let received: Option<Value> = frame::read_frame(&mut peer).unwrap();
+        assert_eq!(
+            received,
+            Some(sent),
+            "the waiting call's deadline left the connection alive"
         );
-        writer.close();
+
+        let (closed, close_returned) = mpsc::channel();
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                writer.close();
+                closed.send(()).unwrap();
+            });
+            assert!(
+                close_returned.recv_timeout(Duration::from_secs(5)).is_ok(),
+                "closing waited for the writer lock"
+            );
+        });
         assert_eq!(peer.read(&mut [0]).unwrap(), 0);
         assert!(writer.wait_closed(Duration::from_secs(2)));
-    }
-
-    #[test]
-    fn a_nonreading_peer_cannot_hold_delivery_indefinitely() {
-        let (stream, _peer) = pair();
-        let writer = SocketWriter::new(stream).unwrap();
-        let started = Instant::now();
-        let mut output = writer.until(started + Duration::from_millis(100)).unwrap();
-        let block = vec![0; 64 * 1024];
-        let mut failed = false;
-        for _ in 0..1024 {
-            if output.write_all(&block).is_err() {
-                failed = true;
-                break;
-            }
-        }
-        assert!(
-            failed,
-            "bounded 64 MiB fixture must reach socket backpressure"
-        );
-        assert!(started.elapsed() < Duration::from_secs(2));
-        assert!(writer.wait_closed(Duration::from_millis(1)));
-    }
-
-    #[test]
-    fn stopping_the_service_interrupts_an_idle_reader() {
-        let (stream, _peer) = pair();
-        let stop = Arc::new(AtomicBool::new(false));
-        let mut reader = SocketReader::new(stream).interrupted_by(stop.clone());
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                std::thread::sleep(Duration::from_millis(20));
-                stop.store(true, Ordering::Release);
-            });
-            assert!(reader.native::<Value>(None).is_err());
-        });
+        drop(held);
     }
 }

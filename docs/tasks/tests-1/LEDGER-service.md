@@ -6,15 +6,19 @@ Machine: the coordinator, on the owner's machine. Paths without a crate are unde
 
 ## RESUME HERE
 
-The pilot landed on 2026-10-21: `service/mod.rs` keeps 29 of its 133 tests (T1), which the owner
-approved before the cut. Next, the rest of the area by the plan in the Notes (211 tests to 32), which
-waits for the owner to see the pilot; then `crates/relay` and `crates/edge`; then the guard.
+T1 and T2 landed on 2026-10-21: `service/mod.rs` keeps 29 of 133, and intake, browser outside the
+adapter, presentation, audit and the top-level files keep 32 of 211. The area holds 113 against a
+budget of 60, because the plan left out `service/`'s other modules (52 tests: presence, idle,
+lifetime, the lock, the shell and the rest), which the pilot leans on for the rules it no longer
+proves end to end. Next: those modules (T3), cut against what the pilot kept, then `crates/relay`
+and `crates/edge`, then the guard. The coordinator moves budget from the reserve or other lanes
+only with the owner's leave.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `service/`, `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, top-level files, `crates/orchestrator/tests` | 396 | 60 | 292 |
+| `service/`, `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, top-level files, `crates/orchestrator/tests` | 396 | 60 | 113 |
 | `crates/relay` | 157 | 35 | 157 |
 | `crates/edge` | 66 | 20 | 66 |
 
@@ -25,7 +29,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 
 | Slice | Subject | Before | After | Kept for | Status |
 | --- | --- | --- | --- | --- | --- |
-| T1 | test(service): `service/mod.rs` keeps the 29 tests that protect something | 133 | 29 | 15 promise, 11 defect, 3 contract | landed (this commit) |
+| T1 | test(service): `service/mod.rs` keeps the 29 tests that protect something | 133 | 29 | 15 promise, 11 defect, 3 contract | landed (5e9ec53d) |
+| T2 | test(intake, browser, audit): the rest of the area outside `service/` keeps 32 | 211 | 32 | 17 promise, 7 contract, 8 defect | landed (this commit) |
 | G | test(guards): the Rust test ceiling, `tests/guards/test-budget.test.mjs` (ADR-0204 Decision 4) | - | - | - | todo, after every area is under its budget |
 
 ## Notes
@@ -44,6 +49,11 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   `intake/desktop.rs` owns, and an `is_quitting` the latch implies. Every fixed sleep became a
   condition, a channel that disconnects, or the fake clock. `presence.rs` loses `Fake::into_world`,
   which only deleted tests used.
+- T2: the store-listing checks are now `tests/guards/store-listing.test.mjs`, which CI runs in the
+  extension job (CI names each guard file, so a new guard runs only once it is listed). Product
+  code that only deleted tests used goes: `RecoveryFailure::ALL`, `TrayItemId::parse` and
+  `TrayItemId::as_str`. The desktop goodbye's stale doc comment is fixed. The tooltip test stays
+  as it was until the shared golden replaces it.
 - The service area's plan after the pilot (an analysis of 2026-10-21, read-only, of every test in
   `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, the crate's
   top-level files and `crates/orchestrator/tests`): 211 tests to 32 (17 promise, 7 contract, 8

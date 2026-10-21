@@ -101,54 +101,69 @@ fn read_exact_until(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::collections::BTreeMap;
     use std::thread;
 
     use super::*;
+    use crate::intake::mcp::{McpSession, OwnedTab, ResumeState, LATEST_REVISION};
+    use crate::intake::session::SessionMarker;
     use ghostlight_relay::endpoint::pair;
-    use ghostlight_relay::frame::{write_frame, write_frame_raw};
-    use ghostlight_relay::protocol::{Edge, Program, Role};
+    use ghostlight_relay::frame::write_frame;
+    use ghostlight_relay::protocol::{Edge, Program, Role, MCP_CHANNEL};
+    use serde_json::json;
 
-    fn opening() -> Opening {
-        Opening::new(Role::Browser, Edge::new(Program::Edge, "2.0.0".into()))
-    }
-
+    /// Defect SERV-1 (3db83135, arch-1 second sweep) and ADR-0203 C11 (8c216920), the one limit
+    /// both ends of a reconnect must agree on: the largest resume token the service mints comes
+    /// back in the longest opening an edge sends, and the service reads that opening. A session
+    /// with about 270 tabs used to mint a token whose opening went over the opening cap, so it
+    /// could never reconnect. The token keeps as many of the session's first tabs as fit, its
+    /// claim, and the lives of the kept tabs' browsers only.
     #[test]
-    fn an_opening_is_read_from_a_connection() {
-        let (mut client, server) = pair().unwrap();
-        let sent = opening();
-        write_frame(&mut client, &sent).unwrap();
-        let read = read_opening(&server, Duration::from_secs(5)).unwrap();
-        assert_eq!(read, sent);
-    }
+    fn the_largest_token_the_service_mints_comes_back_in_an_opening_it_reads() {
+        let mut session = McpSession::new();
+        session.accept(
+            &json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": LATEST_REVISION,
+                    "clientInfo": {"name": "c".repeat(150), "version": "1"},
+                    "capabilities": {}
+                }
+            })
+            .to_string(),
+        );
+        let browser = format!("browser_{}", "b".repeat(60));
+        let tab = |index: u64| OwnedTab {
+            browser_id: browser.clone(),
+            tab_id: index,
+            handle: format!("tab_{index}"),
+            url_digest: Some("d".repeat(64)),
+        };
+        let lives = BTreeMap::from([
+            (browser.clone(), "life_b".to_owned()),
+            ("browser_without_tabs".to_owned(), "life_c".to_owned()),
+        ]);
+        let state = session
+            .resume_state((0..5_000).map(tab).collect(), lives)
+            .expect("an initialized session has a resume state");
+        let token = state.encode();
+        assert!(token.len() <= MAX_RESUME_TOKEN_BYTES, "{}", token.len());
 
-    #[test]
-    fn a_silent_peer_hits_the_deadline() {
-        let (_client, server) = pair().unwrap();
-        let started = Instant::now();
-        let error = read_opening(&server, Duration::from_millis(100)).unwrap_err();
-        assert!(matches!(error, OpeningError::Deadline));
-        assert!(started.elapsed() < Duration::from_secs(5));
-    }
-
-    #[test]
-    fn a_peer_that_sends_half_an_opening_hits_the_deadline() {
-        let (mut client, server) = pair().unwrap();
-        client.write_all(&[40, 0, 0, 0, b'{']).unwrap();
-        let error = read_opening(&server, Duration::from_millis(100)).unwrap_err();
-        assert!(matches!(error, OpeningError::Deadline));
-    }
-
-    #[test]
-    fn an_opening_that_carries_the_largest_resume_token_is_read() {
-        // A session with a few hundred tabs mints a token at its cap. The opening around it, with
-        // its channel, an extension origin and a session marker, is read all the same; it used to
-        // be refused as too large, so such a session could never reconnect.
-        let mut sent = opening();
-        sent.resume = Some("t".repeat(MAX_RESUME_TOKEN_BYTES));
-        sent.channel = Some("mcp".into());
+        // The opening an MCP edge sends with its token, with every other optional field an edge
+        // sets: the browser edge's extension origin and the command line's session marker.
+        let mut sent = Opening::new(
+            Role::Mcp,
+            Edge::new(Program::Edge, env!("CARGO_PKG_VERSION").to_owned()),
+        );
+        sent.channel = Some(MCP_CHANNEL.to_owned());
+        sent.resume = Some(token.clone());
         sent.origin = Some(format!("chrome-extension://{}/", "a".repeat(32)));
-        sent.session = Some(serde_json::json!({ "marker": "s".repeat(512) }));
+        sent.session = Some(
+            serde_json::to_value(SessionMarker::Declared {
+                key: "s".repeat(512),
+            })
+            .unwrap(),
+        );
         let size = serde_json::to_vec(&sent).unwrap().len();
         assert!(
             size > MAX_RESUME_TOKEN_BYTES && size <= MAX_OPENING_BYTES,
@@ -156,50 +171,27 @@ mod tests {
         );
         let expected = sent.clone();
         let (mut client, server) = pair().unwrap();
-        // The frame is larger than a pipe's buffer, so it is written while it is read.
+        // The frame is larger than a pipe's buffer, so the edge writes it while it is read.
         let writer = thread::spawn(move || write_frame(&mut client, &sent).unwrap());
         let read = read_opening(&server, Duration::from_secs(5)).unwrap();
         writer.join().unwrap();
         assert_eq!(read, expected);
-    }
 
-    #[test]
-    fn an_oversize_opening_is_refused_before_it_is_read() {
-        let (mut client, server) = pair().unwrap();
-        let declared = u32::try_from(MAX_OPENING_BYTES + 1).unwrap();
-        client.write_all(&declared.to_le_bytes()).unwrap();
-        let error = read_opening(&server, Duration::from_secs(5)).unwrap_err();
-        assert!(matches!(error, OpeningError::TooLarge));
-    }
-
-    #[test]
-    fn a_closed_connection_is_reported_as_closed() {
-        let (client, server) = pair().unwrap();
-        client.shutdown();
-        drop(client);
-        let error = read_opening(&server, Duration::from_secs(5)).unwrap_err();
-        assert!(matches!(error, OpeningError::Closed));
-    }
-
-    #[test]
-    fn a_frame_that_is_not_an_opening_is_malformed() {
-        let (mut client, server) = pair().unwrap();
-        write_frame_raw(&mut client, b"[1, 2]").unwrap();
-        let error = read_opening(&server, Duration::from_secs(5)).unwrap_err();
-        assert!(matches!(error, OpeningError::Malformed(_)));
-    }
-
-    #[test]
-    fn the_reader_stops_at_the_opening_and_leaves_later_bytes() {
-        let (mut client, mut server) = pair().unwrap();
-        write_frame(&mut client, &opening()).unwrap();
-        write_frame_raw(&mut client, b"{\"next\":1}").unwrap();
-        let handle = thread::spawn(move || {
-            read_opening(&server, Duration::from_secs(5)).unwrap();
-            ghostlight_relay::frame::read_frame_raw(&mut server)
-                .unwrap()
-                .unwrap()
-        });
-        assert_eq!(handle.join().unwrap(), b"{\"next\":1}");
+        let decoded = ResumeState::decode(read.resume.as_deref().unwrap()).expect("it decodes");
+        let kept = decoded.owned_tabs.len();
+        assert!(kept > 0 && kept < state.owned_tabs.len(), "{kept}");
+        assert_eq!(decoded.owned_tabs[..], state.owned_tabs[..kept]);
+        assert!(state.claim.is_some());
+        assert_eq!(decoded.claim, state.claim);
+        assert_eq!(decoded.lives.keys().collect::<Vec<_>>(), [&browser]);
+        let one_more = ResumeState {
+            owned_tabs: state.owned_tabs[..=kept].to_vec(),
+            ..state.clone()
+        };
+        assert_eq!(
+            one_more.encode(),
+            token,
+            "one tab more than the token keeps does not fit"
+        );
     }
 }

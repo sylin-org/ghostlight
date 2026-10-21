@@ -109,6 +109,8 @@ jobs:
         run: ./scripts/package-extension.ps1 -OutputPath dist/ghostlight-extension.zip
       - name: Check the frozen extension package
         run: node --test tests/guards/extension-freeze.test.mjs
+      - name: Check the store listing copy against the manifest
+        run: node --test tests/guards/store-listing.test.mjs
 
   process-journeys:
     strategy:

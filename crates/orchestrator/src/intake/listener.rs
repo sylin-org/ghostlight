@@ -222,8 +222,22 @@ mod tests {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
+    /// The desktop opening of the frozen golden, with its build replaced by `build`.
+    fn desktop_opening(build: &str) -> Value {
+        let mut sent = fixture("opening.desktop.json");
+        sent["edge"]["build"] = build.into();
+        sent
+    }
+
+    /// Contract: the openings 2.0.0's edges, command line and shell send, frozen in
+    /// tests/golden/relay4, are judged as relay 4 says, so the edges of a service this one
+    /// replaced keep working (ADR-0199, amendment of 2026-10-20). Every role and control
+    /// operation a 2.0 service serves is admitted; the command role and an unknown role, control
+    /// operation or quit reason are unsupported; a control opening that names no operation is
+    /// malformed; the desktop role is served only to the shell of this very build; and a quitting
+    /// service refuses every new connection, the shell's too.
     #[test]
-    fn every_opening_fixture_the_service_serves_is_admitted() {
+    fn the_service_judges_every_frozen_opening_as_relay_4_says() {
         for name in [
             "opening.browser.json",
             "opening.cli.json",
@@ -240,10 +254,6 @@ mod tests {
             let expected: Opening = serde_json::from_value(sent.clone()).unwrap();
             assert_eq!(judged(&sent, false), Judgement::Admit(expected), "{name}");
         }
-    }
-
-    #[test]
-    fn the_command_role_and_unknown_names_are_unsupported() {
         for name in [
             "opening.command.json",
             "tolerance/opening.unknown_role.json",
@@ -256,146 +266,44 @@ mod tests {
                 "{name}"
             );
         }
-    }
+        assert_eq!(
+            judged(&opening(Role::Control), false),
+            Judgement::Refuse(OpeningRefusal::Malformed),
+            "a control opening that names no operation"
+        );
 
-    /// The desktop opening of the frozen golden, with its build replaced by `build`.
-    fn desktop_opening(build: &str) -> Value {
-        let mut sent = fixture("opening.desktop.json");
-        sent["edge"]["build"] = build.into();
-        sent
-    }
-
-    #[test]
-    fn the_frozen_desktop_golden_is_admitted_exactly_when_its_build_is_this_one() {
-        let sent = fixture("opening.desktop.json");
-        let decoded: Opening = serde_json::from_value(sent.clone()).unwrap();
+        let frozen = fixture("opening.desktop.json");
+        let decoded: Opening = serde_json::from_value(frozen.clone()).unwrap();
         let expected = if decoded.edge.build == env!("CARGO_PKG_VERSION") {
             Judgement::Admit(decoded)
         } else {
             Judgement::Refuse(OpeningRefusal::Unsupported)
         };
-        assert_eq!(judged(&sent, false), expected);
-    }
-
-    #[test]
-    fn a_desktop_opening_of_this_build_is_admitted() {
-        let sent = desktop_opening(env!("CARGO_PKG_VERSION"));
-        let decoded: Opening = serde_json::from_value(sent.clone()).unwrap();
-        assert_eq!(judged(&sent, false), Judgement::Admit(decoded));
-    }
-
-    #[test]
-    fn a_desktop_opening_of_another_build_or_from_another_program_is_unsupported() {
+        assert_eq!(
+            judged(&frozen, false),
+            expected,
+            "the frozen desktop golden"
+        );
+        let this_build = desktop_opening(env!("CARGO_PKG_VERSION"));
+        let decoded: Opening = serde_json::from_value(this_build.clone()).unwrap();
+        assert_eq!(judged(&this_build, false), Judgement::Admit(decoded));
         let other_build = desktop_opening("0.0.1-other");
-        let mut edge = desktop_opening(env!("CARGO_PKG_VERSION"));
-        edge["edge"]["program"] = "edge".into();
-        for sent in [other_build, edge] {
+        let mut other_program = desktop_opening(env!("CARGO_PKG_VERSION"));
+        other_program["edge"]["program"] = "edge".into();
+        for sent in [other_build, other_program] {
             assert_eq!(
                 judged(&sent, false),
                 Judgement::Refuse(OpeningRefusal::Unsupported),
                 "{sent}"
             );
         }
-    }
 
-    #[test]
-    fn a_quitting_service_refuses_the_shell_too() {
-        assert_eq!(
-            judged(&desktop_opening(env!("CARGO_PKG_VERSION")), true),
-            Judgement::Refuse(OpeningRefusal::ShuttingDown)
-        );
-    }
-
-    #[test]
-    fn an_opening_that_names_an_earlier_relay_is_unsupported() {
-        let mut sent = opening(Role::Browser);
-        sent["relay"] = 3.into();
-        assert_eq!(
-            judged(&sent, false),
-            Judgement::Refuse(OpeningRefusal::Unsupported)
-        );
-        let mut later = opening(Role::Browser);
-        later["relay"] = (ghostlight_relay::RELAY + 1).into();
-        assert!(matches!(judged(&later, false), Judgement::Admit(_)));
-    }
-
-    #[test]
-    fn a_revision_4_edge_and_a_revision_5_edge_are_both_admitted() {
-        for relay in [4, 5] {
-            let mut sent = opening(Role::Browser);
-            sent["relay"] = relay.into();
-            assert!(
-                matches!(judged(&sent, false), Judgement::Admit(_)),
-                "{relay}"
+        for sent in [opening(Role::Browser), this_build] {
+            assert_eq!(
+                judged(&sent, true),
+                Judgement::Refuse(OpeningRefusal::ShuttingDown),
+                "{sent}"
             );
         }
-        assert_eq!(ghostlight_relay::RELAY, 5);
-    }
-
-    #[test]
-    fn a_control_opening_without_an_operation_is_malformed() {
-        assert_eq!(
-            judged(&opening(Role::Control), false),
-            Judgement::Refuse(OpeningRefusal::Malformed)
-        );
-    }
-
-    #[test]
-    fn a_quitting_service_refuses_new_connections() {
-        assert_eq!(
-            judged(&opening(Role::Browser), true),
-            Judgement::Refuse(OpeningRefusal::ShuttingDown)
-        );
-    }
-
-    #[test]
-    fn a_frame_that_is_not_an_opening_is_malformed() {
-        assert_eq!(
-            judged(&serde_json::json!([1, 2]), false),
-            Judgement::Refuse(OpeningRefusal::Malformed)
-        );
-    }
-
-    #[test]
-    fn a_peer_that_goes_away_before_its_opening_is_dropped() {
-        let (client, server) = pair().unwrap();
-        drop(client);
-        assert_eq!(judge(&server, false), Judgement::Drop);
-    }
-
-    #[test]
-    fn refusals_carry_their_relay_code_and_the_service_sentence() {
-        let (mut client, server) = pair().unwrap();
-        refuse(&server, OpeningRefusal::Unsupported);
-        let reply: Reply = frame::read_frame(&mut client).unwrap().unwrap();
-        assert_eq!(
-            reply,
-            Reply::refused(
-                RefusalCode::Unsupported,
-                OpeningRefusal::Unsupported.message()
-            )
-        );
-        let pinned: Reply = serde_json::from_value(fixture("reply.refused.json")).unwrap();
-        assert!(!pinned.accepted);
-        assert_eq!(pinned.code, reply.code);
-        assert!(pinned.say.is_some() && reply.say.is_some());
-    }
-
-    #[test]
-    fn a_control_answer_is_one_result_frame() {
-        let (mut client, server) = pair().unwrap();
-        answer_control(&server, &control::Shown { shown: true }).unwrap();
-        let result: ControlResult = frame::read_frame(&mut client).unwrap().unwrap();
-        let ControlResult::Result { value } = result;
-        assert_eq!(value, serde_json::json!({"shown": true}));
-    }
-
-    #[test]
-    fn the_status_answer_has_the_shape_of_the_golden_result() {
-        let golden: ControlResult =
-            serde_json::from_value(fixture("control.result.status.json")).unwrap();
-        let ControlResult::Result { value } = golden;
-        let status: control::Status = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&status).unwrap(), value);
     }
 }

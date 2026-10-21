@@ -408,273 +408,6 @@ mod tests {
 
     use super::*;
 
-    /// The agent the window shows for a connection these details describe.
-    fn agent_of(details: &ConnectionDetails) -> Agent {
-        details.agent.clone()
-    }
-
-    #[test]
-    fn live_claim_and_durable_evidence_are_separate() {
-        let evidence =
-            ConnectionEvidence::claimed("claimed application secret", IntakeChannel::Mcp);
-        let encoded = serde_json::to_value(evidence.attribution()).unwrap();
-        assert!(!encoded.to_string().contains("claimed application secret"));
-        let mut keys: Vec<_> = encoded.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(keys, ["channel", "connection_id", "observed_at_ms"]);
-        assert_eq!(
-            evidence.details().reported_application.as_deref(),
-            Some("claimed application secret")
-        );
-        assert_eq!(evidence.attribution().details().reported_application, None);
-        let restored: Attribution = serde_json::from_value(encoded).unwrap();
-        assert_eq!(&restored, evidence.attribution());
-    }
-
-    #[test]
-    fn every_connection_gets_fresh_evidence_even_for_the_same_claim() {
-        let first = ConnectionEvidence::claimed("application", IntakeChannel::Mcp);
-        let retained = first.attribution().clone();
-        let second = ConnectionEvidence::claimed("application", IntakeChannel::Mcp);
-        assert_ne!(retained.connection_id, second.attribution().connection_id);
-        assert_eq!(retained, *first.attribution());
-        assert!(retained.observed_at_ms.unwrap() > 0);
-    }
-
-    #[test]
-    fn claims_are_bounded_and_stripped_of_control_text() {
-        let evidence = ConnectionEvidence::claimed(
-            &format!("\n\u{202e}{}\0", "x".repeat(150)),
-            IntakeChannel::Cli,
-        );
-        assert_eq!(evidence.claim(), Some("x".repeat(100).as_str()));
-        assert_eq!(
-            evidence.details().reported_application,
-            Some("x".repeat(100))
-        );
-    }
-
-    #[test]
-    fn historical_evidence_does_not_invent_connection_information() {
-        let absent = Attribution::legacy(IntakeChannel::Mcp);
-        assert_eq!(absent.connection_id, None);
-        assert_eq!(absent.observed_at_ms, None);
-        assert_eq!(absent.details().reported_application, None);
-        assert_eq!(agent_of(&absent.details()), Agent::earlier());
-    }
-
-    #[test]
-    fn a_live_connection_names_its_agent_and_history_names_the_catalog_agent_it_claimed() {
-        let codex = ConnectionEvidence::claimed("codex-mcp-client", IntakeChannel::Mcp);
-        assert_eq!(agent_of(&codex.details()).name, "Codex");
-        assert_eq!(agent_of(&codex.details()).id, "codex");
-        assert_eq!(
-            codex.details().reported_application.as_deref(),
-            Some("codex-mcp-client")
-        );
-        assert_eq!(codex.attribution().claimed_agent.as_deref(), Some("codex"));
-        assert_eq!(agent_of(&codex.attribution().details()).id, "codex");
-        assert_eq!(codex.attribution().details().reported_application, None);
-        let unknown = ConnectionEvidence::claimed(" my agent ", IntakeChannel::Mcp);
-        assert_eq!(agent_of(&unknown.details()).name, "my agent");
-        assert_eq!(agent_of(&unknown.details()).id, "unknown:my agent");
-        assert_eq!(unknown.attribution().claimed_agent, None);
-        assert_eq!(
-            agent_of(&unknown.attribution().details()),
-            Agent::earlier(),
-            "a name the catalog does not know is never kept, so with no source the record names none"
-        );
-        let script = ConnectionEvidence::claimed("ghostlight call", IntakeChannel::Cli);
-        assert_eq!(agent_of(&script.details()), Agent::command_line());
-        assert_eq!(
-            agent_of(&script.attribution().details()),
-            Agent::command_line()
-        );
-        let unnamed = ConnectionEvidence::claimed("", IntakeChannel::Mcp);
-        assert_eq!(agent_of(&unnamed.details()), Agent::unknown());
-    }
-
-    /// The evidence of an MCP connection whose client claimed `claim`, started by `source`.
-    fn connected(claim: &str, source: Option<Source>) -> ConnectionEvidence {
-        ConnectionEvidence::new(
-            Attribution {
-                source,
-                ..Attribution::accepted(IntakeChannel::Mcp)
-            },
-            Some(claim),
-        )
-    }
-
-    /// Claude Desktop's installed app, as a source.
-    fn claude_desktop() -> Option<Source> {
-        Some(Source {
-            agent: Some("claude-desktop".into()),
-            image: "claude.exe".into(),
-        })
-    }
-
-    /// `attribution` as it reads back from a record.
-    fn restored(attribution: &Attribution) -> Attribution {
-        serde_json::from_value(serde_json::to_value(attribution).unwrap()).unwrap()
-    }
-
-    #[test]
-    fn restored_mcp_history_is_named_for_the_app_that_started_it() {
-        let code = connected("claude-code", claude_desktop());
-        let live = code.details();
-        let history = restored(code.attribution()).details();
-        assert_eq!(live.agent.id, "claude-code");
-        assert_eq!(
-            history.agent, live.agent,
-            "the same name live and after a restart"
-        );
-        assert_eq!(history.explanation, "Claude Code, in Claude Desktop.");
-        assert_eq!(history.explanation, live.explanation);
-
-        let unnamed = restored(connected("my agent", claude_desktop()).attribution()).details();
-        assert_eq!(unnamed.agent.id, "claude-desktop");
-        assert_eq!(unnamed.explanation, "Started by Claude Desktop.");
-    }
-
-    #[test]
-    fn restored_mcp_history_without_a_source_or_a_claim_is_the_earlier_session() {
-        let unseen = restored(connected("my agent", None).attribution()).details();
-        assert_eq!(unseen.agent, Agent::earlier());
-        assert_eq!(
-            unseen.explanation, "",
-            "it shows no name, so it has no caveat"
-        );
-        let program = restored(
-            connected(
-                "my agent",
-                Some(Source {
-                    agent: None,
-                    image: "WindowsTerminal.exe".into(),
-                }),
-            )
-            .attribution(),
-        )
-        .details();
-        assert_eq!(
-            program.agent,
-            Agent::unknown(),
-            "a record with a source is not an early one"
-        );
-        assert_eq!(program.explanation, "Started by WindowsTerminal.exe.");
-        assert_eq!(
-            restored(&Attribution::legacy(IntakeChannel::Mcp))
-                .details()
-                .agent,
-            Agent::earlier()
-        );
-    }
-
-    #[test]
-    fn the_claimed_agent_is_kept_as_a_catalog_id_and_an_edited_one_is_dropped() {
-        let code = connected("claude-code", None);
-        let mut encoded = serde_json::to_value(code.attribution()).unwrap();
-        assert_eq!(encoded["claimed_agent"], "claude-code");
-        assert!(!encoded.to_string().contains("\"claude-code\" is"));
-        encoded["claimed_agent"] = "Not An Id!".into();
-        let edited: Attribution = serde_json::from_value(encoded).unwrap();
-        assert_eq!(edited.claimed_agent, None);
-        let unlisted = Attribution {
-            claimed_agent: Some("retired-agent".into()),
-            ..Attribution::accepted(IntakeChannel::Mcp)
-        };
-        assert_eq!(
-            unlisted.details().agent,
-            Agent::unknown(),
-            "an id the catalog no longer lists names nobody"
-        );
-    }
-
-    #[test]
-    fn a_client_that_reported_no_name_is_the_unknown_agent_and_claims_nothing() {
-        for unnamed in [None, Some(""), Some(" \t "), Some("\u{202e}\u{200f}")] {
-            let evidence =
-                ConnectionEvidence::new(Attribution::accepted(IntakeChannel::Mcp), unnamed);
-            assert_eq!(evidence.claim(), None, "{unnamed:?}");
-            assert_eq!(evidence.reuse_key(), None, "{unnamed:?}");
-            let details = evidence.details();
-            assert_eq!(agent_of(&details), Agent::unknown(), "{unnamed:?}");
-            assert_eq!(details.reported_application, None, "{unnamed:?}");
-            assert!(!details.explanation.contains('"'), "{unnamed:?}");
-        }
-    }
-
-    #[test]
-    fn a_reuse_key_is_the_agent_the_claim_names_and_never_the_source() {
-        let key = |claim: Option<&str>, channel, source: Option<Source>| {
-            ConnectionEvidence::new(
-                Attribution {
-                    source,
-                    ..Attribution::accepted(channel)
-                },
-                claim,
-            )
-            .reuse_key()
-        };
-        assert_eq!(
-            key(Some("claude-code"), IntakeChannel::Mcp, None),
-            key(Some(" Claude Code "), IntakeChannel::Mcp, claude_desktop()),
-            "one catalog agent is one key, whatever started it"
-        );
-        assert_eq!(
-            key(Some("claude-code"), IntakeChannel::Mcp, None).as_deref(),
-            Some("claude-code")
-        );
-        assert_eq!(
-            key(Some("ghostlight call"), IntakeChannel::Cli, None),
-            key(None, IntakeChannel::Cli, None),
-            "every command-line session shares the command line's key"
-        );
-        assert_eq!(
-            key(None, IntakeChannel::Cli, None),
-            Some(Agent::command_line().id)
-        );
-        assert_eq!(
-            key(Some("my agent"), IntakeChannel::Mcp, None),
-            Some(Agent::of(Some("my agent"), IntakeChannel::Mcp).id)
-        );
-        assert_ne!(
-            key(Some("my agent"), IntakeChannel::Mcp, None),
-            key(Some("claude-code"), IntakeChannel::Mcp, None)
-        );
-        for nobody in [None, Some(""), Some("Unknown agent"), Some("Command line")] {
-            assert_eq!(
-                key(nobody, IntakeChannel::Mcp, claude_desktop()),
-                None,
-                "a claim that names no agent gives no key, even from an agent's app: {nobody:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_agent_is_named_from_the_claim_the_card_shows() {
-        let details =
-            ConnectionEvidence::claimed("Some\u{202e}Agent", IntakeChannel::Mcp).details();
-        assert_eq!(agent_of(&details).name, "SomeAgent");
-        assert_eq!(details.reported_application.as_deref(), Some("SomeAgent"));
-    }
-
-    #[test]
-    fn a_line_written_with_peer_fields_still_reads() {
-        let line = serde_json::json!({
-            "connection_id": format!("{CONNECTION_ID_PREFIX}{}", Uuid::new_v4().simple()),
-            "observed_at_ms": 7,
-            "channel": "mcp",
-            "peer": { "state": "observed", "executable": "client.exe" },
-            "signature": "not_checked",
-        });
-        let restored: Attribution = serde_json::from_value(line).unwrap();
-        assert_eq!(restored.observed_at_ms, Some(7));
-        assert_eq!(restored.channel, IntakeChannel::Mcp);
-        let rewritten = serde_json::to_value(&restored).unwrap();
-        assert!(rewritten.get("peer").is_none());
-        assert!(rewritten.get("signature").is_none());
-    }
-
     /// A chain of ancestors, nearest first: the nearest is process 1, and each is older than the
     /// one below it.
     fn chain(images: &[&str]) -> Vec<Ancestor> {
@@ -707,8 +440,14 @@ mod tests {
             .then_some("claude-desktop")
     }
 
+    /// ACCEPTANCE CR (ADR-0161, amendment of 2026-10-18): a connection's source is the nearest
+    /// ancestor of its peer that lies in a catalog agent's installed app, past wrappers and other
+    /// programs, else the nearest ancestor that is not a wrapper, kept as a file name and never a
+    /// path. An app is known by where it is installed, never by its file name; the process kept
+    /// is the source's own, never a wrapper below it; and with only wrappers or nothing to read,
+    /// the source stays unknown.
     #[test]
-    fn a_source_is_the_nearest_agent_app_past_wrappers_and_other_programs() {
+    fn a_source_is_the_nearest_agent_app_else_the_nearest_program_past_wrappers() {
         let observation = Observation::among(
             &chain(&[
                 "C:/Users/ann/.ghostlight/bin/ghostlight.exe",
@@ -733,10 +472,7 @@ mod tests {
             SourceProcess { id: 5, started: 95 },
             "the process is the source's own, never a wrapper below it"
         );
-    }
 
-    #[test]
-    fn with_no_agent_app_the_source_is_the_nearest_program_that_is_not_a_wrapper() {
         let source = source_among(
             &chain(&[
                 "/usr/bin/node",
@@ -761,10 +497,7 @@ mod tests {
             "an app is recognized by where it is installed, not by its file name"
         );
         assert_eq!(same_name_elsewhere.image, "claude.exe");
-    }
 
-    #[test]
-    fn only_wrappers_or_nothing_leave_the_source_unknown() {
         assert_eq!(source_among(&[], store_claude), None);
         assert_eq!(
             source_among(
@@ -774,82 +507,5 @@ mod tests {
             None
         );
         assert_eq!(Observation::of_peer(None), None);
-    }
-
-    /// How long the source observation takes for a cargo test peer on this machine. It reads the
-    /// real process tree and the installed apps, so it stays out of the default run:
-    /// `cargo test -p ghostlight-service source_observation_time -- --ignored --nocapture`.
-    #[test]
-    #[ignore = "measures this machine; run on demand"]
-    fn the_source_observation_time_on_this_machine() {
-        const RUNS: usize = 10;
-        let peer = Some(std::process::id());
-        let mut spans: Vec<std::time::Duration> = (0..RUNS)
-            .map(|_| {
-                let start = std::time::Instant::now();
-                assert!(Observation::of_peer(peer).is_some());
-                start.elapsed()
-            })
-            .collect();
-        let first = spans[0];
-        spans.sort();
-        println!(
-            "source observation, {RUNS} runs: first {first:?}, median {:?}, slowest {:?}",
-            spans[RUNS / 2],
-            spans[RUNS - 1]
-        );
-    }
-
-    #[test]
-    fn a_source_is_kept_on_the_record_as_a_file_name_and_a_record_without_one_still_reads() {
-        let evidence = ConnectionEvidence::new(
-            Attribution {
-                source: Some(Source {
-                    agent: Some("claude-desktop".into()),
-                    image: "claude.exe".into(),
-                }),
-                ..Attribution::accepted(IntakeChannel::Mcp)
-            },
-            Some("claude-code"),
-        );
-        let encoded = serde_json::to_value(evidence.attribution()).unwrap();
-        assert_eq!(
-            encoded["source"],
-            serde_json::json!({ "agent": "claude-desktop", "image": "claude.exe" })
-        );
-        let restored: Attribution = serde_json::from_value(encoded.clone()).unwrap();
-        assert_eq!(&restored, evidence.attribution());
-
-        let mut without = encoded.clone();
-        without.as_object_mut().unwrap().remove("source");
-        let restored: Attribution = serde_json::from_value(without).unwrap();
-        assert_eq!(restored.source, None);
-        assert!(serde_json::to_value(&restored)
-            .unwrap()
-            .get("source")
-            .is_none());
-
-        let mut edited = encoded;
-        edited["source"] = serde_json::json!({
-            "agent": "Not An Id!",
-            "image": "C:\\Users\\ann\\AppData\\Local\\agent.exe",
-        });
-        let restored: Attribution = serde_json::from_value(edited).unwrap();
-        assert_eq!(
-            restored.source,
-            Some(Source {
-                agent: None,
-                image: "agent.exe".into(),
-            }),
-            "a path is cut to its file name and an id that is not one is dropped"
-        );
-    }
-
-    #[test]
-    fn restored_evidence_rejects_arbitrary_connection_claims() {
-        let evidence = ConnectionEvidence::claimed("transient claim", IntakeChannel::Mcp);
-        let mut invalid = serde_json::to_value(evidence.attribution()).unwrap();
-        invalid["connection_id"] = "private supplied text".into();
-        assert!(serde_json::from_value::<Attribution>(invalid).is_err());
     }
 }

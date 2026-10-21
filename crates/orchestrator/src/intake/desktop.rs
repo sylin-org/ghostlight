@@ -65,8 +65,8 @@ pub enum DesktopFrame {
     /// place. The stream ends right after, and the shell leaves. The shell that holds the place is
     /// asked to show its window.
     AlreadyOpen,
-    /// From the service: it is about to close the stream. Byte for byte the goodbye of an `mcp`
-    /// stream, so the service writes both with one code path.
+    /// From the service: it is about to close the stream. The service writes this frame to the
+    /// shell itself; an `mcp` stream gets the relay's own goodbye frame, written separately.
     Goodbye {
         /// Why.
         reason: GoodbyeReason,
@@ -298,23 +298,6 @@ impl TrayItemId {
     /// Every entry, in the order the tray lists them.
     pub const ALL: [Self; 4] = [Self::Open, Self::Hold, Self::Resume, Self::Quit];
 
-    /// The entry's id as the tray menu and the wire carry it.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Hold => "hold",
-            Self::Resume => "resume",
-            Self::Quit => "quit",
-        }
-    }
-
-    /// The entry named `text`, or `None` for an id this build does not use.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|item| item.as_str() == text)
-    }
-
     /// What the entry says while browser work is `runtime`: Resume starts a new session once the
     /// session ended, in the words the window and the browser toolbar use for it.
     #[must_use]
@@ -425,9 +408,6 @@ impl TrayModel {
 
 #[cfg(test)]
 mod tests {
-    use ghostlight_relay::protocol::McpFrame;
-    use serde_json::json;
-
     use super::*;
     use crate::language::self_check::golden::{check_golden_with, golden_text};
 
@@ -480,275 +460,178 @@ mod tests {
         )
     }
 
+    /// Contract: every frame of the desktop stream matches its golden in tests/golden/desktop/,
+    /// the bytes the shell decodes in its own tests (crates/desktop/src/link.rs): what the
+    /// service sends (the workbench with its tray, a new tray, already open, goodbye, show with
+    /// and without a section, a notice, each act) and what the shell sends (a tray click,
+    /// unavailable, closed, each act result).
     #[test]
-    fn the_frames_match_their_goldens() {
-        golden(
-            "workbench.json",
-            &DesktopFrame::workbench(GOLDEN_URL, GOLDEN_BEARER, golden_tray()),
-        );
-        golden(
-            "tray-model.json",
-            &DesktopFrame::TrayModel {
-                model: TrayModel::of(
-                    Readiness::Paused,
-                    RuntimeControlState::Held,
-                    golden_counts(),
-                ),
-            },
-        );
-        golden(
-            "unavailable.json",
-            &DesktopFrame::Unavailable {
-                reason: UnavailableReason::NoTray,
-            },
-        );
-        golden("closed.json", &DesktopFrame::Closed { stays: true });
-        golden("already-open.json", &DesktopFrame::AlreadyOpen);
-        golden(
-            "goodbye.json",
-            &DesktopFrame::Goodbye {
-                reason: GoodbyeReason::Quit,
-            },
-        );
-        golden(
-            "tray.json",
-            &DesktopFrame::Tray {
-                item: TrayItemId::Hold,
-            },
-        );
-        golden(
-            "tray-open.json",
-            &DesktopFrame::Tray {
-                item: TrayItemId::Open,
-            },
-        );
-    }
-
-    #[test]
-    fn the_shows_notices_acts_and_results_match_their_goldens() {
-        golden(
-            "show.json",
-            &DesktopFrame::Show {
-                address: Some(PageAddress::SettingsDiagnostics),
-            },
-        );
-        golden(
-            "show-no-address.json",
-            &DesktopFrame::Show { address: None },
-        );
-        golden(
-            "notice.json",
-            &DesktopFrame::Notice {
-                title: words::NOTICE_CHECKUP_TITLE.to_owned(),
-                body: words::NOTICE_CHECKUP_BODY.to_owned(),
-            },
-        );
-        golden(
-            "act-open-url.json",
-            &DesktopFrame::Act {
-                id: 1,
-                act: NativeAct::OpenUrl {
-                    url: GOLDEN_LINK.to_owned(),
+    fn every_desktop_frame_matches_the_golden_the_shell_reads() {
+        let frames = [
+            (
+                "workbench.json",
+                DesktopFrame::workbench(GOLDEN_URL, GOLDEN_BEARER, golden_tray()),
+            ),
+            (
+                "tray-model.json",
+                DesktopFrame::TrayModel {
+                    model: TrayModel::of(
+                        Readiness::Paused,
+                        RuntimeControlState::Held,
+                        golden_counts(),
+                    ),
                 },
-            },
-        );
-        golden(
-            "act-open-folder.json",
-            &DesktopFrame::Act {
-                id: 2,
-                act: NativeAct::OpenFolder {
-                    path: GOLDEN_FOLDER.to_owned(),
+            ),
+            (
+                "unavailable.json",
+                DesktopFrame::Unavailable {
+                    reason: UnavailableReason::NoTray,
                 },
-            },
-        );
-        golden(
-            "act-pick-file.json",
-            &DesktopFrame::Act {
-                id: 3,
-                act: NativeAct::PickFile {
-                    title: words::LOCATE_DIALOG_TITLE.to_owned(),
+            ),
+            ("closed.json", DesktopFrame::Closed { stays: true }),
+            ("already-open.json", DesktopFrame::AlreadyOpen),
+            (
+                "goodbye.json",
+                DesktopFrame::Goodbye {
+                    reason: GoodbyeReason::Quit,
                 },
-            },
-        );
-        golden(
-            "act-result.json",
-            &DesktopFrame::ActResult {
-                id: 3,
-                outcome: ActOutcome::Picked {
-                    path: GOLDEN_FILE.to_owned(),
+            ),
+            (
+                "tray.json",
+                DesktopFrame::Tray {
+                    item: TrayItemId::Hold,
                 },
-            },
-        );
-        golden(
-            "act-result-done.json",
-            &DesktopFrame::ActResult {
-                id: 1,
-                outcome: ActOutcome::Done,
-            },
-        );
-        golden(
-            "act-result-cancelled.json",
-            &DesktopFrame::ActResult {
-                id: 3,
-                outcome: ActOutcome::Cancelled,
-            },
-        );
-        golden(
-            "act-result-failed.json",
-            &DesktopFrame::ActResult {
-                id: 2,
-                outcome: ActOutcome::Failed,
-            },
-        );
-    }
-
-    #[test]
-    fn an_act_this_build_does_not_know_decodes_as_unknown() {
-        let frame: DesktopFrame =
-            serde_json::from_value(json!({"kind": "act", "id": 9, "act": {"kind": "print"}}))
-                .unwrap();
-        assert_eq!(
-            frame,
-            DesktopFrame::Act {
-                id: 9,
-                act: NativeAct::Unknown
-            }
-        );
-    }
-
-    #[test]
-    fn a_show_for_a_section_that_is_not_one_does_not_decode() {
-        let frame = serde_json::from_value::<DesktopFrame>(
-            json!({"kind": "show", "address": "settings/nowhere"}),
-        );
-        assert!(frame.is_err());
-    }
-
-    /// The entries of `model` as (id, label, enabled).
-    fn listed(model: &TrayModel) -> Vec<(&str, &str, bool)> {
-        model
-            .items
-            .iter()
-            .map(|item| (item.id.as_str(), item.label.as_str(), item.enabled))
-            .collect()
-    }
-
-    #[test]
-    fn an_active_tray_lists_the_four_entries_and_offers_pause_but_not_resume() {
-        let tray = golden_tray();
-        assert_eq!(
-            tray.tooltip,
-            "Ready. Ghostlight is running; 2 agents and 2 browsers connected."
-        );
-        assert_eq!(tray.state, TrayState::Ready);
-        assert_eq!(
-            listed(&tray),
-            [
-                ("open", "Open Ghostlight", true),
-                ("hold", "Pause agents", true),
-                ("resume", "Resume agents", false),
-                ("quit", "Quit Ghostlight", true),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_paused_tray_offers_resume_but_not_pause() {
-        let tray = TrayModel::of(
-            Readiness::Paused,
-            RuntimeControlState::Held,
-            golden_counts(),
-        );
-        assert_eq!(tray.state, TrayState::Paused);
-        assert_eq!(
-            listed(&tray),
-            [
-                ("open", "Open Ghostlight", true),
-                ("hold", "Pause agents", false),
-                ("resume", "Resume agents", true),
-                ("quit", "Quit Ghostlight", true),
-            ]
-        );
-        assert_eq!(
-            TrayItemId::Resume.intent(RuntimeControlState::Held),
-            Some(RuntimeControlIntent::Resume)
-        );
-    }
-
-    #[test]
-    fn an_ended_session_offers_no_resume_in_the_tray() {
-        let runtime = RuntimeControlState::Ended;
-        let tray = TrayModel::of(Readiness::SessionEnded, runtime, golden_counts());
-        assert_eq!(tray.state, TrayState::Paused);
-        assert_eq!(
-            listed(&tray),
-            [
-                ("open", "Open Ghostlight", true),
-                ("hold", "Pause agents", false),
-                ("resume", "Start a new session", true),
-                ("quit", "Quit Ghostlight", true),
-            ]
-        );
-        let asked: Vec<_> = tray
-            .items
-            .iter()
-            .filter(|item| item.enabled)
-            .filter_map(|item| item.id.intent(runtime))
-            .collect();
-        assert_eq!(
-            asked,
-            [RuntimeControlIntent::StartSession],
-            "an ended session accepts only a new session; a Resume would leave it ended"
-        );
-    }
-
-    #[test]
-    fn a_runtime_entry_can_be_chosen_exactly_when_the_state_offers_its_act() {
-        for runtime in [
-            RuntimeControlState::Active,
-            RuntimeControlState::Held,
-            RuntimeControlState::Ended,
-        ] {
-            let tray = TrayModel::of(Readiness::Ready, runtime, golden_counts());
-            for item in &tray.items {
-                if let Some(intent) = item.id.intent(runtime) {
-                    assert_eq!(
-                        item.enabled,
-                        offers(runtime).contains(&intent),
-                        "{runtime:?} {intent:?}"
-                    );
-                }
-            }
+            ),
+            (
+                "tray-open.json",
+                DesktopFrame::Tray {
+                    item: TrayItemId::Open,
+                },
+            ),
+            (
+                "show.json",
+                DesktopFrame::Show {
+                    address: Some(PageAddress::SettingsDiagnostics),
+                },
+            ),
+            ("show-no-address.json", DesktopFrame::Show { address: None }),
+            (
+                "notice.json",
+                DesktopFrame::Notice {
+                    title: words::NOTICE_CHECKUP_TITLE.to_owned(),
+                    body: words::NOTICE_CHECKUP_BODY.to_owned(),
+                },
+            ),
+            (
+                "act-open-url.json",
+                DesktopFrame::Act {
+                    id: 1,
+                    act: NativeAct::OpenUrl {
+                        url: GOLDEN_LINK.to_owned(),
+                    },
+                },
+            ),
+            (
+                "act-open-folder.json",
+                DesktopFrame::Act {
+                    id: 2,
+                    act: NativeAct::OpenFolder {
+                        path: GOLDEN_FOLDER.to_owned(),
+                    },
+                },
+            ),
+            (
+                "act-pick-file.json",
+                DesktopFrame::Act {
+                    id: 3,
+                    act: NativeAct::PickFile {
+                        title: words::LOCATE_DIALOG_TITLE.to_owned(),
+                    },
+                },
+            ),
+            (
+                "act-result.json",
+                DesktopFrame::ActResult {
+                    id: 3,
+                    outcome: ActOutcome::Picked {
+                        path: GOLDEN_FILE.to_owned(),
+                    },
+                },
+            ),
+            (
+                "act-result-done.json",
+                DesktopFrame::ActResult {
+                    id: 1,
+                    outcome: ActOutcome::Done,
+                },
+            ),
+            (
+                "act-result-cancelled.json",
+                DesktopFrame::ActResult {
+                    id: 3,
+                    outcome: ActOutcome::Cancelled,
+                },
+            ),
+            (
+                "act-result-failed.json",
+                DesktopFrame::ActResult {
+                    id: 2,
+                    outcome: ActOutcome::Failed,
+                },
+            ),
+        ];
+        for (name, frame) in &frames {
+            golden(name, frame);
         }
     }
 
+    /// Defect A-01 (37554eab, ADR-0203 Decisions 12.1 and 7.9) and ACCEPTANCE X6 and D19: the
+    /// tray offers exactly the runtime act its state accepts, labelled with that act's words:
+    /// Pause while browser work is active, Resume while it is paused, and once the session ended
+    /// only Start a new session, since a Resume would leave it ended. Open and Quit can always be
+    /// chosen.
     #[test]
-    fn only_the_runtime_entries_ask_for_a_runtime_control() {
-        for runtime in [
-            RuntimeControlState::Active,
-            RuntimeControlState::Held,
-            RuntimeControlState::Ended,
+    fn the_tray_offers_exactly_the_runtime_act_its_state_accepts() {
+        for (readiness, runtime, act, label) in [
+            (
+                Readiness::Ready,
+                RuntimeControlState::Active,
+                RuntimeControlIntent::Hold,
+                words::TRAY_HOLD,
+            ),
+            (
+                Readiness::Paused,
+                RuntimeControlState::Held,
+                RuntimeControlIntent::Resume,
+                words::TRAY_RESUME,
+            ),
+            (
+                Readiness::SessionEnded,
+                RuntimeControlState::Ended,
+                RuntimeControlIntent::StartSession,
+                words::TRAY_START_SESSION,
+            ),
         ] {
-            assert_eq!(
-                TrayItemId::Hold.intent(runtime),
-                Some(RuntimeControlIntent::Hold)
-            );
-            assert_eq!(TrayItemId::Open.intent(runtime), None);
-            assert_eq!(TrayItemId::Quit.intent(runtime), None);
-        }
-    }
-
-    #[test]
-    fn the_icon_state_follows_the_tone_of_the_readiness() {
-        for readiness in Readiness::ALL {
-            let expected = match readiness.tone() {
-                "quiet" | "offline" => TrayState::Ready,
-                "working" => TrayState::Working,
-                "held" => TrayState::Paused,
-                "attention" => TrayState::Attention,
-                other => panic!("a tone the tray does not know: {other}"),
-            };
-            assert_eq!(TrayState::of(*readiness), expected, "{readiness:?}");
+            let tray = TrayModel::of(readiness, runtime, golden_counts());
+            let offered: Vec<_> = tray
+                .items
+                .iter()
+                .filter(|item| item.enabled)
+                .filter_map(|item| {
+                    item.id
+                        .intent(runtime)
+                        .map(|intent| (intent, item.label.as_str()))
+                })
+                .collect();
+            assert_eq!(offered, [(act, label)], "{runtime:?}");
+            for always in [TrayItemId::Open, TrayItemId::Quit] {
+                assert!(
+                    tray.items
+                        .iter()
+                        .any(|item| item.id == always && item.enabled),
+                    "{always:?} while {runtime:?}"
+                );
+            }
         }
     }
 
@@ -773,51 +656,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn an_entry_id_is_its_wire_name() {
-        for item in TrayItemId::ALL {
-            assert_eq!(json!(item), json!(item.as_str()));
-            assert_eq!(TrayItemId::parse(item.as_str()), Some(item));
-        }
-        assert_eq!(TrayItemId::parse("settings"), None);
-    }
-
-    #[test]
-    fn the_goodbye_is_byte_for_byte_the_goodbye_of_an_mcp_stream() {
-        for reason in [
-            GoodbyeReason::Quit,
-            GoodbyeReason::Replace,
-            GoodbyeReason::Uninstall,
-            GoodbyeReason::SessionEnd,
-        ] {
-            assert_eq!(
-                serde_json::to_vec(&DesktopFrame::Goodbye { reason }).unwrap(),
-                serde_json::to_vec(&McpFrame::Goodbye { reason }).unwrap(),
-                "{reason:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_frame_kind_this_build_does_not_know_is_unknown() {
-        let frame: DesktopFrame = serde_json::from_value(json!({"kind": "ping"})).unwrap();
-        assert_eq!(frame, DesktopFrame::Unknown);
-    }
-
-    #[test]
-    fn a_tray_click_on_an_entry_this_build_does_not_have_does_not_decode() {
-        let frame = serde_json::from_value::<DesktopFrame>(json!({"kind": "tray", "item": "x"}));
-        assert!(frame.is_err());
-    }
-
-    #[test]
-    fn the_secret_is_not_printed() {
-        let frame = DesktopFrame::workbench(GOLDEN_URL, "s3cr3t-bearer-value", golden_tray());
-        let printed = format!("{frame:?} {frame:#?}");
-        assert!(!printed.contains("s3cr3t-bearer-value"), "{printed}");
-        assert!(printed.contains("[redacted]"));
-        assert!(printed.contains(GOLDEN_URL));
     }
 }

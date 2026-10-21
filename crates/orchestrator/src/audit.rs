@@ -627,6 +627,11 @@ mod tests {
         )
     }
 
+    /// ACCEPTANCE AH1, AH3 and AH4 (ADR-0159): a receipt whose storage fails is unconfirmed and
+    /// the outcome stands; recovery probes at most once per interval, never in a hot loop, writes
+    /// one content-free gap marker that counts what went unconfirmed, and never replays a failed
+    /// receipt. That holds when storage fails after a good start, and when it is unavailable from
+    /// the start while receipts arrive at once.
     #[test]
     fn failed_receipts_stay_unconfirmed_after_bounded_recovery_without_backfill() {
         let sink = Arc::new(SwitchSink::default());
@@ -660,10 +665,7 @@ mod tests {
         assert!(!serde_json::to_string(&recorder.health())
             .unwrap()
             .contains("PRIVATE"));
-    }
 
-    #[test]
-    fn cold_failure_and_concurrent_receipts_share_one_recovery_state() {
         let sink = Arc::new(SwitchSink::default());
         sink.fails.store(true, Ordering::SeqCst);
         let recorder = Arc::new(AuditRecorder::new(
@@ -690,6 +692,10 @@ mod tests {
         assert_eq!(sink.gaps.lock().unwrap().len(), 1);
     }
 
+    /// ACCEPTANCE AH1 and AH3 (ADR-0159): a saved composition parent does not upgrade a child
+    /// whose storage was unconfirmed, live and after a restart. Recovery does not retry the
+    /// failed child, and history read back from the file shows that child as unconfirmed, with
+    /// no receipt made up for it, beside the gap marker that counts it.
     #[test]
     fn recovered_composition_parent_preserves_child_storage_gaps_live_and_after_restart() {
         use crate::language::composition::{CompositionProgress, EffectCounts, StepCounts};
@@ -838,19 +844,10 @@ mod tests {
         assert_eq!(restored.audit_health().unconfirmed_receipts, 1);
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn the_first_append_creates_a_private_file_in_a_private_directory() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let root = Scratch::named("audit");
-        let path = root.join("audit").join("audit.jsonl");
-        JsonlAuditSink::new(&path).record(&record("first")).unwrap();
-        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&path), 0o600);
-        assert_eq!(mode(path.parent().unwrap()), 0o700);
-    }
-
+    /// ACCEPTANCE AH3 and AH4 (ADR-0159): with a real file, a torn historical entry is counted
+    /// as unreadable without erasing the good receipt before it; a destination that goes away
+    /// leaves a receipt unconfirmed; and once the destination is repaired, recovery reopens it,
+    /// new receipts are saved after the gap marker, and the missing receipt is never written.
     #[test]
     fn actual_file_repair_keeps_good_history_and_reports_torn_and_missing_entries() {
         let root = Scratch::named("audit-repair");
@@ -884,48 +881,12 @@ mod tests {
         assert!(!text.contains("\"missing\""));
     }
 
+    /// ACCEPTANCE AH4 (ADR-0159): a damaged history line never hides the receipt after it. A
+    /// line too long to hold is drained without being kept in memory, and a line whose required
+    /// meaning this build does not know, such as a reason it has no word for, reads as unreadable
+    /// rather than as a guess; the next receipt reads either way.
     #[test]
-    fn historical_extensions_preserve_known_receipts_without_copying_unknown_payloads() {
-        let expected = record("known");
-        let mut extended = serde_json::to_value(&expected).unwrap();
-        extended["future_optional"] = serde_json::json!({"payload": "PRIVATE_FUTURE_FIELD"});
-        let Some(AuditLine::Receipt(decoded)) =
-            read_line(&mut io::Cursor::new(serde_json::to_vec(&extended).unwrap())).unwrap()
-        else {
-            panic!("An additive field hid a readable receipt");
-        };
-        assert_eq!(*decoded, expected);
-        assert!(!serde_json::to_string(&decoded)
-            .unwrap()
-            .contains("PRIVATE_"));
-
-        // An unsupported required meaning is not a safe default. Preserve readable neighbors.
-        extended["reason"] = serde_json::json!("future_decision");
-        let mut bytes = serde_json::to_vec(&extended).unwrap();
-        bytes.push(b'\n');
-        serde_json::to_writer(&mut bytes, &expected).unwrap();
-        let mut reader = io::Cursor::new(bytes);
-        assert!(matches!(
-            read_line(&mut reader).unwrap(),
-            Some(AuditLine::Unreadable)
-        ));
-        assert!(matches!(
-            read_line(&mut reader).unwrap(),
-            Some(AuditLine::Receipt(_))
-        ));
-
-        let gap = br#"{"future_optional":"PRIVATE_FUTURE_FIELD","audit_gap":{"id":"gap_future","started_at_ms":1,"recovered_at_ms":2,"unconfirmed_receipts":3,"future_optional":true}}"#;
-        let Some(AuditLine::Gap(decoded)) = read_line(&mut io::Cursor::new(gap)).unwrap() else {
-            panic!("An additive field hid a readable gap");
-        };
-        assert_eq!(decoded.unconfirmed_receipts, 3);
-        assert!(!serde_json::to_string(&decoded)
-            .unwrap()
-            .contains("future_optional"));
-    }
-
-    #[test]
-    fn oversized_history_does_not_hide_the_following_receipt() {
+    fn a_damaged_line_never_hides_the_receipt_after_it() {
         let mut bytes = vec![b'x'; MAX_ENTRY_BYTES as usize + 100];
         bytes.extend_from_slice(b"\n");
         serde_json::to_writer(&mut bytes, &record("after")).unwrap();
@@ -939,38 +900,21 @@ mod tests {
         };
         assert_eq!(receipt.invocation, "after");
         assert!(read_line(&mut reader).unwrap().is_none());
-    }
 
-    #[test]
-    fn recovery_markers_and_health_round_trip_without_payloads() {
-        let gap = AuditGap {
-            id: "gap_1".into(),
-            started_at_ms: 1,
-            recovered_at_ms: 2,
-            unconfirmed_receipts: 4,
+        let mut unknown = serde_json::to_value(record("unknown")).unwrap();
+        unknown["reason"] = serde_json::json!("future_decision");
+        let mut bytes = serde_json::to_vec(&unknown).unwrap();
+        bytes.push(b'\n');
+        serde_json::to_writer(&mut bytes, &record("after")).unwrap();
+        let mut reader = io::Cursor::new(bytes);
+        assert!(matches!(
+            read_line(&mut reader).unwrap(),
+            Some(AuditLine::Unreadable)
+        ));
+        let Some(AuditLine::Receipt(receipt)) = read_line(&mut reader).unwrap() else {
+            panic!("a line of an unknown meaning hid the receipt after it")
         };
-        let mut encoded = Vec::new();
-        serde_json::to_writer(
-            &mut encoded,
-            &GapEntry {
-                audit_gap: gap.clone(),
-            },
-        )
-        .unwrap();
-        let Some(AuditLine::Gap(decoded)) = read_line(&mut io::Cursor::new(encoded)).unwrap()
-        else {
-            panic!("gap lost")
-        };
-        assert_eq!(decoded, gap);
-        let health = AuditHealth {
-            failure: Some(StorageFailure::Write),
-            unconfirmed_receipts: 4,
-            ..Default::default()
-        };
-        assert_eq!(
-            serde_json::from_str::<AuditHealth>(&serde_json::to_string(&health).unwrap()).unwrap(),
-            health
-        );
+        assert_eq!(receipt.invocation, "after");
     }
 }
 
