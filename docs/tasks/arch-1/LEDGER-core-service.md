@@ -29,7 +29,7 @@ In order. "After" names what a slice waits for.
 | S-D4 | fix(cli): a start relaunches itself, so a tree kill of its starter cannot reach the service | - | leo-desktop-02's finding while proving S-D3 (ADR-0199 amendment of 2026-10-21); cross-lane `cli/parse.rs`, `cli/mod.rs`, `cli/desktop.rs`, `cli/start.rs` under test-04's hold | landed (this commit) |
 | S-D5 | fix(intake): a batch is answered as one array, its tool results in it | - | tests-1's service plan; the owner's question of 2026-10-21, sent back to the coordinator (Notes) | landed (this commit) |
 | S-D6 | fix(intake): a client before MCP 2025-06-18 gets the lean JSON in a cut-off or expired answer too | - | tests-1's service plan (Notes) | landed (this commit) |
-| S-D7 | fix(browser): a browser with no Ghostlight extension reads as the missing extension, with the step to add it | - | found on leo-desktop-02 and by test-01, 2026-10-21 (Notes) | todo |
+| S-D7 | fix(browser): a browser with no Ghostlight extension reads as the missing extension, with the step to add it | - | found on leo-desktop-02 and by test-01, 2026-10-21 (Notes); done by test-01, cross-lane into `work/` and `install/browser_profiles.rs` under test-03's and test-04's holds | landed (this commit) |
 | S-D8 | fix(edge): a browser frame over the relay bound ends nothing | tests-1 T4 | test-02's answer to the coordinator's question, 2026-10-21 (Notes) | todo |
 | S-D9 | fix(edge): a client line over the relay bound is answered, in the service's words | S-D8 | the coordinator's relay and edge classification, 2026-10-21 (Notes) | todo |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
@@ -130,6 +130,14 @@ A kill-on-close job would need the relay to break away; none has been seen.
   `language/`). The browser profiles the installer reads say whether a profile holds the extension
   (`install/browser_profiles.rs`); recovery should use that, so a start into a browser with no
   Ghostlight extension says so and how to add it.
+- S-D7 as landed: each installed browser the recovery inventory reads now says whether a profile
+  of it holds the Ghostlight extension turned on, under the store id or the development id
+  (`RecoveryCandidate::extension`). A browser Ghostlight started whose adapter never arrives is
+  `ExtensionAbsent` when none does, and `HandshakeTimeout` as before when one does. The browser is
+  still started either way, so a profile the scan misreads changes only the words, never whether
+  Ghostlight starts the browser. `ExtensionAbsent` always gets the store step, setup finished or
+  not. A development build loaded from a folder has no `Extensions` directory, so the profile scan
+  also reads its settings' `location` (unpacked 4, command line 8).
 - S-D8, found on 2026-10-21 by the relay and edge classification and confirmed by test-02: the
   browser relay ends its port on any Chrome frame over the relay bound (8 MiB), and that one port
   carries every session's browser. The extension bounds what it sends in UTF-16 characters, never

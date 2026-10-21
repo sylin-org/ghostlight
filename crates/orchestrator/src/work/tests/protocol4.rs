@@ -211,6 +211,7 @@ fn opened_replying(
             package_detail: "Chromium native package".into(),
             registration: NativeHostState::Current,
             ordinary_executable: Some(PathBuf::from("chromium")),
+            extension: true,
         }]);
     let opened = execute(
         &executor,

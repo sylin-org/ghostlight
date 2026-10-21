@@ -2637,13 +2637,11 @@ fn routing_refusal(
         BrowserError::RecoveryFailed { reason, details } => Some((
             Refusal::BrowserRecoveryFailed {
                 reason: recovery_reason(*reason),
-                extension: if matches!(
-                    reason,
-                    RecoveryFailure::ExtensionAbsent | RecoveryFailure::HandshakeTimeout
-                ) {
-                    extension()
-                } else {
-                    ExtensionAdvice::Plain
+                // A browser known to lack the extension always learns where it comes from (S-D7).
+                extension: match reason {
+                    RecoveryFailure::ExtensionAbsent => ExtensionAdvice::AddFromStore,
+                    RecoveryFailure::HandshakeTimeout => extension(),
+                    _ => ExtensionAdvice::Plain,
                 },
             },
             json!({"details":details}),
@@ -3330,6 +3328,7 @@ mod tests {
                 package_detail: "Chromium native package".into(),
                 registration: NativeHostState::Current,
                 ordinary_executable: Some(PathBuf::from("chromium")),
+                extension: true,
             }]);
         (executor, workspace, audit)
     }

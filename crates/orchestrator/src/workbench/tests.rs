@@ -796,6 +796,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             package_detail: String::new(),
             registration: NativeHostState::Current,
             ordinary_executable: Some("/installed/chrome".into()),
+            extension: true,
         }]
     };
     let switched = |config: &str| {

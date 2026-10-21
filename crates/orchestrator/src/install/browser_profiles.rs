@@ -13,8 +13,9 @@
 //! profile every browser starts with.
 //!
 //! An extension installed from the Chrome Web Store has the same id in Chrome, Edge, Brave and
-//! Chromium, so one id finds them all. An unpacked development extension has another id and is
-//! not found, by design.
+//! Chromium, so one id finds them all. A development build loaded from a folder has another id and
+//! no directory under `Extensions`; its settings in the profile's preferences say it was loaded
+//! from a folder, so a scan for that id finds it.
 
 use std::fs::File;
 use std::io::Read;
@@ -43,6 +44,11 @@ const DISABLE_REASONS_KEY: &str = "disable_reasons";
 const STATE_KEY: &str = "state";
 /// The [`STATE_KEY`] value of a disabled extension.
 const DISABLED_STATE: i64 = 0;
+/// The settings key that says where an extension was loaded from.
+const LOCATION_KEY: &str = "location";
+/// The [`LOCATION_KEY`] values of an extension loaded from a folder rather than installed: unpacked
+/// (4) and named on the command line (8).
+const FOLDER_LOCATIONS: [i64; 2] = [4, 8];
 /// The most of `Local State` that is read. A larger file is treated as unusable.
 const LOCAL_STATE_LIMIT: u64 = 8 * 1024 * 1024;
 /// The most of a preferences file that is read. A larger file is treated as unusable, and then
@@ -111,14 +117,7 @@ pub fn scan_user_data(user_data: &Path, extension_id: &str) -> ProfileScan {
     let listed = read_listed_profiles(user_data).unwrap_or_else(|| fallback_profiles(user_data));
     let with_extension = listed
         .iter()
-        .filter(|(directory, _)| {
-            let profile = user_data.join(directory);
-            profile
-                .join(EXTENSIONS_DIRECTORY)
-                .join(extension_id)
-                .is_dir()
-                && !marked_disabled(&profile, extension_id)
-        })
+        .filter(|(directory, _)| holds(&user_data.join(directory), extension_id))
         .map(|(directory, name)| ExtensionProfile {
             directory: directory.clone(),
             name: name.clone(),
@@ -154,14 +153,31 @@ fn read_listed_profiles(user_data: &Path) -> Option<Vec<(String, Option<String>)
     (!listed.is_empty()).then_some(listed)
 }
 
-/// Whether a preferences file of `profile` marks the extension `extension_id` disabled.
-fn marked_disabled(profile: &Path, extension_id: &str) -> bool {
-    PREFERENCES_FILES.iter().any(|file| {
-        read_bounded(&profile.join(file), PREFERENCES_LIMIT)
-            .and_then(|bytes| serde_json::from_slice::<Preferences>(&bytes).ok())
-            .and_then(|preferences| preferences.extensions?.settings?.remove(extension_id))
-            .is_some_and(|settings| settings_say_disabled(&settings))
-    })
+/// Whether `profile` holds the extension `extension_id` turned on: installed under its
+/// `Extensions` directory or loaded from a folder, and marked disabled by no preferences file.
+fn holds(profile: &Path, extension_id: &str) -> bool {
+    let settings: Vec<Value> = PREFERENCES_FILES
+        .iter()
+        .filter_map(|file| {
+            read_bounded(&profile.join(file), PREFERENCES_LIMIT)
+                .and_then(|bytes| serde_json::from_slice::<Preferences>(&bytes).ok())
+                .and_then(|preferences| preferences.extensions?.settings?.remove(extension_id))
+        })
+        .collect();
+    let present = profile
+        .join(EXTENSIONS_DIRECTORY)
+        .join(extension_id)
+        .is_dir()
+        || settings.iter().any(loaded_from_a_folder);
+    present && !settings.iter().any(settings_say_disabled)
+}
+
+/// Whether one extension's settings say it was loaded from a folder, as a development build is.
+fn loaded_from_a_folder(settings: &Value) -> bool {
+    settings
+        .get(LOCATION_KEY)
+        .and_then(Value::as_i64)
+        .is_some_and(|location| FOLDER_LOCATIONS.contains(&location))
 }
 
 /// Whether one extension's settings say it is disabled: a disable reason is recorded, or the
@@ -466,6 +482,43 @@ mod tests {
             vec![
                 found("Profile 3", Some("On")),
                 found("Profile 4", Some("Clear"))
+            ]
+        );
+
+        // S-D7: a development build loaded from a folder has no `Extensions` directory, only
+        // settings that say so; turned off, or with stale settings of an installed one, it is
+        // not held.
+        let folder = Scratch::new();
+        local_state(
+            folder.path(),
+            &listing(
+                r#""Default":{"name":"Dev"},"Profile 1":{"name":"Line"},
+                "Profile 2":{"name":"Off"},"Profile 3":{"name":"Stale"}"#,
+            ),
+        );
+        for (profile, location, extra) in [
+            ("Default", FOLDER_LOCATIONS[0], ""),
+            ("Profile 1", FOLDER_LOCATIONS[1], ""),
+            (
+                "Profile 2",
+                FOLDER_LOCATIONS[0],
+                r#","disable_reasons":[1]"#,
+            ),
+            ("Profile 3", 1, ""),
+        ] {
+            write(
+                &folder.path().join(profile).join("Preferences"),
+                &extension_settings(
+                    ID,
+                    &format!(r#"{{"location":{location},"path":"/src/extension"{extra}}}"#),
+                ),
+            );
+        }
+        assert_eq!(
+            scan_user_data(folder.path(), ID).with_extension,
+            vec![
+                found("Default", Some("Dev")),
+                found("Profile 1", Some("Line"))
             ]
         );
 

@@ -41,8 +41,11 @@ use super::{choose_browser, BrowserPort};
 use crate::governance::manifest::BrowserStartup;
 use crate::governance::GovernanceFacade;
 use crate::install::browser_package::BrowserPackage;
+use crate::install::browser_profiles::scan_user_data;
 use crate::install::container::Residence;
-use crate::install::native_host::{NativeHostRegistry, NativeHostState};
+use crate::install::native_host::{
+    NativeHostRegistry, NativeHostState, DEVELOPMENT_EXTENSION_ID, STORE_EXTENSION_ID,
+};
 use crate::language::MAX_TIMEOUT_MS;
 use crate::sync::lock;
 
@@ -66,6 +69,10 @@ pub struct RecoveryCandidate {
     pub registration: NativeHostState,
     /// Exact ordinary-profile executable verified during the inventory snapshot.
     pub ordinary_executable: Option<PathBuf>,
+    /// Whether a profile of this browser holds the Ghostlight extension turned on, the store's or
+    /// the development build's. A started browser whose adapter never arrives is then a browser
+    /// without the extension when no profile holds it (S-D7).
+    pub extension: bool,
 }
 
 /// Every terminal recovery failure, kept closed so each one can have an exact remedy.
@@ -185,6 +192,7 @@ impl BrowserInventory for SystemBrowserInventory {
                     .into_iter()
                     .map(|browser| {
                         let ordinary_executable = registry.browser_executable(&browser.id);
+                        let extension = holds_ghostlight(&registry, &browser.id);
                         RecoveryCandidate {
                             id: browser.id,
                             name: browser.name,
@@ -192,12 +200,28 @@ impl BrowserInventory for SystemBrowserInventory {
                             package_detail: browser.package_detail,
                             registration: browser.state,
                             ordinary_executable,
+                            extension,
                         }
                     })
                     .collect()
             })
             .map_err(|_| ())
     }
+}
+
+/// Whether a profile of the installed browser `id` holds the Ghostlight extension turned on, under
+/// the store's id or the development build's. A browser with no user data directory has never run,
+/// so it holds none.
+fn holds_ghostlight(registry: &NativeHostRegistry, id: &str) -> bool {
+    registry.user_data_directory(id).is_some_and(|user_data| {
+        [STORE_EXTENSION_ID, DEVELOPMENT_EXTENSION_ID]
+            .into_iter()
+            .any(|extension| {
+                !scan_user_data(&user_data, extension)
+                    .with_extension
+                    .is_empty()
+            })
+    })
 }
 
 /// A mechanism whose repair and launch both succeed, and whose launch runs one test action in
@@ -646,7 +670,7 @@ impl BrowserRecovery {
                 return match (&state.phase, error) {
                     (FlightPhase::Launched { browser }, RecoveryWaitError::Deadline) => {
                         Ok(RecoveryDecision::Failed {
-                            reason: RecoveryFailure::HandshakeTimeout,
+                            reason: unconnected(browser),
                             details: vec![browser.name.clone()],
                         })
                     }
@@ -1004,6 +1028,16 @@ fn start_plan(mode: BrowserStartup, browser: RecoveryCandidate) -> FlightPhase {
     }
 }
 
+/// Why a browser Ghostlight started never connected: no profile of it holds the extension, or its
+/// adapter did not arrive in time (S-D7).
+const fn unconnected(browser: &RecoveryCandidate) -> RecoveryFailure {
+    if browser.extension {
+        RecoveryFailure::HandshakeTimeout
+    } else {
+        RecoveryFailure::ExtensionAbsent
+    }
+}
+
 /// The answer when the installed browsers cannot be read: the native host is not usable.
 fn unreadable_inventory() -> FlightPhase {
     FlightPhase::Complete(RecoveryDecision::Failed {
@@ -1116,6 +1150,7 @@ mod tests {
             ordinary_executable: package
                 .native_messaging_usable()
                 .then(|| PathBuf::from(format!("{name}-browser"))),
+            extension: true,
         }
     }
 

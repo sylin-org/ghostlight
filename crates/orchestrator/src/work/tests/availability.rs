@@ -83,6 +83,7 @@ fn relay_fixture(
             package_detail: "Chromium native package".into(),
             registration: NativeHostState::Current,
             ordinary_executable: Some(PathBuf::from("chromium")),
+            extension: true,
         }]);
     (executor, workspaces, workspace)
 }
@@ -341,6 +342,7 @@ fn chrome_installed() -> Vec<RecoveryCandidate> {
         package_detail: "Google Chrome native package".into(),
         registration: NativeHostState::Current,
         ordinary_executable: Some(PathBuf::from("chrome")),
+        extension: true,
     }]
 }
 
@@ -908,8 +910,8 @@ fn the_no_browser_answer_is_unchanged_with_an_extension_or_a_finished_setup() {
 }
 
 /// Governance that starts a browser on demand, the Windows default, and an executor whose launch
-/// succeeds but never brings an adapter: Edge on a machine without the extension.
-fn launch_without_extension(
+/// of Chrome succeeds but never brings an adapter, with the extension in a profile of it or not.
+fn launch_without_adapter(
     setup_complete: bool,
     extension_in_a_profile: bool,
 ) -> crate::work::result::InvocationResult {
@@ -941,40 +943,56 @@ fn launch_without_extension(
         .workbench
         .attach_setup(crate::workbench::setup::SetupProgress::load(&record));
     executor.extension_probe = Arc::new(move || extension_in_a_profile);
+    executor.recovery.set_test_candidates(
+        chrome_installed()
+            .into_iter()
+            .map(|chrome| RecoveryCandidate {
+                extension: extension_in_a_profile,
+                ..chrome
+            })
+            .collect(),
+    );
     executor.recovery.set_test_launch_without_adapter();
     port.backdate(RETURN_GRACE);
     let refused = navigate_for(&executor, &workspace, 300);
     drop(policy);
-    assert_eq!(
-        refused.facts["reason"],
-        json!("browser_handshake_timeout"),
-        "{:?}",
-        refused.facts
-    );
     refused
 }
 
-/// A browser Ghostlight started whose adapter never arrived, while setup is incomplete and no
-/// profile has the extension, sends the person to the store: the extension is what is missing.
+/// S-D7: a browser Ghostlight started whose profiles hold no Ghostlight extension is the missing
+/// extension, not an adapter that was late, and the step names the store whether or not setup
+/// finished.
 #[test]
-fn a_launched_browser_without_the_extension_names_the_store_while_setup_is_incomplete() {
-    let refused = launch_without_extension(false, false);
-    assert!(refused
-        .summary
-        .starts_with("The Ghostlight adapter did not connect in time"));
-    assert_eq!(refused.next_steps.len(), 1, "{:?}", refused.next_steps);
-    assert!(
-        refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL),
-        "{}",
-        refused.next_steps[0]
-    );
+fn a_launched_browser_without_the_extension_names_the_store() {
+    for complete in [false, true] {
+        let refused = launch_without_adapter(complete, false);
+        assert_eq!(
+            refused.facts["reason"],
+            json!("browser_extension_absent"),
+            "{:?}",
+            refused.facts
+        );
+        assert_eq!(refused.next_steps.len(), 1, "{:?}", refused.next_steps);
+        assert!(
+            refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL),
+            "{}",
+            refused.next_steps[0]
+        );
+    }
 }
 
-/// With the extension in some profile, or setup finished, the timeout keeps its own step.
+/// With the extension in a profile of the started browser, a missing adapter is the handshake
+/// timeout, with its own step.
 #[test]
 fn a_launched_browser_that_timed_out_keeps_its_own_step_with_an_extension_or_a_finished_setup() {
-    for (complete, present) in [(false, true), (true, false), (true, true)] {
-        let refused = launch_without_extension(complete, present);
+    for complete in [false, true] {
+        let refused = launch_without_adapter(complete, true);
+        assert_eq!(
+            refused.facts["reason"],
+            json!("browser_handshake_timeout"),
+            "{:?}",
+            refused.facts
+        );
         assert_eq!(
             refused.next_steps,
             vec![
