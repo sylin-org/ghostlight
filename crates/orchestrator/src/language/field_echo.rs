@@ -23,7 +23,7 @@ use super::outcome::{ActionSubject, TargetRole};
 use super::phrase::{counted, NO_VALUE};
 
 /// The longest page value a sentence quotes.
-const NOW_MAX_CHARS: usize = 40;
+pub(super) const NOW_MAX_CHARS: usize = 40;
 /// The longest page name a sentence quotes.
 const NAME_MAX_CHARS: usize = 60;
 /// The most characters the readings of one fill may take in its sentence.
@@ -284,120 +284,8 @@ mod tests {
         HeldField::new(HANDLE, role, name, now, tolerated, preserve)
     }
 
-    #[test]
-    fn a_choice_reads_as_an_assignment_and_a_reformatted_text_as_a_sentence() {
-        let held = [
-            field(TargetRole::Combobox, "Role", "Administrator", false, true),
-            field(TargetRole::Textbox, "Phone", "(555) 123-4567", true, true),
-        ];
-        let readings = readings(&held);
-        assert_eq!(readings.after_clause(), Some("Role = Administrator"));
-        assert_eq!(readings.trailing(), " Phone now reads \"(555) 123-4567\".");
-    }
-
-    #[test]
-    fn a_radio_picked_through_a_sibling_speaks_of_the_group_not_the_addressed_radio() {
-        let held = [field(TargetRole::Radio, "Free", "unchecked", false, true)
-            .matched(ChoiceMatch::Normalized, "pro")
-            .picked("Pro", Some("Plan"))];
-        assert_eq!(
-            readings(&held).after_clause(),
-            Some("Plan = Pro (matched \"pro\")")
-        );
-        assert_eq!(
-            facts(&held),
-            Some(json!([{
-                "target": HANDLE,
-                "now": "unchecked",
-                "match": "normalized",
-                "picked": "Pro",
-                "group": "Plan"
-            }]))
-        );
-        let ungrouped =
-            [field(TargetRole::Radio, "Free", "unchecked", false, true).picked("Pro", None)];
-        assert_eq!(readings(&ungrouped).after_clause(), Some("Pro is checked"));
-        assert_eq!(
-            facts(&ungrouped),
-            Some(json!([{"target": HANDLE, "now": "unchecked", "picked": "Pro"}]))
-        );
-        let unnamed =
-            [field(TargetRole::Radio, "Free", "unchecked", false, false)
-                .picked("Pro", Some("Plan"))];
-        assert_eq!(readings(&unnamed).after_clause(), None);
-        assert_eq!(
-            facts(&unnamed),
-            Some(json!([{
-                "target": HANDLE,
-                "now": "unchecked",
-                "picked": "Pro",
-                "group": "Plan"
-            }]))
-        );
-    }
-
-    #[test]
-    fn without_names_nothing_is_said_but_the_facts_still_hold_the_reading() {
-        let held = [field(
-            TargetRole::Combobox,
-            "Role",
-            "Administrator",
-            false,
-            false,
-        )];
-        let readings = readings(&held);
-        assert_eq!(readings.after_clause(), None);
-        assert_eq!(readings.trailing(), "");
-        assert_eq!(
-            facts(&held),
-            Some(json!([{"target": HANDLE, "now": "Administrator"}]))
-        );
-    }
-
-    #[test]
-    fn a_value_is_bounded_on_one_line_and_never_poses_as_a_handle() {
-        let long = "x".repeat(80);
-        let held = [
-            field(
-                TargetRole::Combobox,
-                "Note",
-                &format!("a\n\"b\" {long}"),
-                false,
-                true,
-            ),
-            field(TargetRole::Combobox, "Ref", "target_abcdefgh", false, true),
-            field(TargetRole::Combobox, "Empty", "", false, true),
-        ];
-        let said = readings(&held).assignments;
-        assert!(said.contains("Note = a 'b' xxx"));
-        assert!(said.contains("..."));
-        assert!(said.contains("Ref = [handle]"));
-        assert!(said.contains("Empty = no value"));
-        assert!(!said.contains('\n'));
-    }
-
-    #[test]
-    fn readings_the_room_does_not_hold_are_counted() {
-        let held: Vec<HeldField> = (0..12)
-            .map(|index| {
-                field(
-                    TargetRole::Combobox,
-                    &format!("Field number {index}"),
-                    &"v".repeat(30),
-                    false,
-                    true,
-                )
-            })
-            .collect();
-        let said = readings(&held).assignments;
-        assert!(said.chars().count() < 340);
-        assert!(said.ends_with("more in the facts"), "{said}");
-        assert_eq!(
-            facts(&held).and_then(|facts| facts.as_array().map(Vec::len)),
-            Some(12)
-        );
-    }
-
+    /// The completed fill of LANGUAGE.md's echo example: two choices and a phone number the
+    /// page's mask reformatted.
     fn filled(preserve: bool, submitted: bool) -> Outcome {
         Outcome::FormFilled {
             fields: 3,
@@ -430,8 +318,14 @@ mod tests {
         }
     }
 
+    /// LANGUAGE.md's fill echo (ADR-0198 Decision 11) and ACCEPTANCE Governance 17: with names
+    /// preserved a completed fill reads `<name> = <value>` for a choice and a sentence for text
+    /// the page reformatted, the group for a radio picked through a sibling (fc52b0ef: never the
+    /// addressed radio, which reads `unchecked`) and the given value after a normalized match;
+    /// with names off it says only how many fields it filled; the facts carry every reading
+    /// either way.
     #[test]
-    fn a_completed_fill_says_what_the_page_holds_only_when_names_are_preserved() {
+    fn a_completed_fill_names_what_the_page_holds_only_when_names_are_preserved() {
         assert_eq!(
             filled(true, false).summary(),
             "Filled 3 fields on example.com: Role = Administrator, Shipping method = Express. Phone now reads \"(555) 123-4567\"."
@@ -444,18 +338,38 @@ mod tests {
             filled(false, false).summary(),
             "Filled 3 fields on example.com."
         );
-    }
 
-    #[test]
-    fn history_keeps_the_fill_without_what_the_page_held() {
-        let audit = filled(true, false).audit();
-        assert_eq!(audit.summary(), "Filled 3 fields on example.com.");
-        assert_eq!(filled(true, false).observed().count, Some(3));
-    }
-
-    #[test]
-    fn a_fill_that_reported_nothing_has_no_facts() {
-        assert_eq!(facts(&[]), None);
-        assert_eq!(readings(&[]).after_clause(), None);
+        let picked = |preserve: bool, group: Option<&str>| {
+            field(TargetRole::Radio, "Free", "unchecked", false, preserve).picked("Pro", group)
+        };
+        let normalized = picked(true, Some("Plan")).matched(ChoiceMatch::Normalized, "pro");
+        for (held, said, fact) in [
+            (
+                normalized,
+                Some("Plan = Pro (matched \"pro\")"),
+                json!({"target": HANDLE, "now": "unchecked", "match": "normalized", "picked": "Pro", "group": "Plan"}),
+            ),
+            (
+                picked(true, None),
+                Some("Pro is checked"),
+                json!({"target": HANDLE, "now": "unchecked", "picked": "Pro"}),
+            ),
+            (
+                picked(false, Some("Plan")),
+                None,
+                json!({"target": HANDLE, "now": "unchecked", "picked": "Pro", "group": "Plan"}),
+            ),
+            (
+                field(TargetRole::Combobox, "Role", "Administrator", false, false),
+                None,
+                json!({"target": HANDLE, "now": "Administrator"}),
+            ),
+        ] {
+            let held = [held];
+            let readings = readings(&held);
+            assert_eq!(readings.after_clause(), said, "{fact}");
+            assert_eq!(readings.trailing(), "", "{fact}");
+            assert_eq!(facts(&held), Some(json!([fact])));
+        }
     }
 }

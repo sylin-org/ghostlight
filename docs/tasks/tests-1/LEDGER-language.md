@@ -12,7 +12,7 @@ In progress since 2026-10-21. Every test in `language/` and `workbench/` was cla
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `language/` | 349 | 55 | 164 |
+| `language/` | 349 | 55 | 128 |
 | `workbench/` | 252 | 35 | 252 |
 
 ## Slices
@@ -33,7 +33,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL9 | test(language): channel_switch.rs keeps the policy sentence | 4 | 1 | 1 promise | landed (00a6928c) |
 | TL10 | test(language): agent_icon.rs keeps the doctor line | 2 | 1 | 1 promise | landed (fc88b901) |
 | TL11 | test(language): intake.rs, migration.rs and adapter.rs drop tests of their literals | 7 | 0 | - | landed (9820d0c8) |
-| TL12 | test(language): the decoder and catalog tests become the model surface contract | 53 | 14 | 5 promise, 6 contract, 3 defect | landed (this commit) |
+| TL12 | test(language): the decoder and catalog tests become the model surface contract | 53 | 14 | 5 promise, 6 contract, 3 defect | landed (021297ff) |
+| TL13 | test(language): field_problem.rs and field_echo.rs keep the fill sentences LANGUAGE.md tables | 45 | 9 | 6 promise, 1 contract, 2 defect | landed (this commit) |
 
 ## Notes
 

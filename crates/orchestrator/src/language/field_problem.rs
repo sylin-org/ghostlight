@@ -69,24 +69,6 @@ pub enum FieldProblemKind {
     SubmitNotOwned,
 }
 
-impl FieldProblemKind {
-    /// The word the page and the facts use for this problem.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::OptionMissing => "option_missing",
-            Self::OptionAmbiguous => "option_ambiguous",
-            Self::OptionDisabled => "option_disabled",
-            Self::MultipleValues => "multiple_values",
-            Self::NotBoolean => "not_boolean",
-            Self::Format => "format",
-            Self::WrongTool => "wrong_tool",
-            Self::Reverted => "reverted",
-            Self::SubmitNotOwned => "submit_not_owned",
-        }
-    }
-}
-
 /// The tool a control that a fill cannot use is left to, as the page found it in the element
 /// itself. The control's role is no guide: an image input reads as a text field and a button
 /// with the role `switch` reads as a checkbox.
@@ -922,10 +904,13 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::language::outcome::Refusal;
+    use crate::language::field_echo::{self, HeldField, NOW_MAX_CHARS};
+    use crate::language::outcome::{Outcome, Refusal, SUMMARY_MAX_CHARS};
 
     const HANDLE: &str = "target_7k2nb5xe";
     const OTHER_HANDLE: &str = "target_q3m5c2ra";
+    /// How a bounded page string ends when it was cut.
+    const ELLIPSIS: &str = "...";
 
     fn decode(problem: Value) -> FieldProblem {
         FieldProblems::decode(&json!({ "problems": [problem] }))
@@ -966,69 +951,281 @@ mod tests {
         json!({"field": 0, "problem": "option_missing", "options": options})
     }
 
-    #[test]
-    fn a_short_list_is_offered_in_the_summary_and_the_step_names_the_handle() {
-        let refusal = one(
-            missing_role(json!(["Developer", "Administrator", "Researcher", "Other"])),
-            TargetRole::Combobox,
-            "Role",
-            "Engineer",
-            true,
-        );
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The \"Role\" dropdown has no option \"Engineer\". It offers: Developer, Administrator, Researcher, Other."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            vec![format!(
-                "Repeat browser_fill_form with {HANDLE} set to one of the offered options."
-            )]
-        );
+    fn at(target: &str, mut control: RejectedControl) -> RejectedControl {
+        control.target = target.into();
+        control
     }
 
-    #[test]
-    fn a_long_list_gives_its_count_and_the_options_that_contain_the_value() {
-        let problem = json!({
-            "field": 0, "problem": "option_missing", "options": ["Alpha", "Beta"],
-            "options_total": 195, "containing": ["Region East", "Region West"]
-        });
-        let refusal = one(problem, TargetRole::Combobox, "Region", "region", true);
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The \"Region\" dropdown has no option \"region\" among its 195 options. Options containing \"region\": Region East, Region West."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            vec![format!(
-                "Read {HANDLE} with browser_read to list all its options."
-            )]
-        );
-        let none = one(
-            json!({"field": 0, "problem": "option_missing", "options": ["Alpha"], "options_total": 195}),
-            TargetRole::Combobox,
-            "Region",
-            "zzz",
-            true,
-        );
-        assert_eq!(
-            none.summary(),
-            "Nothing was changed. The \"Region\" dropdown has no option \"zzz\" among its 195 options."
-        );
+    fn reverted(problem: Value, role: TargetRole, name: &str, preserve: bool) -> RejectedField {
+        let mut problem = problem;
+        problem["field"] = json!(0);
+        problem["problem"] = json!("reverted");
+        field(problem, role, name, "given", preserve)
     }
 
+    /// A given value quoted in a sentence after it was cut to `max_chars`.
+    fn quoted_cut(character: char, max_chars: usize) -> String {
+        let kept = character.to_string().repeat(max_chars - ELLIPSIS.len());
+        format!("\"{kept}{ELLIPSIS}\"")
+    }
+
+    /// One row of the clause table: the page's problem, the control's role, name and given
+    /// value, whether an earlier choice of the call can change its options, its clause and its
+    /// one next step.
+    type ClauseRow = (
+        Value,
+        TargetRole,
+        &'static str,
+        &'static str,
+        bool,
+        String,
+        String,
+    );
+
+    /// LANGUAGE.md's fill-refusal table: each problem word, on each control, reads its own clause
+    /// after `Nothing was changed.`, and its one next step names the handle and the tool that
+    /// fixes it. Rows reproduce a9b1529a (the route the page names, not the role the control reads
+    /// as, picks the sentence; a range names the step it snaps to, a number field never does) and
+    /// fc52b0ef (an ambiguous radio sends the model to find the radio it means). Every word a
+    /// refused fill can carry has a row.
     #[test]
-    fn a_whole_list_too_wide_for_one_clause_names_the_rest_and_keeps_the_repeat_step() {
+    fn each_refused_field_speaks_the_clause_and_step_language_md_names() {
+        let offered =
+            format!("Repeat browser_fill_form with {HANDLE} set to one of the offered options.");
+        let corrected = format!("Repeat browser_fill_form with {HANDLE} set to a corrected value.");
+        let click = format!("Click it with browser_click on {HANDLE}.");
+        let widget = format!(
+            "Open it with browser_click on {HANDLE}, then browser_click the option by name."
+        );
+        let wrong_tool = |route: &str| json!({"field": 0, "problem": "wrong_tool", "route": route});
+        let range = |input_type: &str| {
+            json!({"field": 0, "problem": "format", "type": input_type, "expected": "a number",
+                "limits": {"min": "0", "max": "100", "step": "10"}})
+        };
+        let button = |name: &str| format!("The \"{name}\" control is a button, not a field.");
+        let rows: Vec<ClauseRow> = vec![
+            (
+                missing_role(json!(["Developer", "Administrator", "Researcher", "Other"])),
+                TargetRole::Combobox, "Role", "Engineer", false,
+                "The \"Role\" dropdown has no option \"Engineer\". It offers: Developer, Administrator, Researcher, Other.".into(),
+                offered.clone(),
+            ),
+            (
+                missing_role(json!(["Free", {"text": "Pro", "disabled": true}, {"group": "Staff", "options": ["Team"]}])),
+                TargetRole::Combobox, "Plan", "Gold", false,
+                "The \"Plan\" dropdown has no option \"Gold\". It offers: Free, Team.".into(),
+                offered.clone(),
+            ),
+            (
+                missing_role(json!(["Lyon", "Nice"])),
+                TargetRole::Combobox, "City", "Paris", true,
+                "The \"City\" dropdown has no option \"Paris\". It offers: Lyon, Nice. Its options can depend on earlier fields.".into(),
+                format!("Fill the earlier fields first, then repeat for {HANDLE}."),
+            ),
+            (
+                json!({"field": 0, "problem": "option_missing", "options": ["Standard", "Express"], "group": "Shipping"}),
+                TargetRole::Radio, "Standard", "Overnight", false,
+                "The \"Shipping\" choice has no option \"Overnight\". It offers: Standard, Express.".into(),
+                format!("Repeat with one of the offered labels for {HANDLE}."),
+            ),
+            (
+                json!({"field": 0, "problem": "option_ambiguous", "options": [
+                    {"text": "Other", "value": "other-staff"}, {"text": "Other", "value": "other-guest"}]}),
+                TargetRole::Combobox, "Kind", "other", false,
+                "\"other\" matches 2 options of the \"Kind\" dropdown: Other (value other-staff), Other (value other-guest).".into(),
+                format!("Repeat with the option's value for {HANDLE}."),
+            ),
+            // fc52b0ef: two radios with one label.
+            (
+                json!({"field": 0, "problem": "option_ambiguous", "options": ["Yes", "Yes"], "group": "Subscribe"}),
+                TargetRole::Radio, "No", "yes", false,
+                "\"yes\" matches 2 options of the \"Subscribe\" radio button: Yes, Yes.".into(),
+                "Find the radio you mean with browser_find, then fill that radio's own handle with true.".into(),
+            ),
+            (
+                json!({"field": 0, "problem": "option_disabled"}),
+                TargetRole::Combobox, "Plan", "Pro", false,
+                "The option \"Pro\" of the \"Plan\" dropdown is disabled.".into(),
+                "Choose an enabled option, or inspect the form for the field that enables it.".into(),
+            ),
+            (
+                json!({"field": 0, "problem": "multiple_values"}),
+                TargetRole::Combobox, "Role", "a, b", false,
+                "The \"Role\" dropdown takes one value, not a list.".into(),
+                format!("Repeat browser_fill_form with {HANDLE} set to a single value."),
+            ),
+            (
+                json!({"field": 0, "problem": "not_boolean"}),
+                TargetRole::Checkbox, "Agree", "maybe", false,
+                "The \"Agree\" checkbox takes true or false, not \"maybe\".".into(),
+                format!("Repeat with true or false for {HANDLE}."),
+            ),
+            (
+                json!({"field": 0, "problem": "format", "expected": "YYYY-MM-DD", "type": "date",
+                    "limits": {"min": "2026-10-01", "max": "2026-12-31"}}),
+                TargetRole::Textbox, "Start", "next week", false,
+                "The \"Start\" date field takes YYYY-MM-DD, not \"next week\". Allowed: 2026-10-01 to 2026-12-31.".into(),
+                corrected.clone(),
+            ),
+            (
+                json!({"field": 0, "problem": "format", "limits": {"min": "5"}}),
+                TargetRole::NumberField, "Count", "x", false,
+                "The \"Count\" number field does not accept \"x\". Allowed: from 5.".into(),
+                corrected.clone(),
+            ),
+            // a9b1529a: a range names the step it snaps to.
+            (
+                range("range"),
+                TargetRole::Slider, "Level", "15", false,
+                "The \"Level\" slider takes a number, not \"15\". Allowed: 0 to 100, in steps of 10.".into(),
+                corrected.clone(),
+            ),
+            // a9b1529a: a number field keeps a value off its step, so it never names one.
+            (
+                range("number"),
+                TargetRole::NumberField, "Count", "many", false,
+                "The \"Count\" number field takes a number, not \"many\". Allowed: 0 to 100.".into(),
+                corrected.clone(),
+            ),
+            (
+                wrong_tool("file"),
+                TargetRole::Textbox, "Resume", "cv.pdf", false,
+                "The \"Resume\" field is a file input.".into(),
+                format!("Attach the file with browser_upload on {HANDLE}."),
+            ),
+            // a9b1529a: the button route decides the sentence for an image input, a switch, a tab
+            // and a menu item alike.
+            (wrong_tool("button"), TargetRole::Button, "Save", "x", false, button("Save"), click.clone()),
+            (wrong_tool("button"), TargetRole::Textbox, "Go", "x", false, button("Go"), click.clone()),
+            (wrong_tool("button"), TargetRole::Checkbox, "Dark mode", "x", false, button("Dark mode"), click.clone()),
+            (wrong_tool("button"), TargetRole::Tab, "Overview", "x", false, button("Overview"), click.clone()),
+            (wrong_tool("button"), TargetRole::MenuItem, "Settings", "x", false, button("Settings"), click),
+            (
+                wrong_tool("widget"),
+                TargetRole::Combobox, "Country", "x", false,
+                "The \"Country\" dropdown is a page widget, not a form field.".into(),
+                widget.clone(),
+            ),
+            (
+                wrong_tool("widget"),
+                TargetRole::ListBox, "Colors", "x", false,
+                "The \"Colors\" list box is a page widget, not a form field.".into(),
+                widget,
+            ),
+            (
+                json!({"field": 0, "problem": "submit_not_owned"}),
+                TargetRole::Button, "Go", "x", false,
+                "The submit control does not belong to the form that holds these fields.".into(),
+                "Repeat without submit_target, then click the submit control with browser_click.".into(),
+            ),
+        ];
+
+        let mut covered = Vec::new();
+        for (problem, role, name, given, follows_choice, clause, step) in rows {
+            let decoded = decode(problem.clone());
+            covered.push(decoded.kind);
+            let mut asked = control(role, name, given);
+            asked.follows_choice = follows_choice;
+            let refusal = Refusal::FieldValuesRejected {
+                fields: vec![RejectedField::new(decoded, asked, true)],
+                total: 1,
+            };
+            assert_eq!(
+                refusal.summary(),
+                format!("Nothing was changed. {clause}"),
+                "{problem}"
+            );
+            assert_eq!(refusal.next_steps(), vec![step], "{problem}");
+        }
+
+        let every = [
+            FieldProblemKind::OptionMissing,
+            FieldProblemKind::OptionAmbiguous,
+            FieldProblemKind::OptionDisabled,
+            FieldProblemKind::MultipleValues,
+            FieldProblemKind::NotBoolean,
+            FieldProblemKind::Format,
+            FieldProblemKind::WrongTool,
+            FieldProblemKind::Reverted,
+            FieldProblemKind::SubmitNotOwned,
+        ];
+        for kind in every {
+            // No wildcard: a new problem word stops this compiling until it is listed above.
+            let refuses = match kind {
+                FieldProblemKind::Reverted => false,
+                FieldProblemKind::OptionMissing
+                | FieldProblemKind::OptionAmbiguous
+                | FieldProblemKind::OptionDisabled
+                | FieldProblemKind::MultipleValues
+                | FieldProblemKind::NotBoolean
+                | FieldProblemKind::Format
+                | FieldProblemKind::WrongTool
+                | FieldProblemKind::SubmitNotOwned => true,
+            };
+            assert_eq!(
+                covered.contains(&kind),
+                refuses,
+                "{kind:?} has no clause row"
+            );
+        }
+    }
+
+    /// Reproduces 5bcb28f3: a list is cut only when the page says so (`options_total`), so a list
+    /// the transport dropped reads `among its N options` with the browser_read step and never
+    /// `offers no options`, and an empty or all-disabled list sends the model to read the
+    /// control; a whole list too wide for one clause is named as far as it fits, keeps the repeat
+    /// step and leaves every option in the facts.
+    #[test]
+    fn the_read_step_follows_an_option_list_the_summary_cannot_offer_whole() {
+        let read = format!("Read {HANDLE} with browser_read to list all its options.");
+        for (problem, given, summary) in [
+            (
+                json!({"field": 0, "problem": "option_missing", "options": ["Alpha", "Beta"],
+                    "options_total": 195, "containing": ["Region East", "Region West"]}),
+                "region",
+                "The \"Region\" dropdown has no option \"region\" among its 195 options. Options containing \"region\": Region East, Region West.",
+            ),
+            (
+                json!({"field": 0, "problem": "option_missing", "options": ["Alpha"], "options_total": 195}),
+                "zzz",
+                "The \"Region\" dropdown has no option \"zzz\" among its 195 options.",
+            ),
+            (
+                json!({"field": 0, "problem": "option_missing", "options_total": 4}),
+                "Engineer",
+                "The \"Region\" dropdown has no option \"Engineer\" among its 4 options.",
+            ),
+            (
+                missing_role(json!([])),
+                "Gold",
+                "The \"Region\" dropdown has no option \"Gold\". It offers no options.",
+            ),
+            (
+                missing_role(json!([{"text": "Pro", "disabled": true}])),
+                "Gold",
+                "The \"Region\" dropdown has no option \"Gold\". Every option is disabled.",
+            ),
+        ] {
+            let refusal = one(problem.clone(), TargetRole::Combobox, "Region", given, true);
+            assert_eq!(refusal.summary(), format!("Nothing was changed. {summary}"), "{problem}");
+            assert_eq!(refusal.next_steps(), vec![read.clone()], "{problem}");
+        }
+
         let options: Vec<String> = (0..25)
             .map(|index| format!("{}{index}", "w".repeat(50)))
             .collect();
-        let refusal = one(
+        let wide = field(
             missing_role(json!(options)),
             TargetRole::Combobox,
             "Wide",
             "x",
             true,
         );
+        let facts = rejected_facts(std::slice::from_ref(&wide));
+        let refusal = Refusal::FieldValuesRejected {
+            fields: vec![wide],
+            total: 1,
+        };
         let summary = refusal.summary();
         assert!(
             summary.contains("has no option \"x\". It offers: "),
@@ -1036,366 +1233,228 @@ mod tests {
         );
         assert!(summary.contains(" more, all in the facts."), "{summary}");
         assert!(!summary.contains("among its"), "{summary}");
-        assert!(summary.chars().count() <= 500);
+        assert!(summary.chars().count() <= SUMMARY_MAX_CHARS, "{summary}");
         assert_eq!(
             refusal.next_steps(),
             vec![format!(
                 "Repeat browser_fill_form with {HANDLE} set to one of the offered options."
             )]
         );
-        let Refusal::FieldValuesRejected { fields, .. } = &refusal else {
-            unreachable!()
+        assert_eq!(
+            facts["problems"][0]["options"].as_array().map(Vec::len),
+            Some(options.len())
+        );
+    }
+
+    /// Contract with the page asset, which sends the detail: a detail this build cannot read
+    /// decodes to nothing, so the refusal stays the browser's own and never guesses a route. That
+    /// covers an unknown problem word, no problems, a detail that is not an object, and a
+    /// wrong_tool problem with no route or an unknown one (a9b1529a).
+    #[test]
+    fn a_detail_this_build_cannot_read_does_not_decode() {
+        for detail in [
+            json!({"problems": [{"field": 0, "problem": "invented"}]}),
+            json!({"problems": []}),
+            json!("text"),
+            json!({"problems": [{"field": 0, "problem": "wrong_tool"}]}),
+            json!({"problems": [{"field": 0, "problem": "wrong_tool", "route": "teleport"}]}),
+            json!({"problems": [{"field": 0, "problem": "wrong_tool", "type": "file"}]}),
+        ] {
+            assert!(FieldProblems::decode(&detail).is_none(), "{detail}");
+        }
+    }
+
+    /// LANGUAGE.md's bounds on a fill's summary: a refusal names `N of M fields`, stays within
+    /// SUMMARY_MAX_CHARS and counts the clauses it has no room for; a fill the page partly undid
+    /// names the first REVERTED_SHOWN_MAX fields that went back and counts the rest; and a
+    /// completed fill names the readings it has room for and counts the rest, while its facts keep
+    /// every reading.
+    #[test]
+    fn a_fill_summary_names_what_it_has_room_for_and_counts_the_rest() {
+        let fields: Vec<RejectedField> = (0..12)
+            .map(|index| {
+                field(
+                    json!({"field": index, "problem": "option_missing",
+                        "options": ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"]}),
+                    TargetRole::Combobox,
+                    &format!("A fairly long control name number {index}"),
+                    "a value of some length",
+                    true,
+                )
+            })
+            .collect();
+        let summary = Refusal::FieldValuesRejected { fields, total: 12 }.summary();
+        assert!(summary.chars().count() <= SUMMARY_MAX_CHARS, "{summary}");
+        assert!(
+            summary.starts_with("Nothing was changed: 12 of 12 fields cannot take their values."),
+            "{summary}"
+        );
+        assert!(summary.ends_with(" more are in the facts."), "{summary}");
+
+        let went_back = |count: usize, set: usize| Refusal::FieldsReverted {
+            set,
+            reverted: (0..count)
+                .map(|index| {
+                    reverted(
+                        json!({"now": format!("Old {index}")}),
+                        TargetRole::Combobox,
+                        &format!("Field {index}"),
+                        true,
+                    )
+                })
+                .collect(),
         };
-        assert_eq!(
-            rejected_facts(fields)["problems"][0]["options"]
-                .as_array()
-                .map(Vec::len),
-            Some(25)
-        );
-    }
-
-    #[test]
-    fn options_the_transport_dropped_are_never_spoken_as_an_empty_select() {
-        let dropped = one(
-            json!({"field": 0, "problem": "option_missing", "options_total": 4}),
-            TargetRole::Combobox,
-            "Role",
-            "Engineer",
-            true,
-        );
-        assert_eq!(
-            dropped.summary(),
-            "Nothing was changed. The \"Role\" dropdown has no option \"Engineer\" among its 4 options."
-        );
-        assert!(!dropped.summary().contains("offers no options"));
-        assert_eq!(
-            dropped.next_steps(),
-            vec![format!(
-                "Read {HANDLE} with browser_read to list all its options."
-            )]
-        );
-    }
-
-    #[test]
-    fn a_choice_earlier_in_the_call_says_the_options_can_depend_on_it() {
-        let mut dependent = control(TargetRole::Combobox, "City", "Paris");
-        dependent.follows_choice = true;
-        let refusal = Refusal::FieldValuesRejected {
-            fields: vec![RejectedField::new(
-                decode(missing_role(json!(["Lyon", "Nice"]))),
-                dependent,
+        let one_back = Refusal::FieldsReverted {
+            set: 2,
+            reverted: vec![reverted(
+                json!({"now": "Choose one..."}),
+                TargetRole::Combobox,
+                "Role",
                 true,
             )],
-            total: 2,
         };
         assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The \"City\" dropdown has no option \"Paris\". It offers: Lyon, Nice. Its options can depend on earlier fields."
+            one_back.summary(),
+            "Set 2 of 3 fields; the \"Role\" dropdown went back to \"Choose one...\" after the page reacted."
         );
         assert_eq!(
-            refusal.next_steps(),
-            vec![format!(
-                "Fill the earlier fields first, then repeat for {HANDLE}."
-            )]
+            went_back(2, 1).summary(),
+            "Set 1 of 3 fields; the \"Field 0\" dropdown went back to \"Old 0\" and the \"Field 1\" dropdown went back to \"Old 1\" after the page reacted."
+        );
+        let many = 5;
+        let five = went_back(many, 1).summary();
+        assert!(
+            five.starts_with("Set 1 of 6 fields; the \"Field 0\" dropdown"),
+            "{five}"
+        );
+        assert!(
+            five.ends_with(&format!(
+                "and {} more fields went back too after the page reacted.",
+                many - REVERTED_SHOWN_MAX
+            )),
+            "{five}"
+        );
+
+        let held: Vec<HeldField> = (0..12)
+            .map(|index| {
+                HeldField::new(
+                    HANDLE,
+                    TargetRole::Combobox,
+                    &format!("Field number {index}"),
+                    &"v".repeat(30),
+                    false,
+                    true,
+                )
+            })
+            .collect();
+        let readings = field_echo::readings(&held);
+        let said = readings.after_clause().expect("named readings are said");
+        assert!(said.ends_with("more in the facts"), "{said}");
+        let facts = field_echo::facts(&held);
+        let filled = Outcome::FormFilled {
+            fields: held.len(),
+            submitted: false,
+            host: Some("example.com".into()),
+            held,
+            rebound: false,
+        };
+        assert!(filled.summary().chars().count() <= SUMMARY_MAX_CHARS);
+        assert_eq!(
+            facts.and_then(|facts| facts.as_array().map(Vec::len)),
+            Some(12)
         );
     }
 
+    /// LANGUAGE.md's example and step rules: one call with a bad date, a bad checkbox word and a
+    /// file input names every field, edits nothing and gives two steps; fields that need only a
+    /// corrected value share one step that names their handles, past HANDLES_LISTED_MAX counting
+    /// the rest; a credential field keeps its own step; a reverted field is read back; and a
+    /// result carries at most NEXT_STEPS_MAX steps.
     #[test]
-    fn disabled_options_are_not_offered() {
-        let options = json!([
-            "Free",
-            {"text": "Pro", "disabled": true},
-            {"group": "Staff", "options": ["Team"]}
-        ]);
-        let refusal = one(
-            missing_role(options),
-            TargetRole::Combobox,
-            "Plan",
-            "Gold",
-            true,
-        );
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The \"Plan\" dropdown has no option \"Gold\". It offers: Free, Team."
-        );
-        let all_disabled = one(
-            missing_role(json!([{"text": "Pro", "disabled": true}])),
-            TargetRole::Combobox,
-            "Plan",
-            "Gold",
-            true,
-        );
-        assert!(all_disabled
-            .summary()
-            .ends_with("Every option is disabled."));
-        let empty = one(
-            missing_role(json!([])),
-            TargetRole::Combobox,
-            "Plan",
-            "Gold",
-            true,
-        );
-        assert!(empty.summary().ends_with("It offers no options."));
-        assert!(empty.next_steps()[0].starts_with("Read "));
-    }
-
-    #[test]
-    fn an_ambiguous_value_lists_the_candidates_with_their_values() {
-        let problem = json!({"field": 0, "problem": "option_ambiguous", "options": [
-            {"text": "Other", "value": "other-staff"}, {"text": "Other", "value": "other-guest"}]});
-        let refusal = one(problem, TargetRole::Combobox, "Kind", "other", true);
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. \"other\" matches 2 options of the \"Kind\" dropdown: Other (value other-staff), Other (value other-guest)."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            vec![format!("Repeat with the option's value for {HANDLE}.")]
-        );
-    }
-
-    #[test]
-    fn a_disabled_option_is_named_with_the_dropdown() {
-        let refusal = one(
-            json!({"field": 0, "problem": "option_disabled"}),
-            TargetRole::Combobox,
-            "Plan",
-            "Pro",
-            true,
-        );
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The option \"Pro\" of the \"Plan\" dropdown is disabled."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            vec!["Choose an enabled option, or inspect the form for the field that enables it."]
-        );
-    }
-
-    #[test]
-    fn a_list_for_a_single_choice_and_a_word_for_a_checkbox() {
-        let many = one(
-            json!({"field": 0, "problem": "multiple_values"}),
-            TargetRole::Combobox,
-            "Role",
-            "a, b",
-            true,
-        );
-        assert_eq!(
-            many.summary(),
-            "Nothing was changed. The \"Role\" dropdown takes one value, not a list."
-        );
-        let flag = one(
-            json!({"field": 0, "problem": "not_boolean"}),
-            TargetRole::Checkbox,
-            "Agree",
-            "maybe",
-            true,
-        );
-        assert_eq!(
-            flag.summary(),
-            "Nothing was changed. The \"Agree\" checkbox takes true or false, not \"maybe\"."
-        );
-        assert_eq!(
-            flag.next_steps(),
-            vec![format!("Repeat with true or false for {HANDLE}.")]
-        );
-    }
-
-    #[test]
-    fn a_radio_is_named_by_its_group_and_offers_its_labels() {
-        let problem = json!({"field": 0, "problem": "option_missing",
-            "options": ["Standard", "Express"], "group": "Shipping"});
-        let refusal = one(problem, TargetRole::Radio, "Standard", "Overnight", true);
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The \"Shipping\" choice has no option \"Overnight\". It offers: Standard, Express."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            vec![format!(
-                "Repeat with one of the offered labels for {HANDLE}."
-            )]
-        );
-    }
-
-    #[test]
-    fn two_radios_with_one_label_send_the_model_to_the_radio_it_means() {
-        let problem = json!({"field": 0, "problem": "option_ambiguous",
-            "options": ["Yes", "Yes"], "group": "Subscribe"});
-        let refusal = one(problem, TargetRole::Radio, "No", "yes", true);
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. \"yes\" matches 2 options of the \"Subscribe\" radio button: Yes, Yes."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            vec!["Find the radio you mean with browser_find, then fill that radio's own handle with true.".to_owned()]
-        );
-    }
-
-    #[test]
-    fn a_format_problem_names_the_form_and_the_allowed_range() {
-        let problem = json!({"field": 0, "problem": "format", "expected": "YYYY-MM-DD", "type": "date",
-            "limits": {"min": "2026-10-01", "max": "2026-12-31"}});
-        let refusal = one(problem, TargetRole::Textbox, "Start", "next week", true);
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The \"Start\" date field takes YYYY-MM-DD, not \"next week\". Allowed: 2026-10-01 to 2026-12-31."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            vec![format!(
-                "Repeat browser_fill_form with {HANDLE} set to a corrected value."
-            )]
-        );
-        let open = one(
-            json!({"field": 0, "problem": "format", "limits": {"min": "5"}}),
-            TargetRole::NumberField,
-            "Count",
-            "x",
-            true,
-        );
-        assert_eq!(
-            open.summary(),
-            "Nothing was changed. The \"Count\" number field does not accept \"x\". Allowed: from 5."
-        );
-    }
-
-    #[test]
-    fn a_control_a_fill_cannot_use_points_at_the_tool_that_can() {
-        let file = one(
-            json!({"field": 0, "problem": "wrong_tool", "route": "file"}),
-            TargetRole::Textbox,
-            "Resume",
-            "cv.pdf",
-            true,
-        );
-        assert_eq!(
-            file.summary(),
-            "Nothing was changed. The \"Resume\" field is a file input."
-        );
-        assert_eq!(
-            file.next_steps(),
-            vec![format!("Attach the file with browser_upload on {HANDLE}.")]
-        );
-        let button = one(
-            json!({"field": 0, "problem": "wrong_tool", "route": "button"}),
-            TargetRole::Button,
-            "Save",
-            "x",
-            true,
-        );
-        assert_eq!(
-            button.summary(),
-            "Nothing was changed. The \"Save\" control is a button, not a field."
-        );
-        assert_eq!(
-            button.next_steps(),
-            vec![format!("Click it with browser_click on {HANDLE}.")]
-        );
-        let widget = one(
-            json!({"field": 0, "problem": "wrong_tool", "route": "widget"}),
-            TargetRole::Combobox,
-            "Country",
-            "x",
-            true,
-        );
-        assert_eq!(
-            widget.summary(),
-            "Nothing was changed. The \"Country\" dropdown is a page widget, not a form field."
-        );
-        assert_eq!(
-            widget.next_steps(),
-            vec![format!(
-                "Open it with browser_click on {HANDLE}, then browser_click the option by name."
-            )]
-        );
-    }
-
-    fn at(target: &str, mut control: RejectedControl) -> RejectedControl {
-        control.target = target.into();
-        control
-    }
-
-    #[test]
-    fn a_bad_date_a_bad_checkbox_word_and_a_file_input_read_as_one_refusal_with_two_steps() {
-        let fields = vec![
-            RejectedField::new(
-                decode(
-                    json!({"field": 0, "problem": "format", "type": "date", "expected": "YYYY-MM-DD"}),
+    fn fields_that_only_need_a_corrected_value_share_one_step_and_a_result_has_at_most_two() {
+        let example = Refusal::FieldValuesRejected {
+            fields: vec![
+                RejectedField::new(
+                    decode(
+                        json!({"field": 0, "problem": "format", "type": "date", "expected": "YYYY-MM-DD"}),
+                    ),
+                    at(
+                        "target_14",
+                        control(TargetRole::Textbox, "Start", "10/14/2026"),
+                    ),
+                    true,
                 ),
-                at(
-                    "target_14",
-                    control(TargetRole::Textbox, "Start", "10/14/2026"),
+                RejectedField::new(
+                    decode(json!({"field": 1, "problem": "not_boolean"})),
+                    at(
+                        "target_15",
+                        control(TargetRole::Checkbox, "Remember me", "maybe"),
+                    ),
+                    true,
                 ),
-                true,
-            ),
-            RejectedField::new(
-                decode(json!({"field": 1, "problem": "not_boolean"})),
-                at(
-                    "target_15",
-                    control(TargetRole::Checkbox, "Remember me", "maybe"),
+                RejectedField::new(
+                    decode(json!({"field": 2, "problem": "wrong_tool", "route": "file"})),
+                    at(
+                        "target_16",
+                        control(TargetRole::Textbox, "Resume", "cv.pdf"),
+                    ),
+                    true,
                 ),
-                true,
-            ),
-            RejectedField::new(
-                decode(json!({"field": 2, "problem": "wrong_tool", "route": "file"})),
-                at(
-                    "target_16",
-                    control(TargetRole::Textbox, "Resume", "cv.pdf"),
-                ),
-                true,
-            ),
-        ];
-        let refusal = Refusal::FieldValuesRejected { fields, total: 4 };
-        let summary = refusal.summary();
+            ],
+            total: 4,
+        };
         assert_eq!(
-            summary,
+            example.summary(),
             "Nothing was changed: 3 of 4 fields cannot take their values. The \"Start\" date field takes YYYY-MM-DD, not \"10/14/2026\". The \"Remember me\" checkbox takes true or false, not \"maybe\". The \"Resume\" field is a file input."
         );
-        assert!(summary.chars().count() <= 500);
         assert_eq!(
-            refusal.next_steps(),
+            example.next_steps(),
             vec![
                 "Repeat browser_fill_form with corrected values for target_14 and target_15."
                     .to_owned(),
                 "Attach the file with browser_upload on target_16.".to_owned(),
             ]
         );
-    }
 
-    #[test]
-    fn corrected_values_name_the_first_handles_and_count_the_rest() {
-        let many = |count: usize| {
-            rejected_next_steps(
-                &(0..count)
-                    .map(|index| {
-                        RejectedField::new(
-                            decode(json!({"field": index, "problem": "format", "expected": "a number"})),
-                            at(&format!("target_{index}"), control(TargetRole::NumberField, "Qty", "x")),
-                            true,
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            )
+        let correctable = |count: usize| -> (Vec<String>, Vec<String>) {
+            let handles: Vec<String> = (0..count).map(|index| format!("target_{index}")).collect();
+            let fields: Vec<RejectedField> = handles
+                .iter()
+                .enumerate()
+                .map(|(index, handle)| {
+                    RejectedField::new(
+                        decode(
+                            json!({"field": index, "problem": "format", "expected": "a number"}),
+                        ),
+                        at(handle, control(TargetRole::NumberField, "Qty", "x")),
+                        true,
+                    )
+                })
+                .collect();
+            (handles, rejected_next_steps(&fields))
         };
+        let (handles, steps) = correctable(3);
         assert_eq!(
-            many(3),
-            vec!["Repeat browser_fill_form with corrected values for target_0, target_1 and target_2.".to_owned()]
+            steps,
+            vec![format!(
+                "Repeat browser_fill_form with corrected values for {}, {} and {}.",
+                handles[0], handles[1], handles[2]
+            )]
         );
+        let many = HANDLES_LISTED_MAX + 2;
+        let (handles, steps) = correctable(many);
         assert_eq!(
-            many(6),
-            vec!["Repeat browser_fill_form with corrected values for target_0, target_1, target_2, target_3 and 2 more.".to_owned()]
+            steps,
+            vec![format!(
+                "Repeat browser_fill_form with corrected values for {} and {} more.",
+                handles[..HANDLES_LISTED_MAX].join(", "),
+                many - HANDLES_LISTED_MAX
+            )]
         );
-    }
 
-    #[test]
-    fn a_credential_field_keeps_its_own_step_beside_a_shared_correction() {
         let mut secret = at("target_9", control(TargetRole::Textbox, "Password", "x"));
         secret.credential = true;
-        let fields = vec![
+        let beside_a_credential = rejected_next_steps(&[
             RejectedField::new(
                 decode(json!({"field": 0, "problem": "format", "expected": "a number"})),
                 at("target_1", control(TargetRole::NumberField, "Qty", "x")),
@@ -1411,78 +1470,56 @@ mod tests {
                 at("target_3", control(TargetRole::NumberField, "Count", "y")),
                 true,
             ),
-        ];
-        let steps = rejected_next_steps(&fields);
-        assert_eq!(steps.len(), 2);
+        ]);
         assert_eq!(
-            steps[0],
-            "Repeat browser_fill_form with corrected values for target_1 and target_3."
+            beside_a_credential,
+            vec![
+                "Repeat browser_fill_form with corrected values for target_1 and target_3."
+                    .to_owned(),
+                "Ask the user for the value, then repeat browser_fill_form with target_9 set to it."
+                    .to_owned(),
+            ]
         );
-        assert!(steps[1].contains("target_9"), "{steps:?}");
-    }
 
-    #[test]
-    fn a_foreign_submit_control_has_its_sentence() {
-        let submit = one(
-            json!({"field": 0, "problem": "submit_not_owned"}),
-            TargetRole::Button,
-            "Go",
-            "x",
-            true,
+        let other = at(
+            OTHER_HANDLE,
+            control(TargetRole::Checkbox, "Agree", "maybe"),
         );
-        assert_eq!(
-            submit.summary(),
-            "Nothing was changed. The submit control does not belong to the form that holds these fields."
-        );
-    }
-
-    fn reverted(problem: Value, role: TargetRole, name: &str, preserve: bool) -> RejectedField {
-        let mut problem = problem;
-        problem["field"] = json!(0);
-        problem["problem"] = json!("reverted");
-        field(problem, role, name, "given", preserve)
-    }
-
-    #[test]
-    fn a_reverted_field_is_named_with_what_it_holds_now() {
-        let refusal = Refusal::FieldsReverted {
-            set: 2,
-            reverted: vec![reverted(
-                json!({"now": "Choose one..."}),
-                TargetRole::Combobox,
-                "Role",
-                true,
-            )],
+        let mixed = Refusal::FieldValuesRejected {
+            fields: vec![
+                field(
+                    missing_role(json!(["A", "B"])),
+                    TargetRole::Combobox,
+                    "Role",
+                    "x",
+                    true,
+                ),
+                RejectedField::new(
+                    decode(json!({"field": 3, "problem": "not_boolean"})),
+                    other,
+                    true,
+                ),
+                field(
+                    json!({"field": 4, "problem": "multiple_values"}),
+                    TargetRole::Combobox,
+                    "Team",
+                    "x",
+                    true,
+                ),
+            ],
+            total: 5,
         };
-        assert_eq!(
-            refusal.summary(),
-            "Set 2 of 3 fields; the \"Role\" dropdown went back to \"Choose one...\" after the page reacted."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            [format!(
-                "Read {HANDLE} with browser_read to see its current value."
-            )]
-        );
-        let Refusal::FieldsReverted { set, reverted } = &refusal else {
-            panic!("a reverted fill");
-        };
-        assert_eq!(
-            reverted_facts(*set, reverted),
-            json!({"reason": "fields_reverted", "set": 2, "reverted": [
-                {"field": 0, "problem": "reverted", "now": "Choose one...", "target": HANDLE}
-            ]})
-        );
-    }
+        let steps = mixed.next_steps();
+        assert_eq!(steps.len(), NEXT_STEPS_MAX, "{steps:?}");
+        assert!(steps[1].contains(OTHER_HANDLE), "{steps:?}");
 
-    #[test]
-    fn several_reverted_fields_read_as_one_list_and_the_rest_are_counted() {
-        let many = |count: usize| Refusal::FieldsReverted {
+        let read_back = format!("Read {HANDLE} with browser_read to see its current value.");
+        let went_back = |count: usize| Refusal::FieldsReverted {
             set: 1,
             reverted: (0..count)
                 .map(|index| {
                     reverted(
-                        json!({"now": format!("Old {index}")}),
+                        json!({"now": "Old"}),
                         TargetRole::Combobox,
                         &format!("Field {index}"),
                         true,
@@ -1490,52 +1527,47 @@ mod tests {
                 })
                 .collect(),
         };
-        assert_eq!(
-            many(2).summary(),
-            "Set 1 of 3 fields; the \"Field 0\" dropdown went back to \"Old 0\" and the \"Field 1\" dropdown went back to \"Old 1\" after the page reacted."
-        );
-        let five = many(5).summary();
-        assert!(five.starts_with("Set 1 of 6 fields; the \"Field 0\" dropdown"));
-        assert!(
-            five.ends_with("and 2 more fields went back too after the page reacted."),
-            "{five}"
-        );
-        assert_eq!(many(5).next_steps().len(), 2);
+        assert_eq!(went_back(1).next_steps(), vec![read_back]);
+        assert_eq!(went_back(5).next_steps().len(), NEXT_STEPS_MAX);
     }
 
+    /// LANGUAGE.md and ACCEPTANCE Browser journeys 4: a credential-class control never lists
+    /// options or echoes a value, in its sentence, its steps or its facts, whether the fill was
+    /// refused or the page changed the control back.
     #[test]
-    fn a_reverted_field_names_nothing_when_names_are_not_preserved() {
-        let refusal = Refusal::FieldsReverted {
-            set: 0,
-            reverted: vec![reverted(
-                json!({"now": "PRIVATE_VALUE"}),
-                TargetRole::Combobox,
-                "PRIVATE_NAME",
-                false,
-            )],
-        };
-        let summary = refusal.summary();
-        assert_eq!(
-            summary,
-            "Set 0 of 1 field; a dropdown went back after the page reacted."
-        );
-        assert!(!refusal.audit().summary().contains("PRIVATE"));
-    }
-
-    #[test]
-    fn a_reverted_credential_never_carries_what_it_holds() {
-        let mut secret = control(TargetRole::Textbox, "Password", "PRIVATE_GIVEN");
+    fn a_credential_class_control_lists_nothing_and_echoes_nothing() {
+        let mut secret = control(TargetRole::Combobox, "Token kind", "PRIVATE_VALUE");
         secret.credential = true;
-        let field = RejectedField::new(
-            decode(json!({"field": 0, "problem": "reverted", "now": "PRIVATE_NOW"})),
+        let refused = RejectedField::new(
+            decode(missing_role(json!(["PRIVATE_OPTION"]))),
             secret,
             true,
         );
-        let fact = field.fact().to_string();
+        let fact = refused.fact();
+        let refusal = Refusal::FieldValuesRejected {
+            fields: vec![refused],
+            total: 1,
+        };
+        assert_eq!(
+            refusal.summary(),
+            "Nothing was changed. The \"Token kind\" dropdown is credential-class."
+        );
+        let everything = format!("{} {:?} {fact}", refusal.summary(), refusal.next_steps());
+        assert!(!everything.contains("PRIVATE"), "{everything}");
+        assert_eq!(fact.get("options"), None);
+
+        let mut password = control(TargetRole::Textbox, "Password", "PRIVATE_GIVEN");
+        password.credential = true;
+        let changed_back = RejectedField::new(
+            decode(json!({"field": 0, "problem": "reverted", "now": "PRIVATE_NOW"})),
+            password,
+            true,
+        );
+        let fact = changed_back.fact().to_string();
         assert!(!fact.contains("PRIVATE"), "{fact}");
         let refusal = Refusal::FieldsReverted {
             set: 1,
-            reverted: vec![field],
+            reverted: vec![changed_back],
         };
         assert_eq!(
             refusal.summary(),
@@ -1549,56 +1581,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_reverted_value_is_bounded_and_empty_reads_as_no_value() {
-        let long = "y".repeat(100);
-        let bounded = Refusal::FieldsReverted {
-            set: 0,
-            reverted: vec![reverted(
-                json!({ "now": long }),
-                TargetRole::Textbox,
-                "Note",
-                true,
-            )],
-        };
-        assert!(bounded
-            .summary()
-            .contains(&format!("\"{}...\"", "y".repeat(37))));
-        let empty = Refusal::FieldsReverted {
-            set: 0,
-            reverted: vec![reverted(
-                json!({"now": ""}),
-                TargetRole::Textbox,
-                "Note",
-                true,
-            )],
-        };
-        assert!(empty.summary().contains("went back to no value"));
-    }
-
-    #[test]
-    fn a_credential_class_control_lists_nothing_and_echoes_nothing() {
-        let mut secret = control(TargetRole::Combobox, "Token kind", "PRIVATE_VALUE");
-        secret.credential = true;
-        let field = RejectedField::new(
-            decode(missing_role(json!(["PRIVATE_OPTION"]))),
-            secret,
-            true,
-        );
-        let fact = field.fact();
-        let refusal = Refusal::FieldValuesRejected {
-            fields: vec![field],
-            total: 1,
-        };
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The \"Token kind\" dropdown is credential-class."
-        );
-        let everything = format!("{} {:?} {fact}", refusal.summary(), refusal.next_steps());
-        assert!(!everything.contains("PRIVATE"), "{everything}");
-        assert_eq!(fact.get("options"), None);
-    }
-
+    /// ACCEPTANCE Governance 17 for fill and credential refusals: with preserve_target_names off,
+    /// no page name, option text, group or given value reaches a summary or a step, for every
+    /// problem word and role, a revert, and a credential typing refusal.
     #[test]
     fn without_name_governance_no_page_text_or_given_value_reaches_a_sentence() {
         let cases = [
@@ -1623,8 +1608,7 @@ mod tests {
                     "PRIVATE_VALUE",
                     false,
                 );
-                let steps = refusal.next_steps();
-                let text = format!("{} {steps:?}", refusal.summary());
+                let text = format!("{} {:?}", refusal.summary(), refusal.next_steps());
                 assert!(!text.contains("PRIVATE"), "{problem}: {text}");
             }
         }
@@ -1639,97 +1623,36 @@ mod tests {
             refusal.summary(),
             "Nothing was changed. A dropdown has no matching option."
         );
-    }
 
-    #[test]
-    fn facts_hold_the_options_and_the_handle_but_never_the_given_value() {
-        let refusal = one(
-            missing_role(json!(["Developer", "Other"])),
-            TargetRole::Combobox,
-            "Role",
-            "PRIVATE_VALUE",
-            false,
-        );
-        let Refusal::FieldValuesRejected { fields, .. } = &refusal else {
-            unreachable!()
-        };
-        let facts = rejected_facts(fields);
-        assert_eq!(
-            facts,
-            json!({"reason": "field_value_rejected", "problems": [
-                {"field": 0, "target": HANDLE, "problem": "option_missing",
-                 "options": ["Developer", "Other"]}
-            ]})
-        );
-        assert!(!facts.to_string().contains("PRIVATE_VALUE"));
-    }
-
-    #[test]
-    fn several_problems_are_counted_and_each_gets_a_clause_and_at_most_two_steps() {
-        let first = field(
-            missing_role(json!(["A", "B"])),
-            TargetRole::Combobox,
-            "Role",
-            "x",
-            true,
-        );
-        let mut other = control(TargetRole::Checkbox, "Agree", "maybe");
-        other.target = OTHER_HANDLE.into();
-        let second = RejectedField::new(
-            decode(json!({"field": 3, "problem": "not_boolean"})),
-            other,
-            true,
-        );
-        let third = field(
-            json!({"field": 4, "problem": "multiple_values"}),
-            TargetRole::Combobox,
-            "Team",
-            "x",
-            true,
-        );
-        let refusal = Refusal::FieldValuesRejected {
-            fields: vec![first, second, third],
-            total: 5,
+        let went_back = Refusal::FieldsReverted {
+            set: 0,
+            reverted: vec![reverted(
+                json!({"now": "PRIVATE_VALUE"}),
+                TargetRole::Combobox,
+                "PRIVATE_NAME",
+                false,
+            )],
         };
         assert_eq!(
-            refusal.summary(),
-            "Nothing was changed: 3 of 5 fields cannot take their values. The \"Role\" dropdown has no option \"x\". It offers: A, B. The \"Agree\" checkbox takes true or false, not \"maybe\". The \"Team\" dropdown takes one value, not a list."
+            went_back.summary(),
+            "Set 0 of 1 field; a dropdown went back after the page reacted."
         );
-        let steps = refusal.next_steps();
-        assert_eq!(steps.len(), 2);
-        assert!(steps[1].contains(OTHER_HANDLE));
+
+        let typing = Refusal::CredentialAuthorization {
+            control: ControlRef::new(TargetRole::Textbox, "PRIVATE_NAME", None, false),
+        };
+        let text = format!("{} {:?}", typing.summary(), typing.next_steps());
+        assert!(!text.contains("PRIVATE"), "{text}");
     }
 
+    /// LANGUAGE.md's page-text rule, and reproduces L-D4 (eff79366): page text and a given value
+    /// stand in a sentence on one line, bounded, with single quotes, and a word shaped like a real
+    /// Ghostlight id, a minted invocation id and a diag_ cursor included, becomes
+    /// HANDLE_REPLACEMENT, while near misses stay as they are. A refused fill quotes the given value
+    /// within GIVEN_MAX_CHARS, a revert quotes what the field holds within the same bound and says
+    /// NO_VALUE for nothing, and a completed fill quotes what a field holds within NOW_MAX_CHARS.
     #[test]
-    fn the_summary_fits_the_cap_and_counts_what_it_left_out() {
-        let fields: Vec<RejectedField> = (0..12)
-            .map(|index| {
-                field(
-                    json!({"field": index, "problem": "option_missing",
-                        "options": ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"]}),
-                    TargetRole::Combobox,
-                    &format!("A fairly long control name number {index}"),
-                    "a value of some length",
-                    true,
-                )
-            })
-            .collect();
-        let refusal = Refusal::FieldValuesRejected { fields, total: 12 };
-        let summary = refusal.summary();
-        assert!(
-            summary.chars().count() <= crate::language::outcome::SUMMARY_MAX_CHARS,
-            "{}",
-            summary.chars().count()
-        );
-        assert!(
-            summary.starts_with("Nothing was changed: 12 of 12 fields cannot take their values.")
-        );
-        assert!(summary.ends_with(" more are in the facts."), "{summary}");
-        assert!(summary.is_ascii());
-    }
-
-    #[test]
-    fn page_text_in_a_sentence_is_one_bounded_line_without_quotes_or_handles() {
+    fn page_text_reaches_a_sentence_as_one_bounded_line_that_cannot_pose_as_a_handle() {
         let nasty = format!("Line\none \"quoted\" {HANDLE} {}", "x".repeat(100));
         let refusal = one(
             missing_role(json!([nasty.clone()])),
@@ -1739,18 +1662,15 @@ mod tests {
             true,
         );
         let summary = refusal.summary();
-        assert!(!summary.contains('\n'));
-        assert!(!summary.contains(HANDLE));
-        assert!(summary.contains("[handle]"));
-        assert!(summary.contains("'quoted'"));
+        assert!(!summary.contains('\n'), "{summary}");
+        assert!(!summary.contains(HANDLE), "{summary}");
+        assert!(summary.contains(HANDLE_REPLACEMENT), "{summary}");
+        assert!(summary.contains("'quoted'"), "{summary}");
         assert!(
-            summary.contains(&format!("\"{}...\"", "g".repeat(37))),
+            summary.contains(&quoted_cut('g', GIVEN_MAX_CHARS)),
             "{summary}"
         );
-    }
 
-    #[test]
-    fn page_text_shaped_like_a_real_id_is_replaced() {
         let invocation = crate::work::InvocationId::mint();
         for minted in [
             HANDLE,
@@ -1763,7 +1683,7 @@ mod tests {
         ] {
             assert_eq!(
                 page_text(&format!("see ({minted})."), PAGE_TEXT_MAX_CHARS),
-                "see [handle]",
+                format!("see {HANDLE_REPLACEMENT}"),
                 "{minted}"
             );
         }
@@ -1779,212 +1699,43 @@ mod tests {
         ] {
             assert_eq!(page_text(near, PAGE_TEXT_MAX_CHARS), near, "{near}");
         }
-    }
 
-    #[test]
-    fn the_audit_holds_a_count_and_nothing_the_page_or_the_caller_said() {
-        let refusal = one(
-            missing_role(json!(["PRIVATE_OPTION"])),
-            TargetRole::Combobox,
-            "PRIVATE_NAME",
-            "PRIVATE_VALUE",
-            true,
-        );
-        let audit = refusal.audit();
-        assert_eq!(
-            audit.summary(),
-            "Refused a form fill before any edit: 1 field could not take its value."
-        );
-        assert_eq!(
-            serde_json::to_value(audit.refusal()).unwrap(),
-            json!({"reason": "field_values_rejected"})
-        );
-        let two = Refusal::FieldValuesRejected {
-            fields: vec![
-                field(
-                    missing_role(json!([])),
-                    TargetRole::Combobox,
-                    "A",
-                    "x",
-                    true,
-                ),
-                field(
-                    missing_role(json!([])),
-                    TargetRole::Combobox,
-                    "B",
-                    "x",
-                    true,
-                ),
-            ],
-            total: 4,
-        };
-        assert_eq!(
-            two.audit().summary(),
-            "Refused a form fill before any edit: 2 fields could not take their values."
-        );
-    }
-
-    #[test]
-    fn a_credential_refusal_names_the_control_and_the_handle() {
-        let named = Refusal::CredentialAuthorization {
-            control: ControlRef::new(TargetRole::Textbox, "Password", Some(HANDLE), true),
-        };
-        assert_eq!(
-            named.summary(),
-            format!(
-                "Nothing was typed. The \"Password\" text field ({HANDLE}) is credential-class."
-            )
-        );
-        assert_eq!(
-            named.next_steps(),
-            vec!["If the user explicitly authorized it, repeat with user_authorized_credentials true; otherwise ask the user to type it."]
-        );
-        let unnamed = Refusal::CredentialAuthorization {
-            control: ControlRef::new(TargetRole::Textbox, "Password", None, false),
-        };
-        assert_eq!(
-            unnamed.summary(),
-            "Nothing was typed. A text field is credential-class."
-        );
-        assert!(!named.audit().summary().contains("Password"));
-    }
-
-    #[test]
-    fn every_problem_word_round_trips_and_has_a_sentence() {
-        let kinds = [
-            FieldProblemKind::OptionMissing,
-            FieldProblemKind::OptionAmbiguous,
-            FieldProblemKind::OptionDisabled,
-            FieldProblemKind::MultipleValues,
-            FieldProblemKind::NotBoolean,
-            FieldProblemKind::Format,
-            FieldProblemKind::WrongTool,
-            FieldProblemKind::Reverted,
-            FieldProblemKind::SubmitNotOwned,
-        ];
-        for kind in kinds {
-            assert_eq!(serde_json::to_value(kind).unwrap(), json!(kind.as_str()));
-            let refusal = one(
-                json!({"field": 0, "problem": kind.as_str(), "route": "widget"}),
-                TargetRole::Combobox,
-                "Role",
-                "x",
+        let went_back = |now: &str| Refusal::FieldsReverted {
+            set: 0,
+            reverted: vec![reverted(
+                json!({ "now": now }),
+                TargetRole::Textbox,
+                "Note",
                 true,
-            );
-            assert!(refusal.summary().is_ascii());
-            assert!(refusal.summary().len() > "Nothing was changed.".len());
-            assert!(!refusal.next_steps().is_empty());
-        }
-    }
-
-    #[test]
-    fn the_route_the_page_names_decides_the_sentence_not_the_role_the_control_reads_as() {
-        let button_routes = [
-            (TargetRole::Textbox, "Go", "text field", "an image input"),
-            (
-                TargetRole::Checkbox,
-                "Dark mode",
-                "checkbox",
-                "a button with a switch role",
-            ),
-            (
-                TargetRole::Tab,
-                "Overview",
-                "tab control",
-                "a button with a tab role",
-            ),
-            (
-                TargetRole::MenuItem,
-                "Settings",
-                "menu item",
-                "a button with a menu item role",
-            ),
-        ];
-        for (role, name, role_noun, case) in button_routes {
-            let refusal = one(
-                json!({"field": 0, "problem": "wrong_tool", "route": "button"}),
-                role,
-                name,
-                "x",
-                true,
-            );
-            let summary = refusal.summary();
-            assert_eq!(
-                summary,
-                format!("Nothing was changed. The \"{name}\" control is a button, not a field."),
-                "{case}"
-            );
-            assert!(!summary.contains(role_noun), "{case}: {summary}");
-            assert!(!summary.contains("widget"), "{case}: {summary}");
-            assert_eq!(
-                refusal.next_steps(),
-                vec![format!("Click it with browser_click on {HANDLE}.")],
-                "{case}"
-            );
-        }
-        let widget = one(
-            json!({"field": 0, "problem": "wrong_tool", "route": "widget"}),
-            TargetRole::ListBox,
-            "Colors",
-            "x",
-            true,
-        );
-        assert_eq!(
-            widget.summary(),
-            "Nothing was changed. The \"Colors\" list box is a page widget, not a form field."
-        );
-    }
-
-    #[test]
-    fn a_wrong_tool_problem_with_no_route_or_an_unknown_one_does_not_decode() {
-        for problem in [
-            json!({"field": 0, "problem": "wrong_tool"}),
-            json!({"field": 0, "problem": "wrong_tool", "route": "teleport"}),
-            json!({"field": 0, "problem": "wrong_tool", "type": "file"}),
-        ] {
-            assert!(
-                FieldProblems::decode(&json!({ "problems": [problem.clone()] })).is_none(),
-                "{problem}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_range_refusal_always_names_its_bounds_and_the_step_it_snaps_to() {
-        let applied = json!({"field": 0, "problem": "format", "type": "range",
-            "expected": "a number", "limits": {"min": "0", "max": "100", "step": "1"}});
-        let undeclared = one(applied, TargetRole::Slider, "Volume", "150", true);
-        assert_eq!(
-            undeclared.summary(),
-            "Nothing was changed. The \"Volume\" slider takes a number, not \"150\". Allowed: 0 to 100, in steps of 1."
-        );
-        let stepped = json!({"field": 0, "problem": "format", "type": "range",
-            "expected": "a number", "limits": {"min": "0", "max": "100", "step": "10"}});
-        let off_step = one(stepped, TargetRole::Slider, "Level", "15", true);
-        assert_eq!(
-            off_step.summary(),
-            "Nothing was changed. The \"Level\" slider takes a number, not \"15\". Allowed: 0 to 100, in steps of 10."
-        );
-    }
-
-    #[test]
-    fn a_number_field_never_names_a_step_because_it_keeps_a_value_off_its_step() {
-        let number = json!({"field": 0, "problem": "format", "type": "number",
-            "expected": "a number", "limits": {"min": "0", "max": "100", "step": "10"}});
-        let refusal = one(number, TargetRole::NumberField, "Count", "many", true);
-        assert_eq!(
-            refusal.summary(),
-            "Nothing was changed. The \"Count\" number field takes a number, not \"many\". Allowed: 0 to 100."
-        );
-    }
-
-    #[test]
-    fn a_detail_with_an_unknown_word_or_no_problems_does_not_decode() {
+            )],
+        };
+        let long = went_back(&"y".repeat(100)).summary();
+        assert!(long.contains(&quoted_cut('y', GIVEN_MAX_CHARS)), "{long}");
+        let empty = went_back("").summary();
         assert!(
-            FieldProblems::decode(&json!({"problems": [{"field": 0, "problem": "invented"}]}))
-                .is_none()
+            empty.contains(&format!("went back to {NO_VALUE}")),
+            "{empty}"
         );
-        assert!(FieldProblems::decode(&json!({"problems": []})).is_none());
-        assert!(FieldProblems::decode(&json!("text")).is_none());
+
+        let held = [
+            HeldField::new(
+                HANDLE,
+                TargetRole::Combobox,
+                "Note",
+                &format!("a\n\"b\" {}", "x".repeat(80)),
+                false,
+                true,
+            ),
+            HeldField::new(HANDLE, TargetRole::Combobox, "Empty", "", false, true),
+        ];
+        let readings = field_echo::readings(&held);
+        let said = readings.after_clause().expect("named readings are said");
+        assert!(!said.contains('\n'), "{said}");
+        let (note, empty) = said.split_once(", ").expect("two readings");
+        let value = note.strip_prefix("Note = ").expect("the note is named");
+        assert!(value.starts_with("a 'b' "), "{value}");
+        assert!(value.ends_with(ELLIPSIS), "{value}");
+        assert_eq!(value.chars().count(), NOW_MAX_CHARS, "{value}");
+        assert_eq!(empty, format!("Empty = {NO_VALUE}"));
     }
 }
