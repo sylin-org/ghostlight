@@ -29,7 +29,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | S3 | refactor(workbench): every part comes from one gather | none | P5, I6, C2 | - | todo |
 | S4b | refactor(workbench): the Policy page's words come from governance | none | P7, P8 | - | todo |
 | S5 | refactor(workbench): the window's words come from language/ and are pinned | none | C18, C12b | - | todo |
-| S7 | test(desktop): the shell decodes and re-encodes every desktop golden | none | ux-2 closes | - | todo |
+| S7 | test(desktop): the shell decodes and re-encodes every desktop golden | none | ux-2 closes | - | landed (this commit) |
 | S9 | fix(workbench): the window offers Remove whenever the service does | none | I4 | the window half of G3-02; see Notes | landed (this commit) |
 
 ## Notes
@@ -189,3 +189,9 @@ C3c), then the rows below.
   its document "Your rules". The proof is a row in the kept workbench test that applies the rules
   and reads the policy hints; the preview server's fake answer reads the same sentence, as the
   surface fake already did. "Your rules are removed." stays for S4b, which takes those lines.
+- S7 as landed: no code change. The shell's
+  `every_frame_the_service_writes_is_one_the_shell_reads_and_writes_back` (`crates/desktop/src/link.rs`,
+  since 079727e9) already reads every file in `tests/golden/desktop`, refuses `Unknown` and compares
+  the re-encoded value. Checked by hand on test-02: a probe golden with a tray field the shell's
+  copy lacks fails it ("zz-probe.json is the bytes the shell writes"), and the probe was removed.
+  S8's two new goldens are read the same way.
