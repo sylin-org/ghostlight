@@ -6,7 +6,7 @@ Machine: leo-desktop-02. Paths without a crate are under `crates/orchestrator/sr
 
 ## RESUME HERE
 
-Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The install area's plan") and cutting file by file. Budget 78 with the coordinator's 3 reserve tests. Next: the next file in the plan's order that has no row in Slices. The four product findings under Notes are this lane's to fix, each as its own slice with one test.
+Closed on 2026-10-21 at 78 of 78 (627 at opening; 75 and the 3 reserve tests), T-I1 to T-I44. Findings 1 (verified not reachable), 2 and 3 are done; 4 is surface S3. crates/desktop moved to the adapter lane.
 
 ## Areas
 
