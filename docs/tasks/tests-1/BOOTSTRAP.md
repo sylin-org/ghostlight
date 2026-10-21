@@ -42,7 +42,12 @@ Paths without a crate are under `crates/orchestrator/src`. Counts were taken at 
 | service | `service/`, `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, the crate's top-level files and `crates/orchestrator/tests`; then `crates/relay` and `crates/edge`; then the guard | 396; 157; 66 | 60; 35; 20 | the coordinator, on the owner's machine | [LEDGER-service.md](LEDGER-service.md) |
 
 The budgets add up to 450. The other 50 are a reserve the coordinator grants for tests the cut finds
-missing. A budget is a ceiling, not a target: an area whose meaningful tests number fewer ends
+missing. On 2026-10-21 the owner gave the coordinator standing leave to grant it for boundary and
+contract tests the lanes find missing, telling the owner each grant. Granted so far: 1 for
+ACCEPTANCE P3's first real test (work lane), 9 for the service area, whose last 52 tests in
+`service/` hold eight rules' last proofs (the owner's own grant), and 3 for the install area (the
+install command grammar the scripts call, the install.json the launchers read, and the dev extension
+id the native host must match); 37 left. A budget is a ceiling, not a target: an area whose meaningful tests number fewer ends
 under it.
 
 The JavaScript ceiling for the extension (553 tests) and the page assets (275) is set after the

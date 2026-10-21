@@ -18,7 +18,7 @@ only with the owner's leave.
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `service/`, `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, top-level files, `crates/orchestrator/tests` | 396 | 60 | 113 |
+| `service/`, `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, top-level files, `crates/orchestrator/tests` | 396 | 69 (60, and 9 from the reserve) | 113 |
 | `crates/relay` | 157 | 35 | 157 |
 | `crates/edge` | 66 | 20 | 66 |
 
