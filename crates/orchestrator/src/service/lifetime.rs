@@ -8,13 +8,14 @@
 //! Each is a small state machine with no knowledge of the executor, the sockets or the desktop,
 //! so each is tested alone.
 
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use ghostlight_relay::protocol::StartReason;
 
 use crate::language::outcome::QuitCause;
+use crate::sync::lock;
 
 /// How long a quit lets in-flight invocations finish before the service exits anyway.
 pub const QUIT_GRACE: Duration = Duration::from_secs(10);
@@ -251,12 +252,6 @@ impl ReadyWatch {
             })
             .map(drop)
     }
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(test)]

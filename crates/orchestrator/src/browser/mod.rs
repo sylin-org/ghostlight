@@ -17,6 +17,7 @@ use crate::browser::adapter::{BrowserEvent, BrowserOutcome, RuntimeControlState,
 use crate::browser::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use crate::install::last_browser;
 use crate::install::native_host::browser_id_named;
+use crate::sync::lock;
 use ghostlight_relay::endpoint::Connection as RelayConnection;
 use ghostlight_relay::protocol::{goodbye_frame, GoodbyeReason};
 use serde_json::Value;
@@ -1329,12 +1330,6 @@ fn valid_opaque_id(value: &str, prefix: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 /// Truth-preserving physical-browser failure classes.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum BrowserError {
@@ -1505,10 +1500,11 @@ mod contract_tests;
 pub(crate) mod testing {
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::Mutex;
     use std::time::Instant;
 
     use crate::browser::adapter::{BrowserOutcome, RuntimeControlState, Work};
+    use crate::sync::lock;
 
     use super::{BrowserError, BrowserPort, BrowserSummary};
 
@@ -1815,11 +1811,5 @@ pub(crate) mod testing {
             lock(&self.control_states).push(state);
             Ok(())
         }
-    }
-
-    fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-        mutex
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }

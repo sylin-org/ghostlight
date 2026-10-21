@@ -16,6 +16,7 @@ use crate::language::audit_health::{AuditHealth, Storage, StorageFailure};
 use crate::language::history::StepReceipt;
 use crate::language::outcome::{Observed, Outcome};
 use crate::provenance::Attribution;
+use crate::sync::lock;
 use crate::work::result::{Effect, UnexecutedStatus};
 use crate::workbench::WorkbenchProjection;
 
@@ -301,10 +302,7 @@ impl JsonlAuditSink {
     }
 
     fn append(&self, value: Option<&impl Serialize>) -> io::Result<()> {
-        let mut needs_separator = self
-            .writer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut needs_separator = lock(&self.writer);
         if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
             private::create_dir_all(parent)?;
         }
@@ -396,10 +394,7 @@ impl AuditRecorder {
         record: &AuditRecord,
         provenance: Option<&crate::provenance::ConnectionEvidence>,
     ) -> Storage {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = lock(&self.state);
         let storage = if state.health.unavailable() {
             Storage::Unconfirmed
         } else if let Err(error) = self.sink.record(record) {
@@ -428,11 +423,7 @@ impl AuditRecorder {
     /// Read the same current health used for strict dispatch admission.
     #[must_use]
     pub fn health(&self) -> AuditHealth {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .health
-            .clone()
+        lock(&self.state).health.clone()
     }
 
     /// Make one due recovery attempt. No caller operation is retained or replayed.
@@ -441,10 +432,7 @@ impl AuditRecorder {
     }
 
     fn recover_at(&self, now: Instant) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = lock(&self.state);
         if !state.health.unavailable() || now < state.next_probe {
             return;
         }
@@ -466,10 +454,7 @@ impl AuditRecorder {
 
     /// Wait until recovery is due or stop is requested.
     pub fn wait_for_recovery(&self, stop: &AtomicBool) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = lock(&self.state);
         loop {
             if stop.load(Ordering::SeqCst) {
                 return;

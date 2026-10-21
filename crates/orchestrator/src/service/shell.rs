@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ghostlight_relay::protocol::GoodbyeReason;
@@ -27,6 +27,7 @@ use super::presence::{Presence, Shown};
 use crate::browser::transport::SocketWriter;
 use crate::intake::desktop::{ActOutcome, DesktopFrame, NativeAct, TrayModel};
 use crate::language::workbench as words;
+use crate::sync::lock;
 use crate::workbench::{
     PageAddress, WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
     WorkbenchPresentationPort,
@@ -35,13 +36,6 @@ use crate::workbench::{
 /// How long a link or a folder may take to open before the act counts as failed. A file dialog
 /// has no limit: it waits for the person.
 const OPEN_PATIENCE: Duration = Duration::from_secs(10);
-
-/// Lock `mutex`, taking the data back from a poisoned one.
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 /// The service's one desktop place.
 #[derive(Default)]

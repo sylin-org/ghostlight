@@ -14,13 +14,14 @@
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::browser::AdapterLifecycleObserver;
 
 use super::lifetime::Clock;
+use crate::sync::lock;
 
 /// How long the service may hold no stream before it exits.
 pub const IDLE_EXIT: Duration = Duration::from_secs(10 * 60);
@@ -243,12 +244,6 @@ pub fn watch(
                 thread::park_timeout(streams.poll());
             }
         })
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(test)]

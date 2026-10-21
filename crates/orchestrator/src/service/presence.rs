@@ -30,7 +30,7 @@
 use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -39,6 +39,7 @@ use ghostlight_relay::os;
 use crate::install::layout::Layout;
 use crate::intake::desktop::ShellView;
 use crate::language::workbench::WindowReason;
+use crate::sync::lock;
 use crate::workbench::PageAddress;
 
 /// How long after the service is ready, or after a shell's stream ended without a goodbye, a
@@ -136,12 +137,6 @@ pub struct Presence {
     state: Mutex<State>,
     changed: Condvar,
     patience: Duration,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Presence {

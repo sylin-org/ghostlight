@@ -13,6 +13,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use ghostlight_relay::endpoint::Connection;
 use ghostlight_relay::frame::{self, FrameError};
 
+use crate::sync::lock;
+
 /// Total time allowed to authenticate or finish a frame once its first byte arrives.
 pub const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Total writer wait plus delivery budget, independent of the peer's incremental progress.
@@ -144,20 +146,14 @@ impl SocketWriter {
 
     /// Interrupt both directions without acquiring the serialization lock.
     pub fn close(&self) {
-        *self
-            .closed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        *lock(&self.closed) = true;
         self.wake.notify_all();
         self.shutdown.shutdown();
     }
 
     /// Wait between liveness probes, ending immediately when this connection is retired.
     pub fn wait_closed(&self, interval: Duration) -> bool {
-        let closed = self
-            .closed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let closed = lock(&self.closed);
         *self
             .wake
             .wait_timeout_while(closed, interval, |closed| !*closed)

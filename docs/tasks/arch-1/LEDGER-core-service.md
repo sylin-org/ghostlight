@@ -12,8 +12,8 @@ Statuses: `todo`, `landed` (with commits), `blocked` (with the reason).
 
 ## RESUME HERE
 
-S-D1 and S-D2 have landed. S-D2 fixed the update case; the demand start after a Quit is open and
-waits on the owner's choice (Notes). Next: SERV-7.
+S-D1, S-D2 and SERV-7 have landed. S-D2 fixed the update case; the demand start after a Quit is
+open and waits on the owner's choice (Notes). Next: C19c-s.
 
 ## Slices
 
@@ -22,8 +22,8 @@ In order. "After" names what a slice waits for.
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | S-D1 | fix(intake): an opening that carries the largest resume token is accepted | - | SERV-1; the opening cap rises above the token cap, with a const assert, so tokens 2.0.0 edges hold pass too | landed (3db83135) |
-| S-D2 | fix(service): a replacement waits for the browsers of the service it replaced | - | BROW-9; the test failed before the fix | landed (this commit) |
-| SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | todo |
+| S-D2 | fix(service): a replacement waits for the browsers of the service it replaced | - | BROW-9; the test failed before the fix | landed (9c257daa) |
+| SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | landed (this commit) |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
 | BROW-2 | refactor(browser): the dead recovery decisions go | - | BROW-2 | todo |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
@@ -62,6 +62,14 @@ startup budget. Tests: `service::tests::a_replacement_waits_for_the_relays_of_th
 (failed before the fix), `a_start_that_replaced_no_browser_waits_only_the_relay_return_window` and
 `lifetime::tests::only_an_update_or_recover_start_replaces_a_service`. ARCHITECTURE, ACCEPTANCE
 and LANGUAGE say so.
+
+SERV-7: `crate::sync::lock` replaces this lane's eight copies and its direct locks in
+`browser/transport.rs`, `service/test_home.rs`, `audit.rs` and `presentation/mod.rs`. Condvar
+waits keep their inline `PoisonError::into_inner`, because a wait takes a guard and returns one.
+The other lanes adopt `lock` in their own files: adapter in `protocol4/fake.rs` (a copy), policy
+in `governance/mod.rs` (a copy), install in `install/mod.rs` (a copy), `install/icons.rs` and
+`agent/image.rs`, core-work in `work/mod.rs` and `workspace/mod.rs`, surface in `workbench/**`.
+`crates/relay` and `crates/edge` keep theirs (Decision 13).
 
 Open, the owner's choice: a demand start long after a Quit. The relay of an open browser keeps
 looking every 30 s, and a call that starts the service lands within about a second of its

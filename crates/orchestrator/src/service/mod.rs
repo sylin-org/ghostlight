@@ -40,7 +40,7 @@ use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
@@ -78,6 +78,7 @@ use crate::language::outcome::{CancelCause, DialogKind, QuitCause};
 use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::{Attribution, ConnectionEvidence, SourceReader};
+use crate::sync::lock;
 use crate::work::{Admission, ApplicationExecutor, PreparedInvocation};
 use crate::workbench::setup::SetupProgress;
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
@@ -2316,12 +2317,6 @@ fn deliver_result(wire: &McpWire, mut result: crate::work::result::InvocationRes
         }),
         Err(_) => wire.writer.close(),
     }
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The name of the short-lived thread that carries out a request to show the window.

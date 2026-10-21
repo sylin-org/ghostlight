@@ -18,6 +18,7 @@ pub mod provenance;
 #[cfg(test)]
 pub(crate) mod scratch;
 pub mod service;
+pub(crate) mod sync;
 pub mod work;
 pub mod workbench;
 pub mod workspace;

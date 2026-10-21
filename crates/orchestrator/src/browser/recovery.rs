@@ -31,7 +31,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -44,6 +44,7 @@ use crate::install::browser_package::BrowserPackage;
 use crate::install::container::Residence;
 use crate::install::native_host::{NativeHostRegistry, NativeHostState};
 use crate::language::MAX_TIMEOUT_MS;
+use crate::sync::lock;
 
 /// How long a browser start Ghostlight made holds the launch guard while no connection of that
 /// browser has arrived: the longest wait any call can give a handshake. A request inside it waits
@@ -1104,12 +1105,6 @@ fn phase_from_plan(plan: RecoveryPlan) -> FlightPhase {
             browsers: vec![browser],
         }),
     }
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(test)]

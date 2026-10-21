@@ -10,6 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 use ghostlight_relay::home::TEST_HOME_VARIABLE;
 
 use crate::scratch::Scratch;
+use crate::sync::lock;
 
 /// Serializes every test that sets the home variable.
 static HOME: Mutex<()> = Mutex::new(());
@@ -23,9 +24,7 @@ pub(crate) struct TestHome {
 impl TestHome {
     /// Create a fresh home named after `name` and point the relay at it.
     pub(crate) fn new(name: &str) -> Self {
-        let exclusive = HOME
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let exclusive = lock(&HOME);
         let directory = Scratch::named(&format!("home-{name}"));
         std::env::set_var(TEST_HOME_VARIABLE, directory.path());
         Self {

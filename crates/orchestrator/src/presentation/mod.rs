@@ -13,6 +13,7 @@ use thiserror::Error;
 use crate::browser::{addressed_tab, BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
 use crate::language::presentation as presentation_words;
+use crate::sync::lock;
 use crate::workspace::WorkspaceStore;
 
 /// How long one presentation may take, including the tab lookup a protocol-4 notice needs.
@@ -134,33 +135,26 @@ impl PresentationReactor {
     /// React synchronously and intentionally ignore presentation failure.
     pub fn react(&self, event: &DomainEvent) {
         let current = || {
-            self.activities
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
+            lock(&self.activities)
                 .get(event.invocation())
                 .map(|active| active.activity)
                 .unwrap_or(PresentationActivity::Quiet)
         };
         let recorded_tab = || {
-            self.activities
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
+            lock(&self.activities)
                 .get(event.invocation())
                 .and_then(|active| active.tab)
         };
         let (signal, activity, phase, detail, tab_id, locator, terminal) = match event {
             DomainEvent::WorkWaiting { .. } => return,
             DomainEvent::WorkStarted { activity, .. } => {
-                self.activities
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(
-                        event.invocation().into(),
-                        ActivePresentation {
-                            activity: *activity,
-                            tab: None,
-                        },
-                    );
+                lock(&self.activities).insert(
+                    event.invocation().into(),
+                    ActivePresentation {
+                        activity: *activity,
+                        tab: None,
+                    },
+                );
                 (
                     PresentationKind::Start,
                     *activity,
@@ -176,16 +170,13 @@ impl PresentationReactor {
                 physical_id,
                 ..
             } => {
-                self.activities
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(
-                        event.invocation().into(),
-                        ActivePresentation {
-                            activity: *activity,
-                            tab: *physical_id,
-                        },
-                    );
+                lock(&self.activities).insert(
+                    event.invocation().into(),
+                    ActivePresentation {
+                        activity: *activity,
+                        tab: *physical_id,
+                    },
+                );
                 (
                     PresentationKind::Start,
                     *activity,
@@ -280,10 +271,7 @@ impl PresentationReactor {
         };
         let _ = self.port.present(event.workspace(), frame);
         if terminal {
-            self.activities
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove(event.invocation());
+            lock(&self.activities).remove(event.invocation());
         }
     }
 
@@ -296,10 +284,7 @@ impl PresentationReactor {
             return;
         };
         let activity = {
-            let mut activities = self
-                .activities
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut activities = lock(&self.activities);
             let Some(active) = activities.get_mut(invocation) else {
                 return;
             };
@@ -329,12 +314,7 @@ impl PresentationReactor {
     /// cue is the target it names once the browser has acted. A command on that tab then starts
     /// nothing, so a scroll to a target draws no cue at the viewport centre before its own.
     pub(crate) fn bind_for_target(&self, invocation: &str, tab: u64) {
-        if let Some(active) = self
-            .activities
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_mut(invocation)
-        {
+        if let Some(active) = lock(&self.activities).get_mut(invocation) {
             active.tab = Some(tab);
         }
     }
