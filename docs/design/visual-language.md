@@ -83,10 +83,12 @@ what the page holds.
 The workbench window is a second surface for the same vocabulary, with two deliberate differences.
 
 - **Tempo is shared.** A treatment that means the same thing in both places keeps the same beat.
-  The workbench names them as `--beat-*` tokens in `crates/orchestrator/ui/styles.css`, taken from
-  the renderer's frozen `visualIdentity`: the workwheel turns over 2400ms in both, waiting lights
-  breathe over 1050ms with a 150ms stagger in both, the keyboard pulses over 1150ms, the read scan
-  runs 1450ms, and scope breathes over four seconds.
+  The workbench names them as `--beat-*` tokens in `crates/orchestrator/ui/styles.css`. Two come
+  from the renderer's frozen `visualIdentity`: the read scan runs 1450ms (`read_scan_ms`) and
+  scope breathes over four seconds (`border_breathe_ms`). The other three are the renderer's
+  looping CSS animations in `presentation-css.js`, not `visualIdentity` entries: the workwheel
+  turns over 2400ms, waiting lights breathe over 1050ms with a 150ms stagger, and the keyboard
+  pulses over 1150ms, in both places.
 - **Accent differs on purpose.** The workbench carries Ghostlight's published teal, while the
   in-page renderer keeps the sky signal users are trained on. See the 2026-08-11 amendment to
   ADR-0102. In the window, teal means live: it marks work happening and the one primary action in

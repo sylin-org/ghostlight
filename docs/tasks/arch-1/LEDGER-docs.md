@@ -125,4 +125,13 @@ with its skeptic's corrections. Nothing has landed yet; start with D3 once a lan
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| D3 | docs: the contract lines the second sweep's slices owe | each slice | AGENTS.md, ARCHITECTURE.md and LANGUAGE.md lines named by the slices, as D2 does | todo |
+| D3 | docs: the contract lines the second sweep's slices owe | each slice | AGENTS.md, ARCHITECTURE.md and LANGUAGE.md lines named by the slices, as D2 does | in progress: the BROW-10, EXT-13, freeze-record and BROW-11a lines landed (test-01, given by the coordinator) |
+- D3, the lines test-01 took for the coordinator (2026-10-20): `docs/design/visual-language.md`
+  credits `visualIdentity` with only the read scan and the scope breathe, and names the
+  workwheel, waiting-light and keyboard beats as the renderer's looping CSS animations (BROW-10).
+  `docs/design/adapter-protocol-4.md` gains dated notes that EXT-13 (14bee797) folded
+  `lib/script-evaluator.js` into `lib/evaluate.js`, beside the 2026 table, the worker's import
+  list and C13. `docs/RELEASE.md` says one packager reproduces its own ZIP bytes, two need not,
+  and the release workflow's artifact is the one a submission uploads (the package lane's
+  freeze-record note). `docs/1.0/ARCHITECTURE.md` says `browser/adapter/mod.rs` holds one module
+  per family with no family enum (BROW-11a).

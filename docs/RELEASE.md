@@ -112,7 +112,10 @@ pwsh -NoProfile -File scripts/package-extension.ps1
 ```
 
 CI runs the Rust, extension, and process tiers on Windows and Linux. The extension artifact
-uses a fixed file order and timestamp, so identical input produces identical ZIP bytes. The ordinary
+uses a fixed file order and timestamp, so one packager given identical input produces identical
+ZIP bytes. Two packagers need not agree: the same tree gave `cfa6226d...` packaged on a Linux
+test machine and `bddfb37a...` in the release workflow (2026-10-20). The release workflow's
+artifact is the one a store submission uploads, and the one the freeze record holds. The ordinary
 public truth check is offline and deterministic. `scripts/check-public-surfaces.ps1 -Online` is a manual
 reconciliation against GitHub, npm, the Chrome update feed, the official MCP Registry, and the
 canonical website; a transient external outage does not make an otherwise valid source commit

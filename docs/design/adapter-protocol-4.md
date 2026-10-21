@@ -713,6 +713,10 @@ largest remaining parts are the diagnostics ring (720 lines), recording and chun
 | `lib/popup-view.js`, `lib/setup-view.js` | The words and actions of the popup and the setup page: pure functions of the connection snapshot, with no DOM and no `chrome.*`. The page scripts only place them | | new |
 | `kit.css`, `options.css` | The extension pages' shared visual tokens, and the options page layout on them | | new |
 
+Note (2026-10-20): `lib/script-evaluator.js` no longer exists. The second sweep's EXT-13
+(14bee797) folded it into `lib/evaluate.js`, so the worker's `importScripts` list below names
+`vendor/acorn.js` and `lib/evaluate.js` only. The table and the list are kept as designed.
+
 Deleted in the final commit:
 - `service-worker.js`;
 - `lib/engine.js` (ledger);
@@ -2754,6 +2758,7 @@ If nothing effectful has been dispatched in this command, the failures are `Canc
 - Change:
   - `lib/tabs.js`, `lib/capture.js`, `lib/notice.js`, `lib/buffers.js`, `lib/primitives.js`;
   - `script-evaluator.js` gains an additive `prepare` and `run(deadline, terminate)`.
+    (2026-10-20: this code now lives in `lib/evaluate.js`, after EXT-13.)
 - Tests (mocked chrome APIs):
   - every golden request produces its golden receipt;
   - an unknown name answers `unsupported` with `dispatched:false`;

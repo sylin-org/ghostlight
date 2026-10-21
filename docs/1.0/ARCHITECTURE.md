@@ -355,8 +355,9 @@ Each adapter has one closed executable handler table. Platform is identity and p
 information, never a dispatch key. A vendor protocol such as CDP is private adapter technique, not
 a second wire vocabulary.
 
-The browser adapter is a service component. `browser/adapter/mod.rs` names a closed `Family`
-(Chromium) and re-exports the service's internal browser work vocabulary from
+The browser adapter is a service component. `browser/adapter/mod.rs` holds one module per
+browser family, today only `chromium`, with no enum naming the families: a new family is a new
+module beside it. It re-exports the service's internal browser work vocabulary from
 `browser/adapter/work.rs`: `BrowserCommand` in, `BrowserOutcome` back, `BrowserEvent` between
 calls. Chromium speaks one wire, adapter protocol 4 (`adapter/chromium/protocol4`, specified in
 `docs/design/adapter-protocol-4.md`). Its translator turns each unit of work into frozen
