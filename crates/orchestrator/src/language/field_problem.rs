@@ -18,6 +18,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use super::handle::HandleKind;
 use super::outcome::{article, counted, one_line_bounded, ActionSubject, TargetRole};
 
 /// The longest part of a given value a sentence quotes.
@@ -28,24 +29,6 @@ const PAGE_TEXT_MAX_CHARS: usize = 60;
 const LIST_MAX_CHARS: usize = 140;
 /// The characters held back for the tail that counts clauses the summary had no room for.
 const TAIL_RESERVE_CHARS: usize = 40;
-/// Prefixes of the handles and ids Ghostlight mints, each with the shape of what follows it. Page
-/// text that looks like one is not repeated.
-const HANDLE_SHAPES: [(&str, SuffixShape); 6] = [
-    ("target_", is_workspace_suffix),
-    ("tab_", is_workspace_suffix),
-    ("view_", is_workspace_suffix),
-    ("image_", is_workspace_suffix),
-    ("diag_", is_diagnostics_cursor_suffix),
-    ("invocation_", is_invocation_suffix),
-];
-/// Whether the text after a handle prefix has the shape Ghostlight mints.
-type SuffixShape = fn(&str) -> bool;
-/// How many lowercase base32 characters follow the prefix of a workspace handle.
-const WORKSPACE_SUFFIX_CHARS: usize = 8;
-/// How many lowercase hex digits follow `invocation_`.
-const INVOCATION_SUFFIX_CHARS: usize = 32;
-/// How many lowercase hex digits end a `diag_<counter>_<check>` cursor.
-const CURSOR_CHECK_CHARS: usize = 8;
 /// What page text shaped like a handle becomes in a sentence.
 const HANDLE_REPLACEMENT: &str = "[handle]";
 /// The input type of a range, whose refusal names the step it snaps to.
@@ -902,37 +885,9 @@ pub(super) fn page_text(value: &str, max_chars: usize) -> String {
 fn is_handle_shaped(word: &str) -> bool {
     let word = word
         .trim_matches(|character: char| !(character.is_ascii_alphanumeric() || character == '_'));
-    HANDLE_SHAPES
-        .iter()
-        .any(|(prefix, shaped)| word.strip_prefix(prefix).is_some_and(shaped))
-}
-
-fn is_workspace_suffix(suffix: &str) -> bool {
-    suffix.len() == WORKSPACE_SUFFIX_CHARS
-        && suffix
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || ('2'..='7').contains(&c))
-}
-
-fn is_lower_hex(text: &str, chars: usize) -> bool {
-    text.len() == chars
-        && text
-            .chars()
-            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-}
-
-fn is_invocation_suffix(suffix: &str) -> bool {
-    is_lower_hex(suffix, INVOCATION_SUFFIX_CHARS)
-}
-
-fn is_diagnostics_cursor_suffix(suffix: &str) -> bool {
-    suffix.split_once('_').is_some_and(|(counter, check)| {
-        !counter.is_empty()
-            && counter
-                .chars()
-                .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase())
-            && is_lower_hex(check, CURSOR_CHECK_CHARS)
-    })
+    HandleKind::IN_PAGE_TEXT
+        .into_iter()
+        .any(|kind| kind.minted(word))
 }
 
 /// The options a clause offers: all of them when they fit the room, otherwise the leading ones

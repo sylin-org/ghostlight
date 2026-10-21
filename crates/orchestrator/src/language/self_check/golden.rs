@@ -46,9 +46,8 @@ const VOLATILE_KEYS: [&str; 7] = [
     "timestamp",
 ];
 
-/// The prefix of a target handle, and how many characters of base32 follow it.
-const TARGET_HANDLE_PREFIX: &str = "target_";
-const TARGET_HANDLE_SUFFIX_LEN: usize = 8;
+/// The prefix of a target handle.
+const TARGET_HANDLE_PREFIX: &str = crate::language::HandleKind::Target.prefix();
 
 /// A path relative to the repository root, resolved from this crate.
 pub(crate) fn repository_path(relative: &str) -> std::path::PathBuf {
@@ -94,7 +93,7 @@ fn mask_target_handles(text: &str) -> String {
             .bytes()
             .take_while(|byte| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(byte))
             .count();
-        if length == TARGET_HANDLE_SUFFIX_LEN {
+        if length == crate::language::handle::WORKSPACE_SUFFIX_CHARS {
             masked.push_str(VOLATILE_PLACEHOLDER);
             rest = &suffix[length..];
         } else {

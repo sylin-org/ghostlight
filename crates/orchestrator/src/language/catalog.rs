@@ -18,6 +18,7 @@ use super::bounds::{
     READ_CHARS, SCRIPT_RESULT_CHARS, SEARCH_TEXT_CHARS, UPLOAD_PATHS, UPLOAD_PATH_CHARS, URL_MAX,
     WHEEL_TICKS, WINDOW_HEIGHT, WINDOW_WIDTH, ZOOM_PERCENT,
 };
+use super::handle::HandleKind;
 use super::wait::{PageCondition, WaitCondition};
 use super::{
     DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
@@ -326,14 +327,14 @@ fn tabs_schema() -> Value {
             object(
                 vec![
                     ("action", constant("focus", "Bring the tab to the front.")),
-                    ("tab", handle("tab_", "From browser_tabs list.")),
+                    ("tab", handle(HandleKind::Tab, "From browser_tabs list.")),
                 ],
                 vec!["action", "tab"],
             ),
             object(
                 vec![
                     ("action", constant("close", "Close the tab.")),
-                    ("tab", handle("tab_", "From browser_tabs list.")),
+                    ("tab", handle(HandleKind::Tab, "From browser_tabs list.")),
                 ],
                 vec!["action", "tab"],
             ),
@@ -379,7 +380,7 @@ fn navigate_schema() -> Value {
                     (
                         "browser",
                         handle(
-                            "browser_",
+                            HandleKind::Browser,
                             "Only with new_tab true. From browser_tabs list. Omit to use the browser the user attended last.",
                         ),
                     ),
@@ -464,7 +465,7 @@ fn read_schema() -> Value {
                 ("tab", tab()),
                 (
                     "target",
-                    handle("target_", ""),
+                    handle(HandleKind::Target, ""),
                 ),
                 (
                     "mode",
@@ -500,7 +501,7 @@ fn inspect_schema() -> Value {
                 ),
                 (
                     "root",
-                    handle("target_", "Subtree root for document scope."),
+                    handle(HandleKind::Target, "Subtree root for document scope."),
                 ),
                 (
                     "max_depth",
@@ -564,7 +565,7 @@ fn screenshot_schema() -> Value {
                 vec!["full_page"],
             ),
             object(
-                vec![("tab", tab()), ("target", handle("target_", ""))],
+                vec![("tab", tab()), ("target", handle(HandleKind::Target, ""))],
                 vec!["target"],
             ),
             object(
@@ -573,7 +574,7 @@ fn screenshot_schema() -> Value {
                     (
                         "view",
                         handle(
-                            "view_",
+                            HandleKind::View,
                             "The region is in this view's image pixels; take a screenshot first.",
                         ),
                     ),
@@ -614,14 +615,14 @@ fn click_schema() -> Value {
     union(
         vec![
             object(
-                with(common.clone(), ("target", handle("target_", ""))),
+                with(common.clone(), ("target", handle(HandleKind::Target, ""))),
                 vec!["target"],
             ),
             object(
                 with_many(
                     common,
                     vec![
-                        ("view", handle("view_", VIEW_POINT)),
+                        ("view", handle(HandleKind::View, VIEW_POINT)),
                         ("x", coordinate()),
                         ("y", coordinate()),
                     ],
@@ -654,7 +655,7 @@ fn scroll_schema() -> Value {
     union(
         vec![
             object(
-                vec![("tab", tab()), ("target", handle("target_", ""))],
+                vec![("tab", tab()), ("target", handle(HandleKind::Target, ""))],
                 vec!["target"],
             ),
             object(
@@ -690,7 +691,7 @@ fn scroll_schema() -> Value {
                             SCROLL_DIRECTION,
                         ),
                     ),
-                    ("view", handle("view_", VIEW_POINT)),
+                    ("view", handle(HandleKind::View, VIEW_POINT)),
                     ("x", coordinate()),
                     ("y", coordinate()),
                     ("ticks", within(WHEEL_TICKS, None, "")),
@@ -713,13 +714,13 @@ fn hover_schema() -> Value {
     union(
         vec![
             object(
-                vec![("tab", tab()), ("target", handle("target_", ""))],
+                vec![("tab", tab()), ("target", handle(HandleKind::Target, ""))],
                 vec!["target"],
             ),
             object(
                 vec![
                     ("tab", tab()),
-                    ("view", handle("view_", VIEW_POINT)),
+                    ("view", handle(HandleKind::View, VIEW_POINT)),
                     ("x", coordinate()),
                     ("y", coordinate()),
                 ],
@@ -743,13 +744,13 @@ fn fill_schema() -> Value {
             vec![
                 (
                     "fields",
-                    json!({"type":"array","minItems":FILL_FIELDS.min,"maxItems":FILL_FIELDS.max,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_",""),"selector":semantic_selector(),"value":{"description":"Text replaces the current value; empty clears it. Select: an option's text or value as browser_inspect lists it; multi-select: an array. Checkbox: true or false (sets, never toggles). Radio: true selects it, or a sibling's label selects that one. Date and time: ISO, like 2026-10-14, 14:30, 2026-10-14T14:30. Number and range: within the control's limits.","anyOf":[{"type":"string","maxLength":FIELD_VALUE_CHARS},{"type":"boolean"},{"type":"number"},{"type":"array","items":{"type":"string","maxLength":FIELD_VALUE_CHARS},"maxItems":FIELD_CHOICES}]}},"required":["value"]}}),
+                    json!({"type":"array","minItems":FILL_FIELDS.min,"maxItems":FILL_FIELDS.max,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle(HandleKind::Target,""),"selector":semantic_selector(),"value":{"description":"Text replaces the current value; empty clears it. Select: an option's text or value as browser_inspect lists it; multi-select: an array. Checkbox: true or false (sets, never toggles). Radio: true selects it, or a sibling's label selects that one. Date and time: ISO, like 2026-10-14, 14:30, 2026-10-14T14:30. Number and range: within the control's limits.","anyOf":[{"type":"string","maxLength":FIELD_VALUE_CHARS},{"type":"boolean"},{"type":"number"},{"type":"array","items":{"type":"string","maxLength":FIELD_VALUE_CHARS},"maxItems":FIELD_CHOICES}]}},"required":["value"]}}),
                 ),
                 ("tab", tab()),
                 (
                     "submit_target",
                     handle(
-                        "target_",
+                        HandleKind::Target,
                         "Clicked after filling; may cause an external effect.",
                     ),
                 ),
@@ -781,7 +782,7 @@ fn type_schema() -> Value {
     union(
         vec![
             object(
-                with(common.clone(), ("target", handle("target_", ""))),
+                with(common.clone(), ("target", handle(HandleKind::Target, ""))),
                 vec!["target", "text"],
             ),
             object(
@@ -811,7 +812,11 @@ fn type_schema() -> Value {
 
 fn key_schema() -> Value {
     let modifiers = ("modifiers", modifier_keys());
-    let shared = vec![("tab", tab()), ("target", handle("target_", "")), modifiers];
+    let shared = vec![
+        ("tab", tab()),
+        ("target", handle(HandleKind::Target, "")),
+        modifiers,
+    ];
     // Exclusive by construction: every named key is longer than one character.
     let stroke_item = json!({"oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]});
     union(
@@ -854,10 +859,10 @@ fn drag_schema() -> Value {
         vec![
             object(
                 vec![
-                    ("source_target", handle("target_", "")),
+                    ("source_target", handle(HandleKind::Target, "")),
                     (
                         "destination_target",
-                        handle("target_", ""),
+                        handle(HandleKind::Target, ""),
                     ),
                     ("tab", tab()),
                 ],
@@ -867,7 +872,7 @@ fn drag_schema() -> Value {
                 vec![
                     (
                         "view",
-                        handle("view_", "Both points are pixels in this view's screenshot image; take one first."),
+                        handle(HandleKind::View, "Both points are pixels in this view's screenshot image; take one first."),
                     ),
                     ("start_x", coordinate()),
                     ("start_y", coordinate()),
@@ -972,7 +977,7 @@ fn wait_branch(condition: WaitCondition) -> Value {
             fields.push((
                 "target",
                 handle(
-                    "target_",
+                    HandleKind::Target,
                     "For target_present, target_absent, and visual_settle.",
                 ),
             ));
@@ -1031,7 +1036,7 @@ fn upload_schema() -> Value {
     examples(
         object(
             vec![
-                ("target", handle("target_", "File input.")),
+                ("target", handle(HandleKind::Target, "File input.")),
                 ("selector", semantic_selector()),
                 (
                     "paths",
@@ -1043,12 +1048,12 @@ fn upload_schema() -> Value {
                 ),
                 (
                     "source_image",
-                    handle("image_", "From an earlier screenshot."),
+                    handle(HandleKind::Image, "From an earlier screenshot."),
                 ),
                 (
                     "view",
                     handle(
-                        "view_",
+                        HandleKind::View,
                         "x and y are pixels in this view's image; needs source_image.",
                     ),
                 ),
@@ -1140,7 +1145,7 @@ fn record_schema() -> Value {
                     (
                         "target",
                         handle(
-                            "target_",
+                            HandleKind::Target,
                             "File input to attach the replay to, inside the browser.",
                         ),
                     ),
@@ -1204,7 +1209,10 @@ fn diagnose_schema() -> Value {
                         "Case-insensitive literal filter, not a regular expression.",
                     ),
                 ),
-                ("after", handle("diag_", "Cursor from a prior result.")),
+                (
+                    "after",
+                    handle(HandleKind::Diagnostics, "Cursor from a prior result."),
+                ),
                 (
                     "limit",
                     within(DIAGNOSTIC_LIMIT, Some(DEFAULT_DIAGNOSTIC_LIMIT), ""),
@@ -1624,7 +1632,8 @@ fn enumeration(values: &[&str], default: Option<&str>, description: &str) -> Val
     described(schema, description)
 }
 
-fn handle(prefix: &str, description: &str) -> Value {
+fn handle(kind: HandleKind, description: &str) -> Value {
+    let prefix = kind.prefix();
     described(
         json!({"type":"string","maxLength":HANDLE_CHARS,"pattern":format!("^{prefix}.+$")}),
         description,
@@ -1637,7 +1646,7 @@ fn modifier_keys() -> Value {
 }
 
 fn tab() -> Value {
-    handle("tab_", "Omit when unambiguous.")
+    handle(HandleKind::Tab, "Omit when unambiguous.")
 }
 
 fn url() -> Value {
@@ -1673,6 +1682,7 @@ fn extent() -> Value {
 
 #[cfg(test)]
 mod tests {
+    use crate::language::HandleKind;
     use std::fs;
 
     use serde_json::{json, Value};
@@ -1930,7 +1940,7 @@ mod tests {
                             "direction",
                             enumeration(&["up", "down", "left"], Some("down"), "Way."),
                         ),
-                        ("target", handle("target_", "First meaning.")),
+                        ("target", handle(HandleKind::Target, "First meaning.")),
                         ("count", integer(1, 5, None, "How many.")),
                     ],
                     vec!["action", "text"],
@@ -1944,7 +1954,7 @@ mod tests {
                             "direction",
                             enumeration(&["up", "down"], Some("down"), "Way."),
                         ),
-                        ("target", handle("target_", "Second meaning.")),
+                        ("target", handle(HandleKind::Target, "Second meaning.")),
                         ("count", integer(3, 9, None, "How many.")),
                     ],
                     vec!["action"],

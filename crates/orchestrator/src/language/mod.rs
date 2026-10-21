@@ -15,6 +15,7 @@ pub mod deployment;
 pub mod environment;
 pub mod field_echo;
 pub mod field_problem;
+pub mod handle;
 pub mod history;
 pub mod intake;
 pub mod migration;
@@ -33,6 +34,7 @@ mod tool_catalog;
 pub mod wait;
 pub mod workbench;
 
+pub use handle::HandleKind;
 pub use tool_catalog::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
 pub use wait::{PageCondition, WaitCondition};
 
@@ -1007,9 +1009,9 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             |value: &ReadPage| {
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
+                validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
                 validate_timeout(value.timeout_ms)?;
-                validate_optional_handle(value.target.as_deref(), "target_")?;
+                validate_optional_handle(value.target.as_deref(), HandleKind::Target)?;
                 if value.mode.is_some() && value.target.is_some() {
                     return Err(LanguageError::Invalid(
                         "mode cannot be combined with target".into(),
@@ -1031,7 +1033,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             |value: &InspectPage| {
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
+                validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
                 validate_timeout(value.timeout_ms)?;
                 validate_choice(
                     &value.scope,
@@ -1039,7 +1041,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                     "scope",
                 )?;
                 if value.scope == "document" {
-                    validate_optional_handle(value.root.as_deref(), "target_")?;
+                    validate_optional_handle(value.root.as_deref(), HandleKind::Target)?;
                     if let Some(depth) = value.max_depth {
                         validate_within(depth, DOCUMENT_DEPTH, "max_depth")?;
                     }
@@ -1067,7 +1069,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             |value: &Find| {
                 validate_text(&value.text, SEARCH_TEXT_CHARS, "text")?;
                 validate_timeout(value.timeout_ms)?;
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
+                validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
                 validate_choice(&value.scope, &["any", "control", "text"], "scope")?;
                 validate_within(value.max_results, FIND_RESULTS, "max_results")?;
                 Ok(())
@@ -1232,7 +1234,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             |value: &RunScript| {
                 validate_text(&value.script, SCRIPT_MAX_CHARS, "script")?;
-                validate_optional_handle(value.tab.as_deref(), "tab_")?;
+                validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
                 validate_within(
                     value.max_result_chars,
                     SCRIPT_RESULT_CHARS,
@@ -1284,7 +1286,7 @@ fn decode_tabs(input: Value) -> Result<Operation, LanguageError> {
                             .into(),
                     )
                     })?,
-                    "tab_",
+                    HandleKind::Tab,
                 )?,
                 _ => {}
             }
@@ -1321,8 +1323,8 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
         ],
         |value: &NavigateRequest| {
             validate_url(&value.url)?;
-            validate_optional_handle(value.tab.as_deref(), "tab_")?;
-            validate_optional_handle(value.browser.as_deref(), "browser_")?;
+            validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
+            validate_optional_handle(value.browser.as_deref(), HandleKind::Browser)?;
             if let Some(reuse) = value.reuse.as_deref() {
                 validate_choice(reuse, &["domain", "never"], "reuse")?;
             }
@@ -1389,7 +1391,7 @@ fn decode_history(input: Value) -> Result<Operation, LanguageError> {
                 &["back", HISTORY_FORWARD, "reload"],
                 "action",
             )?;
-            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
             // false is the advertised default, which a client may send with any action.
             if value.action != "reload" && value.bypass_cache {
                 return Err(LanguageError::Invalid(
@@ -1422,7 +1424,7 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
         |value: &WindowRequest| {
             validate_choice(&value.action, &["zoom", "resize"], "action")?;
             validate_timeout(value.timeout_ms)?;
-            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
             match value.action.as_str() {
                 "zoom" => {
                     let percent = value.percent.ok_or_else(|| {
@@ -1492,7 +1494,7 @@ fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
                 "action",
             )?;
             validate_timeout(value.timeout_ms)?;
-            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
             match value.action.as_str() {
                 "respond" => validate_text_allow_empty(
                     value.text.as_deref().ok_or_else(|| {
@@ -1528,8 +1530,8 @@ fn decode_record(input: Value) -> Result<Operation, LanguageError> {
                 "action",
             )?;
             validate_timeout(value.timeout_ms)?;
-            validate_optional_handle(value.tab.as_deref(), "tab_")?;
-            validate_optional_handle(value.target.as_deref(), "target_")?;
+            validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
+            validate_optional_handle(value.target.as_deref(), HandleKind::Target)?;
             match value.action.as_str() {
                 "start" if value.target.is_some() => {
                     return Err(LanguageError::Invalid(
@@ -1577,14 +1579,14 @@ fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
             "timeout_ms",
         ],
         |value: &Diagnose| {
-            validate_optional_handle(value.tab.as_deref(), "tab_")?;
+            validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
             validate_timeout(value.timeout_ms)?;
             validate_choice(&value.source, &["both", "console", "network"], "source")?;
             validate_choice(&value.detail, &["problems", "all"], "detail")?;
             if let Some(pattern) = &value.r#match {
                 validate_text(pattern, SEARCH_TEXT_CHARS, "match")?;
             }
-            validate_optional_handle(value.after.as_deref(), "diag_")?;
+            validate_optional_handle(value.after.as_deref(), HandleKind::Diagnostics)?;
             validate_within(value.limit, DIAGNOSTIC_LIMIT, "limit")?;
             Ok(())
         },
@@ -1749,7 +1751,7 @@ fn validate_flow(value: &RunFlow) -> Result<(), LanguageError> {
         "steps",
     )?;
     validate_choice(&value.on_error, &["stop", "continue"], "on_error")?;
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     validate_timeout(value.timeout_ms)?;
     let mut seen: Vec<&str> = Vec::with_capacity(value.steps.len());
     for (index, step) in value.steps.iter().enumerate() {
@@ -1879,7 +1881,7 @@ fn validate_click(value: &Click) -> Result<(), LanguageError> {
             value.y,
         )?;
     }
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     validate_choice(&value.button, &["primary", "middle", "secondary"], "button")?;
     validate_within(usize::from(value.click_count), CLICK_COUNT, "click_count")?;
     validate_modifiers(&value.modifiers)?;
@@ -1889,7 +1891,7 @@ fn validate_click(value: &Click) -> Result<(), LanguageError> {
 }
 
 fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     let region_requested = value.view.is_some()
         || value.x.is_some()
         || value.y.is_some()
@@ -1906,7 +1908,7 @@ fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
                 .view
                 .as_deref()
                 .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
-            "view_",
+            HandleKind::View,
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
             validate_coordinate(
@@ -1926,7 +1928,7 @@ fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
             )?;
         }
     } else {
-        validate_optional_handle(value.target.as_deref(), "target_")?;
+        validate_optional_handle(value.target.as_deref(), HandleKind::Target)?;
         if value.target.is_some() && value.full_page {
             return Err(LanguageError::Invalid(
                 "target and full_page cannot be combined".into(),
@@ -1944,7 +1946,7 @@ fn validate_hover(value: &Hover) -> Result<(), LanguageError> {
         value.x,
         value.y,
     )?;
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     validate_timeout(value.timeout_ms)?;
     Ok(())
 }
@@ -1956,9 +1958,9 @@ fn validate_location(
     y: Option<f64>,
 ) -> Result<(), LanguageError> {
     match (target, view, x, y) {
-        (Some(target), None, None, None) => validate_handle(target, "target_"),
+        (Some(target), None, None, None) => validate_handle(target, HandleKind::Target),
         (None, Some(view), Some(x), Some(y)) => {
-            validate_handle(view, "view_")?;
+            validate_handle(view, HandleKind::View)?;
             validate_coordinate(x, "x")?;
             validate_coordinate(y, "y")
         }
@@ -1984,7 +1986,7 @@ impl ScrollPage {
 }
 
 fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     let wheel = value.wheel();
     if let Some(target) = &value.target {
         if wheel {
@@ -1992,7 +1994,7 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
                 "target cannot be combined with a view point".into(),
             ));
         }
-        validate_handle(target, "target_")?;
+        validate_handle(target, HandleKind::Target)?;
         // A client that fills in the advertised defaults sends them beside a target; only another
         // direction or amount asks for the page scroll a target excludes.
         let page_scroll = value
@@ -2028,7 +2030,7 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
                 .view
                 .as_deref()
                 .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
-            "view_",
+            HandleKind::View,
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
             validate_coordinate(
@@ -2060,8 +2062,8 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
 
 fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
     validate_within(value.fields.len(), FILL_FIELDS, "fields")?;
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
-    validate_optional_handle(value.submit_target.as_deref(), "target_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
+    validate_optional_handle(value.submit_target.as_deref(), HandleKind::Target)?;
     validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
     for field in &value.fields {
@@ -2072,7 +2074,7 @@ fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
             ));
         }
         if let Some(target) = &field.target {
-            validate_handle(target, "target_")?;
+            validate_handle(target, HandleKind::Target)?;
         }
         if let Some(selector) = &field.selector {
             validate_selector(selector)?;
@@ -2103,7 +2105,7 @@ fn validate_type_text(value: &TypeText) -> Result<(), LanguageError> {
         ));
     }
     if !value.target.is_empty() {
-        validate_handle(&value.target, "target_")?;
+        validate_handle(&value.target, HandleKind::Target)?;
     }
     if let Some(selector) = &value.selector {
         validate_selector(selector)?;
@@ -2114,7 +2116,7 @@ fn validate_type_text(value: &TypeText) -> Result<(), LanguageError> {
         ));
     }
     validate_text_allow_empty(&value.text, FIELD_VALUE_CHARS, "text")?;
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
     Ok(())
@@ -2138,14 +2140,14 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
                 .source_target
                 .as_deref()
                 .ok_or_else(|| LanguageError::Invalid("drag by targets needs source_target and destination_target: current handles from browser_find or browser_inspect".into()))?,
-            "target_",
+            HandleKind::Target,
         )?;
         validate_handle(
             value
                 .destination_target
                 .as_deref()
                 .ok_or_else(|| LanguageError::Invalid("drag by targets needs destination_target as well as source_target: where to drop".into()))?,
-            "target_",
+            HandleKind::Target,
         )?;
     } else {
         validate_handle(
@@ -2153,7 +2155,7 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
                 .view
                 .as_deref()
                 .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
-            "view_",
+            HandleKind::View,
         )?;
         for (name, coordinate) in [
             ("start_x", value.start_x),
@@ -2167,7 +2169,7 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
             )?;
         }
     }
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     validate_timeout(value.timeout_ms)?;
     Ok(())
 }
@@ -2229,7 +2231,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
                 .view
                 .as_deref()
                 .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
-            "view_",
+            HandleKind::View,
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
             validate_coordinate(
@@ -2242,7 +2244,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
             )?;
         }
     } else if let Some(image) = &value.source_image {
-        validate_handle(image, "image_")?;
+        validate_handle(image, HandleKind::Image)?;
         if value.target.is_none() && value.selector.is_none() {
             return Err(LanguageError::Invalid(
                 "attaching an image requires target or selector".into(),
@@ -2287,7 +2289,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
             ));
         }
     }
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     validate_timeout(value.timeout_ms)?;
     Ok(())
 }
@@ -2332,8 +2334,8 @@ fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
         }
         validate_within(usize::from(value.repeat), KEY_REPEAT, "repeat")?;
     }
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
-    validate_optional_handle(value.target.as_deref(), "target_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
+    validate_optional_handle(value.target.as_deref(), HandleKind::Target)?;
     validate_modifiers(&value.modifiers)?;
     validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
@@ -2341,7 +2343,7 @@ fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
 }
 
 fn validate_wait(value: &Wait) -> Result<(), LanguageError> {
-    validate_optional_handle(value.tab.as_deref(), "tab_")?;
+    validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     validate_timeout(value.timeout_ms)?;
     if value.condition == WaitCondition::SelectorPresent {
         let selector = value
@@ -2407,7 +2409,7 @@ fn validate_condition(
                 )));
             }
             if let Some(target) = target {
-                validate_handle(target, "target_")?;
+                validate_handle(target, HandleKind::Target)?;
             }
             Ok(())
         }
@@ -2426,7 +2428,7 @@ fn validate_condition(
         WaitCondition::TargetPresent | WaitCondition::TargetAbsent => {
             let target =
                 target.ok_or_else(|| LanguageError::Invalid(format!("{name} requires target")))?;
-            validate_handle(target, "target_")?;
+            validate_handle(target, HandleKind::Target)?;
             if value.is_some() {
                 Err(LanguageError::Invalid(format!(
                     "{name} does not accept value"
@@ -2498,7 +2500,8 @@ fn validate_choice(value: &str, choices: &[&str], field: &str) -> Result<(), Lan
     }
 }
 
-fn validate_handle(value: &str, prefix: &str) -> Result<(), LanguageError> {
+fn validate_handle(value: &str, kind: HandleKind) -> Result<(), LanguageError> {
+    let prefix = kind.prefix();
     if value.starts_with(prefix) && value.len() > prefix.len() && value.len() <= HANDLE_CHARS {
         Ok(())
     } else {
@@ -2508,8 +2511,8 @@ fn validate_handle(value: &str, prefix: &str) -> Result<(), LanguageError> {
     }
 }
 
-fn validate_optional_handle(value: Option<&str>, prefix: &str) -> Result<(), LanguageError> {
-    value.map_or(Ok(()), |handle| validate_handle(handle, prefix))
+fn validate_optional_handle(value: Option<&str>, kind: HandleKind) -> Result<(), LanguageError> {
+    value.map_or(Ok(()), |handle| validate_handle(handle, kind))
 }
 
 fn validate_text(value: &str, maximum: usize, field: &str) -> Result<(), LanguageError> {

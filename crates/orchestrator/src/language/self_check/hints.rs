@@ -24,6 +24,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::language::HandleKind;
 use serde_json::Value;
 
 use crate::intake::session::IntakeChannel;
@@ -48,33 +49,24 @@ const ARTICLES: &[&str] = &["a", "an", "the"];
 /// Prefixes that make a word a tool name.
 const TOOL_PREFIXES: &[&str] = &["browser_", "policy_"];
 
-/// The prefixes the catalog gives its handle fields (`handle()` in the catalog, pattern
-/// `^<prefix>.+$`). A hint may name a handle value that starts with one of them.
-const HANDLE_PREFIXES: &[&str] = &["target_", "tab_", "view_", "diag_", "image_", "invocation_"];
-
-/// How many characters follow a handle prefix: eight, the length the workspace mints.
-const HANDLE_SUFFIX_LEN: usize = 8;
-
-/// Whether a character belongs to a handle's random part: lowercase RFC 4648 base32.
-fn is_handle_suffix_char(character: char) -> bool {
-    character.is_ascii_lowercase() || ('2'..='7').contains(&character)
-}
+/// The handle kinds a hint may name a value of: those the catalog's handle fields take (pattern
+/// `^<prefix>.+$`), apart from browser ids, whose prefix is also how tool names begin.
+const HINT_HANDLES: [HandleKind; 6] = HandleKind::IN_PAGE_TEXT;
 
 /// The prefix of a word shaped like a handle value, or none.
 fn handle_prefix(word: &str) -> Option<&'static str> {
-    HANDLE_PREFIXES.iter().copied().find(|prefix| {
-        word.strip_prefix(prefix).is_some_and(|suffix| {
-            suffix.len() == HANDLE_SUFFIX_LEN && suffix.chars().all(is_handle_suffix_char)
-        })
-    })
+    HINT_HANDLES
+        .into_iter()
+        .find(|kind| kind.minted(word))
+        .map(HandleKind::prefix)
 }
 
 /// The handle prefix a field's schema requires, read from its `^<prefix>` pattern.
 fn required_handle_prefix(schema: &Value) -> Option<&'static str> {
     let pattern = schema.get("pattern")?.as_str()?.strip_prefix('^')?;
-    HANDLE_PREFIXES
-        .iter()
-        .copied()
+    HINT_HANDLES
+        .into_iter()
+        .map(HandleKind::prefix)
         .find(|prefix| pattern.starts_with(prefix))
 }
 

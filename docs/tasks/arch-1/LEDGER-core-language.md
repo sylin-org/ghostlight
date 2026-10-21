@@ -10,8 +10,10 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D5, C17, LANG-4, C12b-1 and LANG-1 have landed. Next is LANG-2 (one `HandleKind`). A
-slice's hash is filled in by the next slice's commit, since a rebase before the push changes it.
+L-D1 to L-D5, C17, LANG-4, C12b-1, LANG-1 and LANG-2 have landed. LANG-3 waits for test-02's
+BROW-15 (agreed: it lands first and reports its commit); meanwhile LANG-7, LANG-9, LANG-11 and
+LANG-12 need nothing. A slice's hash is filled in by the next slice's commit, since a rebase
+before the push changes it.
 
 ## Slices
 
@@ -27,8 +29,8 @@ In order. "After" names what a slice waits for.
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b 1b693758) |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed (5c65614a) |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
-| LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | landed (test f54e2469, block) |
-| LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | todo |
+| LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | landed (test f54e2469, block 512ad4d1) |
+| LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | landed |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | todo |
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
 | LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
@@ -137,3 +139,11 @@ In order. "After" names what a slice waits for.
   characters in the schema, documented on `URL_MAX`; the coordinate bound is an integer so the
   schema still prints `1000000`. The 5,000,000-byte inline ceiling stays where C12b left it,
   and `COMPOSITION_STEP_LIMIT` stays in `history.rs` for LANG-10 to move.
+- LANG-2: `language::HandleKind` names the eight kinds (tab, target, view, image, snapshot,
+  browser, diagnostics cursor, invocation) with each prefix and the shape Ghostlight mints
+  (`minted`). The decoder's 44 prefix literals and the catalog's `handle()` take the kind; the
+  page-text replacement and the hints self-check read `HandleKind::IN_PAGE_TEXT`, the set they
+  already used, so no word changes; the golden helper reads the target prefix and
+  `WORKSPACE_SUFFIX_CHARS`. A test pins the extension's `browser_` and `diag_` spellings. The
+  length bound stays `bounds::HANDLE_CHARS`. Left to their lanes: the five mint sites in
+  `workspace/mod.rs` (core-work) and `BROWSER_ID_PREFIX` in `browser/mod.rs` (core-service).
