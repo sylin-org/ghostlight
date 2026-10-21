@@ -879,6 +879,44 @@ mod tests {
                 );
             }
         }
+        {
+            // The policy subcommands the completions list are exactly the ones the command line
+            // takes: one ordinary call of each parses.
+            let samples: &[&[&str]] = &[
+                &["validate", "policy.json"],
+                &["migrate", "policy.json"],
+                &["explain", "policy.json"],
+                &["simulate", "policy.json", "audit.jsonl"],
+                &["keygen", "keys"],
+                &["pubkey", "ed25519.seed"],
+                &[
+                    "sign",
+                    "policy.json",
+                    "--ed25519-seed",
+                    "s",
+                    "--sequence",
+                    "1",
+                ],
+                &[
+                    "publish",
+                    "policy.json",
+                    "--ed25519-seed",
+                    "s",
+                    "--source",
+                    "policy.json",
+                ],
+            ];
+            let named: Vec<&str> = samples.iter().map(|sample| sample[0]).collect();
+            assert_eq!(named, crate::governance::inspection::SUBCOMMANDS);
+            for sample in samples {
+                let arguments = std::iter::once("policy")
+                    .chain(sample.iter().copied())
+                    .map(OsString::from);
+                if let Err(error) = launch_mode(arguments) {
+                    panic!("policy {} does not parse: {error}", sample[0]);
+                }
+            }
+        }
     }
 
     /// Protects the coordinator's reserve contract: `deployment install` takes one payload, one mode

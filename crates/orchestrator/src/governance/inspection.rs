@@ -147,45 +147,8 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
 mod tests {
     use std::fs;
 
-    use super::{parse, run, Command, SUBCOMMANDS};
+    use super::{parse, run, Command};
     use crate::scratch::Scratch;
-
-    /// Each listed subcommand is one the parser accepts, and the list names every one it accepts.
-    #[test]
-    fn every_listed_subcommand_parses() {
-        let samples: &[&[&str]] = &[
-            &["validate", "policy.json"],
-            &["migrate", "policy.json"],
-            &["explain", "policy.json"],
-            &["simulate", "policy.json", "audit.jsonl"],
-            &["keygen", "keys"],
-            &["pubkey", "ed25519.seed"],
-            &[
-                "sign",
-                "policy.json",
-                "--ed25519-seed",
-                "s",
-                "--sequence",
-                "1",
-            ],
-            &[
-                "publish",
-                "policy.json",
-                "--ed25519-seed",
-                "s",
-                "--source",
-                "policy.json",
-            ],
-        ];
-        let named: Vec<&str> = samples.iter().map(|sample| sample[0]).collect();
-        assert_eq!(named, SUBCOMMANDS);
-        for sample in samples {
-            let arguments: Vec<String> = sample.iter().map(|word| (*word).to_owned()).collect();
-            if let Err(error) = parse(&arguments) {
-                panic!("policy {} does not parse: {error}", sample[0]);
-            }
-        }
-    }
 
     #[test]
     fn commands_are_small_and_unambiguous() {

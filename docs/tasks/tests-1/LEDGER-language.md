@@ -23,7 +23,7 @@ every test read-only first, then cut one file per commit.
 | --- | --- | --- | --- |
 | `language/` | 349 | 55 | 55 |
 | `workbench/` | 252 | 35 + 2 reserve | 37 |
-| `governance/` | 136 | 40 | 136 |
+| `governance/` | 136 | 40 | 135 |
 
 ## Slices
 
@@ -61,6 +61,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TW4 | test(workbench): setup.rs keeps the 5 tests of the setup journey, and parts/ its none | 54 | 5 | 4 promise, 1 defect | landed (15cf6d1a) |
 | TW5 | test(workbench): watching.rs keeps the marker rule | 3 | 1 | 1 promise | landed (3e477cde) |
 | TW6 | test(workbench): input.rs keeps the search bound, checked against the page | 2 | 1 | 1 promise | landed (f7b86902) |
+| TG1 | test(cli, governance): the policy subcommands parse in the completions test, and governance drops its copy | 1 | 0 | - (moved to cli/parse.rs) | landed (this commit) |
 
 ## Notes
 
