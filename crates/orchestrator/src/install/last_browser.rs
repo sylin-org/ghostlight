@@ -41,38 +41,3 @@ pub fn record(path: &Path, browser: &str) -> io::Result<()> {
     .map_err(io::Error::other)?;
     atomic_replace(path, &bytes)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::scratch::Scratch;
-
-    #[test]
-    fn a_recorded_browser_reads_back_and_the_latest_wins() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("state").join("last-browser.json");
-        assert_eq!(read(&path), None);
-        record(&path, "chrome").unwrap();
-        assert_eq!(read(&path).as_deref(), Some("chrome"));
-        record(&path, "edge").unwrap();
-        assert_eq!(read(&path).as_deref(), Some("edge"));
-    }
-
-    #[test]
-    fn a_record_that_does_not_parse_is_no_memory() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("last-browser.json");
-        fs::write(&path, b"not json").unwrap();
-        assert_eq!(read(&path), None);
-        fs::write(&path, br#"{"browser":7}"#).unwrap();
-        assert_eq!(read(&path), None);
-    }
-
-    #[test]
-    fn unknown_fields_are_ignored() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("last-browser.json");
-        fs::write(&path, br#"{"browser":"brave","added_later":"x"}"#).unwrap();
-        assert_eq!(read(&path).as_deref(), Some("brave"));
-    }
-}

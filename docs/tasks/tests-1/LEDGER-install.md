@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 624 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 621 |
 | `crates/desktop` | 161 | 20 | 161 |
 
 ## Slices
@@ -23,6 +23,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | Slice | Subject | Before | After | Kept for | Status |
 | --- | --- | --- | --- | --- | --- |
 | T-I1 | `install/layout.rs`: its three tests restated path literals; the edge command name's tie to the relay's executable name is now a compile-time assert | 627 | 624 | none (the assert costs no test) | landed (this commit) |
+| T-I2 | `install/last_browser.rs`: its three tests repeated `service/mod.rs`'s B22 test, which remembers a connected browser and reads an unreadable record as none | 624 | 621 | none here (the service test proves it) | landed (this commit) |
 
 ## Notes
 
