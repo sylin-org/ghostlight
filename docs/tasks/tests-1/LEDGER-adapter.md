@@ -14,14 +14,15 @@ ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (
 (`scope/tests.rs`), A9 (`tree/tests.rs`),
 A10 (`merge/tests.rs`), A11 (`link/tests.rs`), A12 (`connection/tests.rs`), A13
 (`golden.rs`), A14 (`translate/script.rs`), A15 (`translate/tests/forms.rs`) ,
-A16 (`translate/tests/points.rs`) and A17 (`translate/tests/interaction.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+A16 (`translate/tests/points.rs`), A17 (`translate/tests/interaction.rs`) and A18
+(`translate/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 70 |
+| `browser/adapter/` | 337 | 55 | 56 |
 
 ## Slices
 
@@ -46,7 +47,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A14 | `protocol4/translate/script.rs`: which scripts `browser_execute` awaits | 2 | 1 | contract 1 | landed (4de312d7) |
 | A15 | `protocol4/translate/tests/forms.rs`: a fill's order, its refusals and its partial outcomes | 20 | 3 | promise 2, defect 1 | landed (1a4ccfed) |
 | A16 | `protocol4/translate/tests/points.rs`: where a point or a target may land | 22 | 3 | promise 2, defect 1 | landed (f64971b8) |
-| A17 | `protocol4/translate/tests/interaction.rs` (and `world`'s removed lookup): input refusals, unknown effects, capture and scripts | 37 + 1 | 4 | promise 3, defect 1 | landed (this commit) |
+| A17 | `protocol4/translate/tests/interaction.rs` (and `world`'s removed lookup): input refusals, unknown effects, capture and scripts | 37 + 1 | 4 | promise 3, defect 1 | landed (fa3d1e60) |
+| A18 | `protocol4/translate/tests.rs`: no unguarded content, the diagnostics binding and a changed document | 18 | 4 | contract 1, defect 3 | landed (this commit) |
 
 ## Notes
 
@@ -192,6 +194,14 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   region captures (a clip that restates its input, and staleness of a read-only image), the upload
   tests (the link's chunked request proves the chunking), and two script cases of the scanner
   `script.rs` proves.
+- A18: kept four: no content reaches a page outside an admitted scope (ADR-0203 Decision 6.6);
+  a diagnostics read binds its records only when the scope watches documents (a0dfc56b); a handle
+  whose document changed is stale as navigated, with the strict-guard, incomplete-inventory,
+  one-locator and page-export cases (fa3bcb02, a9d40c83); and an iframe read reports the tab's url
+  and host (fa3bcb02). Cut: the text conditions' race internals, the strict guard's unseen count
+  (scope's guard test), admission and coverage (scope's tests), the read and tree merges (merge's
+  tables), the recording-start shape (the request golden), and call-position wire fields (points'
+  routed-point case).
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden
