@@ -179,6 +179,30 @@ test("composed reads apply one exact character ceiling", async () => {
   assert.equal(read.value.truncated, true);
 });
 
+// The page cuts and counts characters, the unit of every limit the service sends, so a cut never
+// ends on the first half of a pair, which a 2.0.0 extension would send as is and lose the answer
+// (A-D1).
+test("a text cut never splits a character and counts characters as the service does", async () => {
+  const emoji = String.fromCodePoint(0x1f600);
+  const harness = contentHarness();
+  const body = harness.element("body");
+  body.append(harness.text(`ab${emoji}${emoji}cd`));
+  harness.setBody(body);
+
+  const fits = await harness.send({ kind: "read_text", mode: "visible", max_chars: 6 });
+  assert.equal(fits.value.text, `ab${emoji}${emoji}cd`, "six characters fit six");
+  assert.equal(fits.value.truncated, false);
+  const cut = await harness.send({ kind: "read_text", mode: "visible", max_chars: 3 });
+  assert.equal(cut.value.text, `ab${emoji}`, "the cut keeps the whole character");
+  assert.equal(cut.value.truncated, true);
+
+  const fields = contentHarness();
+  fields.newInput("Mood", { value: emoji.repeat(100) });
+  const mood = await controlNamed(fields, "Mood");
+  assert.equal(mood.value, emoji.repeat(80));
+  assert.equal(mood.value_chars, 100);
+});
+
 test("composed reads include form values and editable text while masking passwords", async () => {
   const harness = contentHarness();
   const body = harness.element("body");

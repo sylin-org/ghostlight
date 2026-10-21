@@ -652,10 +652,11 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       full = String(element.value ?? "");
     }
     if (secret) return { value: full ? MASKED_VALUE : "" };
-    if (full.length <= limit) return { value: full };
+    const chars = shared.characters(full);
+    if (chars <= limit) return { value: full };
     // A rich editor read up to its cap has no known full length, so it reports none.
-    const sized = kind !== "rich" || full.length < RICH_VALUE_READ_MAX;
-    return { value: full.slice(0, limit), chars: sized ? full.length : 0 };
+    const sized = kind !== "rich" || chars < RICH_VALUE_READ_MAX;
+    return { value: shared.bounded(full, limit), chars: sized ? chars : 0 };
   }
 
   // The placeholder of a native select: its first option when that option's value is empty. Only
@@ -1477,6 +1478,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const limit = maxChars + 1;
     const visited = new Set();
     let output = "";
+    let written = 0;
     let truncated = false;
 
     function append(value, separator = " ") {
@@ -1486,24 +1488,29 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
         ? separator
         : "";
       const next = `${joiner}${normalized}`;
-      const remaining = limit - output.length;
+      const remaining = limit - written;
       if (remaining <= 0) {
         truncated = true;
         return;
       }
-      output += next.slice(0, remaining);
-      if (next.length > remaining) truncated = true;
+      const piece = shared.bounded(next, remaining);
+      output += piece;
+      written += shared.characters(piece);
+      if (piece.length < next.length) truncated = true;
     }
 
     function lineBreak() {
       if (!output || output.endsWith("\n")) return;
-      if (output.length >= limit) truncated = true;
-      else output += "\n";
+      if (written >= limit) truncated = true;
+      else {
+        output += "\n";
+        written += 1;
+      }
     }
 
     function visit(node) {
-      if (!node || visited.has(node) || output.length >= limit) {
-        if (output.length >= limit) truncated = true;
+      if (!node || visited.has(node) || written >= limit) {
+        if (written >= limit) truncated = true;
         return;
       }
       visited.add(node);
@@ -1549,7 +1556,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
 
     visit(root);
     const text = output.trim();
-    return { text: text.slice(0, maxChars), truncated: truncated || text.length > maxChars };
+    return { text: shared.bounded(text, maxChars), truncated: truncated || shared.characters(text) > maxChars };
   }
 
   // A targeted read: the control's text, and for a native select a last line naming every option.
@@ -1559,7 +1566,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     if (!line) return read;
     const text = read.text ? `${read.text}
 ${line}` : line;
-    return { text: text.slice(0, maxChars), truncated: read.truncated || text.length > maxChars };
+    return { text: shared.bounded(text, maxChars), truncated: read.truncated || shared.characters(text) > maxChars };
   }
 
   // The page's own text: composedVisibleText without any field value or editable content.

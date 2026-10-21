@@ -52,7 +52,7 @@ const ERROR_CODES = Object.freeze({
 /*@include page-shared.js sensor.js presentation-css.js presentation.js content.js*/
 const failure = (e) => {
   const known = Object.values(ERROR_CODES).includes(e?.code);
-  const error = { code: known ? e.code : ERROR_CODES.pageException, message: String(e?.message ?? e).slice(0, 500) };
+  const error = { code: known ? e.code : ERROR_CODES.pageException, message: shared.bounded(e?.message ?? e, 500) };
   if (e instanceof AssetError && e.detail !== undefined) error.detail = e.detail;
   return { ok: false, error };
 };

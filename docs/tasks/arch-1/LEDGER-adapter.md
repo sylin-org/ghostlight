@@ -159,7 +159,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | landed (this commit) |
 | D52 | fix(adapter): Decision 5.2's receipt codes reach the refusal as a typed cause | SERV-7 | the coordinator's placement: `BrowserError::Primitive { detail, cause }` with `language::outcome::PrimitiveCause`; core-work's routing_refusal half is D52(c) in its ledger | landed (696fa557) |
 | D52(c) | fix(work): a refusal names its typed cause, and a capture over its budget says so | D52 | test-03 handed core-work's D52(c) to this lane on 2026-10-20; cross-lane in `work/mod.rs` | landed (this commit) |
-| A-D1 | fix(assets): a page text cut never splits a character and counts characters as the service does | - | the coordinator's page-asset classification, 2026-10-21 (Notes, second sweep) | todo |
+| A-D1 | fix(assets): a page text cut never splits a character and counts characters as the service does | - | the coordinator's page-asset classification, 2026-10-21 (Notes, second sweep) | landed (this commit) |
 | A-D2 | fix(assets): an image input reads as a button, as fill already treats it | - | the same classification (Notes, second sweep) | todo |
 | A-D3 | fix(assets): a visual-settle wait on a target that is gone refuses it as stale | - | the same classification, lower confidence: confirm first (Notes, second sweep) | todo |
 
@@ -337,6 +337,15 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   over-counts `value_chars` (P-D4's mismatch, page side). One root: the page's cut counts characters
   and stops before a pair's first half, as the extension's `shared.bounded` does. The page assets
   ship with the service, so this fix needs no store resubmission.
+  Landed: `page-shared.js` holds the one rule, `bounded` cutting by characters (code points, so it
+  can never end inside a pair) and `characters` counting them, and every listed site calls it: the
+  composed read keeps a running character count beside its output instead of `output.length`, the
+  read's final cut and `truncated`, the targeted read, a field value's cut and `value_chars`, and
+  the rich editor's sized check in `content.js`, and the failure message in `world.js`. Proof: the
+  one boundary test the page-asset plan reserved, "a text cut never splits a character and counts
+  characters as the service does" (`content.test.js`): two emoji fit six characters exactly, a cut
+  after the first keeps it whole, and a field's emoji value is cut at 80 characters with
+  `value_chars` 100. The asset id is regenerated on purpose.
 - A-D2, found the same way: `INPUT_ROLES` in `content.js` has no `image` entry, so
   `<input type=image>` reads as a `textbox`. HTML-AAM maps it to `button`, and the fill path already
   calls it a button, so inspect contradicts fill and a selector for role `button` never finds it.

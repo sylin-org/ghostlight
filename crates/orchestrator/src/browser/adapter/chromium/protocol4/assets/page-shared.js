@@ -17,8 +17,27 @@ const CREDENTIAL_NAME = new RegExp(
   "card.?number|api.?key|cc-exp|cc-name)([^a-z]|$)"
 );
 
+// Page text is cut and counted in characters (code points), as the service counts the limits it
+// sends, so a cut never ends on the first half of a pair: the extension cannot send half an emoji,
+// and a 2.0.0 extension would drop the whole answer.
 function bounded(value, maximum) {
-  return String(value ?? "").slice(0, maximum);
+  const text = String(value ?? "");
+  if (text.length <= maximum) return text;
+  let kept = 0;
+  let end = 0;
+  for (const character of text) {
+    if (kept === maximum) break;
+    kept += 1;
+    end += character.length;
+  }
+  return text.slice(0, end);
+}
+
+// How many characters (code points) the text holds, the unit of every limit the service sends.
+function characters(value) {
+  let count = 0;
+  for (const _character of String(value ?? "")) count += 1;
+  return count;
 }
 
 function isCredentialMetadata(metadata) {
@@ -40,4 +59,4 @@ function normalizeNeedle(value) {
     .trim();
 }
 
-const shared = Object.freeze({ bounded, isCredentialMetadata, normalizeNeedle });
+const shared = Object.freeze({ bounded, characters, isCredentialMetadata, normalizeNeedle });
