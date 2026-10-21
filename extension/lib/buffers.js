@@ -99,10 +99,9 @@
    * `lifecycle` is a GhostlightSessions instance, `inventory` a GhostlightInventory and `worldCalls`
    * a GhostlightWorld instance. `diagnostics` is a GhostlightDiagnostics instance, whose events the
    * worker feeds, and `recording` a GhostlightRecording instance created with `onStop` set to this
-   * object's `recordingEnded`. `acquire` and `release` take and give back a debugger lease (default:
-   * the lifecycle's). `imageSize(base64)` measures an encoded frame. `changed()` is called after a
-   * recording starts or ends, so the worker can refresh the popup and badge. `chromeApi` supplies
-   * `tabs`, `runtime`, `offscreen` and `downloads`.
+   * object's `recordingEnded`. `imageSize(base64)` measures an encoded frame. `changed()` is called
+   * after a recording starts or ends, so the worker can refresh the popup and badge. `chromeApi`
+   * supplies `tabs`, `runtime`, `offscreen` and `downloads`.
    */
   function create({
     chromeApi = globalThis.chrome,
@@ -111,8 +110,6 @@
     worldCalls,
     diagnostics,
     recording,
-    acquire = (tabId) => lifecycle.acquire(tabId),
-    release = (tabId) => lifecycle.release(tabId),
     imageSize = captureApi.decodeImageSize,
     now = () => Date.now(),
     changed = () => {}
@@ -137,8 +134,7 @@
 
     async function readDiagnostics(op) {
       const tabId = op.tab_id;
-      await acquire(tabId);
-      try {
+      return lifecycle.withLease(tabId, async () => {
         if (!check.absent(op.binding) && bindings.get(tabId) !== op.binding) {
           // A different binding means the admitted documents changed without a tracked boundary.
           if (bindings.has(tabId)) {
@@ -175,9 +171,7 @@
           throw error;
         }
         return { ...result, capture_started: result.capture_started || sourceStarted, ...clearedFacts(0) };
-      } finally {
-        await release(tabId);
-      }
+      });
     }
 
     async function clearDiagnostics(op) {
@@ -282,9 +276,7 @@
     async function captureFrame(tabId, frameKind) {
       // A dialog blocks the renderer, so no frame can be taken until it is handled.
       if (lifecycle.currentDialog(tabId) || !(await scopeCurrent(tabId))) return false;
-      worldCalls.holdHidden(tabId);
-      try {
-        await worldCalls.ambientAll(tabId);
+      return worldCalls.withHidden(tabId, async () => {
         const metrics = await cdp(rootTarget(tabId), METHOD.LAYOUT_METRICS);
         const visual = metrics.cssVisualViewport || metrics.visualViewport;
         const clip = {
@@ -301,10 +293,7 @@
           throw new Error("recording frame exceeded its negotiated dimensions");
         }
         return await scopeCurrent(tabId) && recording.append(tabId, shot.data, frameKind, now());
-      } finally {
-        worldCalls.releaseHidden(tabId);
-        await worldCalls.ambientAll(tabId).catch(() => {});
-      }
+      });
     }
 
     function requireTab(tabId) {
@@ -314,8 +303,7 @@
     async function startRecording(op) {
       const tabId = op.tab_id;
       const tab = await requireTab(tabId);
-      await acquire(tabId);
-      try {
+      return lifecycle.withLease(tabId, async () => {
         const started = recording.start(tabId, tab.url);
         if (started.existing) return { result: RESULT.STARTED, summary: started.existing, existing: true };
         const state = recording.activeForTab(tabId);
@@ -338,9 +326,7 @@
           recording.discard(state.id);
           throw error;
         }
-      } finally {
-        await release(tabId);
-      }
+      });
     }
 
     function recordingStatus(op) {
@@ -354,13 +340,10 @@
       const state = selected.state;
       if (state.state !== RECORDING_STATE) return { result: RESULT.STOPPED, summary: selected.summary, changed: false };
       try {
-        await acquire(state.tabId);
-        try {
+        await lifecycle.withLease(state.tabId, async () => {
           await captureFrame(state.tabId, FRAME_KIND.FINAL).catch(() => false);
           await cdp(rootTarget(state.tabId), METHOD.STOP_SCREENCAST);
-        } finally {
-          await release(state.tabId);
-        }
+        });
         const summary = recording.finishStop(state, STOP_REASON.EXPLICIT);
         return { result: RESULT.STOPPED, summary, changed: true };
       } catch (error) {
@@ -433,8 +416,7 @@
 
     async function deliverToPage(destination, encoded, fx, correlation) {
       const tabId = destination.tab_id;
-      await acquire(tabId);
-      try {
+      return lifecycle.withLease(tabId, async () => {
         const snap = await inventory.snapshot(tabId);
         inventory.checkGuard(destination.guard, snap);
         fx.watch(tabId);
@@ -448,9 +430,7 @@
         fx.dispatched = worldApi.started(answer);
         if (!worldApi.okAnswer(answer)) throw new Error("the page did not accept the replay");
         return { delivery: DELIVERY.ATTACHED, tab_id: tabId };
-      } finally {
-        await release(tabId);
-      }
+      });
     }
 
     async function deliver(destination, encoded, fx, correlation) {

@@ -358,8 +358,7 @@ test("a call carries the local facts, the token and the attachment", async () =>
   const { chrome, world } = await ready({
     local: { preferences: () => ({ effects: false, captions: true }), managed: () => true, recording: () => false, runtime: () => "active" }
   });
-  world.holdHidden(TAB);
-  await world.callPrimitive(callArgs([box]), effects(), "p4_20");
+  await world.withHidden(TAB, () => world.callPrimitive(callArgs([box]), effects(), "p4_20"));
   const args = worldCalls(chrome)[0].params.arguments.map((entry) => entry.value);
   assert.equal(args[0], assets().id);
   assert.deepEqual(args[1], box.message);
@@ -367,7 +366,15 @@ test("a call carries the local facts, the token and the attachment", async () =>
   assert.equal(args[3], "p4_20:0");
   assert.equal(args[4], null);
   assert.equal(args[5], false);
-  world.releaseHidden(TAB);
+  assert.equal(world.localFacts(TAB).hidden, false, "the hold ends with the work");
+});
+
+test("withHidden shows the presentation again when its work throws", async () => {
+  const { world } = await ready();
+  await assert.rejects(world.withHidden(TAB, async () => {
+    assert.equal(world.localFacts(TAB).hidden, true);
+    throw new Error("capture failed");
+  }), /capture failed/);
   assert.equal(world.localFacts(TAB).hidden, false);
 });
 

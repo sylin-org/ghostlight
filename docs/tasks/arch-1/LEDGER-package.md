@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8 and EXT-13 have landed; EXT-14 is next.
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13 and EXT-14 have landed; EXT-15 is next.
 
 ## Slices
 
@@ -85,7 +85,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8 and EXT-13 have landed; EXT-14 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13 and EXT-14 have landed; EXT-15 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -98,7 +98,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8 and EXT-13 have landed; EXT-1
 | EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | todo |
 | EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | todo |
 | EXT-13 | refactor(extension): `script-evaluator.js` folds into `evaluate.js` | - | EXT-13 | landed (this commit) |
-| EXT-14 | refactor(extension): `withLease` and `withHidden` | - | EXT-14 | todo |
+| EXT-14 | refactor(extension): `withLease` and `withHidden` | - | EXT-14 | landed (this commit) |
 | EXT-12 | refactor(extension): the native link moves into `lib/link.js` | EXT-5, EXT-7, EXT-10 | EXT-12 | todo |
 | EXT-15 | docs(extension): module docs, and the README lists every file | - | EXT-15; the README is not packaged | todo |
 | B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | todo |
@@ -171,3 +171,15 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8 and EXT-13 have landed; EXT-1
   documents linked to the removed file (`docs/design/security-assessment-2026-09-06.md` twice,
   `docs/tasks/security-hardening/h3-script-effect-truth.md` once); each link now points at
   `evaluate.js`, keeps the old name, and says where the code went.
+- EXT-14: `lifecycle.withLease(tabId, work)` in `sessions.js` and `world.withHidden(tabId, work)`
+  replace the hand-written brackets: 14 of the 15 lease brackets in eight modules (`evaluate.js`
+  fits now that EXT-13 took its lease out of the evaluator's send, and the dialog status leases
+  inside its `if`, as before), and both hidden brackets (`capture.js` and `buffers.js`), whose
+  hold, page notice and show-again were identical. The one bracket left by hand is
+  `tabs.js`'s navigate: it leases only when it discards a beforeunload prompt and counts the
+  discard in the same bracket. Every module's `acquire` and `release` create options go: nothing
+  injected them, and with them the brackets could have leased one way and released another.
+  `holdHidden` and `releaseHidden` stay inside `world.js`; their test now runs through
+  `withHidden`. Proofs: "withLease gives the lease back however its work ends" in
+  `sessions.test.js` and "withHidden shows the presentation again when its work throws" in
+  `world.test.js`.

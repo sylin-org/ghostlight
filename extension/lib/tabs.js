@@ -348,8 +348,7 @@
      * nothing is sent, and the receipt says no_history_entry.
      */
     async function traverseHistory(tabId, direction, fx) {
-      await lifecycle.acquire(tabId);
-      try {
+      await lifecycle.withLease(tabId, async () => {
         const history = await lifecycle.cdp({ tabId }, METHOD.NAVIGATION_HISTORY);
         const step = direction === TARGET.BACK ? -1 : 1;
         const entry = Array.isArray(history?.entries) && Number.isSafeInteger(history.currentIndex)
@@ -358,9 +357,7 @@
         if (!Number.isSafeInteger(entry?.id)) throw sessions.failure(FAILURE.NO_HISTORY_ENTRY, NO_ENTRY_MESSAGE[direction]);
         fx.dispatched = true;
         await lifecycle.cdp({ tabId }, METHOD.NAVIGATE_TO_ENTRY, { entryId: entry.id });
-      } finally {
-        await lifecycle.release(tabId);
-      }
+      });
     }
 
     const navigate = handler({

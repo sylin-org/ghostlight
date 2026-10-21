@@ -235,7 +235,7 @@
    * `createCancellations()` registry. `lifecycle`, `inventory` and `world` are the sessions,
    * inventory and world instances. `tabs`, `capture`, `input`, `buffers` and `evaluate` are the
    * modules whose handlers fill the table. `chromeApi` supplies `tabs.get` for the tab facts.
-   * `acquire`, `release` and `sleep` default to the lifecycle's leases and a timer.
+   * `sleep` defaults to a timer.
    */
   function create({
     chromeApi = globalThis.chrome,
@@ -250,8 +250,6 @@
     input,
     buffers,
     evaluate,
-    acquire = (tabId) => lifecycle.acquire(tabId),
-    release = (tabId) => lifecycle.release(tabId),
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   } = {}) {
     if (typeof send !== "function" || !controlled?.manage || !cancellations?.isCancelled) {
@@ -311,13 +309,10 @@
       let dialog = lifecycle.currentDialog(tabId);
       if (!dialog) {
         // A dialog that was already open when the debugger attaches is announced just after.
-        await acquire(tabId);
-        try {
+        dialog = await lifecycle.withLease(tabId, async () => {
           await sleep(DIALOG_SETTLE_MS);
-          dialog = lifecycle.currentDialog(tabId);
-        } finally {
-          await release(tabId);
-        }
+          return lifecycle.currentDialog(tabId);
+        });
       }
       return {
         present: Boolean(dialog),
@@ -340,7 +335,7 @@
     // is answered too.
     async function dialogHandle(request, fx) {
       const tabId = request.tab_id;
-      await acquire(tabId);
+      return lifecycle.withLease(tabId, async () => {
       const dialog = lifecycle.currentDialog(tabId);
       try {
         fx.watch(tabId);
@@ -355,9 +350,8 @@
         fx.dispatched = false;
         await lifecycle.closeDialog(tabId);
         return { present: false, dialog_type: DIALOG_UNKNOWN, handled: false, accepted: false };
-      } finally {
-        await release(tabId);
       }
+      });
     }
 
     const dialogPrimitive = handler({
@@ -383,8 +377,7 @@
        */
       async run(request) {
         const tabId = request.tab_id;
-        await acquire(tabId);
-        try {
+        return lifecycle.withLease(tabId, async () => {
           const snap = await inventory.snapshot(tabId);
           inventory.checkGuard(request.guard, snap);
           const owner = snap.owner.get(request.frame.frame_id);
@@ -406,9 +399,7 @@
           }
           const nodes = (raw.nodes ?? []).filter((candidate) => !candidate.ignored);
           return { nodes: nodes.slice(0, request.max_nodes).map(axFact), truncated: nodes.length > request.max_nodes };
-        } finally {
-          await release(tabId);
-        }
+        });
       }
     });
 

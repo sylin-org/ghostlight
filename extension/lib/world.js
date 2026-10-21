@@ -142,16 +142,13 @@
    *
    * `lifecycle` is a GhostlightSessions instance and `inventory` a GhostlightInventory instance over
    * it. Pass `register` as the lifecycle installer, `disposeTab` as its onRelease and `sessionGone`
-   * as its onSessionGone. `acquire` and `release` take and give back a debugger lease (default: the
-   * lifecycle's). `isCancelled(correlation)` reports a cancel frame. `local` supplies the
+   * as its onSessionGone. `isCancelled(correlation)` reports a cancel frame. `local` supplies the
    * extension-owned facts: `preferences()`, `managed(tabId)`, `recording(tabId)` and `runtime()`.
    */
   function create({
     lifecycle,
     inventory,
     subtle = globalThis.crypto?.subtle,
-    acquire = (tabId) => lifecycle.acquire(tabId),
-    release = (tabId) => lifecycle.release(tabId),
     isCancelled = () => false,
     local = {},
     now = () => Date.now(),
@@ -370,6 +367,23 @@
     }
 
     /**
+     * Runs `work()` with Ghostlight's presentation hidden on a tab, for a capture of page pixels.
+     * The hold is told to the page before `work` runs, and the last hold's end shows the
+     * presentation again however `work` ends: a dead service or a detached tab cannot leave it
+     * hidden.
+     */
+    async function withHidden(tabId, work) {
+      holdHidden(tabId);
+      try {
+        await ambientAll(tabId);
+        return await work();
+      } finally {
+        releaseHidden(tabId);
+        await ambientAll(tabId).catch(() => {});
+      }
+    }
+
+    /**
      * Runs one world call and answers it as a call answer: `returned` with the unparsed envelope, or
      * `failed` with a call failure code and whether the page may have run it. A world without the
      * current runtime is installed lazily, exactly once, and the call is retried once.
@@ -488,7 +502,7 @@
      * throws `cancelled` with those facts kept.
      */
     async function callPrimitive(args, fx, correlation) {
-      await acquire(args.tab_id);
+      return lifecycle.withLease(args.tab_id, async () => {
       let snap = null;
       try {
         snap = await inventory.snapshot(args.tab_id);
@@ -515,8 +529,8 @@
         return { answers };
       } finally {
         pruneHandles(args.tab_id, snap);
-        await release(args.tab_id);
       }
+      });
     }
 
     // The top world of an attached tab, or null. Never attaches.
@@ -641,8 +655,7 @@
       devicePixelRatio,
       documentObject,
       localFacts,
-      holdHidden,
-      releaseHidden
+      withHidden
     });
   }
 

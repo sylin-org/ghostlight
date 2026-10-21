@@ -83,15 +83,11 @@
   }
 
   /**
-   * Creates the inventory over a GhostlightSessions instance and chrome.webNavigation. `acquire` and
-   * `release` take and give back a debugger lease for the `frames` primitive (default: the
-   * lifecycle's).
+   * Creates the inventory over a GhostlightSessions instance and chrome.webNavigation.
    */
   function create({
     lifecycle,
-    webNavigation,
-    acquire = (tabId) => lifecycle.acquire(tabId),
-    release = (tabId) => lifecycle.release(tabId)
+    webNavigation
   } = {}) {
     if (!lifecycle?.cdp || !webNavigation?.getAllFrames) throw new TypeError("the inventory requires debugger sessions and webNavigation");
     const cdp = lifecycle.cdp;
@@ -186,13 +182,10 @@
 
     /** The `frames` primitive: the tab's documents, completeness and unseen urls, inside a debugger lease. */
     async function framesPrimitive(args) {
-      await acquire(args.tab_id);
-      try {
+      return lifecycle.withLease(args.tab_id, async () => {
         const snap = await snapshot(args.tab_id);
         return { frames: Array.from(snap.owner.values(), (entry) => entry.fact), complete: snap.complete, unseen: snap.unseen };
-      } finally {
-        await release(args.tab_id);
-      }
+      });
     }
 
     return Object.freeze({ snapshot, topSnapshot, checkGuard, currentLoader, framesPrimitive });

@@ -45,6 +45,14 @@ test("concurrent debugger users share one attachment", async () => {
   assert.deepEqual(chromeDebugger.calls.at(-1), ["detach", 7]);
 });
 
+test("withLease gives the lease back however its work ends", async () => {
+  const lifecycle = sessions.create(fakeDebugger(), { installer });
+  assert.equal(await lifecycle.withLease(7, async () => lifecycle.attachedCount()), 1);
+  assert.equal(lifecycle.attachedCount(), 0);
+  await assert.rejects(lifecycle.withLease(7, async () => { throw new Error("boom"); }), /boom/);
+  assert.equal(lifecycle.attachedCount(), 0, "a thrown work still releases");
+});
+
 test("a retained controlled tab stays attached between sequential operations", async () => {
   const chromeDebugger = fakeDebugger();
   const lifecycle = sessions.create(chromeDebugger, { installer });

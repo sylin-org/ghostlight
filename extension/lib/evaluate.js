@@ -127,14 +127,11 @@
 
   /**
    * Creates the evaluate handler. `lifecycle` is a GhostlightSessions instance and `inventory` a
-   * GhostlightInventory. `acquire` and `release` take and give back a debugger lease (default: the
-   * lifecycle's). `sleep(ms)` is the settle wait.
+   * GhostlightInventory. `sleep(ms)` is the settle wait.
    */
   function create({
     lifecycle,
     inventory,
-    acquire = (tabId) => lifecycle.acquire(tabId),
-    release = (tabId) => lifecycle.release(tabId),
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   } = {}) {
     if (!lifecycle?.cdp || !inventory?.snapshot) throw new TypeError("evaluation requires debugger sessions and an inventory");
@@ -161,8 +158,7 @@
         const tabId = request.tab_id;
         const target = { tabId };
         const expression = scriptExpression(request.script, request.max_result_chars);
-        await acquire(tabId);
-        try {
+        return lifecycle.withLease(tabId, async () => {
           if (lifecycle.currentDialog(tabId)) throw sessions.dialogOpen();
           inventory.checkGuard(request.guard, await inventory.snapshot(tabId));
           fx.watch(tabId);
@@ -176,9 +172,7 @@
           const text = serialized.slice(0, request.max_result_chars);
           if (request.settle_ms) await sleep(request.settle_ms);
           return { value: text, truncated: serialized.length > text.length };
-        } finally {
-          await release(tabId);
-        }
+        });
       }
     });
 

@@ -236,8 +236,7 @@ test("the actual worker import list loads its packaged parser before the evaluat
       expressions.push(params.expression);
       return value(4);
     },
-    acquire: async () => {},
-    release: async () => {},
+    withLease: async (_tabId, work) => work(),
     currentDialog: () => null
   };
   const inventory = { snapshot: async () => ({}), checkGuard: () => {} };

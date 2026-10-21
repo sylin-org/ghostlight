@@ -109,19 +109,16 @@
 
   /**
    * Creates the view and capture primitives. `lifecycle` is a GhostlightSessions instance and
-   * `worldCalls` a GhostlightWorld instance. `acquire` and `release` take and give back a debugger
-   * lease (default: the lifecycle's). `chromeApi` supplies `tabs.getZoom`. `imageSize(base64)` measures
-   * an encoded image (default: the browser's decoder).
+   * `worldCalls` a GhostlightWorld instance. `chromeApi` supplies `tabs.getZoom`. `imageSize(base64)`
+   * measures an encoded image (default: the browser's decoder).
    */
   function create({
     lifecycle,
     worldCalls,
     chromeApi = globalThis.chrome,
-    acquire = (tabId) => lifecycle.acquire(tabId),
-    release = (tabId) => lifecycle.release(tabId),
     imageSize = decodeImageSize
   } = {}) {
-    if (!lifecycle?.cdp || !worldCalls?.holdHidden || !worldCalls?.ambientAll) {
+    if (!lifecycle?.cdp || !worldCalls?.withHidden) {
       throw new TypeError("capture requires debugger sessions and the world");
     }
     if (!chromeApi?.tabs?.getZoom) throw new TypeError("capture requires chrome.tabs.getZoom");
@@ -174,13 +171,10 @@
       },
       /** Resolves `ViewFacts` for the tab: visual viewport, content size, device scale and zoom. */
       async run(args) {
-        await acquire(args.tab_id);
-        try {
+        return lifecycle.withLease(args.tab_id, async () => {
           requireNoDialog(args.tab_id);
           return (await readView(args.tab_id)).view;
-        } finally {
-          await release(args.tab_id);
-        }
+        });
       }
     });
 
@@ -202,12 +196,9 @@
       async run(args) {
         const tabId = args.tab_id;
         const budget = args.budget;
-        await acquire(tabId);
-        try {
+        return lifecycle.withLease(tabId, async () => {
           requireNoDialog(tabId);
-          worldCalls.holdHidden(tabId);
-          try {
-            await worldCalls.ambientAll(tabId);
+          return worldCalls.withHidden(tabId, async () => {
             const { visual, content, view: facts } = await readView(tabId);
             const clip = clipFor(args.clip, visual, content);
             const scale = outputScale(clip.width, clip.height, budget);
@@ -231,14 +222,8 @@
               clip,
               view: facts
             };
-          } finally {
-            worldCalls.releaseHidden(tabId);
-            // The last release shows the presentation again. A dead service or detached tab cannot leave it hidden.
-            await worldCalls.ambientAll(tabId).catch(() => {});
-          }
-        } finally {
-          await release(tabId);
-        }
+          });
+        });
       }
     });
 

@@ -39,16 +39,13 @@
 
   /**
    * Creates the input runner. `lifecycle` is a GhostlightSessions instance, `inventory` a
-   * GhostlightInventory and `worldCalls` a GhostlightWorld instance. `acquire` and `release` take and
-   * give back a debugger lease (default: the lifecycle's). `isCancelled(correlation)` reports a
-   * cancel frame.
+   * GhostlightInventory and `worldCalls` a GhostlightWorld instance. `isCancelled(correlation)`
+   * reports a cancel frame.
    */
   function create({
     lifecycle,
     inventory,
     worldCalls,
-    acquire = (tabId) => lifecycle.acquire(tabId),
-    release = (tabId) => lifecycle.release(tabId),
     isCancelled = () => false,
     now = () => Date.now(),
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -189,8 +186,7 @@
      * count, why the batch stopped early (a dialog or a cancel), and whether a drag was native.
      */
     async function run(args, fx, correlation) {
-      await acquire(args.tab_id);
-      try {
+      return lifecycle.withLease(args.tab_id, async () => {
         let snap = await inventory.snapshot(args.tab_id);
         inventory.checkGuard(args.guard, snap);
         fx.watch(args.tab_id);
@@ -225,9 +221,7 @@
         }
         if (args.settle_ms) await sleep(args.settle_ms);
         return outcome;
-      } finally {
-        await release(args.tab_id);
-      }
+      });
     }
 
     return Object.freeze({ run, dragIntercepted, cancelDragInterception });

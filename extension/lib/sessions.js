@@ -314,6 +314,19 @@
     }
 
     /**
+     * Runs `work()` inside one lease on a tab, and gives the lease back however `work` ends.
+     * Resolves or rejects as `work` does. A failed acquire runs nothing and owes no release.
+     */
+    async function withLease(tabId, work) {
+      await acquire(tabId);
+      try {
+        return await work();
+      } finally {
+        await release(tabId);
+      }
+    }
+
+    /**
      * Marks a tab as controlled and attaches it. A retained tab keeps its session, and its focus
      * emulation when enabled, until unretain, forget or detachAll, independent of leases.
      */
@@ -537,6 +550,7 @@
     return Object.freeze({
       cdp,
       acquire,
+      withLease,
       retain,
       unretain,
       setFocusEmulationEnabled,
