@@ -397,231 +397,254 @@ fn entry(operation: &Operation) -> &'static CapabilityVariant {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
 
     use crate::governance::CapabilitySet;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
-    use super::{entry, requirements, variants, CapabilityVariant, Tool, DIRECTORY};
+    use super::{entry, requirements, Tool, DIRECTORY};
+    use crate::language::{decode, Operation};
 
-    fn decoded(tool: &str, input: serde_json::Value) -> CapabilitySet {
-        requirements(&crate::language::decode(tool, input).expect("valid operation"))
-    }
+    const NONE: CapabilitySet = CapabilitySet::EMPTY;
+    const R: CapabilitySet = CapabilitySet::READ;
+    const A: CapabilitySet = CapabilitySet::ACTION;
+    const W: CapabilitySet = CapabilitySet::WRITE;
+    const X: CapabilitySet = CapabilitySet::EXECUTE;
+    const RA: CapabilitySet = R.union(A);
+    const RW: CapabilitySet = R.union(W);
+    const RWA: CapabilitySet = RW.union(A);
 
-    /// One minimal valid decode input for every entry in `DIRECTORY`, keyed by exactly the same
-    /// (tool, variant) pair. A `DIRECTORY` entry with no arm here is a compile-time-silent, test-
-    /// time-loud gap: the match below is exhaustive over what this test knows to check, and an
-    /// unmatched entry panics with its own tool/variant rather than being skipped.
-    fn fixture(tool: &str, variant: Option<&str>) -> serde_json::Value {
+    /// ACCEPTANCE Governance 3 and LANGUAGE.md's capability line for every tool: each decoded call
+    /// reaches its own directory entry and requires exactly the RAWX set LANGUAGE.md documents
+    /// (written here from the document, not copied from `DIRECTORY`); the rows reach every entry
+    /// once and every catalog tool; and a flow requires nothing while its child classifies on its
+    /// own.
+    #[test]
+    fn each_call_requires_the_rawx_set_language_md_documents() {
         let upload_path = if cfg!(windows) {
             r"C:\ghostlight\upload.txt"
         } else {
             "/tmp/ghostlight/upload.txt"
         };
-        match (tool, variant) {
-            ("browser_tabs", Some("list")) => json!({"action":"list"}),
-            ("browser_tabs", Some("focus")) => json!({"action":"focus","tab":"tab_1"}),
-            ("browser_tabs", Some("close")) => json!({"action":"close","tab":"tab_1"}),
-            ("browser_navigate", None) => json!({"url":"https://example.com"}),
-            ("browser_history", None) => json!({"action":"back"}),
-            ("browser_window", Some("zoom")) => json!({"action":"zoom","percent":100}),
-            ("browser_window", Some("resize")) => {
-                json!({"action":"resize","width":1280,"height":720})
-            }
-            ("browser_read", None) => json!({}),
-            ("browser_inspect", None) => json!({}),
-            ("browser_find", None) => json!({"text":"Login"}),
-            ("browser_screenshot", None) => json!({}),
-            ("browser_click", None) => json!({"target":"target_1"}),
-            ("browser_click", Some("selector")) => json!({"selector":{"name":"Save"}}),
-            ("browser_click", Some("expect")) => {
-                json!({"target":"target_1","expect":{"condition":"load_ready"}})
-            }
-            ("browser_scroll", None) => json!({}),
-            ("browser_hover", None) => json!({"target":"target_1"}),
-            ("browser_fill_form", Some("fill")) => {
-                json!({"fields":[{"target":"target_1","value":"Ada"}]})
-            }
-            ("browser_fill_form", Some("submit")) => {
-                json!({"fields":[{"target":"target_1","value":"Ada"}],"submit_target":"target_2"})
-            }
-            ("browser_type_text", None) => json!({"target":"target_1","text":"Ada"}),
-            ("browser_type_text", Some("selector")) => {
-                json!({"selector":{"name":"Draft"},"text":"Ada"})
-            }
-            ("browser_type_text", Some("expect")) => {
-                json!({"focused":true,"text":"Ada","expect":{"condition":"load_ready"}})
-            }
-            ("browser_press_key", None) => json!({"key":"Enter"}),
-            ("browser_press_key", Some("expect")) => {
-                json!({"key":"Enter","expect":{"condition":"load_ready"}})
-            }
-            ("browser_drag", None) => {
-                json!({"source_target":"target_1","destination_target":"target_2"})
-            }
-            ("browser_upload", None) => json!({"target":"target_1","paths":[upload_path]}),
-            ("browser_upload", Some("selector")) => {
-                json!({"selector":{"name":"Attachment"},"paths":[upload_path]})
-            }
-            ("browser_execute", None) => json!({"script":"1+1"}),
-            ("browser_wait", None) => json!({"condition":"load_ready"}),
-            ("browser_flow", None) => json!({"steps":[
-                {"id":"list","tool":"browser_tabs","arguments":{"action":"list"}}
-            ]}),
-            ("browser_dialog", Some("status")) => json!({"action":"status"}),
-            ("browser_dialog", Some("resolve")) => json!({"action":"accept"}),
-            ("browser_record", Some("start")) => json!({"action":"start"}),
-            ("browser_record", Some("inspect")) => json!({"action":"status"}),
-            ("browser_record", Some("save_client")) => json!({"action":"save"}),
-            ("browser_record", Some("save_target")) => {
-                json!({"action":"save","target":"target_1"})
-            }
-            ("browser_diagnose", None) => json!({}),
-            ("policy_explain", None) => json!({}),
-            (tool, variant) => panic!(
-                "DIRECTORY grew a (tool={tool}, variant={variant:?}) entry with no fixture in \
-                 this test; add one so its requirements stay cross-checked against decode()"
+        let fill = json!([{"target":"target_1","value":"Ada"}]);
+        let rows: Vec<(&str, Option<&str>, CapabilitySet, Vec<Value>)> = vec![
+            (
+                "browser_tabs",
+                Some("list"),
+                R,
+                vec![json!({"action":"list"})],
             ),
-        }
-    }
-
-    #[test]
-    fn every_catalog_tool_has_at_least_one_policy_variant() {
-        let expected: HashSet<_> = Tool::ALL.into_iter().map(Tool::name).collect();
-        let actual: HashSet<_> = DIRECTORY.iter().map(|entry| entry.tool).collect();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn compound_and_empty_variants_are_explicit() {
-        let submitted = variants("browser_fill_form")
-            .find(|entry| entry.variant == Some("submit"))
-            .expect("submit variant");
-        assert_eq!(
-            submitted.requirements,
-            CapabilitySet::READ
-                .union(CapabilitySet::WRITE)
-                .union(CapabilitySet::ACTION)
-        );
-        assert!(variants("browser_tabs")
-            .find(|entry| entry.variant == Some("focus"))
-            .expect("focus variant")
-            .requirements
-            .is_empty());
-        assert!(variants("browser_window")
-            .find(|entry| entry.variant == Some("resize"))
-            .expect("resize variant")
-            .requirements
-            .is_empty());
-    }
-
-    #[test]
-    fn decoded_operations_use_the_exact_rawx_map() {
-        assert_eq!(
-            decoded("browser_navigate", json!({"url":"https://example.com"})),
-            CapabilitySet::READ
-        );
-        assert_eq!(
-            decoded("browser_tabs", json!({"action":"focus","tab":"tab_1"})),
-            CapabilitySet::EMPTY
-        );
-        assert_eq!(
-            decoded(
+            (
+                "browser_tabs",
+                Some("focus"),
+                NONE,
+                vec![json!({"action":"focus","tab":"tab_1"})],
+            ),
+            (
+                "browser_tabs",
+                Some("close"),
+                A,
+                vec![json!({"action":"close","tab":"tab_1"})],
+            ),
+            (
+                "browser_navigate",
+                None,
+                R,
+                vec![
+                    json!({"url":"https://example.com"}),
+                    json!({"url":"https://example.com","new_tab":true}),
+                ],
+            ),
+            (
+                "browser_history",
+                None,
+                A,
+                vec![json!({"action":"back"}), json!({"action":"reload"})],
+            ),
+            (
                 "browser_window",
-                json!({"action":"resize","width":1280,"height":720})
+                Some("zoom"),
+                R,
+                vec![json!({"action":"zoom","percent":100})],
             ),
-            CapabilitySet::EMPTY
-        );
-        assert_eq!(
-            decoded(
+            (
+                "browser_window",
+                Some("resize"),
+                NONE,
+                vec![json!({"action":"resize","width":1280,"height":720})],
+            ),
+            ("browser_read", None, R, vec![json!({})]),
+            ("browser_inspect", None, R, vec![json!({})]),
+            ("browser_find", None, R, vec![json!({"text":"Login"})]),
+            ("browser_screenshot", None, R, vec![json!({})]),
+            ("browser_click", None, A, vec![json!({"target":"target_1"})]),
+            (
+                "browser_click",
+                Some("selector"),
+                RA,
+                vec![json!({"selector":{"name":"Save"}})],
+            ),
+            (
+                "browser_click",
+                Some("expect"),
+                RA,
+                vec![json!({"target":"target_1","expect":{"condition":"load_ready"}})],
+            ),
+            ("browser_scroll", None, R, vec![json!({})]),
+            ("browser_hover", None, R, vec![json!({"target":"target_1"})]),
+            (
                 "browser_fill_form",
-                json!({"fields":[{"target":"target_1","value":"Ada"}]})
+                Some("fill"),
+                RW,
+                vec![json!({"fields":fill})],
             ),
-            CapabilitySet::READ.union(CapabilitySet::WRITE)
-        );
-        assert_eq!(
-            decoded(
+            (
                 "browser_fill_form",
-                json!({"fields":[{"target":"target_1","value":"Ada"}],"submit_target":"target_2"})
+                Some("submit"),
+                RWA,
+                vec![json!({"fields":fill,"submit_target":"target_2"})],
             ),
-            CapabilitySet::READ
-                .union(CapabilitySet::WRITE)
-                .union(CapabilitySet::ACTION)
-        );
-        assert_eq!(
-            decoded(
+            (
                 "browser_type_text",
-                json!({"target":"target_1","text":"Ada"})
+                None,
+                A,
+                vec![json!({"target":"target_1","text":"Ada"})],
             ),
-            CapabilitySet::ACTION
-        );
-        assert_eq!(
-            decoded("browser_dialog", json!({"action":"respond","text":"Ada"})),
-            CapabilitySet::ACTION
-        );
-        assert_eq!(
-            decoded("browser_record", json!({"action":"discard"})),
-            CapabilitySet::EMPTY
-        );
-        let flow = crate::language::decode("browser_flow", json!({"steps":[
-            {"tool":"browser_fill_form","arguments":{"fields":[{"target":"target_1","value":"Ada"}]}},
-            {"tool":"browser_wait","arguments":{"condition":"load_ready"}}
-        ]})).unwrap();
-        assert_eq!(requirements(&flow), CapabilitySet::EMPTY);
-        let crate::language::Operation::RunFlow(flow) = flow else {
-            panic!("flow")
-        };
-        let child =
-            crate::language::decode(&flow.steps[0].tool, flow.steps[0].arguments.clone()).unwrap();
-        assert_eq!(
-            requirements(&child),
-            CapabilitySet::READ.union(CapabilitySet::WRITE)
-        );
-    }
+            (
+                "browser_type_text",
+                Some("selector"),
+                RA,
+                vec![json!({"selector":{"name":"Draft"},"text":"Ada"})],
+            ),
+            (
+                "browser_type_text",
+                Some("expect"),
+                RA,
+                vec![json!({"focused":true,"text":"Ada","expect":{"condition":"load_ready"}})],
+            ),
+            ("browser_press_key", None, A, vec![json!({"key":"Enter"})]),
+            (
+                "browser_press_key",
+                Some("expect"),
+                RA,
+                vec![json!({"key":"Enter","expect":{"condition":"load_ready"}})],
+            ),
+            (
+                "browser_drag",
+                None,
+                A,
+                vec![json!({"source_target":"target_1","destination_target":"target_2"})],
+            ),
+            (
+                "browser_upload",
+                None,
+                W,
+                vec![json!({"target":"target_1","paths":[upload_path]})],
+            ),
+            (
+                "browser_upload",
+                Some("selector"),
+                RW,
+                vec![json!({"selector":{"name":"Attachment"},"paths":[upload_path]})],
+            ),
+            ("browser_execute", None, X, vec![json!({"script":"1+1"})]),
+            (
+                "browser_wait",
+                None,
+                R,
+                vec![json!({"condition":"load_ready"})],
+            ),
+            (
+                "browser_flow",
+                None,
+                NONE,
+                vec![json!({"steps":[
+                    {"tool":"browser_fill_form","arguments":{"fields":fill}},
+                    {"tool":"browser_wait","arguments":{"condition":"load_ready"}}
+                ]})],
+            ),
+            (
+                "browser_dialog",
+                Some("status"),
+                R,
+                vec![json!({"action":"status"})],
+            ),
+            (
+                "browser_dialog",
+                Some("resolve"),
+                A,
+                vec![
+                    json!({"action":"accept"}),
+                    json!({"action":"dismiss"}),
+                    json!({"action":"respond","text":"Ada"}),
+                ],
+            ),
+            (
+                "browser_record",
+                Some("start"),
+                R,
+                vec![json!({"action":"start"})],
+            ),
+            (
+                "browser_record",
+                Some("inspect"),
+                NONE,
+                vec![
+                    json!({"action":"status"}),
+                    json!({"action":"stop"}),
+                    json!({"action":"discard"}),
+                ],
+            ),
+            (
+                "browser_record",
+                Some("save_client"),
+                R,
+                vec![json!({"action":"save"})],
+            ),
+            (
+                "browser_record",
+                Some("save_target"),
+                RW,
+                vec![json!({"action":"save","target":"target_1"})],
+            ),
+            ("browser_diagnose", None, R, vec![json!({})]),
+            ("policy_explain", None, NONE, vec![json!({})]),
+        ];
 
-    #[test]
-    fn every_directory_entry_matches_what_decode_actually_requires() {
-        for listed in DIRECTORY {
-            let CapabilityVariant {
-                tool,
-                variant,
-                requirements: expected,
-                ..
-            } = *listed;
-            let input = fixture(tool, variant);
-            let operation = crate::language::decode(tool, input.clone())
-                .unwrap_or_else(|error| panic!("tool={tool} variant={variant:?} input={input}: fixture must decode, got {error:?}"));
-            assert_eq!(
-                requirements(&operation),
-                expected,
-                "tool={tool} variant={variant:?}: DIRECTORY's advertised requirement diverged \
-                 from what requirements() actually returns for the decoded operation"
-            );
-            assert_eq!(
-                entry(&operation),
-                entry_of(tool, variant),
-                "tool={tool} variant={variant:?}: the decoded operation reaches another entry"
-            );
+        let mut reached = Vec::new();
+        for (tool, variant, expected, calls) in &rows {
+            for call in calls {
+                let operation = decode(tool, call.clone())
+                    .unwrap_or_else(|error| panic!("{tool} {call}: {error}"));
+                assert_eq!(requirements(&operation), *expected, "{tool} {call}");
+                let reached_entry = entry(&operation);
+                assert_eq!(
+                    (reached_entry.tool, reached_entry.variant),
+                    (*tool, *variant),
+                    "{tool} {call} reaches another entry"
+                );
+            }
+            reached.push((*tool, *variant));
         }
-    }
-
-    fn entry_of(tool: &str, variant: Option<&str>) -> &'static CapabilityVariant {
-        DIRECTORY
+        let listed: Vec<_> = DIRECTORY
             .iter()
-            .find(|entry| entry.tool == tool && entry.variant == variant)
-            .expect("the entry is in the directory")
-    }
+            .map(|entry| (entry.tool, entry.variant))
+            .collect();
+        assert_eq!(reached, listed, "the rows reach every entry once, in order");
+        let tools: BTreeSet<&str> = listed.iter().map(|(tool, _)| *tool).collect();
+        let catalog: BTreeSet<&str> = Tool::ALL.into_iter().map(Tool::name).collect();
+        assert_eq!(tools, catalog);
 
-    #[test]
-    fn each_tool_and_variant_is_one_directory_entry() {
-        let mut seen = HashSet::new();
-        for entry in DIRECTORY {
-            assert!(
-                seen.insert((entry.tool, entry.variant)),
-                "{} {:?} appears twice",
-                entry.tool,
-                entry.variant
-            );
-        }
+        let (_, _, _, flow_calls) = rows
+            .iter()
+            .find(|(tool, ..)| *tool == Tool::Flow.name())
+            .expect("a row calls browser_flow");
+        let flow = decode(Tool::Flow.name(), flow_calls[0].clone()).expect("the flow decodes");
+        let Operation::RunFlow(flow) = flow else {
+            panic!("browser_flow decodes to a flow")
+        };
+        let child = decode(&flow.steps[0].tool, flow.steps[0].arguments.clone())
+            .expect("the flow's fill step decodes");
+        assert_eq!(requirements(&child), RW);
     }
 }
