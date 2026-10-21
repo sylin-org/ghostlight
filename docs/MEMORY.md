@@ -419,6 +419,12 @@ the owner wants, and what this project learned the hard way.
   operation; explicit waits and configured document authority retain their actual promises
   (ADR-0195).
 
+- **Use the four labels.** The owner set them on 2026-10-20, in the table at the top of
+  [docs/1.0/ARCHITECTURE.md](1.0/ARCHITECTURE.md): the edge adapter, the service, the UI and the
+  extension. Use them in docs, code comments, commits and messages between sessions, and say
+  "adapter" alone only for the edge adapter. The owner kept the executables' names; only the
+  labels were unclear.
+
 ## Durable lessons
 
 - **A gate on one system never compiles the other system's gated code.** On 2026-10-17 the two

@@ -2,8 +2,21 @@
 
 ## Shape and dependencies
 
-Ghostlight has three process or trust-boundary components and one shared wire crate. The edge is
-one executable that runs as two relays:
+Ghostlight ships four parts, and every document names them by these labels:
+
+| Label | Ships as | What it is |
+| --- | --- | --- |
+| the edge adapter, or the edge | `ghostlight` | The executable an MCP client, Chrome or a person starts. It is the MCP relay (`ghostlight mcp`), the browser relay (the native host Chrome starts) and the front door for commands. It makes no product decision. |
+| the service | `ghostlight-service` | The product authority, built from `crates/orchestrator`. It makes every decision, owns every word the model reads, and serves the workbench on 127.0.0.1. |
+| the UI | `ghostlight-desktop` | The window, the tray and the notices, over the service's workbench. A computer with no display has no UI, and its workbench still opens in a browser. |
+| the extension | Ghostlight in Browser | The policy-free Manifest V3 extension. Its only Ghostlight peer is the edge adapter, through native messaging. |
+
+"Adapter" alone means the edge adapter. A browser adapter is one browser family's whole adapter:
+its extension plus the service's `browser/adapter/<family>` module. The Chromium adapter is the
+only one today.
+
+Each part is a process or trust boundary. The edge adapter, the service and the UI share one wire
+crate, `crates/relay`. The edge is one executable that runs as two relays:
 
 ```text
 MCP client
@@ -13,7 +26,7 @@ MCP client
   -> relay protocol 4
   -> ghostlight chrome-extension://... (the edge as the browser relay)
   -> browser native messaging
-  -> policy-free Chromium adapter
+  -> the extension, policy-free
   -> advertised privileged browser mechanisms
 
 local human

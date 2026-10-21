@@ -78,17 +78,23 @@ sessions (Codex or Claude Code, on any host); the git log is the record of resul
 
 ## What this project is
 
-Ghostlight is a governed browser automation MCP server: a protocol-versioned edge that is the MCP
-relay and the browser relay, a persistent Rust service, and a thin Chromium extension. Together
-they give any MCP client (Claude Code, Cursor, Zed, Cline, ...) controlled access to the user's authenticated
-browser session, with identity-bound access control, per-action capability classification (read /
-action / write / execute), and structured audit logging. The unconstrained engine is first-class
-("all-open stays first-class"); governance is an overlay, never a tax on the ungoverned.
+Ghostlight is a governed browser automation MCP server: a protocol-versioned edge adapter that is
+the MCP relay and the browser relay, a persistent Rust service, a desktop UI, and a thin Chromium
+extension. Together they give any MCP client (Claude Code, Cursor, Zed, Cline, ...) controlled
+access to the user's authenticated browser session, with identity-bound access control,
+per-action capability classification (read / action / write / execute), and structured audit
+logging. The unconstrained engine is first-class ("all-open stays first-class"); governance is an
+overlay, never a tax on the ungoverned.
 
 ```
 MCP Client <--stdio--> ghostlight mcp <--relay 4--> ghostlight-service
-    <--relay 4--> ghostlight chrome-extension://... <--native messaging--> Browser adapter
+    <--relay 4--> ghostlight chrome-extension://... <--native messaging--> extension
 ```
+
+The parts go by four labels: `ghostlight` is the edge adapter (the edge for short),
+`ghostlight-service` the service, `ghostlight-desktop` the UI, and Ghostlight in Browser the
+extension. "Adapter" alone means the edge adapter. The table at the top of
+[docs/1.0/ARCHITECTURE.md](docs/1.0/ARCHITECTURE.md) defines each one.
 
 It is a clean-room Rust build. The sole external reference is Anthropic's official Claude
 in Chrome extension: we harvest its observable interface and technique, never its code
@@ -100,19 +106,22 @@ The tree is a Rust workspace with these process/trust concerns:
 
 - `crates/orchestrator/` -- the product authority, built as `ghostlight-service`: language,
   workspace aggregate, governance, browser coordination, presentation decisions, execution, and
-  completion. Its
-  `src/browser/adapter/` is the browser adapter component: one module per browser family
-  (`chromium/`), holding the wire levels the extension can speak and every page asset, JavaScript
-  and CSS, that runs in a page.
+  completion. Its `src/browser/adapter/` is the service half of each browser adapter: one module
+  per browser family (`chromium/`), holding the wire levels the extension can speak and every page
+  asset, JavaScript and CSS, that runs in a page.
 - `crates/relay/` -- relay protocol 4: endpoint, framing, start reasons, the session
   listener and the route an edge invocation takes.
-- `crates/edge/` -- the `ghostlight` executable. It is the MCP relay (`ghostlight mcp`),
-  the browser relay (a `chrome-extension://` argument) and the front door that hands every other
-  command to `ghostlight-service`. It owns protocol lifecycle and generic rendering, never
-  product decisions, and knows no verb.
+- `crates/edge/` -- the edge adapter, the `ghostlight` executable. It is the MCP relay
+  (`ghostlight mcp`), the browser relay (a `chrome-extension://` argument) and the front door that
+  hands every other command to `ghostlight-service`. It owns protocol lifecycle and generic
+  rendering, never product decisions, and knows no verb.
 - `crates/bridge/` -- the service's typed diagnostics contracts.
-- `extension/` -- the Manifest V3 Chromium adapter. It owns Chromium APIs, DOM-local observation,
-  browser-specific durability, and content-free presentation, but no policy or product journeys.
+- `crates/desktop/` -- the UI, the `ghostlight-desktop` executable: the window, the tray and the
+  notices, one webview over the service's loopback workbench.
+- `crates/win-peer/` -- the audited Windows FFI boundary for process, shell and file-security calls.
+- `extension/` -- the extension (Ghostlight in Browser), the browser half of the Chromium adapter.
+  It owns Chromium APIs, DOM-local observation, browser-specific durability, and content-free
+  presentation, but no policy or product journeys.
 - `docs/` -- the complete product history and current 1.0 contracts: SPEC, ADRs, guides, trust
   center, research, design records, task ledgers, and public material.
 - `open-spec/`, `site/`, `examples/`, and root documents -- inherited public, product, legal, and
