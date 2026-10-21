@@ -73,15 +73,3 @@ pub(crate) mod fake {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::fake::FakeSession;
-    use super::*;
-
-    #[test]
-    fn a_session_that_is_not_ending_lets_a_process_start() {
-        assert!(FakeSession::new().may_start_process());
-        assert!(!FakeSession::ending().may_start_process());
-    }
-}

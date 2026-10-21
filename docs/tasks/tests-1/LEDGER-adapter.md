@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 92 |
+| `crates/desktop` | 161 | 20 | 91 |
 
 ## Slices
 
@@ -49,7 +49,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | D2 | `crates/desktop/src/link.rs`: the frames the service writes, the bearer and the link's life | 26 | 3 | contract 2, promise 1 | landed (e3d4bb73) |
 | D3 | `crates/desktop/src/states.rs`: a state screen navigates nowhere else | 9 | 1 | promise 1 | landed (7ce3ebf5) |
 | D4 | `crates/desktop/src/lib.rs`: the launch parser's restating tests | 4 | 0 | - | landed (7edcc0fd) |
-| D5 | `crates/desktop/src/scratch.rs`: tests of a test helper | 2 | 0 | - | landed (this commit) |
+| D5 | `crates/desktop/src/scratch.rs`: tests of a test helper | 2 | 0 | - | landed (see the next row's predecessor) |
+| D6 | `crates/desktop/src/session.rs`: a test of the test fake | 1 | 0 | - | landed (this commit) |
 
 ## Notes
 
@@ -95,6 +96,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   read; a test would only restate it.
 - D5: the scratch directory's two tests tested a test helper; the helper stays for the link and
   webview tests.
+- D6: the session's one test tested its own fake; `FakeSession` stays for the native tests.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against
