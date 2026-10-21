@@ -1703,7 +1703,10 @@ fn operation_requires_workspace_lease(operation: &Operation) -> bool {
             action,
             target: None,
             ..
-        }) if matches!(action.as_str(), "status" | "stop" | "save" | "discard")
+        }) if matches!(
+            action,
+            RecordAction::Status | RecordAction::Stop | RecordAction::Save | RecordAction::Discard
+        )
     ) && !matches!(operation, Operation::ExplainPolicy(_))
 }
 
