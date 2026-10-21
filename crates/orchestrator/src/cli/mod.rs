@@ -330,99 +330,96 @@ mod tests {
         values.iter().map(|value| (*value).to_string()).collect()
     }
 
+    /// Protects the ghostlight call contract: a call takes one tool and an optional input, an output
+    /// path is a value and not a tool, a batch does not overwrite its own captures, each status keeps
+    /// its exit code, and an uncertain effect never exits zero, so a script never reads a maybe as done.
     #[test]
-    fn a_call_takes_one_tool_and_an_optional_input() {
-        assert_eq!(
-            parse(&arguments(&["browser_tabs"])).unwrap(),
-            Command::Call {
-                tool: "browser_tabs".into(),
-                input: "{}".into(),
-                rendering: Rendering::default()
-            }
-        );
-        assert_eq!(
-            parse(&arguments(&[
-                "browser_navigate",
-                "{\"url\":\"x\"}",
-                "--json"
-            ]))
-            .unwrap(),
-            Command::Call {
-                tool: "browser_navigate".into(),
-                input: "{\"url\":\"x\"}".into(),
-                rendering: Rendering {
-                    json: true,
-                    output: None
+    fn a_call_takes_one_tool_and_its_exit_code_never_claims_an_uncertain_effect() {
+        {
+            assert_eq!(
+                parse(&arguments(&["browser_tabs"])).unwrap(),
+                Command::Call {
+                    tool: "browser_tabs".into(),
+                    input: "{}".into(),
+                    rendering: Rendering::default()
                 }
-            }
-        );
-        assert_eq!(parse(&arguments(&["--catalog"])).unwrap(), Command::Catalog);
-        assert!(parse(&arguments(&[])).is_err());
-        assert!(parse(&arguments(&["a", "b", "c"])).is_err());
-        assert!(parse(&arguments(&["browser_tabs", "--nonsense"])).is_err());
-    }
-
-    #[test]
-    fn an_output_path_is_taken_as_a_value_not_a_tool() {
-        // Without consuming its value, "shot.jpg" would look like a second positional and the
-        // call would be rejected as ambiguous.
-        assert_eq!(
-            parse(&arguments(&["--stdin", "--json", "--output", "shot.jpg"])).unwrap(),
-            Command::Batch {
-                rendering: Rendering {
-                    json: true,
-                    output: Some(PathBuf::from("shot.jpg"))
-                }
-            }
-        );
-        assert_eq!(
-            parse(&arguments(&["browser_screenshot", "--output=shot.jpg"])).unwrap(),
-            Command::Call {
-                tool: "browser_screenshot".into(),
-                input: "{}".into(),
-                rendering: Rendering {
-                    json: false,
-                    output: Some(PathBuf::from("shot.jpg"))
-                }
-            }
-        );
-        assert!(parse(&arguments(&["browser_screenshot", "--output"])).is_err());
-    }
-
-    #[test]
-    fn a_batch_does_not_overwrite_its_own_captures() {
-        let path = PathBuf::from("shots/page.jpg");
-        assert_eq!(numbered(&path, 0), path);
-        assert_eq!(numbered(&path, 1), PathBuf::from("shots/page-2.jpg"));
-        assert_eq!(numbered(&path, 2), PathBuf::from("shots/page-3.jpg"));
-    }
-
-    #[test]
-    fn each_status_keeps_its_exit_code() {
-        for (status, code) in [
-            ("succeeded", 0),
-            ("blocked", 2),
-            ("failed", 4),
-            ("cancelled", 5),
-            ("unknown", 6),
-        ] {
-            assert_eq!(exit_code(&json!({ "status": status })), code, "{status}");
-        }
-    }
-
-    #[test]
-    fn an_uncertain_effect_never_exits_zero() {
-        // A script that treats "cannot be determined" as success will replay an effect that may
-        // already have happened. Every terminal status is distinguishable for that reason.
-        assert_eq!(exit_code(&json!({"status":"succeeded"})), EXIT_SUCCEEDED);
-        assert_eq!(exit_code(&json!({"status":"unknown"})), EXIT_UNKNOWN);
-        assert_eq!(exit_code(&json!({})), EXIT_UNKNOWN);
-        for status in ["blocked", "failed", "cancelled"] {
-            assert_ne!(
-                exit_code(&json!({ "status": status })),
-                EXIT_SUCCEEDED,
-                "{status} must not look like success to a shell"
             );
+            assert_eq!(
+                parse(&arguments(&[
+                    "browser_navigate",
+                    "{\"url\":\"x\"}",
+                    "--json"
+                ]))
+                .unwrap(),
+                Command::Call {
+                    tool: "browser_navigate".into(),
+                    input: "{\"url\":\"x\"}".into(),
+                    rendering: Rendering {
+                        json: true,
+                        output: None
+                    }
+                }
+            );
+            assert_eq!(parse(&arguments(&["--catalog"])).unwrap(), Command::Catalog);
+            assert!(parse(&arguments(&[])).is_err());
+            assert!(parse(&arguments(&["a", "b", "c"])).is_err());
+            assert!(parse(&arguments(&["browser_tabs", "--nonsense"])).is_err());
+        }
+        {
+            // Without consuming its value, "shot.jpg" would look like a second positional and the
+            // call would be rejected as ambiguous.
+            assert_eq!(
+                parse(&arguments(&["--stdin", "--json", "--output", "shot.jpg"])).unwrap(),
+                Command::Batch {
+                    rendering: Rendering {
+                        json: true,
+                        output: Some(PathBuf::from("shot.jpg"))
+                    }
+                }
+            );
+            assert_eq!(
+                parse(&arguments(&["browser_screenshot", "--output=shot.jpg"])).unwrap(),
+                Command::Call {
+                    tool: "browser_screenshot".into(),
+                    input: "{}".into(),
+                    rendering: Rendering {
+                        json: false,
+                        output: Some(PathBuf::from("shot.jpg"))
+                    }
+                }
+            );
+            assert!(parse(&arguments(&["browser_screenshot", "--output"])).is_err());
+        }
+        {
+            let path = PathBuf::from("shots/page.jpg");
+            assert_eq!(numbered(&path, 0), path);
+            assert_eq!(numbered(&path, 1), PathBuf::from("shots/page-2.jpg"));
+            assert_eq!(numbered(&path, 2), PathBuf::from("shots/page-3.jpg"));
+        }
+        {
+            for (status, code) in [
+                ("succeeded", 0),
+                ("blocked", 2),
+                ("failed", 4),
+                ("cancelled", 5),
+                ("unknown", 6),
+            ] {
+                assert_eq!(exit_code(&json!({ "status": status })), code, "{status}");
+            }
+        }
+        {
+            // A script that treats "cannot be determined" as success will replay an effect that may
+            // already have happened. Every terminal status is distinguishable for that reason.
+            assert_eq!(exit_code(&json!({"status":"succeeded"})), EXIT_SUCCEEDED);
+            assert_eq!(exit_code(&json!({"status":"unknown"})), EXIT_UNKNOWN);
+            assert_eq!(exit_code(&json!({})), EXIT_UNKNOWN);
+            for status in ["blocked", "failed", "cancelled"] {
+                assert_ne!(
+                    exit_code(&json!({ "status": status })),
+                    EXIT_SUCCEEDED,
+                    "{status} must not look like success to a shell"
+                );
+            }
         }
     }
 }
