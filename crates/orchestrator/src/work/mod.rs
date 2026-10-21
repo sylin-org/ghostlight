@@ -1221,7 +1221,7 @@ impl ApplicationExecutor {
     /// runtime controls. Every operation that acts on a tab's page must pass `Some(&tab.url)`,
     /// the tab's raw string as tracked right now, **even when that string is empty** because the
     /// tab's first landing has not been governed yet. An empty or otherwise unparseable string
-    /// falls straight through to `authorize_landing`, which denies it as `HostDenied` -- there is
+    /// falls straight through to `check_landing`, which denies it as `HostDenied` -- there is
     /// no host-blind fallback. A tab whose destination is not yet known is treated as denied,
     /// never as having no destination; otherwise the operator's host allowlist would be bypassed
     /// for exactly the tabs it exists to cover.
@@ -1256,7 +1256,7 @@ impl ApplicationExecutor {
     ) -> Decision {
         let requirements = requirements.into();
         for url in commits.iter().chain(std::iter::once(&tab.url)) {
-            let decision = self.authorize_landing(context, requirements, url);
+            let decision = self.check_landing(context, requirements, url);
             if !decision.allowed {
                 return decision;
             }
@@ -1266,7 +1266,7 @@ impl ApplicationExecutor {
 
     /// Govern a completed observation's destination. Runtime controls guard the next dispatch;
     /// they cannot turn an already admitted receipt into a permanent policy hold on the tab.
-    fn authorize_landing(
+    fn check_landing(
         &self,
         context: &InvocationContext<'_>,
         requirements: impl Into<CapabilitySet>,
@@ -1303,7 +1303,7 @@ impl ApplicationExecutor {
     /// host, then the tab-close setting. It is none for a held tab, whose close undoes
     /// Ghostlight's refused landing (Decision 2.4), and for a tab already gone, which the close
     /// cannot touch: the setting alone decides those, after the person's runtime controls.
-    fn authorize_tab_close(&self, context: &InvocationContext<'_>, page: Option<&str>) -> Decision {
+    fn check_tab_close(&self, context: &InvocationContext<'_>, page: Option<&str>) -> Decision {
         let admitted = match page {
             Some(url) => self.authorize(context, context.requirements, Some(url)),
             None => self.authorize(context, CapabilitySet::EMPTY, None),
@@ -1396,7 +1396,7 @@ impl ApplicationExecutor {
     /// still named in the record of the work it took part in.
     ///
     /// A command addressed to one tab is admitted only while that tab is one this workspace
-    /// controls in `browser` ([`Self::admit_tab`]). A port asks admission for a command that may
+    /// controls in `browser` ([`Self::admit_crossing`]). A port asks admission for a command that may
     /// change the page, once it holds the connection it writes to. A read it never asked about may
     /// have crossed to a connection that replaced the one its tab was confirmed on, so its tab is
     /// confirmed again before its answer is used, and an answer from a tab the browser no longer
@@ -1427,7 +1427,7 @@ impl ApplicationExecutor {
                 admit: &|| {
                     asked.store(true, Ordering::SeqCst);
                     self.admit_dispatch(context)?;
-                    tab.map_or(Ok(()), |tab| self.admit_tab(context, browser, tab))
+                    tab.map_or(Ok(()), |tab| self.admit_crossing(context, browser, tab))
                 },
                 written: &written,
             },
@@ -1650,7 +1650,7 @@ impl ApplicationExecutor {
             &cancelled,
         ) {
             Ok(BrowserOutcome::TabClosed { tab_id }) if tab_id == tab.physical_id => {
-                if lease.confirm_tab_closed(&tab.handle).is_ok() {
+                if lease.forget_closed_tab(&tab.handle).is_ok() {
                     CloseCompensation::Closed
                 } else {
                     CloseCompensation::Unknown
@@ -2195,7 +2195,7 @@ impl ApplicationExecutor {
         if hold.authority == context.snapshot.id() {
             return hold.denial;
         }
-        let current = self.authorize_landing(context, hold.requirements, &hold.url);
+        let current = self.check_landing(context, hold.requirements, &hold.url);
         if current.allowed {
             Decision::refused(hold.denial.reason)
         } else {

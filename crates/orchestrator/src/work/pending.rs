@@ -91,7 +91,7 @@ impl ApplicationExecutor {
         if self.binding_state(context, browser, tab) == BindingState::Pending {
             self.confirm_in(context, browser)?;
         }
-        self.admit_tab(context, browser, tab)
+        self.admit_crossing(context, browser, tab)
     }
 
     /// Admit a command addressed to `tab` in `browser` at the moment it is written: only a tab
@@ -100,7 +100,7 @@ impl ApplicationExecutor {
     /// A binding that went pending since the call checked it means a new connection replaced the
     /// one the call meant to use, so the command is refused as never sent and the binding waits
     /// for the next call to confirm it.
-    pub(super) fn admit_tab(
+    pub(super) fn admit_crossing(
         &self,
         context: &InvocationContext<'_>,
         browser: &str,

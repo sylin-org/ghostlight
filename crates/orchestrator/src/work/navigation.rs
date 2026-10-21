@@ -683,7 +683,7 @@ impl ApplicationExecutor {
             // held it and the tab may still be open (W-D4). Nothing is sent and nothing is
             // claimed about the tab.
             Err(WorkspaceError::StaleTab) => {
-                let decision = self.authorize_tab_close(context, None);
+                let decision = self.check_tab_close(context, None);
                 if !decision.allowed {
                     return self.blocked(
                         context,
@@ -709,7 +709,7 @@ impl ApplicationExecutor {
         };
         // A held tab's page was refused, so its close is decided by the tab-close setting alone.
         let page = selected.hold.is_none().then_some(selected.url.as_str());
-        let decision = self.authorize_tab_close(context, page);
+        let decision = self.check_tab_close(context, page);
         if !decision.allowed {
             return self.blocked_at(
                 context,
@@ -729,7 +729,7 @@ impl ApplicationExecutor {
             },
         ) {
             Ok(BrowserOutcome::TabClosed { tab_id }) if tab_id == selected.physical_id => {
-                if let Err(error) = lease.confirm_tab_closed(&selected.handle) {
+                if let Err(error) = lease.forget_closed_tab(&selected.handle) {
                     return self.workspace_failure_after_effect(context, error, tab_id);
                 }
                 self.succeeded(

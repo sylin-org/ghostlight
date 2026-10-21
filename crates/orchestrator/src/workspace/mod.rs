@@ -1998,8 +1998,8 @@ impl WorkspaceLease {
             .map(|(_, image)| (image.mime_type.clone(), image.data.clone()))
     }
 
-    /// Confirm decisive physical closure, tolerating its earlier asynchronous close event.
-    pub fn confirm_tab_closed(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
+    /// Forget a tab the browser decisively closed, tolerating its earlier asynchronous close event.
+    pub fn forget_closed_tab(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
         let workspace = self.workspace_in_mut(&mut state)?;
         workspace.forget_tab(handle);

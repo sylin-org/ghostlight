@@ -52,7 +52,7 @@ impl ApplicationExecutor {
                         title,
                         url,
                     }) if tab_id == selected.physical_id => {
-                        let landing = self.authorize_landing(context, Capability::Read, &url);
+                        let landing = self.check_landing(context, Capability::Read, &url);
                         if !landing.allowed {
                             let hold = context.hold_of(landing, Capability::Read, &url);
                             return self.hold(context, lease, selected, hold, Effect::None);

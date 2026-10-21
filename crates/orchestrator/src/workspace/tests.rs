@@ -597,7 +597,7 @@ fn a_tab_let_go_of_is_reused_only_as_kept_and_a_closed_one_leaves_nothing() {
             .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
             .unwrap();
         store.apply_browser_close(TEST_BROWSER, 7);
-        assert!(lease.confirm_tab_closed(&tab.handle).is_ok());
+        assert!(lease.forget_closed_tab(&tab.handle).is_ok());
         assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
     }
 
@@ -721,7 +721,7 @@ fn a_tab_let_go_of_is_reused_only_as_kept_and_a_closed_one_leaves_nothing() {
         assert!(lease
             .register_snapshot(&landed, whole.clone(), serde_json::json!({}))
             .is_ok());
-        lease.confirm_tab_closed(&landed.handle).unwrap();
+        lease.forget_closed_tab(&landed.handle).unwrap();
         assert_eq!(
             lease.previous_snapshot(&landed, &whole),
             None,
@@ -946,7 +946,7 @@ fn a_binding_across_a_gap_is_pending_and_inert_until_its_browser_confirms_it() {
                 .handle,
             second.handle
         );
-        lease.confirm_tab_closed(&second.handle).unwrap();
+        lease.forget_closed_tab(&second.handle).unwrap();
         assert_eq!(lease.select_tab(None).unwrap().handle, first.handle);
     }
 
@@ -1609,7 +1609,7 @@ fn a_control_keeps_one_handle_and_one_record_per_document() {
             .unwrap()[0]
             .0
             .clone();
-        lease.confirm_tab_closed(&tab.handle).unwrap();
+        lease.forget_closed_tab(&tab.handle).unwrap();
         assert_eq!(
             refused(&closed).unwrap_err(),
             WorkspaceError::StaleTarget {
