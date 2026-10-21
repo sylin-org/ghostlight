@@ -6,10 +6,37 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-Every arch-1 slice has landed; I11 landed with follow-up F2 after the owner's answer to question 1. The
-follow-up slices of 2026-10-19 are recorded under Notes, Follow-up (2026-10-19).
+Second sweep, parked for the night of 2026-10-20 on leo-desktop-02 at 09ee4bff (INST-4), green
+locally (workspace clippy, ghostlight-service 2398 passed). Landed, all pushed to `dev`: I-D1
+c51204ca, I-D2 278a9c4c, I-D3 b9e76161, I-lock 6664028e, INST-1 959d0d00, INST-4 09ee4bff.
+SERV-6c moved to test-01 (15b38451). Nothing is parked as a patch; the working tree is clean.
 
-The second sweep (2026-10-20) opens this lane again: see its section below.
+Next: INST-5 (one `config_root`; `HarnessContext.config` and `.roaming` always hold the same
+directory, and `harness_roots` still takes both), then the table's order below. SERV-13 and
+SERV-11c touch `cli/setup.rs`, `cli/mod.rs` and `cli/parse.rs`: other lanes held them today
+(LANG-12b, SERV-6, S-D4, all landed), so ask before starting there.
+
+Carried into the surface lane, which follows this one on this machine:
+- `language/setup.rs` line ~10 says the setup view has "four stages" and lists five; test-01
+  (LANG-11, df9e4cac) handed the fix to surface's first `setup.rs` slice.
+- `workbench/tests.rs` was held for test-03's C16 second commit; check C16 landed first.
+- Surface's S3 wires INST-15's `resymbol` (BOOTSTRAP, Order across lanes).
+- Open item, not a defect yet: after a dev-loop deploy here, the update-started relaunched
+  service's window stayed at "Starting" (policy loading, Pause disabled) for over 100 s while
+  `ghostlight status` read running with a browser connected; it did not reproduce on the owner's
+  machine. If it recurs, keep diagnostics on, note Control or Watching and each process's
+  session before stopping anything.
+
+This machine: the Claude session runs inside the Microsoft Store
+Claude Desktop, so anything that writes the registry or AppData (the dev loop, `doctor`,
+installs) runs through WMI (`Win32_Process Create`), outside the package. Smart App Control was
+turned off by the owner on 2026-10-20 so cargo's build scripts run. Build in
+`.target-lane-arch-install`; the dev loop builds in `.target-dev-loop` inside the checkout it
+runs from. Pushes to `dev` are the owner's standing rule since 2026-10-20 (docs/MEMORY.md).
+
+The first sweep: every arch-1 slice has landed; I11 landed with follow-up F2 after the owner's
+answer to question 1. The follow-up slices of 2026-10-19 are recorded under Notes, Follow-up
+(2026-10-19).
 
 ## Slices
 
@@ -398,7 +425,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: leo-desktop-02 (Windows). A
 slice's specification is its finding in [sweep-2026-10-20/install.md](sweep-2026-10-20/install.md), read
-with its skeptic's corrections. Nothing has landed yet; start with I-D1.
+with its skeptic's corrections. RESUME HERE above says where the lane stands.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
