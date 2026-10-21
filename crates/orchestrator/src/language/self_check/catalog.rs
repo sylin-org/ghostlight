@@ -677,3 +677,63 @@ fn the_catalog_golden_is_ascii() {
         "{CATALOG_GOLDEN} holds a non-ASCII character"
     );
 }
+
+/// Advertised defaults the decoder keeps unset, because a later step applies them: settlement
+/// reads `visual_settle`, and the scroll executor applies its direction and amount.
+const APPLIED_AFTER_DECODE: [&str; 3] = ["visual_settle", "direction", "amount"];
+
+/// Every default the catalog advertises is the value the decoder gives an omitted field: a call
+/// decodes to the same operation with its defaults left out or filled in. The few defaults
+/// applied after decoding are checked against the step that applies them.
+#[test]
+fn every_advertised_default_is_the_decoded_default() {
+    let mut calls: Vec<(String, Value)> = known_good_calls()
+        .into_iter()
+        .map(|(tool, call)| (tool.to_owned(), call))
+        .collect();
+    for tool in catalog() {
+        for example in tool.input_schema["examples"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            calls.push((tool.name.clone(), example.clone()));
+        }
+    }
+    let mut drifted = Vec::new();
+    for (tool, call) in &calls {
+        let schema = advertised(tool);
+        let mut filled = with_defaults(&schema, call);
+        let full = decode(tool, filled.clone()).expect("a call with its defaults decodes");
+        let bare = decode(tool, call.clone()).expect("a known-good call decodes");
+        for field in APPLIED_AFTER_DECODE {
+            if call.get(field).is_none() {
+                filled
+                    .as_object_mut()
+                    .expect("calls are objects")
+                    .remove(field);
+            }
+        }
+        if crate::language::settlement::enabled(&bare)
+            != crate::language::settlement::enabled(&full)
+        {
+            drifted.push(format!("{tool} {call}: visual_settle"));
+        }
+        let partial = decode(tool, filled).expect("a call with some defaults decodes");
+        if format!("{bare:?}") != format!("{partial:?}") {
+            drifted.push(format!(
+                "{tool} {call}:\n  omitted {bare:?}\n  filled  {partial:?}"
+            ));
+        }
+    }
+    assert!(drifted.is_empty(), "defaults that drifted: {drifted:#?}");
+    let scroll = advertised("browser_scroll");
+    assert_eq!(
+        scroll["properties"]["direction"]["default"],
+        crate::language::SCROLL_DIRECTION_DEFAULT
+    );
+    assert_eq!(
+        scroll["properties"]["amount"]["default"],
+        crate::language::SCROLL_AMOUNT_DEFAULT
+    );
+}

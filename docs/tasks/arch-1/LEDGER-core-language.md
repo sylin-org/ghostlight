@@ -10,9 +10,9 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D5, C17, LANG-4 and C12b-1 have landed; the hold on work/forms.rs, work/mod.rs,
-work/composition.rs and work/recording.rs is released. Next is LANG-1, then LANG-2. A slice's
-hash is filled in by the next slice's commit, since a rebase before the push changes it.
+L-D1 to L-D5, C17, LANG-4 and C12b-1 have landed. LANG-1 is under way: its default test is in,
+and the bounds block is next, then LANG-2. A slice's hash is filled in by the next slice's
+commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -26,9 +26,9 @@ In order. "After" names what a slice waits for.
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed (b5135a14) |
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b 1b693758) |
-| C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed |
+| C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed (5c65614a) |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
-| LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | todo |
+| LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | test landed; bounds block todo |
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | todo |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | todo |
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
@@ -123,3 +123,9 @@ In order. "After" names what a slice waits for.
   (`capture_stale`), which wrote prose; no golden holds them. Cross-lane test edits:
   `governance/tests.rs` and `audit/record_tests.rs` (two `AuthorityBlocked` literals), and
   `work/navigation.rs` (the landing code).
+- LANG-1, first commit: `every_advertised_default_is_the_decoded_default` decodes every
+  known-good call and catalog example with its advertised defaults left out and filled in, and
+  needs the same operation, so a decoder default that drifts from the catalog fails (checked by
+  changing `find`'s scope default). `visual_settle` and the scroll direction and amount stay
+  unset at decode; the test checks settlement reads the same and the scroll defaults are the
+  shared constants. No default had drifted.
