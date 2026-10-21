@@ -197,8 +197,21 @@ Now:
   from the bundle on Alpine and Ubuntu 22.04 and 24.04 included. `scripts/check-release-candidate.ps1`
   verifies the bundle (2.0.1, 19 artifacts, the MCPB among them), and its extension ZIP
   (`bddfb37a...`) is the one the freeze golden records. Deployed on the owner's machine (a real
-  task passed on 2.0.1). The four test machines upgrade their 2.0.0 installs to it; then the owner's
-  go for the store submission of the 2.0.1 extension and for the cutover.
+  task passed on 2.0.1). The four test machines upgraded their 2.0.0 installs to it, and every
+  check passed: CachyOS (`testing/cachyos-2.0.1-bundle-2026-10-20.md`), Bluefin
+  (`testing/bluefin-2.0.1-bundle-2026-10-20.md`), Alpine (`testing/alpine-2.0.1-bundle-2026-10-20.md`)
+  and leo-desktop-02 (`testing/windows-2.0.1-bundle-2026-10-20.md`, where VS Code is no longer
+  registered in Codex's container and every window of the shell now allows a restart). An agent
+  rang the desk bell on each Linux machine with a 2.0.0 extension. Until a browser runs the 2.0.1
+  extension, status cannot say what a prompt's field holds, so an agent not told to accept may
+  answer with its own text (Bluefin).
+- The 2.0.1 extension (`bddfb37a...`) is submitted to the Chrome Web Store for review as a staged
+  publish, at the owner's go after the Linux checks (2026-10-20). The store still serves 2.0.0 at
+  100%. From now on, changing a packaged file means resubmitting, which is the owner's call
+  (ADR-0200 Decision 16). Next, at the owner's go: the cutover of `docs/RELEASE.md` for 2.0.1
+  (the GitHub release from this bundle with `release/notes-v2.0.1.md`, npm, the MCP Registry, the
+  website, WinGet and `main`), and publishing the staged extension once Google approves it. The
+  2.0.1 service works with the 2.0.0 extension, so neither waits on the other.
 - The public one-liner on the real installations, which the cutover went on without: done on
   CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
   service is kept until `--restore`, so a second candidate of one version is installed after an
