@@ -284,6 +284,9 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
     assert_eq!(waited.status, Status::Succeeded);
     assert_eq!(waited.facts["condition"], "selector_present");
     assert_eq!(waited.facts["satisfied"], true);
+    // Like every other wait, it says how ready the page was.
+    assert_eq!(waited.facts["readiness"], json!(waited.readiness));
+    assert!(waited.facts["readiness"].is_string());
 
     // A selector that never shows up inside its budget fails decisively.
     for _ in 0..5 {
@@ -297,6 +300,7 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
         );
     assert_eq!(missed.status, Status::Failed);
     assert_eq!(missed.facts["satisfied"], false);
+    assert_eq!(missed.facts["readiness"], json!(missed.readiness));
 }
 
 /// Deadlines speak for themselves instead of claiming disconnection, and carry their

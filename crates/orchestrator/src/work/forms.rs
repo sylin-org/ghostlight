@@ -999,6 +999,7 @@ impl ApplicationExecutor {
                         "condition": "selector_present",
                         "satisfied": final_satisfied,
                         "elapsed_ms": final_elapsed_ms,
+                        "readiness": readiness(selected.readiness),
                         "visual_settle": should_settle,
                         "visual_settled": visual_settled,
                     });

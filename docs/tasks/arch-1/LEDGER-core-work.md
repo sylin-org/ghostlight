@@ -8,7 +8,8 @@ entry in [ADR-0203](../../adr/0203-one-owner-for-each-fact.md)'s Rebuild plan. S
 
 ## RESUME HERE
 
-W-D2 has landed. W-D1 moved to core-language (L-D5). Next: W-D3.
+W-D2 and W-D3 have landed. W-D1 moved to core-language (L-D5). Next: C19c. A slice's hash is
+filled in by the next slice's commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -17,8 +18,8 @@ In order. "After" names what a slice waits for.
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | W-D1 | fix(work): an inline upload of exactly 5,000,000 bytes is accepted | - | WORK-1's note | moved to LEDGER-core-language.md (L-D5) |
-| W-D2 | fix(work): a flow step whose tab close the policy refuses shows the kept-tab notice | - | WORK-8's notice half | landed |
-| W-D3 | fix(work): a selector wait gives the readiness fact the other waits give | - | WORK-13; a deliberate model-visible change | todo |
+| W-D2 | fix(work): a flow step whose tab close the policy refuses shows the kept-tab notice | - | WORK-8's notice half | landed (ecf30a64) |
+| W-D3 | fix(work): a selector wait gives the readiness fact the other waits give | - | WORK-13; a deliberate model-visible change | landed |
 | C19c | refactor(work): the completion path's leftovers go | - | ADR-0203 C19c, moved from core; WORK-7's `CompletionGate`; the service half is core-service's | todo |
 | C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | todo |
 | C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | todo |
@@ -51,3 +52,8 @@ W-D2 reads the notice from the typed `Terminal` (ADR-0203 Decision 5.6): the dec
 kept-by-setting one, whatever the tool. A flow keeps its first refused step's decision, so a flow
 stopped by a refused tab close now shows the kept-tab notice. The four-clause WorkBlocked test in
 `complete_terminal` stays for C12b.
+
+W-D3 adds `readiness` to the selector wait's facts, the value its envelope already carried and
+the duration wait already reports. Regenerating the result goldens changed nothing, because no
+result golden holds a wait, so the extended `waiting_on_a_semantic_selector_polls_the_live_page`
+pins the new fact. The edit stays out of the condition matches C17 retypes.
