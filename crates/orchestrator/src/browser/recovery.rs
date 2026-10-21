@@ -361,20 +361,34 @@ fn start_ordinary_browser(
             ),
         ))
     })?;
-    let environment = crate::browser::session::graphical_session_environment()
-        .map_err(|error| {
-            MechanismError::Failed((RecoveryFailure::LaunchFailed, error.to_string()))
-        })?
-        .ok_or(MechanismError::LeftToThePerson)?;
     ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
-    let mut command = ordinary_browser_command(executable);
-    command.envs(environment.values());
-    start_reaped(command).map(drop).map_err(|error| {
-        MechanismError::Failed((
+    match start_browser(executable, &[]) {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(MechanismError::LeftToThePerson),
+        Err(error) => Err(MechanismError::Failed((
             RecoveryFailure::LaunchFailed,
             format!("{}: {error}", executable.display()),
-        ))
-    })
+        ))),
+    }
+}
+
+/// Start the browser at `executable` with `arguments` in the person's graphical session, reaped
+/// and, on Unix, in a process group of its own, and return its process id. With no display
+/// reachable from the service nothing starts, and the answer is `None`. Every browser start
+/// Ghostlight makes goes through here (ADR-0203 C3c), each noted first with
+/// [`BrowserPort::note_start`].
+pub(crate) fn start_browser(
+    executable: &Path,
+    arguments: &[&std::ffi::OsStr],
+) -> std::io::Result<Option<u32>> {
+    let Some(environment) = crate::browser::session::graphical_session_environment()
+        .map_err(|error| std::io::Error::other(error.to_string()))?
+    else {
+        return Ok(None);
+    };
+    let mut command = ordinary_browser_command(executable);
+    command.args(arguments).envs(environment.values());
+    start_reaped(command).map(Some)
 }
 
 /// Where a flight goes when a repair or a launch of `browser` did not happen: a lost wait ends
@@ -501,16 +515,6 @@ struct Flights {
     scopes: HashMap<FlightScope, Arc<RecoveryFlight>>,
 }
 
-/// One browser start Ghostlight made, as the launch guard holds it.
-#[derive(Clone, Copy, Debug)]
-struct PendingLaunch {
-    /// When the start was made, by the recovery clock.
-    at: Instant,
-    /// The port's count of arrivals of that installed browser when the start was made; a higher
-    /// count means a connection of it has arrived since.
-    arrivals: u64,
-}
-
 /// The source of the current time for the launch guard.
 type RecoveryClock = Arc<dyn Fn() -> Instant + Send + Sync>;
 
@@ -522,9 +526,6 @@ pub struct BrowserRecovery {
     browser: Arc<dyn BrowserPort>,
     mechanism: Arc<dyn RecoveryMechanism>,
     flights: Arc<Mutex<Flights>>,
-    /// The launch guard: the latest start of each installed browser, by native-host id, shared
-    /// by every flight scope.
-    launches: Arc<Mutex<HashMap<String, PendingLaunch>>>,
     /// The clock that times the launch guard.
     clock: RecoveryClock,
 }
@@ -539,7 +540,6 @@ impl BrowserRecovery {
             browser,
             mechanism: discovered_mechanism(),
             flights: Arc::new(Mutex::new(Flights::default())),
-            launches: Arc::new(Mutex::new(HashMap::new())),
             clock: Arc::new(Instant::now),
         }
     }
@@ -848,23 +848,13 @@ impl BrowserRecovery {
         if self.connected_as(installed).is_some() {
             return false;
         }
-        let arrivals = self.browser.arrivals_of(installed);
-        let now = (self.clock)();
-        let mut launches = lock(&self.launches);
-        let pending = launches.get(installed).is_some_and(|launch| {
-            launch.arrivals == arrivals
-                && now.saturating_duration_since(launch.at) < LAUNCH_HANDSHAKE_WINDOW
-        });
-        if pending {
-            return false;
-        }
-        launches.insert(installed.into(), PendingLaunch { at: now, arrivals });
-        true
+        self.browser
+            .note_start(installed, (self.clock)(), LAUNCH_HANDSHAKE_WINDOW)
     }
 
     /// Free the launch guard of `installed` after a start that began no process.
     fn release_launch(&self, installed: &str) {
-        lock(&self.launches).remove(installed);
+        self.browser.forget_start(installed);
     }
 
     /// A connected browser identity that reported the installed browser `installed`.
@@ -1191,7 +1181,6 @@ mod tests {
                 None,
             ),
             flights: Arc::new(Mutex::new(Flights::default())),
-            launches: Arc::new(Mutex::new(HashMap::new())),
             clock: Arc::new(Instant::now),
         }
     }
@@ -1858,6 +1847,28 @@ mod tests {
             launcher.launches.load(Ordering::SeqCst),
             1,
             "both sessions wait for the one start"
+        );
+
+        // C3c: a start another starter noted through the port is one recovery waits for too, not
+        // one it repeats.
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_installed("browser_chrome", "chrome");
+        let launcher = mechanism(Ok(()), None);
+        let (recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &launcher);
+        assert!(browser.note_start("chrome", Instant::now(), LAUNCH_HANDSHAKE_WINDOW));
+        let named = {
+            let recovery = recovery.clone();
+            thread::spawn(move || request_chrome(&recovery, Duration::from_secs(5)))
+        };
+        wait_for_launched(&recovery, &FlightScope::Browser("chrome".into()));
+        browser.connect(vec![summary("browser_chrome", true)]);
+        assert_eq!(named.join().unwrap(), ready("browser_chrome"));
+        assert_eq!(
+            launcher.launches.load(Ordering::SeqCst),
+            0,
+            "a noted start is not repeated within the handshake window"
         );
 
         let browser = Arc::new(FakeBrowser::default());

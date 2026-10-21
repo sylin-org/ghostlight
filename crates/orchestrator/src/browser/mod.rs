@@ -236,6 +236,18 @@ pub trait BrowserPort: Send + Sync {
         0
     }
 
+    /// Note that Ghostlight is about to start the installed browser `installed` (a native-host
+    /// id) at `now`, or learn that it must not: a start of it noted less than `window` ago has seen
+    /// no arrival of that browser since. Returns whether this start was noted. Every starter notes
+    /// its start here, beside the arrivals it is measured against, so no two starters start one
+    /// browser twice (ADR-0203 C3c). The default notes every start.
+    fn note_start(&self, _installed: &str, _now: Instant, _window: Duration) -> bool {
+        true
+    }
+
+    /// Forget the start of `installed` noted last, after it began no process.
+    fn forget_start(&self, _installed: &str) {}
+
     /// The extension life the registered connection of `browser` reported in its hello, or
     /// `None` when no connection of that browser is registered or its hello named no life.
     ///
@@ -480,6 +492,47 @@ impl BrowserSummary {
 ///
 /// Browsers are plural. One person routinely runs Chrome and Edge at once, or two profiles of
 /// one browser, and each is a different user context rather than a redundant server.
+/// One browser start Ghostlight made, as the launch guard holds it.
+#[derive(Clone, Copy, Debug)]
+struct PendingStart {
+    /// When the start was made, by the starter's clock.
+    at: Instant,
+    /// The port's count of arrivals of that installed browser when the start was made; a higher
+    /// count means a connection of it has arrived since.
+    arrivals: u64,
+}
+
+/// The launch guard: the latest start of each installed browser, by native-host id.
+#[derive(Debug, Default)]
+pub(crate) struct LaunchGuard {
+    starts: HashMap<String, PendingStart>,
+}
+
+impl LaunchGuard {
+    /// [`BrowserPort::note_start`] against `arrivals`, the port's count of `installed` now.
+    pub(crate) fn note(
+        &mut self,
+        installed: &str,
+        arrivals: u64,
+        now: Instant,
+        window: Duration,
+    ) -> bool {
+        let pending = self.starts.get(installed).is_some_and(|start| {
+            start.arrivals == arrivals && now.saturating_duration_since(start.at) < window
+        });
+        if !pending {
+            self.starts
+                .insert(installed.into(), PendingStart { at: now, arrivals });
+        }
+        !pending
+    }
+
+    /// [`BrowserPort::forget_start`].
+    pub(crate) fn forget(&mut self, installed: &str) {
+        self.starts.remove(installed);
+    }
+}
+
 #[derive(Debug, Default)]
 struct AdapterRegistry {
     /// One live connection per browser identity.
@@ -507,6 +560,8 @@ struct AdapterRegistry {
     installed: HashMap<String, &'static str>,
     /// How many connections reported each installed browser, for the service's life.
     arrivals: HashMap<&'static str, u64>,
+    /// The starts Ghostlight made of each installed browser, measured against `arrivals`.
+    launches: LaunchGuard,
 }
 
 impl AdapterRegistry {
@@ -1192,6 +1247,16 @@ impl BrowserPort for RelayBrowserPort {
             .unwrap_or(0)
     }
 
+    fn note_start(&self, installed: &str, now: Instant, window: Duration) -> bool {
+        let mut adapters = lock(&self.adapters);
+        let arrivals = adapters.arrivals.get(installed).copied().unwrap_or(0);
+        adapters.launches.note(installed, arrivals, now, window)
+    }
+
+    fn forget_start(&self, installed: &str) {
+        lock(&self.adapters).launches.forget(installed);
+    }
+
     /// A silent connection is waited on until it answers a timer heartbeat again.
     fn await_available(
         &self,
@@ -1585,6 +1650,7 @@ pub(crate) mod testing {
         installed: Mutex<std::collections::HashMap<String, String>>,
         arrivals: Mutex<std::collections::HashMap<String, u64>>,
         lives: Mutex<std::collections::HashMap<String, String>>,
+        launches: Mutex<super::LaunchGuard>,
     }
 
     /// One answer the fake will give, and whether it wrote the command to the browser first.
@@ -1609,6 +1675,7 @@ pub(crate) mod testing {
                 installed: Mutex::default(),
                 arrivals: Mutex::default(),
                 lives: Mutex::default(),
+                launches: Mutex::default(),
             }
         }
     }
@@ -1856,6 +1923,15 @@ pub(crate) mod testing {
 
         fn arrivals_of(&self, installed: &str) -> u64 {
             lock(&self.arrivals).get(installed).copied().unwrap_or(0)
+        }
+
+        fn note_start(&self, installed: &str, now: Instant, window: std::time::Duration) -> bool {
+            let arrivals = self.arrivals_of(installed);
+            lock(&self.launches).note(installed, arrivals, now, window)
+        }
+
+        fn forget_start(&self, installed: &str) {
+            lock(&self.launches).forget(installed);
         }
 
         fn life_of(&self, browser: &str) -> Option<String> {
