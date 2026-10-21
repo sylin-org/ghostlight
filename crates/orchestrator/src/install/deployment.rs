@@ -1883,27 +1883,12 @@ mod tests {
         classify(image, pid, layout, service_pid, std::process::id())
     }
 
-    /// The system program the real-process test copies under a retired connector's name, with the
-    /// arguments that keep it waiting, without a console, for about a minute if the test never
-    /// stops it.
-    #[cfg(windows)]
-    fn sleeper() -> (PathBuf, &'static [&'static str]) {
-        let windows = env::var_os("SystemRoot").expect("Windows sets SystemRoot");
-        let image = Path::new(&windows).join("System32").join("PING.EXE");
-        (image, &["-n", "60", "127.0.0.1"])
-    }
+    /// Set on the child the real-process test starts, so that [`a_stray_stand_in_waits_when_asked`]
+    /// waits in it.
+    const STAND_IN_VARIABLE: &str = "GHOSTLIGHT_TEST_STRAY_STAND_IN";
 
-    /// The system program the real-process test copies under a retired connector's name, with the
-    /// arguments that keep it waiting for about a minute if the test never stops it.
-    #[cfg(not(windows))]
-    fn sleeper() -> (PathBuf, &'static [&'static str]) {
-        (PathBuf::from("/bin/sleep"), &["60"])
-    }
-
-    /// The name the copied [`sleeper`] is started under on Unix. Where `/bin/sleep` is BusyBox, as
-    /// on Alpine, the program picks what to run by this name, not by the copy's file name.
-    #[cfg(unix)]
-    const SLEEPER_NAME: &str = "sleep";
+    /// The longest a stand-in waits if the test that started it never stops it.
+    const STAND_IN_LIFETIME: Duration = Duration::from_secs(60);
 
     /// How long a test waits for the stand-in to show in the process table.
     const STAND_IN_APPEARS_WITHIN: Duration = Duration::from_secs(20);
@@ -1913,6 +1898,23 @@ mod tests {
 
     /// Pause between those tries.
     const STAND_IN_START_PAUSE: Duration = Duration::from_millis(50);
+
+    /// The name of [`a_stray_stand_in_waits_when_asked`] as the test binary lists it.
+    const STAND_IN_TEST: &str = "install::deployment::tests::a_stray_stand_in_waits_when_asked";
+
+    /// The program the real-process test starts under a retired connector's name: this test
+    /// binary, told to run only this test. A normal run skips it. It does nothing unless
+    /// [`STAND_IN_VARIABLE`] is set, and then exits by itself after [`STAND_IN_LIFETIME`].
+    ///
+    /// A copied system sleeper would save this slot, but it never showed as a stray on the
+    /// Ubuntu runner (8a967751, cause not found), so the stand-in stays the test binary.
+    #[test]
+    #[ignore = "a stand-in process for the real-process test, started by it"]
+    fn a_stray_stand_in_waits_when_asked() {
+        if env::var_os(STAND_IN_VARIABLE).is_some() {
+            std::thread::sleep(STAND_IN_LIFETIME);
+        }
+    }
 
     /// A started stand-in, killed and reaped when the test ends however it ends.
     struct StandIn(std::process::Child);
@@ -1924,22 +1926,20 @@ mod tests {
         }
     }
 
-    /// Copy the system [`sleeper`] to `image` and start the copy waiting.
+    /// Copy this test binary to `image` and start the copy waiting.
     ///
     /// Another test thread may fork between the copy and the start and hand the copy's open
     /// descriptor to its child for a moment, and then the kernel refuses to execute the file as
     /// busy. That passes, so the start is tried again a bounded number of times.
     fn start_stand_in(image: &Path) -> StandIn {
-        let (sleeper, arguments) = sleeper();
-        fs::copy(sleeper, image).unwrap();
+        fs::copy(env::current_exe().unwrap(), image).unwrap();
         let mut command = std::process::Command::new(image);
         command
-            .args(arguments)
+            .args(["--ignored", "--exact", "--test-threads=1", STAND_IN_TEST])
+            .env(STAND_IN_VARIABLE, "1")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        #[cfg(unix)]
-        std::os::unix::process::CommandExt::arg0(&mut command, SLEEPER_NAME);
         let mut attempts = 1;
         loop {
             let started = command.spawn();

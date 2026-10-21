@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 214 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 215 |
 | `crates/desktop` | 161 | 20 | moved to the adapter lane (2026-10-21) |
 
 ## Slices
@@ -46,6 +46,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I22 | `install/native_host.rs`: thirty-five tests fold into five: the browser table matches where each Chromium browser reads and names itself; recovery repairs only its own stale registration and only install adopts another; install is idempotent and uninstall removes only what Ghostlight owns (the root isolation as a case); install repoints Ghostlight's old registrations and leaves any other; inside an app container install writes the manifest and names what it cannot register. Gone: the link and no-temporary tests (`record.rs` proves the replace) and the table-order restatement, with their two helpers | 340 | 310 | Browser 22 and 23, ACCEPTANCE C14, the native-messaging contract; defects 47d26b0b, c51204ca, 53a04ef2, 85fbfa83, 2b251105 | landed (this commit) |
 | T-I23 | `install/mod.rs`: ninety-one tests fold into nine: what makes an entry Ghostlight's; setting up everything touches only detected, changeable targets; evidence names only the program found; an update sets only Ghostlight's keys (no temporary left as a case); uninstall reaches every copy; each agent's file is the one it reads (Claude Code and located paths as cases); a Store app's own copy; the npm launcher entry; the agent catalog. Thirty-nine go that the writer golden already pins byte for byte (dialects, comments, foreign, Fix and backup, manual setup, the Store seeds) or that restate the roster, with the background-scan lock test, whose only proof was a 200 ms negative wait (the lock order is structural, arch-1 I6) | 310 | 228 | workbench gates 8 and 10, the ADR-0197 container amendments, the catalog contract; arch-1 I1 to I5; defects c51204ca, 1d220361, 0a0ef063, 567cf210, 218d386f, 5d589e1d, 4af49885, f51130d0, 765736e1, 41a3f8bf, 4fac15a7, 236485f4, d4bdaf9c | landed (this commit) |
 | T-I24 | `cli/start.rs` and `install/entry.rs`: the entry rule is proven once, through `start` with a fake launcher: start.rs's thirteen tests fold into one, which gains a damaged-image row, and entry.rs's two `decide` tables go (every row is now a case of the start test); entry.rs keeps its path test, with its helpers moved into the Windows block that uses them | 228 | 214 | contract gate 14 (the entry rule) | landed (this commit) |
+| T-I25 | `install/deployment.rs`: the real stray test starts the test binary again as its stand-in (an ignored test), since the copied system sleeper of T-I20 never showed as a stray on the Ubuntu runner even after 5b30a4c4 made BusyBox run it (cause not found; Ubuntu 24.04 in WSL runs the copy fine). The slot is to be made back elsewhere | 214 | 215 | defects 31f2c835, a663e83d (the real stop) | landed (this commit) |
 
 ## Notes
 
