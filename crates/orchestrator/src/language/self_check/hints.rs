@@ -369,6 +369,7 @@ variant_names!(refusal_variant, REFUSAL_VARIANTS, Refusal:
     ConnectionLost,
     CancelledAfterDispatch,
     EffectUnknown,
+    ScriptThrew,
     LandingDeniedUnknown,
     WorkspaceUnusable,
     TabHeld,
@@ -917,6 +918,9 @@ fn refusal_samples() -> Vec<Refusal> {
         },
         Refusal::ConnectionLost,
         Refusal::EffectUnknown,
+        Refusal::ScriptThrew {
+            exception: "ReferenceError: missing is not defined".into(),
+        },
         Refusal::LandingDeniedUnknown {
             code: crate::governance::ReasonCode::HostDenied,
         },

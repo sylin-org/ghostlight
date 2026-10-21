@@ -98,6 +98,10 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
         ("stale_locator", BrowserError::stale(StaleReason::Removed)),
         ("interlock", BrowserError::LocalInterlock("x".into())),
         ("effect_unknown", BrowserError::EffectUnknown("x".into())),
+        (
+            "script_threw",
+            BrowserError::ScriptThrew("ReferenceError: missing is not defined".into()),
+        ),
         ("protocol", BrowserError::Protocol("x".into())),
         ("authentication", BrowserError::Authentication),
         (
@@ -180,9 +184,31 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
                     | BrowserError::CancelledAfterDispatch
                     | BrowserError::DeadlineAfterDispatch
                     | BrowserError::EffectUnknown(_)
+                    | BrowserError::ScriptThrew(_)
             ),
             "{name} effect-unknown classification drifted"
         );
+        // A script the page threw on says what it threw, and its effect stays unknown: it may
+        // have acted first. A page exception is no dialog, so no dialog step is offered (L-D6).
+        if let BrowserError::ScriptThrew(exception) = error {
+            let result = &refused.result;
+            assert_eq!(result.facts["reason"], "script_threw");
+            assert_eq!(
+                result.facts[crate::language::outcome::EXCEPTION_FACT],
+                exception.as_str()
+            );
+            assert_eq!(result.facts["phase"], "adapter_reported");
+            assert_eq!(result.status, Status::Unknown);
+            assert_eq!(result.effect, Effect::Unknown);
+            assert_eq!(
+                result.summary,
+                "The script threw \"ReferenceError: missing is not defined\". It may have changed the page before it threw."
+            );
+            assert!(result
+                .next_steps
+                .iter()
+                .all(|step| !step.contains("dialog")));
+        }
     }
 }
 

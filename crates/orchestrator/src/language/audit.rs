@@ -262,11 +262,11 @@ impl WorkspaceReason {
 impl Refusal {
     /// This refusal as durable history may keep it (ADR-0198 rule 3, ADR-0203 Decision 4.1).
     ///
-    /// The browser's own words, a credential control's name and handle, the address of
-    /// Ghostlight's own control page and the name another session's client claimed all go. An
-    /// unconfirmed action retains the action it wraps, so a wrapper never carries past this rule
-    /// what the bare outcome could not. A fill the page refused or undid keeps its fields only so
-    /// that its durable sentence can count them.
+    /// The browser's own words, what a page script threw, a credential control's name and handle,
+    /// the address of Ghostlight's own control page and the name another session's client claimed
+    /// all go. An unconfirmed action retains the action it wraps, so a wrapper never carries past
+    /// this rule what the bare outcome could not. A fill the page refused or undid keeps its
+    /// fields only so that its durable sentence can count them.
     #[must_use]
     pub fn retained(&self) -> Self {
         match self {
@@ -281,6 +281,10 @@ impl Refusal {
             Self::BrowserPrimitive { cause, .. } => Self::BrowserPrimitive {
                 detail: String::new(),
                 cause: *cause,
+            },
+            // What a script threw is the script's result, which history never keeps.
+            Self::ScriptThrew { .. } => Self::ScriptThrew {
+                exception: String::new(),
             },
             Self::WorkspaceUnusable { reason } => Self::WorkspaceUnusable {
                 reason: reason.retained(),
@@ -420,7 +424,7 @@ impl Refusal {
             }
             Self::ConnectionLost => AuditRefusal::ConnectionLost,
             Self::CancelledAfterDispatch { .. } => AuditRefusal::CancelledAfterDispatch,
-            Self::EffectUnknown => AuditRefusal::EffectUnknown,
+            Self::EffectUnknown | Self::ScriptThrew { .. } => AuditRefusal::EffectUnknown,
             Self::LandingDeniedUnknown { .. } => AuditRefusal::LandingDeniedUnknown,
             Self::WorkspaceUnusable { reason } => AuditRefusal::WorkspaceUnusable {
                 cause: reason.clone(),
@@ -492,6 +496,24 @@ mod tests {
         };
         assert_eq!(outcome.audit().summary(), outcome.summary());
         assert_eq!(outcome.observed().count, Some(12));
+    }
+
+    /// What a script threw is the script's result, so durable history keeps only that a script
+    /// threw, under the effect-unknown tag it always wrote (L-D6).
+    #[test]
+    fn durable_history_keeps_that_a_script_threw_and_never_what_it_threw() {
+        let refusal = Refusal::ScriptThrew {
+            exception: "Error: PRIVATE_SCRIPT_TEXT".into(),
+        };
+        assert!(refusal.summary().contains("PRIVATE_SCRIPT_TEXT"));
+        let audit = refusal.audit();
+        assert_eq!(
+            audit.summary(),
+            "The script threw. It may have changed the page before it threw."
+        );
+        let closed = serde_json::to_value(audit.refusal()).expect("closed facts encode");
+        assert_eq!(closed["reason"], "effect_unknown");
+        assert!(!closed.to_string().contains("PRIVATE_SCRIPT_TEXT"));
     }
 
     #[test]

@@ -205,10 +205,11 @@ Now:
   rang the desk bell on each Linux machine with a 2.0.0 extension. Until a browser runs the 2.0.1
   extension, status cannot say what a prompt's field holds, so an agent not told to accept may
   answer with its own text (Bluefin).
-- The 2.0.1 extension (`bddfb37a...`) is submitted to the Chrome Web Store for review as a staged
-  publish, at the owner's go after the Linux checks (2026-10-20). The store still serves 2.0.0 at
-  100%. From now on, changing a packaged file means resubmitting, which is the owner's call
-  (ADR-0200 Decision 16).
+- The 2.0.1 extension (`bddfb37a...`) was submitted to the Chrome Web Store for review as a staged
+  publish on 2026-10-20, and the owner cancelled that review on 2026-10-21 ("let's get everything
+  fixed first"). The store still serves 2.0.0 at 100%. The next submission is the refactored
+  extension once the pass is done (the package lane's B-final), at the owner's go (ADR-0200
+  Decision 16).
 - 2.0.1 is held for a maintainability pass (owner, 2026-10-20: "Refactor first, ship later"), so
   the candidate above is not cut over. arch-1 reopens with a second sweep: 100 findings over every
   area, each checked by a skeptic (57 confirmed, 43 partial, none refuted), and the 15 defects it

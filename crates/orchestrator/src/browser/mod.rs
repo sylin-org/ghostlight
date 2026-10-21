@@ -1435,6 +1435,10 @@ pub enum BrowserError {
     /// Adapter explicitly reported an uncertain effect.
     #[error("browser effect is unknown: {0}")]
     EffectUnknown(String),
+    /// The page threw while running the script the call sent, with the page's own description
+    /// of what it threw. The script may have acted before it threw, so its effect is unknown.
+    #[error("the page script threw: {0}")]
+    ScriptThrew(String),
     /// Browser bridge framing or message state failed.
     #[error("browser bridge protocol failed: {0}")]
     Protocol(String),
@@ -1508,6 +1512,7 @@ impl BrowserError {
                 | Self::CancelledAfterDispatch
                 | Self::DeadlineAfterDispatch
                 | Self::EffectUnknown(_)
+                | Self::ScriptThrew(_)
         )
     }
 }

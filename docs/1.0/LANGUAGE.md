@@ -987,16 +987,19 @@ syntax rejection sends no page evaluation. Browser evaluation happens at most on
 exception or lost reply remains uncertain regardless of its text or exception class, and only a
 refusal before any evaluation allows the original to be sent.
 
-A promise that the script evaluates to, in an awaited form, is waited for. A promise that rejects
-reports an unknown effect with the rejection as its description, as a thrown exception does,
-because the script may already have acted. A promise that never settles holds the call until
-`timeout_ms` ends it.
+A promise that the script evaluates to, in an awaited form, is waited for. A script the page
+throws on, and a promise that rejects, answer `script_threw`. The sentence quotes what was thrown,
+bounded to one line, the `exception` fact holds the page's whole description, and the next step
+checks the page before the script runs again. The effect stays unknown, because the script may
+already have acted, and durable history keeps only that a script threw, under its
+`effect_unknown` tag. A promise that never settles holds the call until `timeout_ms` ends it.
 
 A `{}` value adds one next step that names what else reads as `{}`: a DOM node, a Map or a class
 instance, and, for a script sent as written, an unawaited promise.
 
-Facts: `tab`, `value`, `truncated`, and any governed committed landing. Script source and result
-never enter audit or presentation.
+Facts: `tab`, `value`, `truncated`, and any governed committed landing; a script that threw has
+`exception` and `phase` instead. Script source and result, what a script threw included, never
+enter audit or presentation.
 
 ### `browser_flow`
 

@@ -179,6 +179,10 @@ const TARGET_LABEL_MAX_CHARS: usize = 80;
 /// Maximum number of visible characters retained from one JavaScript dialog's message.
 const DIALOG_MESSAGE_MAX_CHARS: usize = 500;
 
+/// Maximum number of visible characters a sentence quotes from what a page script threw. The
+/// whole description, as the browser bounded it, stays in [`EXCEPTION_FACT`].
+const SCRIPT_EXCEPTION_MAX_CHARS: usize = 500;
+
 /// The bounded human identity of the element an action actually used.
 ///
 /// The role is always narrowed to Ghostlight's closed vocabulary. The optional name is page
@@ -1772,6 +1776,10 @@ pub enum Refusal {
     CancelledAfterDispatch { by: Option<CancelCause> },
     /// A dispatched effect cannot be determined.
     EffectUnknown,
+    /// The page threw while running the script the call sent. The script may have acted before
+    /// it threw, so the effect is unknown, but the browser said what was thrown: `exception` is
+    /// the page's own description. Durable history keeps only that a script threw.
+    ScriptThrew { exception: String },
     /// A denied new-tab landing has an unknown final state.
     LandingDeniedUnknown {
         /// The governance reason code that denied the landing, the refusal's model code.
@@ -1834,6 +1842,8 @@ const DOCUMENT_UNAVAILABLE_CODE: &str = "document_unavailable";
 const BROWSER_CONTRACT_CODE: &str = "browser_contract_failed";
 /// The model code of a dispatched effect that cannot be determined.
 const EFFECT_UNKNOWN_CODE: &str = "browser_effect_unknown";
+/// The model code of a page script that threw: its effect is unknown, and what it threw is known.
+const SCRIPT_THREW_CODE: &str = "script_threw";
 
 impl Refusal {
     /// The refusal's closed model code: the `reason` fact its result carries (ADR-0203 Decision
@@ -1869,6 +1879,7 @@ impl Refusal {
             Self::ConnectionLost | Self::CancelledAfterDispatch { .. } | Self::EffectUnknown => {
                 EFFECT_UNKNOWN_CODE
             }
+            Self::ScriptThrew { .. } => SCRIPT_THREW_CODE,
             Self::WorkspaceUnusable { reason } => reason.as_fact(),
             Self::TabHeld { .. } => WorkspaceReason::TabHeld.as_fact(),
             Self::FilesUnreadable { problem } => problem.as_str(),
@@ -2022,6 +2033,7 @@ impl Refusal {
             },
             Self::ConnectionLost => "Connection lost before the browser confirmed completion.",
             Self::EffectUnknown | Self::CancelledAfterDispatch { by: None } => "The browser never confirmed what the sent command did.",
+            Self::ScriptThrew { exception } => return script_threw_summary(exception),
             Self::CancelledAfterDispatch { by: Some(CancelCause::Client) } => {
                 "The agent cancelled before the browser confirmed what the sent command did."
             }
@@ -2215,6 +2227,10 @@ impl Refusal {
                 "Then observe the page with browser_read or browser_inspect to learn what happened."
                     .into(),
             ],
+            Self::ScriptThrew { .. } => vec![
+                "Check what the script changed with browser_read or browser_inspect before you run it again."
+                    .into(),
+            ],
             Self::ActionUnconfirmed { cause, .. } => unconfirmed_next_steps(*cause),
             _ => vec![],
         }
@@ -2252,6 +2268,10 @@ pub const IMAGE_SIZE_FACT: &str = "image";
 /// The fact that names, as the window does, the agent of the session an `ownership_mismatch`
 /// refusal's handle belongs to, when an agent is named.
 pub const OWNER_FACT: &str = "owner_workspace";
+/// The fact that holds the page's own description of what a script threw, in a `script_threw`
+/// refusal. It is page data: the sentence quotes it bounded to one line, and durable history
+/// never keeps it.
+pub const EXCEPTION_FACT: &str = "exception";
 
 /// What a stale-target refusal offers beyond the word (ADR-0198 Decision 28).
 ///
@@ -2714,6 +2734,16 @@ fn whole_seconds(duration_ms: u64) -> usize {
         return 0;
     }
     usize::try_from(duration_ms.saturating_add(500) / 1_000).unwrap_or(usize::MAX)
+}
+
+/// The sentence for a page script that threw: what it threw, as one bounded line in quotes, and
+/// that it may already have acted.
+fn script_threw_summary(exception: &str) -> String {
+    const MAY_HAVE_ACTED: &str = "It may have changed the page before it threw.";
+    match one_line_bounded(exception, SCRIPT_EXCEPTION_MAX_CHARS) {
+        Some(exception) => format!("The script threw \"{exception}\". {MAY_HAVE_ACTED}"),
+        None => format!("The script threw. {MAY_HAVE_ACTED}"),
+    }
 }
 
 /// The sentence for a dialog that is showing: its message when the browser reported one and, for
@@ -5079,6 +5109,9 @@ Changes are \"unsaved\".".into()),
             Refusal::ConnectionLost,
             Refusal::CancelledAfterDispatch { by: None },
             Refusal::EffectUnknown,
+            Refusal::ScriptThrew {
+                exception: "ReferenceError: missing is not defined".into(),
+            },
             Refusal::LandingDeniedUnknown {
                 code: ReasonCode::HostDenied,
             },
@@ -5191,6 +5224,7 @@ Changes are \"unsaved\".".into()),
             Refusal::ConnectionLost => "ConnectionLost",
             Refusal::CancelledAfterDispatch { .. } => "CancelledAfterDispatch",
             Refusal::EffectUnknown => "EffectUnknown",
+            Refusal::ScriptThrew { .. } => "ScriptThrew",
             Refusal::LandingDeniedUnknown { .. } => "LandingDeniedUnknown",
             Refusal::WorkspaceUnusable { .. } => "WorkspaceUnusable",
             Refusal::TabHeld { .. } => "TabHeld",
@@ -5209,7 +5243,7 @@ Changes are \"unsaved\".".into()),
     }
 
     /// How many variants `Refusal` has; `variant_name` names each once.
-    const REFUSAL_VARIANTS: usize = 41;
+    const REFUSAL_VARIANTS: usize = 42;
 
     fn audit_tag(refusal: &Refusal) -> String {
         let tag = serde_json::to_value(refusal.audit().refusal()).expect("an audit tag encodes");
@@ -5217,6 +5251,46 @@ Changes are \"unsaved\".".into()),
             .as_str()
             .expect("an audit tag has a reason")
             .to_owned()
+    }
+
+    /// A script the page threw on names what it threw, as one bounded line, and that it may
+    /// already have acted; its one step checks the page, and none speaks of dialogs (L-D6).
+    #[test]
+    fn a_script_that_threw_says_what_it_threw_and_that_it_may_have_acted() {
+        let refusal = Refusal::ScriptThrew {
+            exception: "ReferenceError: missing is not defined\n    at <anonymous>:1:1".into(),
+        };
+        assert_eq!(refusal.reason(), "script_threw");
+        assert_eq!(
+            refusal.summary(),
+            "The script threw \"ReferenceError: missing is not defined at <anonymous>:1:1\". It may have changed the page before it threw."
+        );
+        let steps = refusal.next_steps();
+        assert_eq!(steps.len(), 1);
+        assert!(steps[0].contains("browser_read"));
+        assert!(steps.iter().all(|step| !step.contains("dialog")));
+    }
+
+    #[test]
+    fn what_a_script_threw_is_quoted_as_one_bounded_line() {
+        let long = Refusal::ScriptThrew {
+            exception: format!("Error: {}", "x".repeat(2_000)),
+        }
+        .summary();
+        assert!(long.contains("...\". It may have changed the page"));
+        assert!(long.chars().count() < crate::language::outcome::SCRIPT_EXCEPTION_MAX_CHARS + 80);
+        let quoted = Refusal::ScriptThrew {
+            exception: "Error: say \"hi\"".into(),
+        }
+        .summary();
+        assert!(quoted.starts_with("The script threw \"Error: say 'hi'\"."));
+        let blank = Refusal::ScriptThrew {
+            exception: " \n\t ".into(),
+        };
+        assert_eq!(
+            blank.summary(),
+            "The script threw. It may have changed the page before it threw."
+        );
     }
 
     /// Each refusal has one closed model code, the `reason` fact its result carries, and one
@@ -5298,6 +5372,7 @@ Changes are \"unsaved\".".into()),
                 "cancelled_after_dispatch",
             ),
             ("EffectUnknown", "browser_effect_unknown", "effect_unknown"),
+            ("ScriptThrew", "script_threw", "effect_unknown"),
             (
                 "LandingDeniedUnknown",
                 "host_denied",

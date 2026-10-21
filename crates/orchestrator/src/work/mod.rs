@@ -56,8 +56,8 @@ use crate::language::{
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
         CheckFailure, ExtensionAdvice, FileProblem, Observed, Outcome, Refusal, StaleHelp,
-        TargetRole, WorkspaceReason, CANDIDATE_TABS_FACT, HANDLE_TAB_FACT, IMAGE_SIZE_FACT,
-        OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
+        TargetRole, WorkspaceReason, CANDIDATE_TABS_FACT, EXCEPTION_FACT, HANDLE_TAB_FACT,
+        IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
     },
     page_refusal::{PageGesture, PageRefusal},
     Operation, Record, RecordAction, TakeScreenshot,
@@ -1983,6 +1983,16 @@ impl ApplicationExecutor {
                     Refusal::EffectUnknown,
                     json!({"detail":detail,"phase":"adapter_reported"}),
                 ),
+                BrowserError::ScriptThrew(exception) => {
+                    let mut facts = json!({"phase":"adapter_reported"});
+                    facts[EXCEPTION_FACT] = Value::String(exception.clone());
+                    (
+                        Refusal::ScriptThrew {
+                            exception: exception.clone(),
+                        },
+                        facts,
+                    )
+                }
                 BrowserError::DeadlineAfterDispatch => (
                     Refusal::DeadlineExpired {
                         before_dispatch: false,
@@ -2876,6 +2886,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         | BrowserError::StaleView
         | BrowserError::LocalInterlock(_)
         | BrowserError::EffectUnknown(_)
+        | BrowserError::ScriptThrew(_)
         | BrowserError::Protocol(_)
         | BrowserError::Authentication
         | BrowserError::Incompatible { .. }

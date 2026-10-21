@@ -12,8 +12,9 @@ read with its skeptic's corrections, or its entry in
 
 Parked on 2026-10-21. Every slice in this ledger has landed: core-language's own, and the
 core-service slices moved here (SERV-6, SERV-12, BROW-2), with the `workspace_refusal` cleanup
-test-03 asked for after C12b-2. One defect is open: L-D6, from the owner's live test of
-2026-10-21 (Notes). Nothing is held. A fresh session takes L-D6, then what the coordinator hands it.
+test-03 asked for after C12b-2, and L-D6, which the coordinator fixed on 2026-10-21 while the
+lane was parked. Nothing is open and nothing is held. A fresh session takes what the
+coordinator hands it next.
 
 How this lane works: build in `.target-lane-arch-core-language`; before each commit run fmt,
 workspace clippy (check its exit code, not a piped tail), `cargo test -p ghostlight-service` and
@@ -36,7 +37,7 @@ In order. "After" names what a slice waits for.
 | L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed (09d78bd9) |
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed (b5135a14) |
-| L-D6 | fix(language): a script that threw tells the agent what it threw | - | the owner's live test of 2026-10-21 (Notes); cross-lane into `work/mod.rs` if the detail must reach the sentence there | todo |
+| L-D6 | fix(language): a script that threw tells the agent what it threw | - | the owner's live test of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `browser/`, `protocol4/translate/script.rs` and `work/mod.rs` | landed (this commit) |
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b 1b693758) |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed (5c65614a) |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
@@ -67,6 +68,20 @@ is right (`translate/script.rs`: the script may have acted before it threw); the
 next step are not. Say that the script threw and quote the bounded description. Keep the effect
 unknown, and drop the dialog hint when the cause is a page exception. This predates the second
 sweep: the 2.0.1 extension's `script-evaluator.js` reported the same unknown.
+
+The fix types the cause where it is learned. `translate/script.rs` raises
+`BrowserError::ScriptThrew` with the page's description, `work/mod.rs` routes it to
+`Refusal::ScriptThrew`, and the result keeps `status` and `effect` unknown. It carries the new reason
+`script_threw` and the `exception` fact (`EXCEPTION_FACT`) beside `phase: adapter_reported`. The
+sentence quotes the exception as one line bounded to 500 characters (`one_line_bounded`, as dialog
+messages are quoted): `The script threw "ReferenceError: missing is not defined". It may have
+changed the page before it threw.` Its one step checks the page with browser_read or
+browser_inspect, and no step speaks of dialogs. Durable history keeps the retained form without
+the exception, under the `effect_unknown` tag it always wrote, so the persisted vocabulary does
+not change. An extension older than the second sweep still reports a thrown script as a plain
+unknown effect. Tests: the outcome sentence and its bounds, the audit's retained form, the work
+routing in `error_reasons_stay_truthful_about_disconnection_and_unknown_effects`, and the two
+translate tests. No result or catalog golden moved.
 
 - L-D1: the decoder fills a wheel scroll's missing direction with `SCROLL_DIRECTION_DEFAULT`, so
   `work/pointer.rs`'s `expect("language validated direction")` still holds and work/ is untouched.

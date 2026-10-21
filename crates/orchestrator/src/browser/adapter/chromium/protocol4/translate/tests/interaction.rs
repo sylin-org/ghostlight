@@ -1182,7 +1182,7 @@ f()
     });
     assert_eq!(
         call(&port, scoped(all_open(), evaluate("f()"))),
-        Err(BrowserError::EffectUnknown(
+        Err(BrowserError::ScriptThrew(
             "TypeError: f is not a function".into()
         ))
     );
@@ -1227,7 +1227,7 @@ fn a_script_that_threw_may_already_have_acted() {
     });
     assert_eq!(
         call(&port, scoped(all_open(), evaluate("missing()"))),
-        Err(BrowserError::EffectUnknown(
+        Err(BrowserError::ScriptThrew(
             "ReferenceError: missing is not defined".into()
         ))
     );

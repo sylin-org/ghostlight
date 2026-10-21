@@ -1,8 +1,9 @@
 //! Script evaluation in the page's main world.
 //!
 //! A script can do anything the page can, so a script that threw is not a script that did
-//! nothing: the browser may already have acted before the exception. The service reports the
-//! exception as an unknown effect and keeps the description the page gave.
+//! nothing: the browser may already have acted before the exception. The service reports it as
+//! a script that threw ([`BrowserError::ScriptThrew`]), an unknown effect that keeps the
+//! description the page gave, so the agent can read what its script threw.
 //!
 //! The page evaluates in REPL mode, which awaits its own result envelope and not a promise that
 //! is the script's value, so a script that is one expression and evaluates to a promise would
@@ -47,8 +48,8 @@ const RETURN_WORD: &str = "return";
 ///
 /// # Errors
 ///
-/// Returns the failure of the primitive, and an unknown effect carrying the page's description
-/// when the script threw.
+/// Returns the failure of the primitive, and [`BrowserError::ScriptThrew`] with the page's
+/// description when the script threw.
 pub fn evaluate(
     l: &mut Link<'_>,
     scope: &Scope,
@@ -84,7 +85,7 @@ pub fn evaluate(
         }
     };
     if let Some(description) = evaluated.exception {
-        return Err(BrowserError::EffectUnknown(description));
+        return Err(BrowserError::ScriptThrew(description));
     }
     Ok(BrowserOutcome::ScriptEvaluated {
         tab: l.tab(tab_id)?.into(),
