@@ -520,14 +520,14 @@ impl Located {
 }
 
 /// What one look decided for one agent.
-enum Outcome {
+enum LookResult {
     /// The cached copy still stands for the source it came from.
     Kept(Manifest),
     /// A new copy, with its manifest.
     Fresh(Manifest, Vec<u8>),
 }
 
-impl Outcome {
+impl LookResult {
     fn manifest(&self) -> &Manifest {
         match self {
             Self::Kept(manifest) | Self::Fresh(manifest, _) => manifest,
@@ -713,7 +713,7 @@ impl IconCache {
         let _looking = lock(&self.inner.looking);
         let before = self.shelf().clone();
         let deadline = Instant::now() + LOOK_LIMIT;
-        let mut outcomes: BTreeMap<&'static str, Option<Outcome>> = BTreeMap::new();
+        let mut outcomes: BTreeMap<&'static str, Option<LookResult>> = BTreeMap::new();
         for agent in &self.inner.catalog {
             if Instant::now() >= deadline {
                 self.report(agent.agent_id, &Skip::OutOfTime);
@@ -740,10 +740,10 @@ impl IconCache {
         let mut after = before.clone();
         for (agent_id, outcome) in outcomes {
             match outcome {
-                Some(Outcome::Kept(manifest)) => {
+                Some(LookResult::Kept(manifest)) => {
                     after.insert(agent_id, manifest);
                 }
-                Some(Outcome::Fresh(manifest, bytes)) => {
+                Some(LookResult::Fresh(manifest, bytes)) => {
                     match self.keep(agent_id, &manifest, &bytes) {
                         Ok(()) => {
                             after.insert(agent_id, manifest);
@@ -811,7 +811,7 @@ impl IconCache {
 
     /// The first icon `agent`'s own sources give, in order. `kept` is the manifest of its cached
     /// copy, which still stands while its source file is unchanged.
-    fn own_icon(&self, agent: &AgentIconSources, kept: Option<&Manifest>) -> Option<Outcome> {
+    fn own_icon(&self, agent: &AgentIconSources, kept: Option<&Manifest>) -> Option<LookResult> {
         for source in &agent.sources {
             for located in self.locate(agent.agent_id, *source) {
                 let stamp = match Stamp::of(located.path()) {
@@ -825,7 +825,7 @@ impl IconCache {
                     kept.read_from(&stamp)
                         && copy_path(&self.inner.directory, agent.agent_id, kept.kind).is_file()
                 }) {
-                    return Some(Outcome::Kept(kept.clone()));
+                    return Some(LookResult::Kept(kept.clone()));
                 }
                 match read_icon(&located, &stamp) {
                     Ok(Some((kind, bytes))) => {
@@ -838,7 +838,7 @@ impl IconCache {
                             app: agent.agent_id.to_owned(),
                             found_in: source.kind(),
                         };
-                        return Some(Outcome::Fresh(manifest, bytes));
+                        return Some(LookResult::Fresh(manifest, bytes));
                     }
                     Ok(None) => {}
                     Err(skip) => self.report(agent.agent_id, &skip),
@@ -854,22 +854,22 @@ impl IconCache {
         &self,
         agent_id: &str,
         family: &str,
-        found: &Outcome,
+        found: &LookResult,
         kept: Option<&Manifest>,
-    ) -> Option<Outcome> {
+    ) -> Option<LookResult> {
         let manifest = found.manifest();
         if let Some(kept) = kept.filter(|kept| {
             *kept == manifest && copy_path(&self.inner.directory, agent_id, kept.kind).is_file()
         }) {
-            return Some(Outcome::Kept(kept.clone()));
+            return Some(LookResult::Kept(kept.clone()));
         }
         let bytes = match found {
-            Outcome::Fresh(_, bytes) => bytes.clone(),
-            Outcome::Kept(_) => {
+            LookResult::Fresh(_, bytes) => bytes.clone(),
+            LookResult::Kept(_) => {
                 fs::read(copy_path(&self.inner.directory, family, manifest.kind)).ok()?
             }
         };
-        Some(Outcome::Fresh(manifest.clone(), bytes))
+        Some(LookResult::Fresh(manifest.clone(), bytes))
     }
 
     /// The files `source` names that exist on this computer, in order.

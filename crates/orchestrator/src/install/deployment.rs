@@ -623,7 +623,7 @@ pub struct InstallPlan {
 
 /// What an install did.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Outcome {
+pub struct InstallOutcome {
     /// The plan that was carried out.
     pub plan: InstallPlan,
     /// Whether the new service answered; `None` when no service was started.
@@ -692,12 +692,12 @@ pub struct Context<'a> {
 }
 
 /// Run `request` for this user's home with the real processes and registrations.
-pub fn run(request: &Request) -> anyhow::Result<Outcome> {
+pub fn run(request: &Request) -> anyhow::Result<InstallOutcome> {
     run_in(Layout::current()?, request)
 }
 
 /// Run `request` for the home of `layout` with the real processes and registrations.
-fn run_in(layout: Layout, request: &Request) -> anyhow::Result<Outcome> {
+fn run_in(layout: Layout, request: &Request) -> anyhow::Result<InstallOutcome> {
     let own_directory = env::current_exe()?
         .parent()
         .map(Path::to_path_buf)
@@ -762,7 +762,7 @@ pub struct ServiceDidNotStart {
 impl ServiceDidNotStart {
     /// The failure an install's `outcome` reports, when its service did not answer.
     #[must_use]
-    pub fn of(outcome: &Outcome, layout: &Layout) -> Option<Self> {
+    pub fn of(outcome: &InstallOutcome, layout: &Layout) -> Option<Self> {
         (outcome.service_started == Some(false)).then(|| Self {
             bin: layout.bin(),
             failure: outcome
@@ -792,9 +792,9 @@ fn recorded_start_failure(layout: &Layout) -> Option<String> {
 }
 
 /// Plan `request` and, unless it only asks for the plan, carry it out under the install lock.
-pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<Outcome> {
+pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<InstallOutcome> {
     if request.plan_only {
-        return Ok(Outcome {
+        return Ok(InstallOutcome {
             plan: plan(context, request.mode)?,
             service_started: None,
             start_failure: None,
@@ -926,13 +926,13 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 /// marker are removed. The 1.x version directories follow the same order and are removed last,
 /// after the migration has archived its own audit log: the log each holds is archived first, and
 /// a directory whose log could not be archived stays. An entry that cannot be removed is
-/// reported in [`Outcome::left_behind`]; it does not fail the install.
-pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
+/// reported in [`InstallOutcome::left_behind`]; it does not fail the install.
+pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<InstallOutcome> {
     let layout = &context.layout;
     if plan.unchanged {
         // The same version is in place, but what 1.x left still goes.
         let retired_leftovers = migration::retire_leftovers(&plan.migration);
-        return Ok(Outcome {
+        return Ok(InstallOutcome {
             plan,
             service_started: None,
             start_failure: None,
@@ -1001,7 +1001,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
     }
     // After a migration's own steps, so a policy folder whose files it just retired is empty.
     let retired_leftovers = migration::retire_leftovers(&plan.migration);
-    Ok(Outcome {
+    Ok(InstallOutcome {
         plan,
         service_started,
         start_failure,
@@ -1638,7 +1638,12 @@ mod tests {
             }
         }
 
-        fn run(&self, mode: Mode, version: &str, control: &FakeControl) -> anyhow::Result<Outcome> {
+        fn run(
+            &self,
+            mode: Mode,
+            version: &str,
+            control: &FakeControl,
+        ) -> anyhow::Result<InstallOutcome> {
             install(
                 &self.context(self.build(version), control),
                 &Request {

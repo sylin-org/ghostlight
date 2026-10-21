@@ -5,7 +5,7 @@
 //! the next launch will install again. Every sentence is in [`crate::language::deployment`]; this
 //! module chooses which to print and where.
 
-use crate::install::deployment::{self, Mode, Outcome, Request, ServiceDidNotStart};
+use crate::install::deployment::{self, InstallOutcome, Mode, Request, ServiceDidNotStart};
 use crate::install::entry::same_path;
 use crate::install::layout::Layout;
 use crate::install::migration::FlatpakStep;
@@ -68,7 +68,7 @@ pub fn run(request: &Request) -> anyhow::Result<()> {
 }
 
 /// One line for each thing `outcome` changed, saying only what was observed.
-fn report(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
+fn report(outcome: &InstallOutcome, layout: &Layout) -> Vec<Line> {
     let plan = &outcome.plan;
     let mut lines = Vec::new();
     if plan.migration.has_earlier_installation() {
@@ -116,7 +116,7 @@ fn report(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
 }
 
 /// Where the installed build serves from, said only once a service was seen answering.
-fn service_line(outcome: &Outcome, layout: &Layout) -> Option<Line> {
+fn service_line(outcome: &InstallOutcome, layout: &Layout) -> Option<Line> {
     let placed = match outcome.plan.mode {
         Mode::Development => Placed::Development,
         Mode::Restore => Placed::Release,
@@ -135,7 +135,7 @@ fn service_line(outcome: &Outcome, layout: &Layout) -> Option<Line> {
 /// What became of the directory and the marker earlier development builds used and of the 1.x
 /// version directories, with the archive each removed directory's audit log went to, as
 /// observed.
-fn deletion_lines(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
+fn deletion_lines(outcome: &InstallOutcome, layout: &Layout) -> Vec<Line> {
     let marker = layout.retired_development_marker();
     let mut lines = Vec::new();
     for path in &outcome.plan.deletions {
@@ -248,7 +248,7 @@ mod tests {
         left_behind: Vec<PathBuf>,
     ) -> Vec<Line> {
         report(
-            &Outcome {
+            &InstallOutcome {
                 plan: plan(mode, layout, deletions),
                 service_started: started,
                 start_failure: None,
@@ -363,7 +363,7 @@ mod tests {
             let first = layout.bin().join("v1.3.5");
             let second = layout.bin().join("v1.3.6");
             let archive = layout.state().join("audit-v1.3.5.jsonl");
-            let outcome = |left_behind: Vec<PathBuf>| Outcome {
+            let outcome = |left_behind: Vec<PathBuf>| InstallOutcome {
                 plan: plan(
                     Mode::Development,
                     &layout,
@@ -418,7 +418,7 @@ mod tests {
 
             let layout = Layout::new("home");
             let image = layout.bin().join("ghostlight-mcp-connector");
-            let outcome = Outcome {
+            let outcome = InstallOutcome {
                 plan: plan(Mode::Release, &layout, Vec::new()),
                 service_started: Some(true),
                 start_failure: None,
@@ -448,7 +448,7 @@ mod tests {
             use crate::install::deployment::EdgeReplacement;
 
             let layout = Layout::new("home");
-            let outcome = |edge_replaced: Option<EdgeReplacement>| Outcome {
+            let outcome = |edge_replaced: Option<EdgeReplacement>| InstallOutcome {
                 plan: InstallPlan {
                     edge_replaced,
                     ..plan(Mode::Development, &layout, Vec::new())
