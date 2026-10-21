@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 98 |
+| `crates/desktop` | 161 | 20 | 94 |
 
 ## Slices
 
@@ -47,7 +47,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A19 | `protocol4/tree/tests.rs`: an inventory decodes to a tree or to a refusal | 2 | 1 | contract 1 | landed (fb1b7b29) |
 | D1 | `crates/desktop/src/machine.rs`: what the shell starts and when | 37 | 5 | promise 4, defect 1 | landed (60dbba71; its ledger row came in the next commit) |
 | D2 | `crates/desktop/src/link.rs`: the frames the service writes, the bearer and the link's life | 26 | 3 | contract 2, promise 1 | landed (e3d4bb73) |
-| D3 | `crates/desktop/src/states.rs`: a state screen navigates nowhere else | 9 | 1 | promise 1 | landed (this commit) |
+| D3 | `crates/desktop/src/states.rs`: a state screen navigates nowhere else | 9 | 1 | promise 1 | landed (7ce3ebf5) |
+| D4 | `crates/desktop/src/lib.rs`: the launch parser's restating tests | 4 | 0 | - | landed (this commit) |
 
 ## Notes
 
@@ -86,6 +87,11 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   refuses every other navigation (gate 11). Cut: tests that restated the screens' words, buttons,
   classes and the const document's contents, and an escape test of text that is only ever
   constant. The `SCREENS` list goes with them.
+- D4: the four parser tests restated `TRAY_ARGUMENT`, `UPDATING_ARGUMENT` and the parser's own
+  match, and one round-tripped through `Launch::argument`, which only that test called; both go.
+  A contract gap stays open: the service writes the shell's `--tray` separately
+  (`service/presence.rs`), and no test sees both words. The root fix is one constant both crates
+  read; a test would only restate it.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against
