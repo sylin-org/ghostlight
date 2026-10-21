@@ -423,226 +423,217 @@ mod tests {
         }
     }
 
+    /// Protects doctor as the support surface, which names what is wrong and the way back: in text and in JSON it names the window program, why there is no window, an app
+    /// container's view instead of blaming the browser, the strays and the service fields (none when
+    /// nothing is left running), the 1.x version directories left in `bin`, per agent whether an icon
+    /// was found and from where, every workbench readiness state in the same words, and the way back
+    /// for a development build with a missing executable.
     #[test]
-    fn the_binary_list_names_the_window_program() {
-        use crate::install::layout::{Layout, DESKTOP_EXECUTABLE_NAME};
-        use crate::scratch::Scratch;
+    fn doctor_names_every_state_a_person_must_act_on_in_text_and_json() {
+        {
+            use crate::install::layout::{Layout, DESKTOP_EXECUTABLE_NAME};
+            use crate::scratch::Scratch;
 
-        let root = Scratch::named("doctor-binaries");
-        let layout = Layout::new(root.to_path_buf());
-        std::fs::create_dir_all(layout.bin()).unwrap();
-        std::fs::write(layout.service_executable(), b"service").unwrap();
-        std::fs::write(layout.edge(), b"edge").unwrap();
+            let root = Scratch::named("doctor-binaries");
+            let layout = Layout::new(root.to_path_buf());
+            std::fs::create_dir_all(layout.bin()).unwrap();
+            std::fs::write(layout.service_executable(), b"service").unwrap();
+            std::fs::write(layout.edge(), b"edge").unwrap();
 
-        let binaries = installed_binaries(&layout);
-        assert_eq!(
-            binaries,
-            vec![
-                (layout.service_executable(), true),
-                (layout.edge(), true),
-                (layout.desktop_executable(), false),
-            ]
-        );
-        assert!(binaries[2].0.ends_with(DESKTOP_EXECUTABLE_NAME));
-    }
-
-    #[test]
-    fn a_development_build_with_a_missing_executable_gets_the_way_back() {
-        use crate::install::record::{Channel, InstallRecord};
-
-        let mut observed = observation(Vec::new());
-        observed.binaries = vec![
-            (PathBuf::from("bin/ghostlight-service"), false),
-            (PathBuf::from("bin/ghostlight"), true),
-            (PathBuf::from("bin/ghostlight-desktop"), false),
-        ];
-        assert_eq!(observed.missing_development_executable(), None);
-        observed.installed = Some(InstallRecord {
-            service_version: "2.0.0".into(),
-            relay_revision: "4".into(),
-            service_sha256: "a".into(),
-            edge_sha256: None,
-            channel: Channel::Release,
-        });
-        assert_eq!(observed.missing_development_executable(), None);
-        if let Some(record) = observed.installed.as_mut() {
-            record.channel = Channel::Development;
-        }
-        let line = observed.missing_development_executable().unwrap();
-        assert!(line.contains("bin/ghostlight-service is missing"), "{line}");
-        assert!(line.ends_with(&crate::language::deployment::restore_route()));
-        observed.binaries[0].1 = true;
-        assert_eq!(
-            observed.missing_development_executable(),
-            None,
-            "every command works without the window program"
-        );
-    }
-
-    #[test]
-    fn doctor_says_why_there_is_no_window_in_text_and_in_json() {
-        use crate::language::workbench::WindowReason;
-
-        for reason in [
-            WindowReason::NoDisplay,
-            WindowReason::NoInteractiveDesktop,
-            WindowReason::NoShellFile,
-            WindowReason::NoWebview,
-            WindowReason::NoTray,
-            WindowReason::DidNotStay,
-        ] {
-            let mut observed = observation(Vec::new());
-            observed.runtime.status.as_mut().unwrap().window = Some(reason);
+            let binaries = installed_binaries(&layout);
             assert_eq!(
-                doctor_document(&observed)["service"]["window"],
-                reason.as_str()
+                binaries,
+                vec![
+                    (layout.service_executable(), true),
+                    (layout.edge(), true),
+                    (layout.desktop_executable(), false),
+                ]
             );
-            assert!(crate::cli::status::runtime_lines(&observed.runtime, false)
-                .contains(&reason.sentence().unwrap().to_owned()));
+            assert!(binaries[2].0.ends_with(DESKTOP_EXECUTABLE_NAME));
         }
-        assert!(doctor_document(&observation(Vec::new()))["service"]
-            .get("window")
-            .is_none());
-    }
+        {
+            use crate::install::record::{Channel, InstallRecord};
 
-    #[test]
-    fn inside_an_app_container_text_and_json_name_the_apps_view_instead_of_blaming_the_browser() {
-        use crate::install::container::AppContainer;
+            let mut observed = observation(Vec::new());
+            observed.binaries = vec![
+                (PathBuf::from("bin/ghostlight-service"), false),
+                (PathBuf::from("bin/ghostlight"), true),
+                (PathBuf::from("bin/ghostlight-desktop"), false),
+            ];
+            assert_eq!(observed.missing_development_executable(), None);
+            observed.installed = Some(InstallRecord {
+                service_version: "2.0.0".into(),
+                relay_revision: "4".into(),
+                service_sha256: "a".into(),
+                edge_sha256: None,
+                channel: Channel::Release,
+            });
+            assert_eq!(observed.missing_development_executable(), None);
+            if let Some(record) = observed.installed.as_mut() {
+                record.channel = Channel::Development;
+            }
+            let line = observed.missing_development_executable().unwrap();
+            assert!(line.contains("bin/ghostlight-service is missing"), "{line}");
+            assert!(line.ends_with(&crate::language::deployment::restore_route()));
+            observed.binaries[0].1 = true;
+            assert_eq!(
+                observed.missing_development_executable(),
+                None,
+                "every command works without the window program"
+            );
+        }
+        {
+            use crate::language::workbench::WindowReason;
 
-        let mut observed = observation(Vec::new());
-        let open = doctor_document(&observed);
-        assert_eq!(open["browsers"][0]["state"], "needs_attention");
-        assert!(
-            crate::cli::setup::browser_report_lines(&observed.native_host)[0]
-                .contains("needs attention")
-        );
+            for reason in [
+                WindowReason::NoDisplay,
+                WindowReason::NoInteractiveDesktop,
+                WindowReason::NoShellFile,
+                WindowReason::NoWebview,
+                WindowReason::NoTray,
+                WindowReason::DidNotStay,
+            ] {
+                let mut observed = observation(Vec::new());
+                observed.runtime.status.as_mut().unwrap().window = Some(reason);
+                assert_eq!(
+                    doctor_document(&observed)["service"]["window"],
+                    reason.as_str()
+                );
+                assert!(crate::cli::status::runtime_lines(&observed.runtime, false)
+                    .contains(&reason.sentence().unwrap().to_owned()));
+            }
+            assert!(doctor_document(&observation(Vec::new()))["service"]
+                .get("window")
+                .is_none());
+        }
+        {
+            use crate::install::container::AppContainer;
 
-        observed.native_host.private_view = Some(AppContainer {
-            app: "Claude".into(),
-        });
-        let words =
-            "Claude's own view of the registry; run ghostlight doctor from a regular terminal.";
-        let document = doctor_document(&observed);
-        let row = &document["browsers"][0];
-        assert_eq!(row["state"], "not_visible");
-        assert_eq!(row["detail"], words);
-        assert_eq!(row["name"], "Google Chrome");
-        assert_eq!(document["private_view"]["app"], "Claude");
-        let lines = crate::cli::setup::browser_report_lines(&observed.native_host);
-        assert_eq!(
-            lines,
-            [format!(
+            let mut observed = observation(Vec::new());
+            let open = doctor_document(&observed);
+            assert_eq!(open["browsers"][0]["state"], "needs_attention");
+            assert!(
+                crate::cli::setup::browser_report_lines(&observed.native_host)[0]
+                    .contains("needs attention")
+            );
+
+            observed.native_host.private_view = Some(AppContainer {
+                app: "Claude".into(),
+            });
+            let words =
+                "Claude's own view of the registry; run ghostlight doctor from a regular terminal.";
+            let document = doctor_document(&observed);
+            let row = &document["browsers"][0];
+            assert_eq!(row["state"], "not_visible");
+            assert_eq!(row["detail"], words);
+            assert_eq!(row["name"], "Google Chrome");
+            assert_eq!(document["private_view"]["app"], "Claude");
+            let lines = crate::cli::setup::browser_report_lines(&observed.native_host);
+            assert_eq!(
+                lines,
+                [format!(
                 "Browser: Google Chrome -- Google Chrome is installed. -- cannot be checked from \
                  here -- {words}"
             )]
-        );
-        assert!(!lines[0].contains("Malformed"));
-    }
-
-    #[test]
-    fn doctor_json_carries_the_strays_and_the_service_fields() {
-        use crate::install::deployment::{StrayKind, StrayProcess};
-
-        let document = doctor_document(&observation(vec![StrayProcess {
-            pid: 99,
-            image: PathBuf::from("bin/ghostlight-mcp-connector"),
-            kind: StrayKind::RetiredConnector,
-        }]));
-        assert_eq!(
-            document["strays"],
-            serde_json::json!([{
-                "pid": 99,
-                "image": "bin/ghostlight-mcp-connector",
-                "kind": "retired_connector",
-            }])
-        );
-        assert_eq!(document["service"]["running"], true);
-        assert_eq!(
-            document["service"]["connections"],
-            serde_json::json!({"agents": 1, "mcp_clients": 1, "command_line": 0, "browsers": 1})
-        );
-        assert_eq!(
-            document["service"]["workbench"],
-            serde_json::json!({
-                "url": "http://127.0.0.1:47600/",
-                "watching": false,
-                "usual_port": true,
-            })
-        );
-    }
-
-    #[test]
-    fn doctor_json_lists_the_1x_version_directories_left_in_bin() {
-        let mut observed = observation(Vec::new());
-        assert_eq!(
-            doctor_document(&observed)["version_directories"],
-            serde_json::json!([])
-        );
-        observed.version_directories =
-            vec![PathBuf::from("bin/v1.3.5"), PathBuf::from("bin/v1.3.6")];
-        assert_eq!(
-            doctor_document(&observed)["version_directories"],
-            serde_json::json!(["bin/v1.3.5", "bin/v1.3.6"])
-        );
-    }
-
-    #[test]
-    fn doctor_json_says_per_agent_whether_an_icon_was_found_and_from_where() {
-        use crate::install::icons::{AgentIcon, FoundIcon, IconSourceKind};
-
-        let mut observed = observation(Vec::new());
-        observed.icons = vec![
-            AgentIcon {
-                agent_id: "claude-code",
-                name: "Claude Code",
-                found: Some(FoundIcon {
-                    sha256: "0".repeat(64),
-                    app_id: "claude-desktop",
-                    app_name: "Claude Desktop",
-                    found_in: IconSourceKind::StoreApp,
-                }),
-            },
-            AgentIcon {
-                agent_id: "cline",
-                name: "Cline",
-                found: None,
-            },
-        ];
-        assert_eq!(
-            doctor_document(&observed)["agent_icons"],
-            serde_json::json!([
-                { "agent": "claude-code", "found": true, "app": "claude-desktop", "source": "store_app" },
-                { "agent": "cline", "found": false },
-            ])
-        );
-    }
-
-    #[test]
-    fn doctor_json_lists_no_strays_when_nothing_is_left_running() {
-        assert_eq!(
-            doctor_document(&observation(Vec::new()))["strays"],
-            serde_json::json!([])
-        );
-    }
-
-    #[test]
-    fn doctor_renders_every_workbench_readiness_state_in_the_same_words() {
-        use crate::language::readiness::Readiness;
-        use crate::workbench::ReadinessSummary;
-
-        for state in Readiness::ALL {
-            let readiness = ReadinessSummary {
-                state: *state,
-                word: state.word().into(),
-                detail: state.detail().into(),
-                tone: state.tone().into(),
-                invites_control: state.invites_control(),
-            };
-            assert_eq!(
-                readiness_line(&readiness),
-                format!("Readiness: {} -- {}", state.word(), state.detail()),
-                "{state:?}"
             );
+            assert!(!lines[0].contains("Malformed"));
+        }
+        {
+            use crate::install::deployment::{StrayKind, StrayProcess};
+
+            let document = doctor_document(&observation(vec![StrayProcess {
+                pid: 99,
+                image: PathBuf::from("bin/ghostlight-mcp-connector"),
+                kind: StrayKind::RetiredConnector,
+            }]));
+            assert_eq!(
+                document["strays"],
+                serde_json::json!([{
+                    "pid": 99,
+                    "image": "bin/ghostlight-mcp-connector",
+                    "kind": "retired_connector",
+                }])
+            );
+            assert_eq!(document["service"]["running"], true);
+            assert_eq!(
+                document["service"]["connections"],
+                serde_json::json!({"agents": 1, "mcp_clients": 1, "command_line": 0, "browsers": 1})
+            );
+            assert_eq!(
+                document["service"]["workbench"],
+                serde_json::json!({
+                    "url": "http://127.0.0.1:47600/",
+                    "watching": false,
+                    "usual_port": true,
+                })
+            );
+        }
+        {
+            let mut observed = observation(Vec::new());
+            assert_eq!(
+                doctor_document(&observed)["version_directories"],
+                serde_json::json!([])
+            );
+            observed.version_directories =
+                vec![PathBuf::from("bin/v1.3.5"), PathBuf::from("bin/v1.3.6")];
+            assert_eq!(
+                doctor_document(&observed)["version_directories"],
+                serde_json::json!(["bin/v1.3.5", "bin/v1.3.6"])
+            );
+        }
+        {
+            use crate::install::icons::{AgentIcon, FoundIcon, IconSourceKind};
+
+            let mut observed = observation(Vec::new());
+            observed.icons = vec![
+                AgentIcon {
+                    agent_id: "claude-code",
+                    name: "Claude Code",
+                    found: Some(FoundIcon {
+                        sha256: "0".repeat(64),
+                        app_id: "claude-desktop",
+                        app_name: "Claude Desktop",
+                        found_in: IconSourceKind::StoreApp,
+                    }),
+                },
+                AgentIcon {
+                    agent_id: "cline",
+                    name: "Cline",
+                    found: None,
+                },
+            ];
+            assert_eq!(
+                doctor_document(&observed)["agent_icons"],
+                serde_json::json!([
+                    { "agent": "claude-code", "found": true, "app": "claude-desktop", "source": "store_app" },
+                    { "agent": "cline", "found": false },
+                ])
+            );
+        }
+        {
+            assert_eq!(
+                doctor_document(&observation(Vec::new()))["strays"],
+                serde_json::json!([])
+            );
+        }
+        {
+            use crate::language::readiness::Readiness;
+            use crate::workbench::ReadinessSummary;
+
+            for state in Readiness::ALL {
+                let readiness = ReadinessSummary {
+                    state: *state,
+                    word: state.word().into(),
+                    detail: state.detail().into(),
+                    tone: state.tone().into(),
+                    invites_control: state.invites_control(),
+                };
+                assert_eq!(
+                    readiness_line(&readiness),
+                    format!("Readiness: {} -- {}", state.word(), state.detail()),
+                    "{state:?}"
+                );
+            }
         }
     }
 }
