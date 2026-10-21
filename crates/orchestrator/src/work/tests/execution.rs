@@ -5022,3 +5022,31 @@ fn a_relay_restart_keeps_the_workspaces_recording_saveable() {
         BrowserCommand::ExportRecording { recording_id, .. } if recording_id == "recording_7"
     )));
 }
+
+/// be54ad44: a stopped recording's status says it stopped and is ready to save, so the agent never
+/// reads it as still capturing; a running one keeps its own sentence.
+#[test]
+fn a_stopped_recordings_status_says_it_stopped_and_a_running_one_that_it_runs() {
+    let (executor, browser, _, workspace, _) = fixture();
+    holding_recording(&executor, &workspace);
+    for (state, active) in [
+        (RecordingState::Frozen, false),
+        (RecordingState::Recording, true),
+    ] {
+        let summary = recording_summary(state, "https://example.com/");
+        let expected = Outcome::RecordingObserved {
+            frames: summary.frame_count,
+            duration_ms: summary.duration_ms,
+            active,
+        };
+        browser.push(Ok(BrowserOutcome::RecordingStatus { summary }));
+        let status = executor.execute(
+            &workspace,
+            "browser_record",
+            json!({"action":"status"}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(status.status, Status::Succeeded, "{status:?}");
+        assert_eq!(status.summary, expected.summary(), "{state:?}");
+    }
+}
