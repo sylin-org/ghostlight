@@ -530,72 +530,38 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_record_without_a_channel_reads_as_release_and_the_channel_round_trips() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("install.json");
-        fs::write(
-            &path,
-            r#"{"service_version":"2.0.0","relay_revision":"4","service_sha256":"ab"}"#,
-        )
-        .unwrap();
-        let read = InstallRecord::read(&path).unwrap().unwrap();
-        assert_eq!(read.channel, Channel::Release);
-        let development = InstallRecord {
-            channel: Channel::Development,
-            ..read
-        };
-        development.write(&path).unwrap();
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains(r#""channel": "development""#), "{text}");
-        assert_eq!(InstallRecord::read(&path).unwrap(), Some(development));
+    /// The version vectors both launchers test against too (`packaging/version-order.json`).
+    #[derive(Deserialize)]
+    struct VersionVectors {
+        ascending: Vec<String>,
+        equal: Vec<[String; 2]>,
+        malformed: Vec<String>,
     }
 
+    /// Protects promise 1 (ADR-0197 Decision 14): `bin/install.json` reads whatever an earlier or
+    /// later release wrote. A missing, broken or incomplete record reads as none, so the next
+    /// install replaces it; a record from before channels and the edge reads as a release with no
+    /// edge; fields a later release adds are ignored; and a written record reads back whole.
     #[test]
-    fn a_record_written_before_the_edge_existed_reads_with_no_edge() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("install.json");
-        fs::write(
-            &path,
-            r#"{"service_version":"2.0.0","relay_revision":"4","service_sha256":"ab"}"#,
-        )
-        .unwrap();
-        let read = InstallRecord::read(&path).unwrap().unwrap();
-        assert_eq!(read.edge_sha256, None);
-        let with_edge = InstallRecord {
-            edge_sha256: Some("cd".to_owned()),
-            ..read
-        };
-        with_edge.write(&path).unwrap();
-        assert_eq!(InstallRecord::read(&path).unwrap(), Some(with_edge));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_replaced_file_and_the_directories_made_for_it_are_private() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let scratch = Scratch::new();
-        let path = scratch.path().join("state").join("settings.json");
-        atomic_replace(&path, b"{}").unwrap();
-        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&path), 0o600);
-        assert_eq!(mode(path.parent().unwrap()), 0o700);
-    }
-
-    #[test]
-    fn a_record_round_trips() {
+    fn an_install_record_reads_whatever_any_release_wrote() {
         let scratch = Scratch::new();
         let path = scratch.path().join("bin").join("install.json");
-        let written = record("2.0.0", "abc");
-        written.write(&path).unwrap();
-        assert_eq!(InstallRecord::read(&path).unwrap(), Some(written));
-    }
+        assert_eq!(InstallRecord::read(&path).unwrap(), None);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        for unusable in [&b"not json"[..], br#"{"service_version":"2.0.0"}"#] {
+            fs::write(&path, unusable).unwrap();
+            assert_eq!(InstallRecord::read(&path).unwrap(), None);
+        }
 
-    #[test]
-    fn unknown_fields_are_ignored() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("install.json");
+        fs::write(
+            &path,
+            r#"{"service_version":"2.0.0","relay_revision":"3","service_sha256":"ab"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            InstallRecord::read(&path).unwrap(),
+            Some(record("2.0.0", "ab"))
+        );
         fs::write(
             &path,
             br#"{"service_version":"2.1.0","relay_revision":"3","service_sha256":"f0","later":{"a":1}}"#,
@@ -605,21 +571,46 @@ mod tests {
             InstallRecord::read(&path).unwrap(),
             Some(record("2.1.0", "f0"))
         );
+
+        let development = InstallRecord {
+            edge_sha256: Some("cd".to_owned()),
+            channel: Channel::Development,
+            ..record("2.0.0", "ab")
+        };
+        development.write(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains(r#""channel": "development""#), "{text}");
+        assert_eq!(InstallRecord::read(&path).unwrap(), Some(development));
     }
 
+    /// Protects promise 1 (ADR-0197 Decision 14): a payload installs only forward. Versions order
+    /// by semver precedence on the vectors the npm and mcpb launchers share, a malformed one does
+    /// not parse, an older payload is refused whatever state the image is in, and a payload of
+    /// the same version repairs an image whose SHA-256 is missing or not the recorded one.
     #[test]
-    fn a_missing_or_unreadable_record_reads_as_none() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("install.json");
-        assert_eq!(InstallRecord::read(&path).unwrap(), None);
-        fs::write(&path, b"not json").unwrap();
-        assert_eq!(InstallRecord::read(&path).unwrap(), None);
-        fs::write(&path, br#"{"service_version":"2.0.0"}"#).unwrap();
-        assert_eq!(InstallRecord::read(&path).unwrap(), None);
-    }
+    fn a_payload_installs_only_forward_by_the_versions_the_launchers_share() {
+        let vectors: VersionVectors =
+            serde_json::from_str(include_str!("../../../../packaging/version-order.json")).unwrap();
+        let versions: Vec<Version> = vectors
+            .ascending
+            .iter()
+            .map(|text| Version::parse(text).unwrap_or_else(|| panic!("{text:?}")))
+            .collect();
+        for pair in versions.windows(2) {
+            assert!(pair[0] < pair[1], "{pair:?}");
+        }
+        for [left, right] in &vectors.equal {
+            assert!(Version::parse(left).is_some(), "{left}");
+            assert_eq!(
+                Version::parse(left),
+                Version::parse(right),
+                "{left} {right}"
+            );
+        }
+        for text in &vectors.malformed {
+            assert_eq!(Version::parse(text), None, "{text:?}");
+        }
 
-    #[test]
-    fn decisions_follow_version_order_and_image_health() {
         let installed = record("2.0.0", "aa");
         let unordered = record("not a version", "aa");
         let cases = [
@@ -646,222 +637,146 @@ mod tests {
                 "payload {payload}, image {sha:?}"
             );
         }
-    }
 
-    #[test]
-    fn a_refused_payload_names_both_versions() {
-        let message = PayloadRefused::new(&record("2.1.0", "a"), &record("2.0.0", "b")).to_string();
-        assert!(
-            message.contains("2.1.0") && message.contains("2.0.0"),
-            "{message}"
+        let scratch = Scratch::new();
+        let image = scratch.path().join("image");
+        fs::write(&image, b"abc").unwrap();
+        let hashed = record(
+            "2.0.0",
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        );
+        let sha = sha256_file(&image).unwrap();
+        assert_eq!(
+            decide(Some(&hashed), &record("2.0.0", "cc"), Some(&sha)),
+            Standing::Same
         );
     }
 
-    /// The version vectors both launchers test against too (`packaging/version-order.json`).
-    #[derive(Deserialize)]
-    struct VersionVectors {
-        ascending: Vec<String>,
-        equal: Vec<[String; 2]>,
-        malformed: Vec<String>,
-    }
-
-    fn version_vectors() -> VersionVectors {
-        serde_json::from_str(include_str!("../../../../packaging/version-order.json")).unwrap()
-    }
-
+    /// Protects ADR-0203 Decision 11.2: a replace publishes the whole new file or leaves the old
+    /// one. Its temporary sits beside the file under the one name the stray sweep recognises and
+    /// is gone afterwards, a failed replace keeps what was there, a backup keeps the old file
+    /// beside the new one, and an own file refuses a link while a shared one writes through it.
     #[test]
-    fn versions_order_by_semver_precedence_on_the_vectors_the_launchers_share() {
-        let vectors = version_vectors();
-        let versions: Vec<Version> = vectors
-            .ascending
-            .iter()
-            .map(|text| Version::parse(text).unwrap_or_else(|| panic!("{text:?}")))
-            .collect();
-        for pair in versions.windows(2) {
-            assert!(pair[0] < pair[1], "{pair:?}");
-        }
-        for [left, right] in &vectors.equal {
-            assert_eq!(
-                Version::parse(left),
-                Version::parse(right),
-                "{left} {right}"
-            );
-            assert!(Version::parse(left).is_some(), "{left}");
-        }
-    }
-
-    #[test]
-    fn malformed_versions_do_not_parse_on_the_vectors_the_launchers_share() {
-        for text in version_vectors().malformed {
-            assert_eq!(Version::parse(&text), None, "{text:?}");
-        }
-    }
-
-    #[test]
-    fn atomic_replace_publishes_whole_files_and_leaves_no_temporary() {
+    fn a_replace_publishes_the_whole_file_or_leaves_the_old_one() {
         let scratch = Scratch::new();
-        let path = scratch.path().join("nested").join("file.json");
-        atomic_replace(&path, b"first").unwrap();
-        atomic_replace(&path, b"second").unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"second");
-        let names: Vec<_> = fs::read_dir(path.parent().unwrap())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        assert_eq!(names, ["file.json"]);
-    }
-
-    #[test]
-    fn only_a_replace_temporary_is_recognised() {
-        assert!(is_temporary(OsStr::new(
-            ".ghostlight-0123456789abcdef0123456789abcdef.tmp"
-        )));
-        for other in [
-            ".ghostlight-desktop-0123456789abcdef0123456789abcdef.tmp",
-            ".ghostlight-0123456789abcdef.tmp",
-            ".ghostlight-0123456789abcdef0123456789abcdef.json",
-            "ghostlight-0123456789abcdef0123456789abcdef.tmp",
-            "settings.json",
-        ] {
-            assert!(!is_temporary(OsStr::new(other)), "{other}");
+        {
+            let path = scratch.path().join("nested").join("file.json");
+            atomic_replace(&path, b"first").unwrap();
+            atomic_replace(&path, b"second").unwrap();
+            assert_eq!(fs::read(&path).unwrap(), b"second");
+            let names: Vec<_> = fs::read_dir(path.parent().unwrap())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect();
+            assert_eq!(names, ["file.json"]);
         }
-    }
-
-    #[test]
-    fn a_replace_names_its_temporary_with_the_one_pattern() {
-        let scratch = Scratch::new();
-        for (replace, name) in [(Replace::OWN, "own.json"), (Replace::SHARED, "shared.json")] {
-            let path = scratch.path().join(name);
-            steps::taken();
-            replace.write(&path, b"{}").unwrap();
-            let taken = steps::taken();
-            let [steps::Step::Synced(temporary), steps::Step::Renamed(_, published)] =
-                taken.as_slice()
-            else {
-                panic!("one synced write then one rename, not {taken:?}");
+        {
+            for (replace, name) in [(Replace::OWN, "own.json"), (Replace::SHARED, "shared.json")] {
+                let path = scratch.path().join(name);
+                steps::taken();
+                replace.write(&path, b"{}").unwrap();
+                let taken = steps::taken();
+                let [steps::Step::Synced(temporary), steps::Step::Renamed(_, published)] =
+                    taken.as_slice()
+                else {
+                    panic!("one synced write then one rename, not {taken:?}");
+                };
+                assert_eq!(temporary.parent(), path.parent());
+                assert!(
+                    is_temporary(temporary.file_name().unwrap()),
+                    "{temporary:?}"
+                );
+                assert_eq!(published, &path);
+            }
+            for other in [
+                ".ghostlight-desktop-0123456789abcdef0123456789abcdef.tmp",
+                ".ghostlight-0123456789abcdef.tmp",
+                ".ghostlight-0123456789abcdef0123456789abcdef.json",
+                "ghostlight-0123456789abcdef0123456789abcdef.tmp",
+                "settings.json",
+            ] {
+                assert!(!is_temporary(OsStr::new(other)), "{other}");
+            }
+        }
+        {
+            let failed = Scratch::new();
+            let path = failed.path().join("directory");
+            fs::create_dir(&path).unwrap();
+            assert!(atomic_replace(&path, b"bytes").is_err());
+            assert!(path.is_dir());
+            assert_eq!(fs::read_dir(failed.path()).unwrap().count(), 1);
+        }
+        {
+            let path = scratch.path().join("settings.json");
+            let replace = Replace {
+                backup: true,
+                ..Replace::SHARED
             };
-            assert_eq!(temporary.parent(), path.parent());
-            assert!(
-                is_temporary(temporary.file_name().unwrap()),
-                "{temporary:?}"
+            replace.write(&path, b"first").unwrap();
+            assert!(!backup_path(&path).exists());
+            replace.write(&path, b"second").unwrap();
+            assert_eq!(fs::read(&path).unwrap(), b"second");
+            assert_eq!(
+                backup_path(&path),
+                scratch.path().join("settings.json.ghostlight-backup")
             );
-            assert_eq!(published, &path);
+            assert_eq!(fs::read(backup_path(&path)).unwrap(), b"first");
+        }
+        {
+            let absent = scratch.path().join("absent.json");
+            assert_eq!(Replace::OWN.target(&absent).unwrap(), absent);
+            assert_eq!(Replace::SHARED.target(&absent).unwrap(), absent);
+
+            let real = scratch.path().join("real.json");
+            fs::write(&real, b"old").unwrap();
+            let link = scratch.path().join("link.json");
+            #[cfg(unix)]
+            let linked = std::os::unix::fs::symlink(&real, &link).is_ok();
+            // Windows needs the symlink privilege (Developer Mode or an elevated shell); without
+            // it the Unix run proves the same replace.
+            #[cfg(windows)]
+            let linked = std::os::windows::fs::symlink_file(&real, &link).is_ok();
+            if linked {
+                let refused = atomic_replace(&link, b"secret").unwrap_err();
+                assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+                assert_eq!(fs::read(&real).unwrap(), b"old");
+                assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+
+                atomic_replace_keeping_access(&link, b"new").unwrap();
+                assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+                assert_eq!(fs::read(&real).unwrap(), b"new");
+            }
         }
     }
 
+    /// Protects ADR-0203 Decision 11.1: an own replace is readable only by the current user, with
+    /// the directories made for it closed on Unix, while a shared replace creates its file and
+    /// directories with the default access and keeps the access an existing file had.
     #[test]
-    fn a_kept_access_replace_creates_a_new_file_and_its_directories() {
+    fn a_replaced_file_is_private_or_keeps_its_access_as_asked() {
         let scratch = Scratch::new();
-        let path = scratch.path().join("shared").join("policy.json");
-        atomic_replace_keeping_access(&path, b"first").unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"first");
+        let own = scratch.path().join("state").join("settings.json");
+        atomic_replace(&own, b"{}").unwrap();
+        assert_owner_only(&own);
+
+        let shared = scratch.path().join("shared").join("policy.json");
+        atomic_replace_keeping_access(&shared, b"first").unwrap();
+        assert_eq!(fs::read(&shared).unwrap(), b"first");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
+            let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(own.parent().unwrap()), 0o700);
+
             let plain = scratch.path().join("plain");
             fs::create_dir(&plain).unwrap();
             fs::write(plain.join("file"), b"").unwrap();
-            let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode(path.parent().unwrap()), mode(&plain));
-            assert_eq!(mode(&path), mode(&plain.join("file")));
+            assert_eq!(mode(shared.parent().unwrap()), mode(&plain));
+            assert_eq!(mode(&shared), mode(&plain.join("file")));
 
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-            atomic_replace_keeping_access(&path, b"second").unwrap();
-            assert_eq!(mode(&path), 0o644);
+            fs::set_permissions(&shared, fs::Permissions::from_mode(0o644)).unwrap();
+            atomic_replace_keeping_access(&shared, b"second").unwrap();
+            assert_eq!(mode(&shared), 0o644);
         }
-    }
-
-    #[test]
-    fn a_backup_keeps_the_old_file_beside_the_new_one() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("settings.json");
-        let replace = Replace {
-            backup: true,
-            ..Replace::SHARED
-        };
-        replace.write(&path, b"first").unwrap();
-        assert!(!backup_path(&path).exists());
-        replace.write(&path, b"second").unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"second");
-        assert_eq!(
-            backup_path(&path),
-            scratch.path().join("settings.json.ghostlight-backup")
-        );
-        assert_eq!(fs::read(backup_path(&path)).unwrap(), b"first");
-    }
-
-    #[test]
-    fn a_replace_target_without_a_link_is_the_path_itself() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("absent.json");
-        assert_eq!(Replace::OWN.target(&path).unwrap(), path);
-        assert_eq!(Replace::SHARED.target(&path).unwrap(), path);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn an_own_replace_refuses_a_link_and_a_shared_one_writes_through_it() {
-        use std::os::unix::fs::symlink;
-
-        let scratch = Scratch::new();
-        let real = scratch.path().join("real.json");
-        fs::write(&real, b"old").unwrap();
-        let link = scratch.path().join("link.json");
-        symlink(&real, &link).unwrap();
-
-        let refused = atomic_replace(&link, b"secret").unwrap_err();
-        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
-        assert_eq!(fs::read(&real).unwrap(), b"old");
-        assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
-
-        atomic_replace_keeping_access(&link, b"new").unwrap();
-        assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
-        assert_eq!(fs::read(&real).unwrap(), b"new");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn an_own_replace_refuses_a_link_and_a_shared_one_writes_through_it() {
-        use std::os::windows::fs::symlink_file;
-
-        let scratch = Scratch::new();
-        let real = scratch.path().join("real.json");
-        fs::write(&real, b"old").unwrap();
-        let link = scratch.path().join("link.json");
-        if symlink_file(&real, &link).is_err() {
-            // No symlink privilege (Developer Mode or an elevated shell) here; the Unix test
-            // exercises the same replace.
-            return;
-        }
-
-        let refused = atomic_replace(&link, b"secret").unwrap_err();
-        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
-        assert_eq!(fs::read(&real).unwrap(), b"old");
-        assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
-
-        atomic_replace_keeping_access(&link, b"new").unwrap();
-        assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
-        assert_eq!(fs::read(&real).unwrap(), b"new");
-    }
-
-    #[test]
-    fn a_failed_replace_keeps_the_old_file() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("directory");
-        fs::create_dir(&path).unwrap();
-        assert!(atomic_replace(&path, b"bytes").is_err());
-        assert!(path.is_dir());
-        assert_eq!(fs::read_dir(scratch.path()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn a_file_hashes_to_its_sha256() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("image");
-        fs::write(&path, b"abc").unwrap();
-        assert_eq!(
-            sha256_file(&path).unwrap(),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
     }
 }

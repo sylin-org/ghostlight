@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 501 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 485 |
 | `crates/desktop` | 161 | 20 | 161 |
 
 ## Slices
@@ -39,6 +39,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I15 | `install/user_path.rs`: twelve tests of the `Path` value fold into one, which runs on every system (one over the plan, which folded them into T-I14's Windows-only test; made back later in the area); two that only round-tripped the registry encoding through itself go | 539 | 526 | promise 1 (the value comes back byte for byte) | landed (this commit) |
 | T-I16 | `install/icons.rs`: its seventeen tests go, with `IconCache::with_catalog` and `IconCache::version`, which only they used; the plan ranked the icon-cache and PNG-only folds below the budget line, and `agent/image.rs`'s tile golden still reads the cache | 526 | 509 | none here | landed (this commit) |
 | T-I17 | `install/swap.rs`: six tests fold into one; three of the sweep's private details go (the moved-image stop in `deployment.rs` covers the listing) | 509 | 501 | promise 1 (ADR-0197 D14), defect fafb0cb5 as a case | landed (this commit) |
+| T-I18 | `install/record.rs`: twenty tests fold into four: the record reads any release's file, payloads install only forward on the launchers' shared version vectors (the image hash as a case), a replace publishes whole or not at all, and its access is private or kept as asked; the refusal-words test goes (the refusal is proven in `deployment.rs`) | 501 | 485 | promise 1 (ADR-0197 D14), ADR-0203 D11.1 and D11.2 | landed (this commit) |
 
 ## Notes
 
