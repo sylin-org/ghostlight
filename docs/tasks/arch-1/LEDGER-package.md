@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1 has landed; EXT-7 is next.
+adapter waits for C17 (the coordinator's direction). P-D1 and EXT-7 have landed; EXT-8 is next.
 
 ## Slices
 
@@ -85,14 +85,14 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1 has landed; EXT-7 is next.
+with its skeptic's corrections. P-D1 and EXT-7 have landed; EXT-8 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | P-D1 | fix(extension): a dialog that opens during world setup reads `dialog_open` | - | EXT-9 as corrected | landed (this commit) |
 | EXT-5 | refactor(extension): `protocol.js` names its words and owns `failure`, and the vocabulary gains the missing words under new keys | C18 | EXT-5 as corrected | todo |
 | EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | todo |
-| EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | todo |
+| EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | landed (this commit) |
 | EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | todo |
 | EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | todo |
 | EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | todo |
@@ -127,3 +127,16 @@ with its skeptic's corrections. P-D1 has landed; EXT-7 is next.
 - P-D1, live check: not run. test-02 holds the 2.0.1 candidate as the coordinator asked, and
   loading this extension into the owner's Chromium changes its browser data; the coordinator
   decides when the package lane's live check runs.
+- EXT-7: `buffers.settle(reason)` replaces `settleBoundaryState`, and the worker's three
+  boundaries call it: the service's going (`service_disconnected`), a held or ended runtime
+  (`runtime_held`) and a person's release of the debugger sessions (`browser_detached`). The
+  worker's `DIAGNOSTIC_DOMAINS` and `disableDiagnosticCapture` go, and it no longer interrupts
+  recordings or clears diagnostics rings itself. The held and released paths now also forget the
+  read bindings, as the service boundary did; the skeptic found the difference close to inert
+  (at most one more ring reset on a later read). The worker still names CDP domains where it
+  routes events, as the skeptic corrected. `onExpired` is per tab, so it calls
+  `buffers.captureExpired(tabId)`, which turns that tab's capture off as before and keeps its
+  binding. The stop reason `service_disconnected` moves from the buffers' table to the worker's,
+  its one user; EXT-5 gives the stop reasons one home. Proofs, in `extension/tests/buffers.test.js`:
+  "a held runtime settles with its own stop reason, and the read binding goes with the ring" and
+  "an expired ring turns off its tab's capture".

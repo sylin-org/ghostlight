@@ -40,7 +40,11 @@ const FIRST_CONNECTION = Object.freeze({ ACCEPTED: "accepted", HOST_ABSENT: "hos
 
 const CONTROL = Object.freeze({ MANAGED: "managed", RELEASED: "released" });
 const RUNTIME = Object.freeze({ ACTIVE: "active", HELD: "held", ENDED: "ended", DISCONNECTED: "disconnected" });
-const STOP_REASON = Object.freeze({ RUNTIME_HELD: "runtime_held", BROWSER_DETACHED: "browser_detached" });
+const STOP_REASON = Object.freeze({
+  RUNTIME_HELD: "runtime_held",
+  BROWSER_DETACHED: "browser_detached",
+  SERVICE_DISCONNECTED: "service_disconnected"
+});
 const RECEIPT_FAILURE = Object.freeze({ INVALID_REQUEST: "invalid_request" });
 const FRAME = Object.freeze({
   HELLO: "hello",
@@ -93,7 +97,6 @@ const DIAGNOSTIC_EVENTS = Object.freeze({
   "Network.responseReceived": "responseReceived",
   "Network.loadingFailed": "loadingFailed"
 });
-const DIAGNOSTIC_DOMAINS = Object.freeze(["Runtime", "Network"]);
 
 const adapterEpoch = `adapter_${crypto.randomUUID().replaceAll("-", "")}`;
 const connectionEvents = globalThis.GhostlightConnectionLog.EVENTS;
@@ -233,7 +236,7 @@ function setConnection(patch) {
 const cancellations = globalThis.GhostlightPrimitives.createCancellations();
 const presentationQueue = globalThis.GhostlightPresentationQueue.create();
 const diagnostics = globalThis.GhostlightDiagnostics.create({
-  onExpired: (tabId) => disableDiagnosticCapture([tabId])
+  onExpired: (tabId) => buffers.captureExpired(tabId)
 });
 const recording = globalThis.GhostlightRecording.create({
   onStop: (...stop) => buffers.recordingEnded(...stop)
@@ -566,7 +569,7 @@ async function settleServiceBoundaryState() {
   try {
     await lifecycle.setFocusEmulationEnabled(false);
   } finally {
-    await buffers.settleBoundaryState();
+    await buffers.settle(STOP_REASON.SERVICE_DISCONNECTED);
   }
 }
 
@@ -684,11 +687,6 @@ async function negotiate(frame, port) {
 
 // ---- runtime control ----------------------------------------------------------------------------
 
-async function disableDiagnosticCapture(tabIds) {
-  await Promise.all(tabIds.flatMap((tabId) => DIAGNOSTIC_DOMAINS
-    .map((domain) => lifecycle.disableDomain(tabId, domain).catch(() => {}))));
-}
-
 // Tells the page of every managed tab the current local facts (control state, preferences,
 // recording, connection), best effort.
 async function broadcastAmbient() {
@@ -700,10 +698,7 @@ async function applyRuntimeState(state) {
   try {
     await lifecycle.setFocusEmulationEnabled(state === RUNTIME.ACTIVE && liveState.connected && liveState.compatible);
   } finally {
-    if (state !== RUNTIME.ACTIVE) {
-      recording.interruptAll(STOP_REASON.RUNTIME_HELD);
-      await disableDiagnosticCapture(diagnostics.clearAll());
-    }
+    if (state !== RUNTIME.ACTIVE) await buffers.settle(STOP_REASON.RUNTIME_HELD);
     await broadcastAmbient();
     if (state === RUNTIME.ENDED) await lifecycle.detachAll();
   }
@@ -725,8 +720,7 @@ function requestShow() {
 // A purely local, mechanical release: it never touches the native port. If the service is gone for
 // good, nothing else would clear Chrome's "controlled by automated software" banner.
 async function releaseDebuggerSessions() {
-  recording.interruptAll(STOP_REASON.BROWSER_DETACHED);
-  await disableDiagnosticCapture(diagnostics.clearAll());
+  await buffers.settle(STOP_REASON.BROWSER_DETACHED);
   await lifecycle.detachAll();
 }
 

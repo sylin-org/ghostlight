@@ -539,11 +539,33 @@ test("a detach interrupts the recording; settling the boundary interrupts every 
   const settledId = await startRecording(settled);
   await execute(settled.buffers.diagnostics, readArgs({ binding: "binding_a" }));
   settled.chrome.calls.length = 0;
-  await settled.buffers.settleBoundaryState();
+  await settled.buffers.settle("service_disconnected");
   assert.equal(summaryOf(settled, settledId).stop_reason, "service_disconnected");
   assert.equal(settled.diagnostics.isEnabled(TAB), false);
   assert.equal(methods(settled.chrome, "Runtime.disable").length, 1);
   assert.equal(methods(settled.chrome, "Network.disable").length, 1);
+});
+
+test("a held runtime settles with its own stop reason, and the read binding goes with the ring", async () => {
+  const rig = await managed();
+  const id = await startRecording(rig);
+  await execute(rig.buffers.diagnostics, readArgs({ binding: "binding_a" }));
+  await rig.buffers.settle("runtime_held");
+  assert.equal(summaryOf(rig, id).stop_reason, "runtime_held");
+  rig.chrome.calls.length = 0;
+  await execute(rig.buffers.diagnostics, readArgs({ binding: "binding_b" }));
+  assert.equal(methods(rig.chrome, "Runtime.disable").length, 0,
+    "a forgotten binding is no document change, so the next read resets nothing");
+});
+
+test("an expired ring turns off its tab's capture", async () => {
+  const rig = await managed();
+  await execute(rig.buffers.diagnostics, readArgs());
+  rig.chrome.calls.length = 0;
+  await rig.buffers.captureExpired(TAB);
+  const disabled = rig.chrome.calls.filter((call) => call.method.endsWith(".disable"));
+  assert.deepEqual(disabled.map((call) => [call.method, call.target.tabId]).sort(),
+    [["Network.disable", TAB], ["Runtime.disable", TAB]]);
 });
 
 // ---- export ---------------------------------------------------------------------------------

@@ -60,8 +60,7 @@
   const STOP_REASON = Object.freeze({
     EXPLICIT: "explicit",
     DOCUMENT_BOUNDARY: "document_boundary",
-    BROWSER_DETACHED: "browser_detached",
-    SERVICE_DISCONNECTED: "service_disconnected"
+    BROWSER_DETACHED: "browser_detached"
   });
   const RECORDING_STATE = "recording";
   const FRAME_KIND = Object.freeze({ SEED: "seed", SCREENCAST: "screencast", FINAL: "final" });
@@ -599,13 +598,19 @@
     }
 
     /**
-     * Settles the state that must not outlive a service: every recording is interrupted, and every
-     * diagnostics ring is dropped with its capture turned off.
+     * Settles the state that must not outlive a boundary, such as the service going or the person
+     * holding runtime: every recording is interrupted with `reason`, and every diagnostics ring is
+     * dropped with its capture turned off and its read binding forgotten.
      */
-    async function settleBoundaryState() {
-      recording.interruptAll(STOP_REASON.SERVICE_DISCONNECTED);
+    async function settle(reason) {
+      recording.interruptAll(reason);
       await disableCapture(diagnostics.clearAll());
       bindings.clear();
+    }
+
+    /** Turns off the capture of one tab whose diagnostics ring expired. */
+    async function captureExpired(tabId) {
+      await disableCapture([tabId]);
     }
 
     return Object.freeze({
@@ -616,7 +621,8 @@
       beforeNavigate,
       recordingEnded,
       tabDetached,
-      settleBoundaryState
+      settle,
+      captureExpired
     });
   }
 
