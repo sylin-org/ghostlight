@@ -485,19 +485,16 @@ fn a_session_browser_that_left_is_waited_for_or_started_again_only_when_known() 
 
     // Another profile first, then its own: the call goes to its own.
     let (governance, _policy) = on_demand_startup();
-    let (mut executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
+    let browser = Arc::new(FakeBrowser::default());
+    let waiting = ArrivesWhenAwaited::over(browser.clone());
+    let workspaces = WorkspaceStore::default();
+    let (mut executor, workspace, _) = executor_on(governance, &workspaces, waiting.clone());
     browser.connect(vec![]);
     browser.remember_installed("browser_chrome", "chromium");
     browser.remember_installed("browser_other_profile", "chromium");
     bind_tab(&workspaces, &workspace, "browser_chrome");
-    let waiting = ArrivesWhenAwaited::over(browser.clone());
     {
         let (fake, waiting) = (Arc::clone(&browser), Arc::clone(&waiting));
-        executor.recovery = crate::browser::recovery::BrowserRecovery::discover(
-            executor.governance.clone(),
-            waiting.clone(),
-        );
-        executor.browser = waiting.clone();
         executor.recovery.set_test_launch(move || {
             fake.connect(vec![summary("browser_other_profile", true)]);
             let fake = Arc::clone(&fake);
