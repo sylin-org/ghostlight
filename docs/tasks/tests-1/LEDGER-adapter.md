@@ -13,14 +13,14 @@ ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (
 (`geometry/tests.rs`), A7 (`locator.rs`), A8
 (`scope/tests.rs`), A9 (`tree/tests.rs`),
 A10 (`merge/tests.rs`), A11 (`link/tests.rs`), A12 (`connection/tests.rs`), A13
-(`golden.rs`) and A14 (`translate/script.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+(`golden.rs`), A14 (`translate/script.rs`) and A15 (`translate/tests/forms.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 140 |
+| `browser/adapter/` | 337 | 55 | 123 |
 
 ## Slices
 
@@ -42,7 +42,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A11 | `protocol4/link/tests.rs`: what the Link promises the executor | 20 | 8 | promise 4, contract 2, defect 2 | landed (e7ab9fd6) |
 | A12 | `protocol4/connection/tests.rs`: one browser's connection, from hello to its end | 16 | 7 | promise 4, contract 1, defect 2 | landed (dd3eded6) |
 | A13 | `protocol4/golden.rs`: the goldens both sides read, one test per contract | 19 | 4 | contract 4 | landed (2a3a574e) |
-| A14 | `protocol4/translate/script.rs`: which scripts `browser_execute` awaits | 2 | 1 | contract 1 | landed (this commit) |
+| A14 | `protocol4/translate/script.rs`: which scripts `browser_execute` awaits | 2 | 1 | contract 1 | landed (4de312d7) |
+| A15 | `protocol4/translate/tests/forms.rs`: a fill's order, its refusals and its partial outcomes | 20 | 3 | promise 2, defect 1 | landed (this commit) |
 
 ## Notes
 
@@ -155,6 +156,17 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   is awaited only when the scan reads it with certainty as one expression, so a wrap never changes
   what a script means. Every case stays, and the wrap is checked against `AWAIT_OPEN` and
   `AWAIT_CLOSE`.
+- A15: kept three, each running its cases as named functions so every assertion stays: a fill
+  across documents prepares together inside one settle budget, types behind focus and submits last
+  (2160ca74); a fill refused before any edit names every field by its place and edits nothing
+  (e5641da3); and once a field is edited, anything short of every field retained is partial or
+  unknown, never no effect. Cut: a batching detail, defensive decoding of handles work never
+  sends, and two followed-handle tests that `world`'s test and the work lane's rebound tests prove.
+  The failure sentences are compared against the translator's constants, now `pub(super)`. The
+  spent-budget case slept 400 ms against a 300 ms budget; the page now holds the first edit for a
+  whole budget from its arrival, after the budget began, so the case no longer depends on how fast
+  the call starts. A first version measured from before the call and failed one run in five;
+  fifteen runs in a row passed after the fix.
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden

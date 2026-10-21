@@ -6,6 +6,7 @@ use std::thread;
 use serde_json::{json, Value};
 
 use super::super::super::keys;
+use super::super::forms as translator;
 use super::*;
 use crate::browser::adapter::PhysicalFill;
 use crate::browser::adapter::{FieldNow, PhysicalField};
@@ -124,6 +125,10 @@ fn inputs_seen(fake: &FakeExtension) -> Vec<wire::Input> {
         .collect()
 }
 
+/// A fill across documents prepares every document together inside the job's one settle budget
+/// before any field is edited, types a text field behind its focus, fills the page's own fields by
+/// document with document-local handles, and submits last (commit 2160ca74, ADR-0198 Decision
+/// 35; ACCEPTANCE, browser job journeys 4).
 #[test]
 fn a_fill_across_documents_groups_fields_by_document_and_submits_last() {
     let (port, fake) = rig(answer);
@@ -191,6 +196,9 @@ fn a_fill_across_documents_groups_fields_by_document_and_submits_last() {
         primitives_order(&fake),
         ["call", "input", "call", "call", "call", "call", "list_tabs"]
     );
+
+    documents_prepare_together_inside_one_settle_budget();
+    a_text_field_is_one_input_behind_its_focus();
 }
 
 /// The wire name of every primitive the extension received, in order.
@@ -207,7 +215,6 @@ fn primitives_order(fake: &FakeExtension) -> Vec<String> {
         .collect()
 }
 
-#[test]
 fn every_document_prepares_before_any_field_is_edited() {
     let (port, fake) = rig(|world| {
         if world
@@ -239,7 +246,6 @@ fn every_document_prepares_before_any_field_is_edited() {
     assert_eq!(primitives_order(&fake), ["call"], "no field was edited");
 }
 
-#[test]
 fn documents_prepare_together_inside_one_settle_budget() {
     const BUDGET_MS: u64 = 400;
     let (port, fake) = rig(answer);
@@ -277,38 +283,6 @@ fn documents_prepare_together_inside_one_settle_budget() {
     }
 }
 
-#[test]
-fn consecutive_local_fields_share_one_sequence() {
-    let (port, fake) = rig(answer);
-    call(
-        &port,
-        scoped(
-            all_open(),
-            fill(
-                vec![
-                    field("T:t1:locator_a1_1", LOCAL_VALUE),
-                    field("T:t1:locator_a1_2", LOCAL_VALUE),
-                    field("T:t1:locator_a1_3", LOCAL_VALUE),
-                ],
-                None,
-                10_000,
-            ),
-        ),
-    )
-    .unwrap();
-    let calls = calls_seen(&fake);
-    assert_eq!(calls.len(), 3);
-    assert_eq!(calls[1].mode, wire::CallMode::Sequence);
-    assert_eq!(kinds(&calls[1]), ["fill_local", "fill_local", "fill_local"]);
-    assert!(calls[1].guard.is_some());
-    assert_eq!(
-        calls[2].settle_ms, 25,
-        "a fill without a submit settles briefly"
-    );
-    assert!(inputs_seen(&fake).is_empty());
-}
-
-#[test]
 fn a_text_field_is_one_input_behind_its_focus() {
     let (port, fake) = rig(answer);
     call(
@@ -332,7 +306,6 @@ fn a_text_field_is_one_input_behind_its_focus() {
         .all(|call| !kinds(call).contains(&"focus_text_field".to_owned())));
 }
 
-#[test]
 fn a_refused_focus_is_a_page_refusal_with_no_key_sent() {
     let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
         Some("focus_text_field") => refused("not_editable"),
@@ -349,7 +322,6 @@ fn a_refused_focus_is_a_page_refusal_with_no_key_sent() {
     assert_eq!(error, BrowserError::PageRefused(PageRefusal::NotEditable));
 }
 
-#[test]
 fn values_that_never_settled_after_edits_leave_the_effect_unknown() {
     let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
         Some("verify_fill_retained") => refused("not_retained"),
@@ -366,7 +338,6 @@ fn values_that_never_settled_after_edits_leave_the_effect_unknown() {
     assert_eq!(error, BrowserError::EffectUnknown("not_retained".into()));
 }
 
-#[test]
 fn a_real_verification_failure_is_not_rewritten_as_values_that_did_not_hold() {
     let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
         Some("verify_fill_retained") => refused("disabled"),
@@ -392,6 +363,11 @@ fn reverted(problems: Value) -> Value {
     }}})
 }
 
+/// Once a field is edited, the fill reports by place in the call what the page holds, and
+/// anything short of every field retained is a partial fill or an unknown effect, never no
+/// effect: a value the page changed back, values that never settled, a reading for a place the
+/// document lacks, a pause or a spent budget between fields (ACCEPTANCE, executor and truth
+/// gates 4; LANGUAGE, the fill echo).
 #[test]
 fn fields_the_page_changed_back_are_a_partial_fill_named_by_their_place_in_the_call() {
     let (port, _fake) = rig(|world| {
@@ -431,9 +407,15 @@ fn fields_the_page_changed_back_are_a_partial_fill_named_by_their_place_in_the_c
     assert_eq!(problems[0].field, 1);
     assert_eq!(problems[0].kind, FieldProblemKind::Reverted);
     assert_eq!(problems[0].now.as_deref(), Some("Choose one..."));
+
+    what_the_page_holds_comes_back_by_place_in_the_call();
+    values_that_never_settled_after_edits_leave_the_effect_unknown();
+    a_real_verification_failure_is_not_rewritten_as_values_that_did_not_hold();
+    a_reading_for_a_place_the_document_does_not_have_is_an_invalid_verification();
+    a_pause_between_fields_after_an_edit_leaves_the_effect_unknown();
+    a_spent_budget_after_an_edit_leaves_the_effect_unknown();
 }
 
-#[test]
 fn what_the_page_holds_comes_back_by_place_in_the_call() {
     let (port, _fake) = rig(|world| {
         let frame = world.frame.as_ref().map(|frame| frame.frame_id.as_str());
@@ -504,7 +486,6 @@ fn what_the_page_holds_comes_back_by_place_in_the_call() {
     );
 }
 
-#[test]
 fn a_reading_for_a_place_the_document_does_not_have_is_an_invalid_verification() {
     let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
         Some("verify_fill_retained") => {
@@ -522,13 +503,10 @@ fn a_reading_for_a_place_the_document_does_not_have_is_an_invalid_verification()
     .unwrap_err();
     assert_eq!(
         error,
-        BrowserError::EffectUnknown(
-            "content primitive returned an invalid fill verification".into()
-        )
+        BrowserError::EffectUnknown(translator::INVALID_VERIFICATION.into())
     );
 }
 
-#[test]
 fn a_pause_between_fields_after_an_edit_leaves_the_effect_unknown() {
     let (port, fake) = rig(answer);
     let admitted = AtomicUsize::new(0);
@@ -573,11 +551,16 @@ fn a_pause_between_fields_after_an_edit_leaves_the_effect_unknown() {
     );
 }
 
-#[test]
 fn a_spent_budget_after_an_edit_leaves_the_effect_unknown() {
+    const BUDGET_MS: u64 = 300;
+    // The fill's budget began before its first edit reached the page, so the page answers that
+    // edit only once a whole budget has passed since then.
     let (port, fake) = rig(|world| {
         if world.message["kind"] == "fill_local" {
-            thread::sleep(Duration::from_millis(400));
+            let spent = Instant::now() + Duration::from_millis(BUDGET_MS);
+            while Instant::now() <= spent {
+                thread::yield_now();
+            }
         }
         answer(world)
     });
@@ -591,21 +574,20 @@ fn a_spent_budget_after_an_edit_leaves_the_effect_unknown() {
                     field("C:c1:locator_a1_2", LOCAL_VALUE),
                 ],
                 None,
-                300,
+                BUDGET_MS,
             ),
         ),
     )
     .unwrap_err();
     assert_eq!(
         error,
-        BrowserError::EffectUnknown("form fill exhausted its physical execution budget".into())
+        BrowserError::EffectUnknown(translator::BUDGET_EXHAUSTED.into())
     );
     let calls = calls_seen(&fake);
     assert_eq!(calls.len(), 2, "the second document was never edited");
     assert_eq!(frames_of(&calls[1]), ["T"]);
 }
 
-#[test]
 fn a_submit_outside_the_fields_documents_is_refused_before_anything_is_sent() {
     let (port, fake) = rig(answer);
     let command = fill(
@@ -615,44 +597,11 @@ fn a_submit_outside_the_fields_documents_is_refused_before_anything_is_sent() {
     );
     assert_eq!(
         call(&port, scoped(all_open(), command)).unwrap_err(),
-        BrowserError::primitive("submit control is not contained in the resolved form")
+        BrowserError::primitive(translator::ORPHAN_SUBMIT)
     );
     assert!(fake.wait(|_| true).requests.is_empty());
 }
 
-#[test]
-fn malformed_locators_are_plain_failures_before_anything_is_sent() {
-    let (port, fake) = rig(answer);
-    assert_eq!(
-        call(
-            &port,
-            scoped(
-                all_open(),
-                fill(vec![field("locator_a1_1", LOCAL_VALUE)], None, 10_000)
-            )
-        )
-        .unwrap_err(),
-        BrowserError::primitive("field target is not frame-scoped")
-    );
-    assert_eq!(
-        call(
-            &port,
-            scoped(
-                all_open(),
-                fill(
-                    vec![field("T:t1:locator_a1_1", LOCAL_VALUE)],
-                    Some("locator_a1_9"),
-                    10_000
-                )
-            )
-        )
-        .unwrap_err(),
-        BrowserError::stale(StaleReason::Unknown)
-    );
-    assert!(fake.wait(|_| true).requests.is_empty());
-}
-
-#[test]
 fn a_plan_without_one_kind_per_field_is_refused_before_any_edit() {
     let (port, fake) = rig(|world| match world.message["kind"].as_str() {
         Some("prepare_fill") => returned(json!({"prepared": true, "field_kinds": ["local"]})),
@@ -673,10 +622,7 @@ fn a_plan_without_one_kind_per_field_is_refused_before_any_edit() {
         ),
     )
     .unwrap_err();
-    assert_eq!(
-        error,
-        BrowserError::primitive("content primitive returned an invalid fill plan")
-    );
+    assert_eq!(error, BrowserError::primitive(translator::INVALID_PLAN));
     assert_eq!(primitives_order(&fake), ["call"]);
 }
 
@@ -689,6 +635,11 @@ fn rejected(problems: Value) -> Value {
     }}})
 }
 
+/// A fill refused before any edit names every field it could not take by its place in the
+/// call and edits nothing: problems every document's prepare found, a refused prepare or
+/// focus, a submit outside the fields' documents, and a plan without one kind per field or with
+/// a problem for a place the document lacks (commit e5641da3; ACCEPTANCE, browser job journeys
+/// 4).
 #[test]
 fn fields_every_document_refused_come_back_together_named_by_their_place_in_the_call() {
     let (port, fake) = rig(|world| {
@@ -734,9 +685,14 @@ fn fields_every_document_refused_come_back_together_named_by_their_place_in_the_
         ]
     );
     assert_eq!(primitives_order(&fake), ["call"], "no field was edited");
+
+    every_document_prepares_before_any_field_is_edited();
+    a_refused_focus_is_a_page_refusal_with_no_key_sent();
+    a_submit_outside_the_fields_documents_is_refused_before_anything_is_sent();
+    a_plan_without_one_kind_per_field_is_refused_before_any_edit();
+    a_problem_for_a_place_the_document_does_not_have_is_an_invalid_plan();
 }
 
-#[test]
 fn a_problem_for_a_place_the_document_does_not_have_is_an_invalid_plan() {
     let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
         Some("prepare_fill") => rejected(json!([{"field": 4, "problem": "option_missing"}])),
@@ -750,80 +706,5 @@ fn a_problem_for_a_place_the_document_does_not_have_is_an_invalid_plan() {
         ),
     )
     .unwrap_err();
-    assert_eq!(
-        error,
-        BrowserError::primitive("content primitive returned an invalid fill plan")
-    );
-}
-
-/// A world answer that followed `locators` through a re-render, as the page reports it.
-fn returned_following(value: Value, locators: &[&str]) -> Value {
-    json!({"status": "returned",
-        "envelope": {"ok": true, "value": value, "rebound": locators}})
-}
-
-#[test]
-fn a_fill_whose_preparation_followed_a_handle_says_so_without_naming_it() {
-    for (followed, expected) in [(true, true), (false, false)] {
-        let (port, _fake) = rig(move |world| {
-            if world.message["kind"] == "prepare_fill" && followed {
-                let prepared = plan(&world.message);
-                return returned_following(
-                    prepared["envelope"]["value"].clone(),
-                    &["locator_a1_1"],
-                );
-            }
-            answer(world)
-        });
-        let (_, result) = unwrap_scoped(
-            call(
-                &port,
-                scoped(
-                    all_open(),
-                    fill(vec![field("T:t1:locator_a1_1", TEXT_VALUE)], None, 10_000),
-                ),
-            )
-            .unwrap(),
-        );
-        let BrowserOutcome::Filled { rebound, .. } = result else {
-            panic!("a fill");
-        };
-        assert_eq!(rebound, expected);
-    }
-}
-
-#[test]
-fn describing_reports_a_followed_handle_as_a_fact() {
-    for (followed, expected) in [(true, true), (false, false)] {
-        let (port, _fake) = rig(move |_| {
-            let targets = json!({"targets": [{"locator": "locator_a1_1", "role": "textbox",
-                "name": "Name", "state": [], "credential_class": false}]});
-            if followed {
-                returned_following(targets, &["locator_a1_1"])
-            } else {
-                returned(targets)
-            }
-        });
-        let (_, result) = unwrap_scoped(
-            call(
-                &port,
-                scoped(
-                    all_open(),
-                    BrowserCommand::DescribeTargets {
-                        tab_id: 12,
-                        locators: vec!["T:t1:locator_a1_1".into()],
-                    },
-                ),
-            )
-            .unwrap(),
-        );
-        let BrowserOutcome::TargetsDescribed {
-            targets, rebound, ..
-        } = result
-        else {
-            panic!("a description");
-        };
-        assert_eq!(targets.len(), 1);
-        assert_eq!(rebound, expected);
-    }
+    assert_eq!(error, BrowserError::primitive(translator::INVALID_PLAN));
 }

@@ -39,13 +39,14 @@ const SUBMIT_SETTLE_MS: u64 = 250;
 /// The failure of a field whose locator names no document.
 const NOT_FRAME_SCOPED: &str = "field target is not frame-scoped";
 /// The failure of a submit control in no document that holds a field.
-const ORPHAN_SUBMIT: &str = "submit control is not contained in the resolved form";
+pub(super) const ORPHAN_SUBMIT: &str = "submit control is not contained in the resolved form";
 /// The failure of a plan that does not say how each field takes its value.
-const INVALID_PLAN: &str = "content primitive returned an invalid fill plan";
+pub(super) const INVALID_PLAN: &str = "content primitive returned an invalid fill plan";
 /// The failure of a fill that ran out of its own time budget.
-const BUDGET_EXHAUSTED: &str = "form fill exhausted its physical execution budget";
+pub(super) const BUDGET_EXHAUSTED: &str = "form fill exhausted its physical execution budget";
 /// The failure of a verification that named a position the document does not have.
-const INVALID_VERIFICATION: &str = "content primitive returned an invalid fill verification";
+pub(super) const INVALID_VERIFICATION: &str =
+    "content primitive returned an invalid fill verification";
 
 /// The fields of one document, with document-local locators, in the order they were asked for.
 #[derive(Clone, Debug, PartialEq)]
