@@ -160,16 +160,17 @@ enum Phase {
     Ready,
 }
 
-/// A client waiting for the catalog the service will answer next.
+/// A client request waiting for the service's answer: a catalog listing or a tool call.
 #[derive(Clone, Debug)]
-struct CatalogWaiter {
+struct Waiter {
     /// The client's request id.
     id: Value,
     /// The batch the request came in, when it came in one.
     batch: Option<u64>,
 }
 
-/// The replies to one batch, held until every forwarded catalog request in it is answered.
+/// The replies to one batch, held until every catalog request and tool call it forwarded is
+/// answered, so the batch is answered as JSON-RPC answers one: one array (S-D5).
 #[derive(Clone, Debug, Default)]
 struct Batch {
     replies: Vec<Value>,
@@ -234,11 +235,11 @@ pub struct McpSession {
     standby: bool,
     /// The decision a fresh session asks when it initializes, until then.
     seating: Option<Seating>,
-    /// Running tool calls: the invocation id to the client's id.
-    calls: HashMap<InvocationId, Value>,
+    /// Running tool calls: the invocation id to the client's request.
+    calls: HashMap<InvocationId, Waiter>,
     /// Running tool calls: the client's id, as JSON text, to the invocation id.
     call_ids: HashMap<String, InvocationId>,
-    catalog_waiters: VecDeque<CatalogWaiter>,
+    catalog_waiters: VecDeque<Waiter>,
     batches: HashMap<u64, Batch>,
     next_batch: u64,
 }
@@ -361,9 +362,8 @@ impl McpSession {
     /// Read one client line and say what to do with it.
     ///
     /// A line that is not JSON is answered with a parse error and a null id. A batch array is
-    /// handled element by element: its synchronous replies go out together as one array line,
-    /// held until the catalog requests in it are answered, while its tool results go out one by
-    /// one as they finish.
+    /// handled element by element and answered as one array line, held until every catalog
+    /// request and tool call in it is answered, its tool results included (S-D5).
     pub fn accept(&mut self, line: &str) -> Vec<Step> {
         let message: Value = match serde_json::from_str(line) {
             Ok(message) => message,
@@ -399,17 +399,17 @@ impl McpSession {
                 result,
                 is_error,
                 content,
-            } => self
-                .finish_call(&id)
-                .map(|client_id| {
-                    let revision = self.revision.unwrap_or(LATEST_REVISION);
-                    success(
-                        client_id,
-                        call_tool_result(revision, text, result, is_error, content),
-                    )
-                })
-                .into_iter()
-                .collect(),
+            } => {
+                let Some(waiter) = self.finish_call(&id) else {
+                    return Vec::new();
+                };
+                let revision = self.revision.unwrap_or(LATEST_REVISION);
+                let reply = success(
+                    waiter.id,
+                    call_tool_result(revision, text, result, is_error, content),
+                );
+                self.answer(waiter.batch, reply)
+            }
             _ => Vec::new(),
         }
     }
@@ -428,7 +428,10 @@ impl McpSession {
         for element in elements {
             let handled = self.handle(element, Some(batch_id));
             if let Some(forward) = handled.forward {
-                if forward == ServiceRequest::Catalog {
+                if matches!(
+                    forward,
+                    ServiceRequest::Catalog | ServiceRequest::Invoke { .. }
+                ) {
                     batch.waiting += 1;
                 }
                 steps.push(Step::Forward(forward));
@@ -504,10 +507,10 @@ impl McpSession {
                 Handled::reply(refusal(id, &ProtocolRefusal::NotInitialized))
             }
             method::TOOLS_LIST => {
-                self.catalog_waiters.push_back(CatalogWaiter { id, batch });
+                self.catalog_waiters.push_back(Waiter { id, batch });
                 Handled::forward(ServiceRequest::Catalog)
             }
-            method::TOOLS_CALL => self.call(id, message),
+            method::TOOLS_CALL => self.call(id, message, batch),
             _ => Handled::reply(refusal(id, &ProtocolRefusal::MethodNotFound)),
         }
     }
@@ -585,7 +588,7 @@ impl McpSession {
         )
     }
 
-    fn call(&mut self, id: Value, message: &Value) -> Handled {
+    fn call(&mut self, id: Value, message: &Value, batch: Option<u64>) -> Handled {
         let Some(tool) = message.pointer("/params/name").and_then(Value::as_str) else {
             return Handled::reply(refusal(id, &ProtocolRefusal::MissingToolName));
         };
@@ -602,7 +605,7 @@ impl McpSession {
         }
         let invocation = InvocationId::mint();
         self.call_ids.insert(key, invocation.clone());
-        self.calls.insert(invocation.clone(), id);
+        self.calls.insert(invocation.clone(), Waiter { id, batch });
         Handled::forward(ServiceRequest::Invoke {
             id: invocation,
             tool: tool.into(),
@@ -610,10 +613,10 @@ impl McpSession {
         })
     }
 
-    fn finish_call(&mut self, invocation: &InvocationId) -> Option<Value> {
-        let client_id = self.calls.remove(invocation)?;
-        self.call_ids.remove(&id_key(&client_id));
-        Some(client_id)
+    fn finish_call(&mut self, invocation: &InvocationId) -> Option<Waiter> {
+        let waiter = self.calls.remove(invocation)?;
+        self.call_ids.remove(&id_key(&waiter.id));
+        Some(waiter)
     }
 
     fn render_catalog(&mut self, tools: Vec<ToolDefinition>) -> Vec<Value> {
@@ -621,15 +624,21 @@ impl McpSession {
             return Vec::new();
         };
         let reply = success(waiter.id, json!({"tools": tools}));
-        let Some(batch_id) = waiter.batch else {
+        self.answer(waiter.batch, reply)
+    }
+
+    /// The lines that carry `reply`: itself at once, or nothing while its batch still waits for
+    /// another answer, and then the whole batch as one array.
+    fn answer(&mut self, batch: Option<u64>, reply: Value) -> Vec<Value> {
+        let Some(batch_id) = batch else {
             return vec![reply];
         };
-        let Some(batch) = self.batches.get_mut(&batch_id) else {
+        let Some(held) = self.batches.get_mut(&batch_id) else {
             return vec![reply];
         };
-        batch.replies.push(reply);
-        batch.waiting = batch.waiting.saturating_sub(1);
-        if batch.waiting > 0 {
+        held.replies.push(reply);
+        held.waiting = held.waiting.saturating_sub(1);
+        if held.waiting > 0 {
             return Vec::new();
         }
         self.batches

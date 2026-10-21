@@ -345,3 +345,51 @@ fn a_token_another_build_wrote_continues_an_initialized_session() {
         serves(&mut session, "a token this build cannot read");
     }
 }
+
+/// Defect S-D5: a client that batches gets JSON-RPC's answer, every response in the batch's one
+/// array, its tool results included, written once the last of them is answered. A tool result
+/// sent outside the array can be dropped by a strict client, whose agent then waits for it.
+#[test]
+fn a_batch_is_answered_as_one_array_with_its_tool_results_in_it() {
+    let mut session = McpSession::new();
+    session.accept(&initialize_line(json!(0), "2025-03-26"));
+    session.accept(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    let steps = session.accept(
+        r#"[{"jsonrpc":"2.0","id":1,"method":"tools/list"},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_tabs","arguments":{"action":"list"}}},{"jsonrpc":"2.0","id":3,"method":"ping"}]"#,
+    );
+    assert!(
+        steps.iter().all(|step| matches!(step, Step::Forward(_))),
+        "nothing is answered before the batch is"
+    );
+    let invocation = forwards(&steps)
+        .into_iter()
+        .find_map(|request| match request {
+            ServiceRequest::Invoke { id, .. } => Some(id),
+            _ => None,
+        })
+        .expect("the call is forwarded");
+    assert!(
+        session
+            .render(ServiceResponse::Catalog { tools: Vec::new() })
+            .is_empty(),
+        "the batch waits for its call"
+    );
+    let lines = session.render(ServiceResponse::Result {
+        id: invocation,
+        text: "Listed 0 tabs.".into(),
+        result: json!({"status": "succeeded"}),
+        is_error: false,
+        content: Vec::new(),
+    });
+    assert_eq!(lines.len(), 1, "one line answers the batch");
+    let answers = lines[0].as_array().expect("the batch's one array");
+    let mut ids: Vec<i64> = answers
+        .iter()
+        .map(|answer| answer["id"].as_i64().unwrap())
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(ids, [1, 2, 3]);
+    assert!(answers
+        .iter()
+        .any(|answer| answer["id"] == 2 && answer["result"]["content"].is_array()));
+}
