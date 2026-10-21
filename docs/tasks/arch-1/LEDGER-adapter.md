@@ -10,7 +10,7 @@ A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset 
 Notes).
 
 The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7,
-BROW-6 and BROW-14 have landed; BROW-8a is next.
+BROW-6, BROW-14 and BROW-8a have landed; BROW-15 is next.
 
 ## Slices
 
@@ -139,7 +139,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6 and BROW-14 have landed; BROW-8a is next.
+with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14 and BROW-8a have landed; BROW-15 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -148,7 +148,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6 and BROW-14 have
 | BROW-7 | refactor(adapter): one call request in place of seven arguments | - | BROW-7 | landed (this commit) |
 | BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | landed (this commit) |
 | BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | landed (this commit) |
-| BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | todo |
+| BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | landed (this commit) |
 | BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | todo |
 | BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | todo |
 | BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | todo |
@@ -223,3 +223,11 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6 and BROW-14 have
   unchanged: the request, receipt and world fixtures and the vocabulary golden pass as they were.
   The slice was parked uncommitted while C17 was in flight (the coordinator's direction), saved
   as a patch outside the tree, and re-applied cleanly on top of it.
+- BROW-8a: the adapter's half of BROW-8 is the world-call limit. `MAX_WORLD_CALLS` stays the
+  frozen 256 the wire, the vocabulary golden and the 2.0 extension pin, and a compile-time
+  assertion beside it keeps `adapter::documents::DOCUMENT_LIMIT` from passing it, as the skeptic
+  corrected (a check, not a tie). Raising the document limit to 257 fails the build at the
+  assertion; it was restored. The adapter's timings are named constants already (`link.rs`), and
+  BROW-8's other literals and the three poll loops sit in `browser/` outside the adapter, in
+  core-service's BROW-8, whose row also names this check: it landed here because both constants
+  are adapter files.

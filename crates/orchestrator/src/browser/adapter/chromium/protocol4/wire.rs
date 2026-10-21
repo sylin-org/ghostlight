@@ -32,9 +32,11 @@ pub const CHUNK_PAYLOAD_BYTES: usize = 512 * 1024;
 pub const TRANSFER_MAX_BYTES: usize = 8 * 1024 * 1024;
 /// Most chunks one transfer carries.
 pub const TRANSFER_MAX_CHUNKS: u16 = 64;
-/// Most world calls one `call` primitive carries, equal to the document limit so a route never
-/// splits.
+/// Most world calls one `call` primitive carries. A route sends one call per document, so the
+/// limit is never below the document limit and a route never splits. The wire fixes the number;
+/// the assertion below only keeps the document limit from passing it.
 pub const MAX_WORLD_CALLS: usize = 256;
+const _: () = assert!(MAX_WORLD_CALLS >= physical::documents::DOCUMENT_LIMIT);
 /// Most steps one `input` primitive carries.
 pub const MAX_INPUT_STEPS: usize = 4096;
 /// Most unseen frames a guard or inventory reports.
