@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use super::super::link::Link;
+use super::super::link::{CallRequest, Link};
 use super::super::locator::Locator;
 use super::super::scope::{PlannedCall, Scope};
 use super::super::tree::{document_id, FrameTree};
@@ -73,16 +73,9 @@ pub(super) fn settle(settle_ms: u64) -> PlannedCall {
 /// and go on whatever the answer. A zero budget sends nothing.
 pub(super) fn settle_top(l: &mut Link<'_>, tab_id: u64, settle_ms: u64) {
     if settle_ms > 0 {
-        let budget = settle_ms + CALL_MARGIN_MS;
-        let _ = l.call(
-            tab_id,
-            &[settle(settle_ms)],
-            CallMode::Sequence,
-            None,
-            0,
-            budget,
-            None,
-        );
+        let plans = [settle(settle_ms)];
+        let request = CallRequest::sequence(tab_id, &plans);
+        let _ = l.call(request.budget(settle_ms + CALL_MARGIN_MS), None);
     }
 }
 
@@ -170,8 +163,7 @@ fn focused_document(
         .iter()
         .map(|doc| PlannedCall::unscoped(doc, world::focus_probe()))
         .collect();
-    let budget = l.budget_ms();
-    let answers = l.call(tab_id, &plans, CallMode::Parallel, None, 0, budget, None)?;
+    let answers = l.call(CallRequest::parallel(tab_id, &plans), None)?;
     Ok(docs
         .into_iter()
         .zip(&answers)
@@ -235,16 +227,9 @@ pub fn observe(
             false,
         ),
     )?;
-    let guard = Some(scope.guard());
-    let answers = l.call(
-        tab_id,
-        &[plan],
-        CallMode::Sequence,
-        guard,
-        0,
-        budget,
-        Some(&mut *scope),
-    )?;
+    let plans = [plan];
+    let request = CallRequest::sequence(tab_id, &plans).guard(scope.guard());
+    let answers = l.call(request.budget(budget), Some(&mut *scope))?;
     let observed: Observed = value(&answers[0])?;
     Ok(BrowserOutcome::Observed {
         tab_id,
@@ -282,8 +267,8 @@ fn observe_text(
         CallMode::Parallel
     };
     let started = Instant::now();
-    let guard = Some(scope.guard());
-    let answers = l.call(tab_id, &plans, mode, guard, 0, budget, Some(&mut *scope))?;
+    let request = CallRequest::new(tab_id, &plans, mode).guard(scope.guard());
+    let answers = l.call(request.budget(budget), Some(&mut *scope))?;
     let observed: Vec<Option<Observed>> = answers.iter().map(|answer| value(answer).ok()).collect();
     let satisfied = if presence {
         observed.iter().flatten().any(|answer| answer.satisfied)
@@ -323,8 +308,7 @@ fn top_readiness(
     ) else {
         return Ok(BrowserReadiness::Loading);
     };
-    let budget = l.budget_ms();
-    let answers = l.call(tab_id, &[plan], CallMode::Sequence, None, 0, budget, None)?;
+    let answers = l.call(CallRequest::sequence(tab_id, &[plan]), None)?;
     Ok(
         value::<Observed>(&answers[0]).map_or(BrowserReadiness::Loading, |observed| {
             observed.readiness.into()

@@ -11,10 +11,10 @@
 use serde_json::Value;
 
 use super::super::keys;
-use super::super::link::Link;
+use super::super::link::{CallRequest, Link};
 use super::super::locator::Locator;
 use super::super::scope::Scope;
-use super::super::wire::{CallMode, InputStep};
+use super::super::wire::InputStep;
 use super::super::world::{self, Focused, Typed, Uploaded};
 use super::read::{all, focus_candidates, one, plan_each};
 use super::{input_for, send_input, settled, value, OnDialog};
@@ -126,14 +126,8 @@ pub fn type_focused(
                 world::verify_focused_text(request.allow_credentials),
             )?,
         ];
-        let budget = l.budget_ms();
         let cleared = l.call(
-            request.tab_id,
-            &plans,
-            CallMode::Sequence,
-            None,
-            0,
-            budget,
+            CallRequest::sequence(request.tab_id, &plans),
             Some(&mut *scope),
         )?;
         for answer in &cleared {

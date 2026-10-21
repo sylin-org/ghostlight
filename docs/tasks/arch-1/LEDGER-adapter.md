@@ -9,8 +9,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset waited on (see
 Notes).
 
-The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10 and BROW-4
-have landed; BROW-7 is next.
+The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4 and
+BROW-7 have landed; BROW-6 is next.
 
 ## Slices
 
@@ -139,13 +139,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10 and BROW-4 have landed; BROW-7 is next.
+with its skeptic's corrections. BROW-10, BROW-4 and BROW-7 have landed; BROW-6 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | BROW-10 | refactor(assets): one table of the page's error codes, tested against what `content.js` throws, and `visualIdentity` derived from its beats | - | BROW-10 as corrected; `assets.sha256` regenerates | landed (this commit) |
 | BROW-4 | refactor(adapter): one activate variant each, with a modifier list | - | BROW-4 | landed (this commit) |
-| BROW-7 | refactor(adapter): one call request in place of seven arguments | - | BROW-7 | todo |
+| BROW-7 | refactor(adapter): one call request in place of seven arguments | - | BROW-7 | landed (this commit) |
 | BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | todo |
 | BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | todo |
 | BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | todo |
@@ -187,3 +187,17 @@ with its skeptic's corrections. BROW-10 and BROW-4 have landed; BROW-7 is next.
   `protocol4/translate/tests/`. Cross-lane edits, one arm or one construction each: core-work's
   `work/pointer.rs` and `work/documents.rs`, and core-service's `browser/mod.rs`
   (`addressed_tab`). Neither lane had landed a slice in those files.
+- BROW-7, the request: `link::CallRequest` holds the tab, the plans, the mode, the guard, the
+  settle and an optional budget, built with `sequence`, `parallel` or `new` (for a mode chosen at
+  run time, as `observe_text` chooses race or parallel) and set with `guard`, `settle` and
+  `budget`. `Link::call(request, scope)` takes it, and the lint expectation goes. A request
+  without a budget of its own is bounded by what the deadline leaves, which is what the 12 sites
+  that passed `l.budget_ms()` sent, since `call` already took the smaller of the two. The four
+  budgets of their own (the fill's, the settle, and two waits) stay through `budget`. The same
+  `wire::Call` goes out.
+- BROW-7, `forms::Batch` goes: it restated the request. `forms::send` keeps the fill's rule that
+  no calls sends nothing, and its budget, an `Instant`, becomes the request's.
+- BROW-7, not taken: `read::one` and `read::all` stay, rewritten over the request. They are not
+  only the seven-argument gap: `one` carries the first primitive's guard, and `all` the rule that
+  no calls is no readable document and the choice of a guard. Removing them would spread those
+  rules over their 15 call sites in `read.rs`, `keyboard.rs` and `points.rs`.

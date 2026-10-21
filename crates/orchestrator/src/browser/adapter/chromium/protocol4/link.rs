@@ -274,6 +274,75 @@ impl Spec for wire::RecordingOp {
 /// The answers of one `call`, in the order of its calls.
 pub type Answers = Vec<wire::CallAnswer>;
 
+/// One `call` to send: a tab's world calls, how the extension runs them, the currency check that
+/// rides on them, how long the page may settle after them, and how long they may take.
+///
+/// A request with no budget of its own is bounded by what the deadline leaves, and one with a
+/// budget is bounded by the smaller of the two.
+#[derive(Clone, Debug)]
+pub struct CallRequest<'p> {
+    tab_id: u64,
+    plans: &'p [PlannedCall],
+    mode: wire::CallMode,
+    guard: Option<wire::DocumentGuard>,
+    settle_ms: u64,
+    budget_ms: Option<u64>,
+}
+
+impl<'p> CallRequest<'p> {
+    /// Run `plans` in `tab_id` as `mode` says, with no guard and no settle.
+    #[must_use]
+    pub fn new(tab_id: u64, plans: &'p [PlannedCall], mode: wire::CallMode) -> Self {
+        Self {
+            tab_id,
+            plans,
+            mode,
+            guard: None,
+            settle_ms: 0,
+            budget_ms: None,
+        }
+    }
+
+    /// Run `plans` in `tab_id` one after another.
+    #[must_use]
+    pub fn sequence(tab_id: u64, plans: &'p [PlannedCall]) -> Self {
+        Self::new(tab_id, plans, wire::CallMode::Sequence)
+    }
+
+    /// Run `plans` in `tab_id` together.
+    #[must_use]
+    pub fn parallel(tab_id: u64, plans: &'p [PlannedCall]) -> Self {
+        Self::new(tab_id, plans, wire::CallMode::Parallel)
+    }
+
+    /// Carry `guard`, so the extension refuses the calls if their documents changed.
+    #[must_use]
+    pub fn guard(mut self, guard: wire::DocumentGuard) -> Self {
+        self.guard = Some(guard);
+        self
+    }
+
+    /// Let the page settle for up to `settle_ms` after the calls.
+    #[must_use]
+    pub fn settle(mut self, settle_ms: u64) -> Self {
+        self.settle_ms = settle_ms;
+        self
+    }
+
+    /// Bound the calls by `budget_ms` when that is less than what the deadline leaves.
+    #[must_use]
+    pub fn budget(mut self, budget_ms: u64) -> Self {
+        self.budget_ms = Some(budget_ms);
+        self
+    }
+
+    /// Whether the request holds no world call.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.plans.is_empty()
+    }
+}
+
 /// The recording each workspace holds on one connection.
 ///
 /// The extension keeps recordings without knowing workspaces, and a workspace holds at most one.
@@ -509,11 +578,11 @@ impl<'a> Link<'a> {
         self.await_receipt::<P>(&correlation, &receiver, effectful)
     }
 
-    /// Run world calls in one `call` and return their answers, in order.
+    /// Run `request`'s world calls in one `call` and return their answers, in order.
     ///
     /// Each answer is recorded in `scope` when there is one, and an effect-class call whose
-    /// answer shows it ran marks the command as having acted. `budget_ms` bounds the call, and
-    /// never exceeds what the deadline leaves.
+    /// answer shows it ran marks the command as having acted. The call never takes longer than
+    /// what the deadline leaves.
     ///
     /// # Errors
     ///
@@ -521,28 +590,21 @@ impl<'a> Link<'a> {
     /// before it started, or [`BrowserError::Protocol`] when the answers do not pair with the
     /// calls. Answers that do not pair cannot say which calls ran, so the receipt's
     /// `dispatched` flag decides whether that failure follows an effect.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one argument per field of the call primitive, plus the scope that records it"
-    )]
     pub fn call(
         &mut self,
-        tab_id: u64,
-        plans: &[PlannedCall],
-        mode: wire::CallMode,
-        guard: Option<wire::DocumentGuard>,
-        settle_ms: u64,
-        budget_ms: u64,
+        request: CallRequest<'_>,
         mut scope: Option<&mut Scope>,
     ) -> Result<Answers, BrowserError> {
+        let plans = request.plans;
+        let left = self.budget_ms();
         let (called, dispatched) = self.exchange(WorldCalls {
             call: wire::Call {
-                tab_id,
-                mode,
+                tab_id: request.tab_id,
+                mode: request.mode,
                 calls: plans.iter().map(|plan| plan.call.clone()).collect(),
-                guard,
-                settle_ms,
-                timeout_ms: budget_ms.min(self.budget_ms()),
+                guard: request.guard,
+                settle_ms: request.settle_ms,
+                timeout_ms: request.budget_ms.map_or(left, |budget| budget.min(left)),
             },
             effectful: plans.iter().any(|plan| plan.effect == EffectClass::Effect),
         })?;

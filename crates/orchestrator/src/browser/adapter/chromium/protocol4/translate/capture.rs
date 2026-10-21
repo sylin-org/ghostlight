@@ -11,10 +11,10 @@
 //! showing and refuses at once when it is not.
 
 use super::super::geometry;
-use super::super::link::Link;
+use super::super::link::{CallRequest, Link};
 use super::super::locator::Locator;
 use super::super::scope::PlannedCall;
-use super::super::wire::{CallMode, Capture, CaptureClip, ListTabs};
+use super::super::wire::{Capture, CaptureClip, ListTabs};
 use super::super::world::{self, OwnerBox, Prepared};
 use super::observe::{settle, settle_top};
 use super::{frame_tree, value};
@@ -66,8 +66,7 @@ pub fn screenshot(
                 world::box_(&target.local),
             ));
             plans.extend(tree.chain(&target.doc)?);
-            let budget = l.budget_ms();
-            let answers = l.call(tab_id, &plans, CallMode::Sequence, None, 0, budget, None)?;
+            let answers = l.call(CallRequest::sequence(tab_id, &plans), None)?;
             let measure: Prepared = value(&answers[measured])?;
             let boxes = answers[measured + 1..]
                 .iter()

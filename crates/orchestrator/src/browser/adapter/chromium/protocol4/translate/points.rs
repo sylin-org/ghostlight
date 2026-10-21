@@ -10,9 +10,9 @@
 
 use super::super::geometry;
 use super::super::keys::{self, WheelDirection};
-use super::super::link::{Link, View};
+use super::super::link::{CallRequest, Link, View};
 use super::super::scope::Scope;
-use super::super::wire::{CallMode, Point};
+use super::super::wire::Point;
 use super::super::world::{self, Uploaded, ViewportPoint};
 use super::pointer::{dragged, CLICK_SETTLE_MS};
 use super::read::one;
@@ -277,17 +277,8 @@ pub fn drag(
         .map(|point| scope.call(&top, world::viewport_point(point.x, point.y)))
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
-    let guard = Some(scope.guard());
-    let budget = l.budget_ms();
-    let answers = l.call(
-        request.tab_id,
-        &plans,
-        CallMode::Sequence,
-        guard,
-        0,
-        budget,
-        Some(&mut *scope),
-    )?;
+    let call = CallRequest::sequence(request.tab_id, &plans).guard(scope.guard());
+    let answers = l.call(call, Some(&mut *scope))?;
     let start: ViewportPoint = value(&answers[0])?;
     let end: ViewportPoint = value(&answers[1])?;
     let from = subject_at(l, scope, request.tab_id, start)?;

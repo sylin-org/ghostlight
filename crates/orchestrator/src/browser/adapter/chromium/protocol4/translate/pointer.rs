@@ -13,10 +13,10 @@ use serde_json::Value;
 
 use super::super::geometry;
 use super::super::keys;
-use super::super::link::Link;
+use super::super::link::{CallRequest, Link};
 use super::super::locator::Locator;
 use super::super::scope::Scope;
-use super::super::wire::{CallMode, FrameRef, InputStep, Point};
+use super::super::wire::{FrameRef, InputStep, Point};
 use super::super::world::{self, Message, OwnerBox, Prepared, ScrollOffset, Scrolled};
 use super::{input_for, route_and_admit, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{BrowserOutcome, PhysicalActionSubject};
@@ -79,17 +79,8 @@ fn aim(
     let target = Locator::decode(locator)?;
     let mut plans = vec![scope.call(&target.doc, prepare(&target.local))?];
     plans.extend(scope.tree().chain(&target.doc)?);
-    let guard = Some(scope.guard());
-    let budget = l.budget_ms();
-    let answers = l.call(
-        tab_id,
-        &plans,
-        CallMode::Sequence,
-        guard,
-        0,
-        budget,
-        Some(&mut *scope),
-    )?;
+    let call = CallRequest::sequence(tab_id, &plans).guard(scope.guard());
+    let answers = l.call(call, Some(&mut *scope))?;
     let prepared: Prepared = value(&answers[0])?;
     let boxes = answers[1..]
         .iter()
@@ -225,17 +216,8 @@ pub fn scroll(
     if nested {
         plans.push(scope.call(&top, world::scroll_offset())?);
     }
-    let guard = Some(scope.guard());
-    let budget = l.budget_ms();
-    let answers = l.call(
-        request.tab_id,
-        &plans,
-        CallMode::Sequence,
-        guard,
-        0,
-        budget,
-        Some(&mut *scope),
-    )?;
+    let call = CallRequest::sequence(request.tab_id, &plans).guard(scope.guard());
+    let answers = l.call(call, Some(&mut *scope))?;
     let scrolled: Scrolled = settled(l, &answers[0])?;
     let (x, y) = if nested {
         let offset: ScrollOffset = settled(l, &answers[1])?;
@@ -293,17 +275,8 @@ pub fn drag(
     ];
     plans.extend(source_chain);
     plans.extend(destination_chain);
-    let guard = Some(scope.guard());
-    let budget = l.budget_ms();
-    let answers = l.call(
-        request.tab_id,
-        &plans,
-        CallMode::Sequence,
-        guard,
-        0,
-        budget,
-        Some(&mut *scope),
-    )?;
+    let call = CallRequest::sequence(request.tab_id, &plans).guard(scope.guard());
+    let answers = l.call(call, Some(&mut *scope))?;
     for answer in &answers[..DRAG_PREPARATIONS] {
         value::<Value>(answer)?;
     }

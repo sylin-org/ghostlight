@@ -11,7 +11,7 @@ use super::super::fake::{FakeExtension, Reply, Script};
 use super::super::scope::PlannedCall;
 use super::super::translate::tabs::group_key;
 use super::super::{wire, world};
-use super::{Answers, FocusTab, Frames, Line, Link, Spec, View, WorldCalls};
+use super::{Answers, CallRequest, FocusTab, Frames, Line, Link, Spec, View, WorldCalls};
 use crate::browser::adapter::documents::{DocumentScope, PhysicalDocument};
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, PhysicalTab,
@@ -507,16 +507,8 @@ fn a_stale_locator_after_a_started_effect_settles_as_an_unknown_effect() {
         )
     };
     let scroll = PlannedCall::top(world::scroll(None, Some("down"), None));
-    link.call(
-        12,
-        &[scroll],
-        wire::CallMode::Sequence,
-        None,
-        0,
-        1_000,
-        None,
-    )
-    .unwrap();
+    link.call(CallRequest::sequence(12, &[scroll]).budget(1_000), None)
+        .unwrap();
     assert!(link.effect_started());
     assert!(matches!(
         link.settle(stale()),
@@ -1228,7 +1220,7 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
             },
         );
         let answers = link
-            .call(12, &[plan], wire::CallMode::Sequence, None, 0, 1_000, None)
+            .call(CallRequest::sequence(12, &[plan]).budget(1_000), None)
             .unwrap();
         assert_eq!(answers.len(), 1);
         assert_eq!(link.effect_started(), acted, "{answers:?}");
@@ -1250,7 +1242,7 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
             },
         );
         let failed = link
-            .call(12, &[plan], wire::CallMode::Parallel, None, 0, 1_000, None)
+            .call(CallRequest::parallel(12, &[plan]).budget(1_000), None)
             .unwrap_err();
         assert_eq!(matches!(failed, BrowserError::Protocol(_)), unpaired);
         assert_eq!(
@@ -1293,15 +1285,8 @@ fn cancelled_call(dispatched: bool) -> Result<Answers, BrowserError> {
             drop(fake.wait(|seen| !seen.requests.is_empty()));
             cancelled.store(true, Ordering::SeqCst);
         });
-        link.call(
-            12,
-            &[PlannedCall::top(world::scroll(None, Some("down"), None))],
-            wire::CallMode::Sequence,
-            None,
-            0,
-            1_000,
-            None,
-        )
+        let scroll = [PlannedCall::top(world::scroll(None, Some("down"), None))];
+        link.call(CallRequest::sequence(12, &scroll).budget(1_000), None)
     })
 }
 

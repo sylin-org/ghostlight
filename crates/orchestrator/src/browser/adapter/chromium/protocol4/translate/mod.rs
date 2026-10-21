@@ -23,12 +23,11 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::geometry::{self, RouteStep, MAX_ROUTE_DEPTH};
-use super::link::Link;
+use super::link::{CallRequest, Link};
 use super::scope::{PlannedCall, Scope};
 use super::tree::FrameTree;
 use super::wire::{
-    CallAnswer, CallFailure, CallMode, DocumentGuard, FrameRef, Input, InputDone, InputStep,
-    InputStop, Point,
+    CallAnswer, CallFailure, DocumentGuard, FrameRef, Input, InputDone, InputStep, InputStop, Point,
 };
 use super::world::{self, AssetDetail, EffectClass, Hit, OwnerProbe};
 use crate::browser::adapter::PhysicalActionSubject;
@@ -295,8 +294,7 @@ pub fn route(
         if together {
             plans.extend(probes(local));
         }
-        let budget = l.budget_ms();
-        let answers = l.call(tab_id, &plans, CallMode::Parallel, None, 0, budget, None)?;
+        let answers = l.call(CallRequest::parallel(tab_id, &plans), None)?;
         let Ok(hit) = value::<Hit>(&answers[0]) else {
             return Ok(None);
         };
@@ -306,20 +304,11 @@ pub fn route(
                 .map(|answer| value(answer).ok())
                 .collect()
         } else if hit.embed && !children.is_empty() {
-            let budget = l.budget_ms();
             let at = Point { x: hit.x, y: hit.y };
-            l.call(
-                tab_id,
-                &probes(at),
-                CallMode::Parallel,
-                None,
-                0,
-                budget,
-                None,
-            )?
-            .iter()
-            .map(|answer| value(answer).ok())
-            .collect()
+            l.call(CallRequest::parallel(tab_id, &probes(at)), None)?
+                .iter()
+                .map(|answer| value(answer).ok())
+                .collect()
         } else {
             Vec::new()
         };

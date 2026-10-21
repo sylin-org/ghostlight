@@ -21,10 +21,10 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::super::keys;
-use super::super::link::{Answers, Link};
+use super::super::link::{Answers, CallRequest, Link};
 use super::super::locator::Locator;
 use super::super::scope::{PlannedCall, Scope};
-use super::super::wire::{CallAnswer, CallMode, DocumentGuard, FrameRef};
+use super::super::wire::{CallAnswer, FrameRef};
 use super::super::world::{self, FieldKind, FillPlan, FillVerified, Submitted};
 use super::{input_for, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{BrowserOutcome, FieldNow, PhysicalField};
@@ -182,21 +182,10 @@ pub fn fill(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let guard = Some(scope.guard());
     // Preparing edits nothing and every call carries the same remaining settle budget, so the
     // documents prepare together: in sequence their waits would add up past that budget.
-    let plans = send(
-        l,
-        scope,
-        Batch {
-            tab_id,
-            plans: &prepare,
-            mode: CallMode::Parallel,
-            guard,
-            settle_ms: 0,
-            budget,
-        },
-    )?;
+    let request = CallRequest::parallel(tab_id, &prepare).guard(scope.guard());
+    let plans = send(l, request, budget, scope)?;
     let kinds = field_kinds(&plans, &groups)?;
     // Preparing is the one call of a fill that may follow a handle (ADR-0198 Decision 17); the
     // calls after it refuse a control that left the page.
@@ -249,22 +238,13 @@ pub fn fill(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let retained = send(
-        l,
-        scope,
-        Batch {
-            tab_id,
-            plans: &verify,
-            mode: CallMode::Parallel,
-            guard: None,
-            settle_ms: if submit.is_none() {
-                FILLED_SETTLE_MS
-            } else {
-                0
-            },
-            budget,
-        },
-    )?;
+    let settle_ms = if submit.is_none() {
+        FILLED_SETTLE_MS
+    } else {
+        0
+    };
+    let request = CallRequest::parallel(tab_id, &verify).settle(settle_ms);
+    let retained = send(l, request, budget, scope)?;
     let held = verified(l, &groups, &retained, filled)?;
     let submitted = match &submit {
         Some(target) => {
@@ -277,18 +257,9 @@ pub fn fill(
                 &target.doc,
                 world::submit_fill(fields, &target.local, credentials),
             )?;
-            let answers = send(
-                l,
-                scope,
-                Batch {
-                    tab_id,
-                    plans: &[plan],
-                    mode: CallMode::Sequence,
-                    guard: None,
-                    settle_ms: SUBMIT_SETTLE_MS,
-                    budget,
-                },
-            )?;
+            let plans = [plan];
+            let request = CallRequest::sequence(tab_id, &plans).settle(SUBMIT_SETTLE_MS);
+            let answers = send(l, request, budget, scope)?;
             settled::<Submitted>(l, &answers[0])?.submitted
         }
         None => false,
@@ -354,36 +325,18 @@ fn verified(
     })
 }
 
-/// One `call` of a fill.
-struct Batch<'p> {
-    /// The tab.
-    tab_id: u64,
-    /// The world calls.
-    plans: &'p [PlannedCall],
-    /// How the extension runs them.
-    mode: CallMode,
-    /// The currency check that rides on the call, when there is one.
-    guard: Option<DocumentGuard>,
-    /// How long the page may settle after the calls, in milliseconds.
-    settle_ms: u64,
-    /// When the fill's own budget ends.
+/// Send one `call` of a fill, bounded by the fill's budget, which ends at `budget`. No calls
+/// sends nothing and answers nothing.
+fn send(
+    l: &mut Link<'_>,
+    request: CallRequest<'_>,
     budget: Instant,
-}
-
-/// Send one `call` bounded by the fill's budget. No calls sends nothing and answers nothing.
-fn send(l: &mut Link<'_>, scope: &mut Scope, call: Batch<'_>) -> Result<Answers, BrowserError> {
-    if call.plans.is_empty() {
+    scope: &mut Scope,
+) -> Result<Answers, BrowserError> {
+    if request.is_empty() {
         return Ok(Vec::new());
     }
-    l.call(
-        call.tab_id,
-        call.plans,
-        call.mode,
-        call.guard,
-        call.settle_ms,
-        remaining_ms(call.budget),
-        Some(&mut *scope),
-    )
+    l.call(request.budget(remaining_ms(budget)), Some(scope))
 }
 
 /// Fill the fields gathered in `run` in one sequence, and empty it.
@@ -395,19 +348,8 @@ fn flush(
     budget: Instant,
 ) -> Result<(), BrowserError> {
     let plans = std::mem::take(run);
-    let guard = Some(scope.guard());
-    let answers = send(
-        l,
-        scope,
-        Batch {
-            tab_id,
-            plans: &plans,
-            mode: CallMode::Sequence,
-            guard,
-            settle_ms: 0,
-            budget,
-        },
-    )?;
+    let request = CallRequest::sequence(tab_id, &plans).guard(scope.guard());
+    let answers = send(l, request, budget, scope)?;
     for answer in &answers {
         settled::<Value>(l, answer)?;
     }

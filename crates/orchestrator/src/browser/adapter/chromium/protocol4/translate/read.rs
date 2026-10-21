@@ -6,11 +6,11 @@
 //! records it as unavailable. Reads that name their documents, by locator or by focus, fail
 //! with the document's own failure.
 
-use super::super::link::Link;
+use super::super::link::{CallRequest, Link};
 use super::super::locator::{rescope, Locator};
 use super::super::merge::{self, DocumentTargets};
 use super::super::scope::{PlannedCall, Scope};
-use super::super::wire::{CallMode, FrameRef};
+use super::super::wire::FrameRef;
 use super::super::world::{self, Article, Message, Targets, Text, TreeValue};
 use super::value;
 use crate::browser::adapter::{BrowserOutcome, Listing, ObservedTarget};
@@ -414,15 +414,9 @@ pub(super) fn one(
     tab_id: u64,
     plan: PlannedCall,
 ) -> Result<super::super::link::Answers, BrowserError> {
-    let guard = Some(scope.guard());
-    let budget = l.budget_ms();
+    let plans = [plan];
     l.call(
-        tab_id,
-        &[plan],
-        CallMode::Sequence,
-        guard,
-        0,
-        budget,
+        CallRequest::sequence(tab_id, &plans).guard(scope.guard()),
         Some(&mut *scope),
     )
 }
@@ -439,15 +433,11 @@ pub(super) fn all(
     if plans.is_empty() {
         return Err(BrowserError::DocumentUnavailable);
     }
-    let guard = if guarded { Some(scope.guard()) } else { None };
-    let budget = l.budget_ms();
-    l.call(
-        tab_id,
-        plans,
-        CallMode::Parallel,
-        guard,
-        0,
-        budget,
-        Some(&mut *scope),
-    )
+    let request = CallRequest::parallel(tab_id, plans);
+    let request = if guarded {
+        request.guard(scope.guard())
+    } else {
+        request
+    };
+    l.call(request, Some(&mut *scope))
 }
