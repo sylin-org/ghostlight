@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1 and EXT-7 have landed; EXT-8 is next.
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7 and EXT-8 have landed; EXT-13 is next.
 
 ## Slices
 
@@ -85,7 +85,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1 and EXT-7 have landed; EXT-8 is next.
+with its skeptic's corrections. P-D1, EXT-7 and EXT-8 have landed; EXT-13 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -93,7 +93,7 @@ with its skeptic's corrections. P-D1 and EXT-7 have landed; EXT-8 is next.
 | EXT-5 | refactor(extension): `protocol.js` names its words and owns `failure`, and the vocabulary gains the missing words under new keys | C18 | EXT-5 as corrected | todo |
 | EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | todo |
 | EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | landed (this commit) |
-| EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | todo |
+| EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | landed (this commit) |
 | EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | todo |
 | EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | todo |
 | EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | todo |
@@ -140,3 +140,16 @@ with its skeptic's corrections. P-D1 and EXT-7 have landed; EXT-8 is next.
   its one user; EXT-5 gives the stop reasons one home. Proofs, in `extension/tests/buffers.test.js`:
   "a held runtime settles with its own stop reason, and the read binding goes with the ring" and
   "an expired ring turns off its tab's capture".
+- EXT-8: `tabs.js` and `capture.js` take `invalid`, `isObject`, `requireTabId`, `requireText`,
+  `requireArgs` and `requireInteger` from `arguments.js`; their copies go, and so do `tabs.js`'s
+  `requireDuration` and `capture.js`'s `requirePositiveInteger`, which were `requireInteger` with
+  other words. Two local checks stay because they are not copies: `requireOptionalBoolean`
+  (`null` is refused, where `absent` would let it pass) and `capture.js`'s `requireNumber` (an
+  exclusive minimum). The one `requireTab` is `arguments.requireTab(chrome.tabs, tabId)`; the two
+  copies differed only in bounding Chrome's message to 500 or 200 characters, and every receipt
+  message is bounded to 500 anyway (`primitives.js`, `execute`), so it bounds to 500. The refusal
+  words of a bad tab id, a bad wait or a bad capture budget change to the shared ones, an advisory
+  text no golden pins (the `open_tab.invalid_request` receipt golden still matches). Proofs:
+  "a tab primitive refuses a bad tab id and wait in the shared words" in `tabs.test.js` and "a
+  capture refuses a bad tab id and budget in the shared words" in `capture.test.js`, which read the
+  old words before this change.

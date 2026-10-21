@@ -71,7 +71,7 @@
     STOP_SCREENCAST: "Page.stopScreencast",
     SCREENCAST_ACK: "Page.screencastFrameAck"
   });
-  const FAILURE = Object.freeze({ TAB_MISSING: "tab_missing", DOCUMENT_CHANGED: "document_changed" });
+  const FAILURE = Object.freeze({ DOCUMENT_CHANGED: "document_changed" });
   const ENCODER_DOCUMENT = "offscreen.html";
   const ENCODER_TARGET = "ghostlight-offscreen";
   const ENCODE_KIND = "encode_recording";
@@ -307,12 +307,8 @@
       }
     }
 
-    async function requireTab(tabId) {
-      try {
-        return await chromeApi.tabs.get(tabId);
-      } catch (error) {
-        throw sessions.failure(FAILURE.TAB_MISSING, shared.bounded(error?.message ?? `No tab with id: ${tabId}.`, REASON_CHARS));
-      }
+    function requireTab(tabId) {
+      return check.requireTab(chromeApi.tabs, tabId);
     }
 
     async function startRecording(op) {

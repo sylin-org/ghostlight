@@ -75,6 +75,24 @@ test("every golden view and capture request passes validation", async () => {
   }
 });
 
+test("a capture refuses a bad tab id and budget in the shared words", async () => {
+  const Arguments = require("../lib/arguments.js");
+  const shared = (check) => {
+    try {
+      check();
+    } catch (error) {
+      return error.message;
+    }
+    throw new Error("the shared check passed");
+  };
+  const { capture } = await setup();
+  const good = goldenArgs("capture.viewport");
+  const tab = await execute(capture.capture, { ...good, tab_id: 0 });
+  assert.equal(tab.message, shared(() => Arguments.requireTabId(0)));
+  const side = await execute(capture.capture, { ...good, budget: { ...good.budget, max_side: 0 } });
+  assert.equal(side.message, shared(() => Arguments.requireInteger(0, "budget.max_side", { minimum: 1 })));
+});
+
 test("bad capture arguments are invalid_request", async () => {
   const { capture } = await setup();
   const good = goldenArgs("capture.viewport");

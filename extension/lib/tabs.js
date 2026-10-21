@@ -2,14 +2,17 @@
 (function installGhostlightTabs(root, factory) {
   const node = typeof module !== "undefined" && module.exports;
   const api = factory(node
-    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), shared: require("./shared.js"), state: require("./state.js") }
-    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, shared: root.GhostlightShared, state: root.GhostlightState });
+    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), shared: require("./shared.js"), state: require("./state.js"),
+      args: require("./arguments.js") }
+    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, shared: root.GhostlightShared, state: root.GhostlightState,
+      args: root.GhostlightArguments });
   root.GhostlightTabs = api;
   if (node) module.exports = api;
 })(globalThis, function createGhostlightTabsApi(deps) {
   "use strict";
 
-  const { protocol, sessions, shared, state } = deps;
+  const { protocol, sessions, shared, state, args: check } = deps;
+  const { invalid, isObject, requireTabId, requireText, requireInteger, requireArgs } = check;
 
   // Tabs, windows and zoom: list_tabs, open_tab, navigate, focus_tab, close_tab, set_zoom and
   // resize_window. The service chooses which tab to touch and which tab to adopt; this module only
@@ -37,8 +40,6 @@
   });
   const TARGET = Object.freeze({ URL: "url", BACK: "back", FORWARD: "forward", RELOAD: "reload" });
   const FAILURE = Object.freeze({
-    INVALID_REQUEST: "invalid_request",
-    TAB_MISSING: "tab_missing",
     TIMEOUT: "timeout",
     CANCELLED: "cancelled",
     LOCAL_INTERLOCK: "local_interlock",
@@ -56,36 +57,8 @@
   const WIDTH_LIMITS = protocol.vocabulary.limits.resize_width;
   const HEIGHT_LIMITS = protocol.vocabulary.limits.resize_height;
 
-  function invalid(message) {
-    return sessions.failure(FAILURE.INVALID_REQUEST, message);
-  }
-
-  function isObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-  }
-
-  function requireTabId(value, name = "tab_id") {
-    if (!Number.isSafeInteger(value) || value <= 0) throw invalid(`${name} must be a positive integer.`);
-    return value;
-  }
-
-  function requireText(value, name, maximum, { empty = false } = {}) {
-    if (typeof value !== "string" || (!empty && value.length === 0) || value.length > maximum) {
-      throw invalid(`${name} must be text of at most ${maximum} characters.`);
-    }
-    return value;
-  }
-
   function requireOptionalBoolean(value, name) {
     if (value !== undefined && typeof value !== "boolean") throw invalid(`${name} must be true or false.`);
-  }
-
-  function requireDuration(value, name) {
-    if (!Number.isSafeInteger(value) || value < 0) throw invalid(`${name} must be a whole number of milliseconds.`);
-  }
-
-  function requireArgs(args) {
-    if (!isObject(args)) throw invalid("The request arguments must be an object.");
   }
 
   /** The `Tab` outcome object of a Chrome tab. */
@@ -282,12 +255,8 @@
 
     // ---- shared helpers -----------------------------------------------------------------------
 
-    async function requireTab(tabId) {
-      try {
-        return await chromeApi.tabs.get(tabId);
-      } catch (error) {
-        throw sessions.failure(FAILURE.TAB_MISSING, shared.bounded(error?.message ?? `No tab with id: ${tabId}.`, MESSAGE_CHARS));
-      }
+    function requireTab(tabId) {
+      return check.requireTab(chromeApi.tabs, tabId);
     }
 
     // Polls the tab until it is complete, or settled with a url, or the timeout passes. A cancel
@@ -345,7 +314,7 @@
         requireText(args.group_key, "group_key", GROUP_KEY_CHARS);
         requireText(args.group_title, "group_title", GROUP_TITLE_CHARS);
         if (typeof args.focus_window !== "boolean") throw invalid("focus_window must be true or false.");
-        requireDuration(args.ready_timeout_ms, "ready_timeout_ms");
+        requireInteger(args.ready_timeout_ms, "ready_timeout_ms");
       },
       /**
        * Resolves `TabOpened`. Adopts the named tab (moving it into the group, unless the person put it
@@ -403,7 +372,7 @@
         if (args.to.to === TARGET.URL) requireText(args.to.url, "to.url", protocol.URL_CHARS);
         requireOptionalBoolean(args.to.bypass_cache, "to.bypass_cache");
         requireOptionalBoolean(args.discard_beforeunload, "discard_beforeunload");
-        requireDuration(args.ready_timeout_ms, "ready_timeout_ms");
+        requireInteger(args.ready_timeout_ms, "ready_timeout_ms");
       },
       /**
        * Resolves `Navigated`. Loads a url, or goes back, forward or reloads, then waits for the tab.

@@ -2,14 +2,15 @@
 (function installGhostlightCapture(root, factory) {
   const node = typeof module !== "undefined" && module.exports;
   const api = factory(node
-    ? { sessions: require("./sessions.js") }
-    : { sessions: root.GhostlightSessions });
+    ? { sessions: require("./sessions.js"), args: require("./arguments.js") }
+    : { sessions: root.GhostlightSessions, args: root.GhostlightArguments });
   root.GhostlightCapture = api;
   if (node) module.exports = api;
 })(globalThis, function createGhostlightCaptureApi(deps) {
   "use strict";
 
-  const { sessions } = deps;
+  const { sessions, args: check } = deps;
+  const { invalid, isObject, requireTabId, requireInteger } = check;
 
   // The `view` and `capture` primitives. A view is the numbers that relate CSS pixels to the page
   // and the screen: where the visual viewport sits, how big the content is, the device pixel ratio
@@ -22,7 +23,6 @@
   const METHOD = Object.freeze({ LAYOUT_METRICS: "Page.getLayoutMetrics", CAPTURE: "Page.captureScreenshot" });
   const CLIP = Object.freeze({ VIEWPORT: "viewport", FULL_PAGE: "full_page", VIEWPORT_RECT: "viewport_rect", PAGE_RECT: "page_rect" });
   const FAILURE = Object.freeze({
-    INVALID_REQUEST: "invalid_request",
     CAPTURE_TOO_LARGE: "capture_too_large",
     OTHER: "other"
   });
@@ -32,26 +32,10 @@
   // How far the image's two scale ratios may differ before the measured size is not trusted.
   const SCALE_TOLERANCE = 0.02;
 
-  function invalid(message) {
-    return sessions.failure(FAILURE.INVALID_REQUEST, message);
-  }
-
-  function isObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-  }
-
-  function requireTabId(value) {
-    if (!Number.isSafeInteger(value) || value <= 0) throw invalid("tab_id must be a positive integer.");
-  }
-
   function requireNumber(value, name, { minimum = -Infinity, exclusive = false } = {}) {
     if (typeof value !== "number" || !Number.isFinite(value) || (exclusive ? value <= minimum : value < minimum)) {
       throw invalid(`${name} must be a number ${exclusive ? "above" : "of at least"} ${minimum}.`);
     }
-  }
-
-  function requirePositiveInteger(value, name) {
-    if (!Number.isSafeInteger(value) || value <= 0) throw invalid(`${name} must be a positive integer.`);
   }
 
   function validateClip(clip) {
@@ -72,11 +56,11 @@
 
   function validateBudget(budget) {
     if (!isObject(budget)) throw invalid("budget must be an object.");
-    requirePositiveInteger(budget.max_side, "budget.max_side");
-    requirePositiveInteger(budget.max_pixels, "budget.max_pixels");
+    requireInteger(budget.max_side, "budget.max_side", { minimum: 1 });
+    requireInteger(budget.max_pixels, "budget.max_pixels", { minimum: 1 });
     requireNumber(budget.min_scale, "budget.min_scale", { exclusive: true, minimum: 0 });
     if (typeof budget.magnify !== "boolean") throw invalid("budget.magnify must be true or false.");
-    requirePositiveInteger(budget.max_base64_chars, "budget.max_base64_chars");
+    requireInteger(budget.max_base64_chars, "budget.max_base64_chars", { minimum: 1 });
     if (!Array.isArray(budget.qualities) || budget.qualities.length === 0) throw invalid("budget.qualities must list at least one quality.");
     for (const quality of budget.qualities) {
       if (!Number.isSafeInteger(quality) || quality < 1 || quality > MAX_QUALITY) throw invalid("budget.qualities must be whole numbers from 1 to 100.");

@@ -98,6 +98,23 @@ test("bad arguments are invalid_request before anything happens", async () => {
   assert.equal(chrome.calls.length, 0);
 });
 
+test("a tab primitive refuses a bad tab id and wait in the shared words", async () => {
+  const Arguments = require("../lib/arguments.js");
+  const shared = (check) => {
+    try {
+      check();
+    } catch (error) {
+      return error.message;
+    }
+    throw new Error("the shared check passed");
+  };
+  const { tabs } = setup();
+  const tab = await execute(tabs.closeTab, { tab_id: 0 });
+  assert.equal(tab.message, shared(() => Arguments.requireTabId(0)));
+  const wait = await execute(tabs.openTab, { ...goldenArgs("open_tab"), ready_timeout_ms: -1 });
+  assert.equal(wait.message, shared(() => Arguments.requireInteger(-1, "ready_timeout_ms")));
+});
+
 test("invalid_request messages match the golden receipts", async () => {
   const { tabs } = setup();
   const { url: _url, ...withoutUrl } = goldenArgs("open_tab");
