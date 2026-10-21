@@ -8,7 +8,7 @@
 importScripts("lib/protocol.js", "lib/shared.js", "lib/state.js", "lib/connection-log.js", "lib/chunks.js",
   "lib/sessions.js", "lib/arguments.js", "lib/inventory.js", "lib/world.js", "lib/input.js", "lib/tabs.js",
   "lib/capture.js", "lib/presentation-queue.js", "lib/notice.js", "lib/diagnostics.js", "lib/recording.js",
-  "lib/buffers.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/evaluate.js", "lib/primitives.js");
+  "lib/buffers.js", "vendor/acorn.js", "lib/evaluate.js", "lib/primitives.js");
 
 const protocol = globalThis.GhostlightProtocol;
 const shared = globalThis.GhostlightShared;

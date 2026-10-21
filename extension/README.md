@@ -21,7 +21,7 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
 - `lib/world.js`, `lib/inventory.js`: the service-supplied isolated world and the frame inventory
   with its document guard.
 - `lib/tabs.js`, `lib/input.js`, `lib/capture.js`, `lib/evaluate.js`: tab, input, view and script
-  mechanisms. `lib/script-evaluator.js` and `vendor/acorn.js` parse a script before any page effect.
+  mechanisms. `lib/evaluate.js` parses a script with `vendor/acorn.js` before any page effect.
 - `lib/chunks.js`: bounded SHA-256-verified reassembly for large service-to-extension commands.
 - `lib/notice.js`, `lib/presentation-queue.js`: content-free presentation notices and the unseen
   denial queue.

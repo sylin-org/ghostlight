@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1, EXT-7 and EXT-8 have landed; EXT-13 is next.
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8 and EXT-13 have landed; EXT-14 is next.
 
 ## Slices
 
@@ -85,7 +85,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7 and EXT-8 have landed; EXT-13 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8 and EXT-13 have landed; EXT-14 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -97,7 +97,7 @@ with its skeptic's corrections. P-D1, EXT-7 and EXT-8 have landed; EXT-13 is nex
 | EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | todo |
 | EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | todo |
 | EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | todo |
-| EXT-13 | refactor(extension): `script-evaluator.js` folds into `evaluate.js` | - | EXT-13 | todo |
+| EXT-13 | refactor(extension): `script-evaluator.js` folds into `evaluate.js` | - | EXT-13 | landed (this commit) |
 | EXT-14 | refactor(extension): `withLease` and `withHidden` | - | EXT-14 | todo |
 | EXT-12 | refactor(extension): the native link moves into `lib/link.js` | EXT-5, EXT-7, EXT-10 | EXT-12 | todo |
 | EXT-15 | docs(extension): module docs, and the README lists every file | - | EXT-15; the README is not packaged | todo |
@@ -153,3 +153,21 @@ with its skeptic's corrections. P-D1, EXT-7 and EXT-8 have landed; EXT-13 is nex
   "a tab primitive refuses a bad tab id and wait in the shared words" in `tabs.test.js` and "a
   capture refuses a bad tab id and budget in the shared words" in `capture.test.js`, which read the
   old words before this change.
+- EXT-13: `script-evaluator.js` folds into `evaluate.js`, which takes the parser (`vendor/acorn.js`)
+  itself. A script that does not parse throws `invalid_request` directly, and a script the page
+  threw on answers `Evaluated` with its `exception`, so the private codes `invalid_script` and
+  `primitive_failed` go, and so does `effectUnknown`, which no production code read: once the
+  evaluation is sent, `fx.dispatched` is what says its effect may be uncertain, and the receipt
+  carries it. The form selection, the REPL flags, the hashbang and coordinate handling and the
+  deadline are unchanged; parsing still comes before the lease, and the lease is now one plain
+  bracket. The worker imports one file fewer. The h3 regressions in
+  `extension/tests/evaluate.test.js` now run through the `evaluate_main` primitive and read the
+  receipt: a parse failure is `invalid_request`, not dispatched, with nothing sent; a thrown script
+  or a lost reply is dispatched and sent once. The import-order test runs the worker's real import
+  list and evaluates through `GhostlightEvaluate`.
+- EXT-13, owed to docs: `docs/design/adapter-protocol-4.md` says the protocol-4 design kept the
+  script evaluator unchanged as its own module; it is now part of `evaluate.js`. The README's file
+  list is EXT-15's; its line naming `script-evaluator.js` is corrected here. Three historical
+  documents linked to the removed file (`docs/design/security-assessment-2026-09-06.md` twice,
+  `docs/tasks/security-hardening/h3-script-effect-truth.md` once); each link now points at
+  `evaluate.js`, keeps the old name, and says where the code went.

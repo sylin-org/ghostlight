@@ -239,7 +239,8 @@ they cannot reach serialized audit through success, failure, or composition.
 
 ### SA-04: Script error text can cause repeated effects and false effect certainty
 
-Reproduced against [script-evaluator.js](../../extension/lib/script-evaluator.js) using a Node VM
+Reproduced against [script-evaluator.js](../../extension/lib/evaluate.js) (folded into `evaluate.js`
+in 2026-10, arch-1 EXT-13) using a Node VM
 stub of the CDP sender. The evaluator retries a script in an async wrapper if an exception
 description contains `Illegal return statement`. A script can produce that message after doing
 work. The retry therefore runs the work twice.
@@ -481,9 +482,9 @@ the assessment's reproduction limits or establish that H3 or frame enforcement i
 ## Follow-up: H3 implementation evidence (2026-09-06)
 
 The owner's execution instruction led to the H3 correction in
-[script-evaluator.js](../../extension/lib/script-evaluator.js): source is parsed locally before
-one effectful evaluation, and browser exceptions no longer authorize replay or a known no-effect
-claim. The two new SA-04 regressions failed before the fix and now pass. The
+[script-evaluator.js](../../extension/lib/evaluate.js) (now part of `evaluate.js`): source is parsed
+locally before one effectful evaluation, and browser exceptions no longer authorize replay or a
+known no-effect claim. The two new SA-04 regressions failed before the fix and now pass. The
 [execution record](../tasks/security-hardening/h3-script-effect-truth.md) records full workspace
 gates, 183 extension tests, and 19 real Chromium/MCP cases with explicit test-adapter limitations.
 H2a is committed separately as `8103c69b`. Neither fix is deployed or published, and the other

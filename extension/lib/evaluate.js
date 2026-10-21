@@ -4,12 +4,12 @@
   const api = factory(node
     ? {
       args: require("./arguments.js"),
-      scriptEvaluator: require("./script-evaluator.js"),
+      parser: require("../vendor/acorn.js"),
       sessions: require("./sessions.js")
     }
     : {
       args: root.GhostlightArguments,
-      scriptEvaluator: root.GhostlightScriptEvaluator,
+      parser: root.acorn,
       sessions: root.GhostlightSessions
     });
   root.GhostlightEvaluate = api;
@@ -17,20 +17,96 @@
 })(globalThis, function createGhostlightEvaluateApi(deps) {
   "use strict";
 
-  const { args: check, scriptEvaluator, sessions } = deps;
+  const { args: check, parser, sessions } = deps;
 
   // The `evaluate_main` primitive runs a script in the main world of the top frame, where the page's
-  // own code lives. The script form (a plain expression, or a function body with `return`) is chosen
-  // by the unchanged script evaluator, which parses before anything is sent: a script that does not
-  // parse is `invalid_request` and the browser is never touched. This module adds the guard check,
-  // the dialog check, and a deadline. At the deadline it asks the page to stop with
-  // `Runtime.terminateExecution` and answers `timeout`. Terminating stops a running script; it
-  // cannot stop an awaited promise, so the receipt is `timeout` with the effect marked dispatched
-  // either way.
+  // own code lives. The script's form (a plain expression, or a function body with `return`) is
+  // chosen by parsing it before anything is sent: a script that does not parse is `invalid_request`
+  // and the browser is never touched. Once the evaluation is sent, the receipt says it was
+  // dispatched, so a script the page threw on, or a reply that was lost, leaves its effect
+  // uncertain and is never sent again. This module also checks the guard and the dialog, and keeps
+  // a deadline. At the deadline it asks the page to stop with `Runtime.terminateExecution` and
+  // answers `timeout`. Terminating stops a running script; it cannot stop an awaited promise, so
+  // the receipt is `timeout` with the effect marked dispatched either way.
 
-  const METHOD = Object.freeze({ TERMINATE: "Runtime.terminateExecution" });
+  const METHOD = Object.freeze({ EVALUATE: "Runtime.evaluate", TERMINATE: "Runtime.terminateExecution" });
   const FAILURE = Object.freeze({ TIMEOUT: "timeout" });
-  const SCRIPT_CODE = Object.freeze({ INVALID: "invalid_script", FAILED: "primitive_failed" });
+  const UNPARSED_FAILURE = "page script failed";
+  const FUNCTION_NODES = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
+  const PARSE_OPTIONS = Object.freeze({ ecmaVersion: "latest", allowAwaitOutsideFunction: true });
+  const WRAPPER_PREFIX = "await (async () => {\n";
+  const WRAPPER_SUFFIX = "\n})()";
+
+  /** The `Runtime.evaluate` parameters for one expression, with REPL-grade flags. */
+  function evaluationRequest(expression) {
+    return {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true,
+      replMode: true
+    };
+  }
+
+  function wrappedExpression(script) {
+    // REPL evaluation awaits its own result envelope, not a promise stored in that envelope.
+    // A leading hashbang is a comment only at the start of a program, so preserve it as a comment
+    // inside the function as well. Unwrapped REPL execution still receives the original source.
+    const body = script.startsWith("#!") ? `//${script.slice(2)}` : script;
+    return `${WRAPPER_PREFIX}${body}${WRAPPER_SUFFIX}`;
+  }
+
+  function hasTopLevelReturn(program) {
+    const pending = [program];
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (node.type === "ReturnStatement") return true;
+      if (FUNCTION_NODES.has(node.type)) continue;
+      for (const value of Object.values(node)) {
+        if (Array.isArray(value)) {
+          for (const child of value) if (child && typeof child.type === "string") pending.push(child);
+        } else if (value && typeof value.type === "string") {
+          pending.push(value);
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The expression `script` is sent as: the script itself, or the script wrapped as an async
+   * function body when it returns at top level. A script that does not parse throws
+   * `invalid_request`, its description cut to `maximum`, before anything is sent.
+   */
+  function scriptExpression(script, maximum) {
+    try {
+      const expression = wrappedExpression(script);
+      // An async body permits REPL syntax such as top-level await and resource declarations.
+      // Parse it without running it, then keep the original REPL scope unless it contains return.
+      const program = parser.parse(expression, PARSE_OPTIONS);
+      const call = program.body[0]?.expression?.argument;
+      const body = call?.callee?.body;
+      if (program.body.length !== 1 || program.body[0].expression?.type !== "AwaitExpression"
+          || call?.type !== "CallExpression" || call.callee?.type !== "ArrowFunctionExpression"
+          || body?.start !== WRAPPER_PREFIX.indexOf("{")
+          || body?.end !== expression.length - WRAPPER_SUFFIX.length + WRAPPER_SUFFIX.indexOf("}") + 1) {
+        throw new Error("script must form one function body");
+      }
+      return hasTopLevelReturn(body) ? expression : script;
+    } catch (cause) {
+      let description = String(cause?.message || UNPARSED_FAILURE);
+      if (cause?.loc) {
+        // The parser's synthetic prefix adds one line; report coordinates in the supplied source.
+        description = description.replace(/\(\d+:\d+\)$/, `(${Math.max(1, cause.loc.line - 1)}:${cause.loc.column})`);
+      }
+      throw check.invalid(description.slice(0, maximum));
+    }
+  }
+
+  /** The bounded description of an exception the page threw. */
+  function exceptionText(details, maximum) {
+    return String(details?.exception?.description || details?.text || UNPARSED_FAILURE).slice(0, maximum);
+  }
 
   /**
    * Resolves or rejects like `work`, unless `timeoutMs` passes first: then `onTimeout()` runs and the
@@ -84,32 +160,24 @@
       async run(request, fx) {
         const tabId = request.tab_id;
         const target = { tabId };
-        let leased = false;
-        const send = async (method, params) => {
-          await acquire(tabId);
-          leased = true;
+        const expression = scriptExpression(request.script, request.max_result_chars);
+        await acquire(tabId);
+        try {
           if (lifecycle.currentDialog(tabId)) throw sessions.dialogOpen();
           inventory.checkGuard(request.guard, await inventory.snapshot(tabId));
           fx.watch(tabId);
           fx.dispatched = true;
-          return withDeadline(lifecycle.cdp(target, method, params), request.timeout_ms,
-            () => { lifecycle.cdp(target, METHOD.TERMINATE).catch(() => {}); });
-        };
-        try {
-          let value;
-          try {
-            value = await scriptEvaluator.evaluate(send, request.script, request.max_result_chars);
-          } catch (error) {
-            if (error?.code === SCRIPT_CODE.INVALID) throw check.invalid(error.message);
-            if (error?.code === SCRIPT_CODE.FAILED) return { value: "", truncated: false, exception: error.message };
-            throw error;
+          const evaluated = await withDeadline(lifecycle.cdp(target, METHOD.EVALUATE, evaluationRequest(expression)),
+            request.timeout_ms, () => { lifecycle.cdp(target, METHOD.TERMINATE).catch(() => {}); });
+          if (evaluated.exceptionDetails) {
+            return { value: "", truncated: false, exception: exceptionText(evaluated.exceptionDetails, request.max_result_chars) };
           }
-          const serialized = JSON.stringify(value ?? null);
+          const serialized = JSON.stringify(evaluated.result?.value ?? null);
           const text = serialized.slice(0, request.max_result_chars);
           if (request.settle_ms) await sleep(request.settle_ms);
           return { value: text, truncated: serialized.length > text.length };
         } finally {
-          if (leased) await release(tabId);
+          await release(tabId);
         }
       }
     });

@@ -1,20 +1,40 @@
 "use strict";
 
+// The script effect truth regressions (docs/tasks/security-hardening/h3-script-effect-truth.md),
+// through the `evaluate_main` primitive. The script's form is chosen by parsing it before anything
+// is sent: a script that does not parse never reaches the page and its receipt is not dispatched.
+// Once the evaluation is sent the receipt says it was dispatched, so a script the page threw on, or
+// a reply that was lost, leaves its effect uncertain, and nothing is ever sent twice.
+
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
-const scriptEvaluator = require("../lib/script-evaluator.js");
+const Evaluate = require("../lib/evaluate.js");
+const { fakeChrome, wire } = require("./p4-fakes.js");
+const { execute } = require("./p4-chrome.js");
 
-function fakeSend(scripted) {
-  const calls = [];
-  const send = async (method, params) => {
-    calls.push({ method, params });
-    if (scripted.length === 0) throw new Error("unexpected extra evaluation");
-    return scripted.shift();
+const TAB = 12;
+
+/** The primitive over a fake browser whose `Runtime.evaluate` is `answer(params)`. */
+function setup(answer) {
+  const chrome = fakeChrome();
+  chrome.handlers["Runtime.evaluate"] = (_target, params) => answer(params);
+  const parts = wire(chrome);
+  const { evaluateMain } = Evaluate.create({ lifecycle: parts.lifecycle, inventory: parts.inventory, sleep: async () => {} });
+  const sent = () => chrome.calls.filter((call) => call.method === "Runtime.evaluate").map((call) => call.params);
+  return { evaluateMain, sent };
+}
+
+const request = (script, maximum = 1000) => ({ tab_id: TAB, script, max_result_chars: maximum, settle_ms: 0, timeout_ms: 2000 });
+
+/** Answers each evaluation with the next reply, and refuses an extra one. */
+function scripted(...replies) {
+  return async () => {
+    if (replies.length === 0) throw new Error("unexpected extra evaluation");
+    return replies.shift();
   };
-  return { calls, send };
 }
 
 function value(result) {
@@ -30,12 +50,10 @@ function failure(description, className) {
   };
 }
 
-function executingSend() {
+/** Runs each evaluation in one VM context, so a test can count the effects a script had. */
+function executing() {
   const context = vm.createContext({ effects: 0 });
-  const calls = [];
-  const send = async (method, params) => {
-    assert.equal(method, "Runtime.evaluate");
-    calls.push(params.expression);
+  const answer = async (params) => {
     try {
       // Node's VM has no REPL mode. Supply an async context for a leading await expression;
       // the separate Chromium journey verifies the real REPL completion and await behavior.
@@ -45,90 +63,69 @@ function executingSend() {
       return failure(error.stack ?? String(error), error.name);
     }
   };
-  return { context, calls, send };
+  return { context, answer };
 }
 
 test("an expression evaluates with repl-grade debugger flags and returns its value", async () => {
-  const { calls, send } = fakeSend([value(4)]);
-  const result = await scriptEvaluator.evaluate(send, "2 + 2", 1000);
-  assert.equal(result, 4);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, "Runtime.evaluate");
-  assert.deepEqual(calls[0].params, {
+  const { evaluateMain, sent } = setup(scripted(value(4)));
+  const result = await execute(evaluateMain, request("2 + 2"));
+  assert.deepEqual(result.ok, { value: "4", truncated: false });
+  assert.deepEqual(sent(), [{
     expression: "2 + 2",
     awaitPromise: true,
     returnByValue: true,
     userGesture: true,
     replMode: true
-  });
+  }]);
 });
 
 test("a missing result value is returned as null", async () => {
-  const { send } = fakeSend([{ result: {} }]);
-  assert.equal(await scriptEvaluator.evaluate(send, "undefined", 1000), null);
+  const { evaluateMain } = setup(scripted({ result: {} }));
+  assert.deepEqual((await execute(evaluateMain, request("undefined"))).ok, { value: "null", truncated: false });
 });
 
-test("top-level await reaches the evaluator unchanged", async () => {
-  const { calls, send } = fakeSend([value("late")]);
+test("top-level await reaches the page unchanged", async () => {
+  const { evaluateMain, sent } = setup(scripted(value("late")));
   const script = "await new Promise((resolve) => setTimeout(() => resolve('late'), 1))";
-  assert.equal(await scriptEvaluator.evaluate(send, script, 1000), "late");
-  assert.equal(calls[0].params.expression, script);
+  assert.equal((await execute(evaluateMain, request(script))).ok.value, "\"late\"");
+  assert.equal(sent()[0].expression, script);
 });
 
 test("a bare top-level return selects an async function before its only execution", async () => {
-  const { calls, send } = fakeSend([value("returned")]);
-  const result = await scriptEvaluator.evaluate(send, "return 'returned';", 1000);
-  assert.equal(result, "returned");
-  assert.equal(calls.length, 1);
-  assert.equal(
-    calls[0].params.expression,
-    "await (async () => {\nreturn 'returned';\n})()"
-  );
+  const { evaluateMain, sent } = setup(scripted(value("returned")));
+  const result = await execute(evaluateMain, request("return 'returned';"));
+  assert.equal(result.ok.value, "\"returned\"");
+  assert.deepEqual(sent().map((params) => params.expression), ["await (async () => {\nreturn 'returned';\n})()"]);
 });
 
 test("a selected bare-return form reports runtime failure as uncertain", async () => {
-  const { send } = fakeSend([failure("ReferenceError: missing is not defined", "ReferenceError")]);
-  await assert.rejects(
-    scriptEvaluator.evaluate(send, "return missing;", 1000),
-    (error) => error.effectUnknown === true && error.code === "primitive_failed"
-  );
+  const { evaluateMain } = setup(scripted(failure("ReferenceError: missing is not defined", "ReferenceError")));
+  const result = await execute(evaluateMain, request("return missing;"));
+  assert.match(result.ok.exception, /ReferenceError: missing is not defined/);
+  assert.equal(result.dispatched, true);
 });
 
 test("a runtime failure is bounded, useful, and uncertain", async () => {
-  const { send } = fakeSend([failure("ReferenceError: missing is not defined", "ReferenceError")]);
-  await assert.rejects(
-    scriptEvaluator.evaluate(send, "missing()", 1000),
-    (error) => {
-      assert.match(error.message, /ReferenceError: missing is not defined/);
-      assert.equal(error.effectUnknown, true);
-      assert.equal(error.code, "primitive_failed");
-      return true;
-    }
-  );
+  const { evaluateMain } = setup(scripted(failure("ReferenceError: missing is not defined", "ReferenceError")));
+  const result = await execute(evaluateMain, request("missing()"));
+  assert.deepEqual(result.ok, { value: "", truncated: false, exception: "ReferenceError: missing is not defined" });
+  assert.equal(result.dispatched, true);
 });
 
 test("a pure parse failure refuses decisively without inventing an effect", async () => {
-  const { calls, send } = fakeSend([]);
-  await assert.rejects(
-    scriptEvaluator.evaluate(send, "const x = ();", 1000),
-    (error) => {
-      assert.match(error.message, /Unexpected token/);
-      assert.match(error.message, /\(1:11\)$/, "coordinates refer to the supplied script");
-      assert.equal(error.effectUnknown, false);
-      assert.equal(error.code, "invalid_script");
-      return true;
-    }
-  );
-  assert.equal(calls.length, 0, "syntax rejection happens before sending any page code");
+  const { evaluateMain, sent } = setup(scripted());
+  const result = await execute(evaluateMain, request("const x = ();"));
+  assert.equal(result.failure, "invalid_request");
+  assert.match(result.message, /Unexpected token/);
+  assert.match(result.message, /\(1:11\)$/, "coordinates refer to the supplied script");
+  assert.equal(result.dispatched, false);
+  assert.equal(sent().length, 0, "syntax rejection happens before sending any page code");
 });
 
 test("failure descriptions are bounded by the caller's budget", async () => {
   const long = `ReferenceError: ${"x".repeat(500)} is not defined`;
-  const { send } = fakeSend([failure(long, "ReferenceError")]);
-  await assert.rejects(
-    scriptEvaluator.evaluate(send, "missing()", 40),
-    (error) => error.message.length === 40 && error.message === long.slice(0, 40)
-  );
+  const { evaluateMain } = setup(scripted(failure(long, "ReferenceError")));
+  assert.equal((await execute(evaluateMain, request("missing()", 40))).ok.exception, long.slice(0, 40));
 });
 
 for (const errorExpression of [
@@ -138,15 +135,13 @@ for (const errorExpression of [
   "'Illegal return statement'"
 ]) {
   test(`runtime ${errorExpression} neither replays effects nor claims no effects`, async () => {
-    const { context, calls, send } = executingSend();
-    let reported;
-    try {
-      await scriptEvaluator.evaluate(send, `effects += 1; throw ${errorExpression};`, 1000);
-    } catch (error) { reported = error; }
+    const { context, answer } = executing();
+    const { evaluateMain, sent } = setup(answer);
+    const result = await execute(evaluateMain, request(`effects += 1; throw ${errorExpression};`));
     assert.equal(context.effects, 1, "the requested effect happens only once");
-    assert.equal(calls.length, 1, "an exception must not trigger another execution");
-    assert.equal(reported?.effectUnknown, true, "runtime effects cannot be ruled out");
-    assert.equal(reported?.code, "primitive_failed");
+    assert.equal(sent().length, 1, "an exception must not trigger another execution");
+    assert.equal(result.dispatched, true, "runtime effects cannot be ruled out");
+    assert.equal(typeof result.ok.exception, "string");
   });
 }
 
@@ -159,65 +154,75 @@ test("nested function returns and return-like text keep the original REPL expres
     "new class { answer() { return 4; } }().answer()",
     "`return ${(() => { return 4; })()}`"
   ]) {
-    const { calls, send } = executingSend();
-    await scriptEvaluator.evaluate(send, script, 1000);
-    assert.deepEqual(calls, [script]);
+    const { answer } = executing();
+    const { evaluateMain, sent } = setup(answer);
+    await execute(evaluateMain, request(script));
+    assert.deepEqual(sent().map((params) => params.expression), [script]);
   }
 });
 
 test("a return inside top-level control flow and await selects one effectful function", async () => {
-  const { context, calls, send } = executingSend();
-  const result = await scriptEvaluator.evaluate(send,
-    "await Promise.resolve(); effects += 1; if (effects) { return { answer: effects }; }", 1000);
-  assert.equal(result.answer, 1);
+  const { context, answer } = executing();
+  const { evaluateMain, sent } = setup(answer);
+  const result = await execute(evaluateMain,
+    request("await Promise.resolve(); effects += 1; if (effects) { return { answer: effects }; }"));
+  assert.equal(result.ok.value, "{\"answer\":1}");
   assert.equal(context.effects, 1);
-  assert.equal(calls.length, 1);
+  assert.equal(sent().length, 1);
 });
 
 test("a bare return with a later runtime syntax exception remains uncertain", async () => {
-  const { context, calls, send } = executingSend();
-  await assert.rejects(scriptEvaluator.evaluate(send,
-    "effects += 1; await Promise.resolve(); throw new SyntaxError('Illegal return statement'); return 4;", 1000),
-  (error) => error.effectUnknown === true);
+  const { context, answer } = executing();
+  const { evaluateMain, sent } = setup(answer);
+  const result = await execute(evaluateMain,
+    request("effects += 1; await Promise.resolve(); throw new SyntaxError('Illegal return statement'); return 4;"));
+  assert.equal(result.dispatched, true);
+  assert.equal(typeof result.ok.exception, "string");
   assert.equal(context.effects, 1);
-  assert.equal(calls.length, 1);
+  assert.equal(sent().length, 1);
 });
 
 test("invalid source including wrapper escapes cannot dispatch earlier valid effects", async () => {
   for (const script of ["effects += 1; const x = ();", "} effects += 1; { return 4;",
     "})(), effects += 1, await (async () => { return 4;", "'use strict'; with ({}) { return 4; }"]) {
-    const { context, calls, send } = executingSend();
-    await assert.rejects(scriptEvaluator.evaluate(send, script, 1000),
-      (error) => error.code === "invalid_script" && error.effectUnknown === false);
+    const { context, answer } = executing();
+    const { evaluateMain, sent } = setup(answer);
+    const result = await execute(evaluateMain, request(script));
+    assert.equal(result.failure, "invalid_request", script);
+    assert.equal(result.dispatched, false, script);
     assert.equal(context.effects, 0);
-    assert.equal(calls.length, 0);
+    assert.equal(sent().length, 0);
   }
 });
 
 test("REPL resource declarations and hashbangs remain valid during form selection", async () => {
   for (const script of ["using resource = { [Symbol.dispose]() {} }; 4",
     "await using resource = { async [Symbol.asyncDispose]() {} }; 4", "#!/usr/bin/env node\n4"]) {
-    const { calls, send } = fakeSend([value(4)]);
-    assert.equal(await scriptEvaluator.evaluate(send, script, 1000), 4);
-    assert.equal(calls[0].params.expression, script);
+    const { evaluateMain, sent } = setup(scripted(value(4)));
+    assert.equal((await execute(evaluateMain, request(script))).ok.value, "4");
+    assert.equal(sent()[0].expression, script);
   }
-  const { calls, send } = executingSend();
-  assert.equal(await scriptEvaluator.evaluate(send, "#!/usr/bin/env node\nreturn 4;", 1000), 4);
-  assert.equal(calls.length, 1);
+  const { answer } = executing();
+  const { evaluateMain, sent } = setup(answer);
+  assert.equal((await execute(evaluateMain, request("#!/usr/bin/env node\nreturn 4;"))).ok.value, "4");
+  assert.equal(sent().length, 1);
 });
 
 test("a lost evaluation reply is uncertain and is never retried", async () => {
   let attempts = 0;
-  await assert.rejects(scriptEvaluator.evaluate(async () => {
+  const { evaluateMain } = setup(async () => {
     attempts += 1;
     throw new Error("connection lost");
-  }, "effects += 1", 1000), (error) => error.effectUnknown === true);
+  });
+  const result = await execute(evaluateMain, request("effects += 1"));
+  assert.equal(result.ok, undefined);
+  assert.equal(result.dispatched, true);
   assert.equal(attempts, 1);
 });
 
 test("the actual worker import list loads its packaged parser before the evaluator", async () => {
   const extension = join(__dirname, "..");
-  const context = vm.createContext({});
+  const context = vm.createContext({ setTimeout, clearTimeout });
   context.importScripts = (...paths) => {
     for (const path of paths) vm.runInContext(readFileSync(join(extension, path), "utf8"), context, { filename: path });
   };
@@ -225,7 +230,19 @@ test("the actual worker import list loads its packaged parser before the evaluat
   assert.ok(imports, "worker.js imports its scripts in one call");
   vm.runInContext(imports[0], context);
   assert.equal(context.acorn.version, "8.18.0");
-  const { calls, send } = executingSend();
-  assert.equal(await context.GhostlightScriptEvaluator.evaluate(send, "return 4;", 1000), 4);
-  assert.equal(calls.length, 1);
+  const expressions = [];
+  const lifecycle = {
+    cdp: async (_target, _method, params) => {
+      expressions.push(params.expression);
+      return value(4);
+    },
+    acquire: async () => {},
+    release: async () => {},
+    currentDialog: () => null
+  };
+  const inventory = { snapshot: async () => ({}), checkGuard: () => {} };
+  const { evaluateMain } = context.GhostlightEvaluate.create({ lifecycle, inventory });
+  const ok = await evaluateMain.run(request("return 4;"), { dispatched: false, watch: () => {} });
+  assert.equal(ok.value, "4");
+  assert.deepEqual(expressions, ["await (async () => {\nreturn 4;\n})()"], "the parser chose the function form");
 });

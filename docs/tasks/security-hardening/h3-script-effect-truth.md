@@ -65,8 +65,8 @@ records this correction to Decision 6's fallback. The mechanism remains implemen
 
 ## Current placement to recheck at cycle start
 
-- [extension/lib/script-evaluator.js](../../../extension/lib/script-evaluator.js): owns the
-  CDP evaluation flags, wrapper, retry decision, and effect uncertainty on exceptions.
+- [extension/lib/script-evaluator.js](../../../extension/lib/evaluate.js) (folded into `evaluate.js` in
+  2026-10, arch-1 EXT-13): owns the CDP evaluation flags, wrapper, retry decision, and effect uncertainty on exceptions.
 - [extension/tests/evaluate.test.js](../../../extension/tests/evaluate.test.js): closest existing
   tests. Some tests currently pin the unsafe retry mechanism; replace those expectations while
   retaining the supported user behavior. Queueing fake CDP replies alone does not prove effects.
