@@ -237,7 +237,11 @@ Now:
   title is the ghost emoji and the agent's name instead of `Ghostlight - `, and the extension
   retitles a group 2.0.0 named rather than opening a second one (ADR-0098 amendment of
   2026-10-21). P-D3 changes three packaged extension files, so the next candidate carries it.
-  Owed: the tab strip on the four test machines, the Alpine one first, for the emoji font. Found
+  Owed: the tab strip on the four test machines, the Alpine one first, for the emoji font. dev
+  73d5cc46 is deployed on the owner's machine and was checked live on the local 2.0.1 extension:
+  the desk with its prompt and a held dialog, the three forms, diagnose and wait, history, a
+  script, a screenshot and a kept close, plus P-D4 and P-D5. The morning's extension check had run
+  on a store 2.0.0 extension left installed beside the local build; the owner removed it. Found
   while doing P-D3, P-D4: the extension counts a text limit in characters, as the service does, so
   text with emoji within a tool's limit is no longer refused. P-D5, found checking P-D4 live: text
   cut inside an emoji (a long tab title, a script's result) dropped the browser connection for
