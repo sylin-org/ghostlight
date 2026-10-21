@@ -20,8 +20,6 @@ use std::fmt;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
-#[cfg(test)]
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -196,8 +194,6 @@ impl PendingWorkbench {
             port: self.address.port,
             limits: limits::Limits::default(),
             places: Arc::default(),
-            #[cfg(test)]
-            wrong_keys: AtomicU64::new(0),
         });
         let stop = Arc::new(AtomicBool::new(false));
         let thread = spawn_accept(self.listener, Arc::clone(&shared), Arc::clone(&stop));
@@ -220,9 +216,6 @@ struct Shared {
     port: u16,
     limits: limits::Limits,
     places: Arc<Places>,
-    /// Requests that carried a bearer that was not this start's, counted for tests.
-    #[cfg(test)]
-    wrong_keys: AtomicU64,
 }
 
 impl fmt::Debug for Shared {
@@ -274,20 +267,6 @@ impl WorkbenchServer {
     #[must_use]
     pub fn bearer(&self) -> &str {
         &self.shared.bearer
-    }
-
-    /// How many requests carried a bearer that was not this start's.
-    #[must_use]
-    #[cfg(test)]
-    pub fn wrong_key_count(&self) -> u64 {
-        self.shared.wrong_keys.load(Ordering::Acquire)
-    }
-
-    /// How many client scans requests have started.
-    #[must_use]
-    #[cfg(test)]
-    pub fn scan_count(&self) -> u64 {
-        self.shared.limits.scans()
     }
 
     /// Stop answering and free the port. A second call does nothing.

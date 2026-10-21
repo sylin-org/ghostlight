@@ -35,7 +35,7 @@ const API_PREFIX: &str = "/api/";
 const BEARER_PREFIX: &str = "Bearer ";
 
 /// The authentication scheme a refused request is told to use.
-const BEARER_SCHEME: &str = "Bearer";
+pub(super) const BEARER_SCHEME: &str = "Bearer";
 
 /// The type of every JSON body.
 const JSON_TYPE: &str = "application/json";
@@ -44,10 +44,10 @@ const JSON_TYPE: &str = "application/json";
 const JSON_RESPONSE_TYPE: &str = "application/json; charset=utf-8";
 
 /// The most a small request body holds.
-const SMALL_BODY: usize = 4 * 1024;
+pub(super) const SMALL_BODY: usize = 4 * 1024;
 
 /// The most a request body holding a policy document holds.
-const POLICY_BODY: usize = 256 * 1024;
+pub(super) const POLICY_BODY: usize = 256 * 1024;
 
 /// The value of Sec-Fetch-Site for a request from the same origin.
 const FETCH_SAME_ORIGIN: &str = "same-origin";
@@ -59,22 +59,27 @@ const FETCH_NONE: &str = "none";
 const PAGE_CACHE: &str = "no-cache";
 
 /// How a data response is cached: not at all.
-const API_CACHE: &str = "no-store";
+pub(super) const API_CACHE: &str = "no-store";
 
-const NOSNIFF: &str = "nosniff";
-const NO_REFERRER: &str = "no-referrer";
-const SAME_ORIGIN_ONLY: &str = "same-origin";
-const DENY_FRAMES: &str = "DENY";
+/// Every response: the browser takes the type it is given and guesses none.
+pub(super) const NOSNIFF: &str = "nosniff";
+/// Every response: a request from the page says nothing of where it came from.
+pub(super) const NO_REFERRER: &str = "no-referrer";
+/// Every response: only this origin may load it.
+pub(super) const SAME_ORIGIN_ONLY: &str = "same-origin";
+/// A page: no other page may frame it.
+pub(super) const DENY_FRAMES: &str = "DENY";
 
 /// What a page may load and do: its own origin, no frames, no plugins, no forms.
-const PAGE_POLICY: &str = "default-src 'self'; connect-src 'self'; img-src 'self' data:; \
+pub(super) const PAGE_POLICY: &str =
+    "default-src 'self'; connect-src 'self'; img-src 'self' data:; \
 style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; \
 form-action 'none'; frame-ancestors 'none'";
 
 /// What an agent's image may do once loaded: nothing. An image needs no policy to show, the
 /// packaged tiles need nothing beyond their own markup, and an image opened on its own runs
 /// nothing.
-const IMAGE_POLICY: &str = "default-src 'none'; sandbox";
+pub(super) const IMAGE_POLICY: &str = "default-src 'none'; sandbox";
 
 /// Every route that is not a page file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -286,7 +291,8 @@ static ROUTES: [Route; 21] = [
     ),
 ];
 
-/// The method and path of every route in the table, for the test that keeps it closed.
+/// The method and path of every route in the table, for the test that keeps it equal to the
+/// routes the page calls.
 #[cfg(test)]
 pub(super) fn table() -> Vec<(Method, &'static str)> {
     ROUTES
@@ -571,10 +577,6 @@ fn context_of(shared: &Shared, head: &Head) -> Result<WebContext, Response> {
             {
                 Ok(WebContext::Control)
             } else {
-                #[cfg(test)]
-                shared
-                    .wrong_keys
-                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
                 Err(wrong_key())
             }
         }

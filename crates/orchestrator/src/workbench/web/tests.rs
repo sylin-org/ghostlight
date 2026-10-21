@@ -1,17 +1,24 @@
 //! Tests of the workbench server over real loopback sockets.
 //!
-//! Each test starts a server over its own facade and temporary home, and talks to it the way a
-//! browser tab or the window would. A server takes the default port of its home or, when another
-//! test holds it, a port the system picks; no test depends on which.
+//! These are the only tests that put a socket against the loopback server: every journey under
+//! `tests/` talks to the preview server instead. Each test starts a server over its own facade and
+//! temporary home, and talks to it the way a browser tab (no bearer) or the window (this start's
+//! bearer) would. A server takes the default port of its home or, when another test holds it, a
+//! port the system picks; no test depends on which.
 
-use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use super::http::{header, HEAD_LIMIT, READ_DEADLINE};
+use super::routes::{
+    API_CACHE, BEARER_SCHEME, DENY_FRAMES, IMAGE_POLICY, NOSNIFF, NO_REFERRER, PAGE_POLICY,
+    POLICY_BODY, SAME_ORIGIN_ONLY, SMALL_BODY,
+};
 use super::*;
 use crate::browser::adapter::RuntimeControlState;
 use crate::governance::GovernanceFacade;
@@ -19,8 +26,9 @@ use crate::install::HarnessRegistry;
 use crate::language::coverage::{Coverage, HumanCoverage};
 use crate::language::workbench as words;
 use crate::scratch::Scratch;
-use crate::workbench::context::WebContext;
-use crate::workbench::parts::{Part, USER_HOME_VARIABLE};
+use crate::workbench::context::{WebAct, WebContext};
+use crate::workbench::parts::Part;
+use crate::workbench::setup::test_support::Computer;
 use crate::workbench::tests::RecordingActs;
 use crate::workbench::PageAddress;
 use crate::workbench::WorkbenchDestination;
@@ -33,6 +41,18 @@ const SACRED_HOST: &str = "never-touch.invalid";
 /// Marks a fixture that starts with no user policy file.
 const NO_POLICY: &str = "";
 const READ_POLICY: &str = r#"{"schema":4,"name":"read","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[]}"#;
+
+/// The page's transport: every route the page calls and the names it shares with the service.
+const PAGE_TRANSPORT: &str = include_str!("../../../ui/lib/transport.js");
+
+/// The text of the page's `const <name> = "...";` in transport.js.
+fn page_constant(name: &str) -> &'static str {
+    let opening = format!("const {name} = \"");
+    let (_, rest) = PAGE_TRANSPORT
+        .split_once(&opening)
+        .unwrap_or_else(|| panic!("transport.js has no {name}"));
+    rest.split_once('"').expect("the constant is quoted").0
+}
 
 /// One parsed response.
 struct Reply {
@@ -58,20 +78,29 @@ impl Reply {
         })
     }
 
-    fn code(&self) -> String {
-        self.json()["error"]["code"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned()
+    /// The words a refusal says.
+    fn message(&self) -> Value {
+        self.json()["error"]["message"].clone()
+    }
+
+    /// The code a refusal carries, for the one code the page reads.
+    fn code(&self) -> Value {
+        self.json()["error"]["code"].clone()
     }
 }
 
+/// How long a test waits for an answer the server owes it. Only a broken server reaches it.
+const ANSWER_DEADLINE: Duration = Duration::from_secs(15);
+
 /// Send exactly `text` and read the answer until the server closes.
 fn raw(port: u16, text: &str) -> Reply {
+    raw_within(port, text, ANSWER_DEADLINE)
+}
+
+/// Send exactly `text` and read the answer until the server closes, waiting at most `within`.
+fn raw_within(port: u16, text: &str, within: Duration) -> Reply {
     let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(15)))
-        .unwrap();
+    stream.set_read_timeout(Some(within)).unwrap();
     stream.write_all(text.as_bytes()).unwrap();
     let mut bytes = Vec::new();
     let _ = stream.read_to_end(&mut bytes);
@@ -145,10 +174,11 @@ impl Call {
     }
 
     fn bearer(self, bearer: &str) -> Self {
-        self.header("Authorization", &format!("Bearer {bearer}"))
+        self.header(header::AUTHORIZATION, &format!("Bearer {bearer}"))
     }
 
-    fn send(&self, port: u16) -> Reply {
+    /// The request as it goes on the wire to the server at `port`.
+    fn text(&self, port: u16) -> String {
         let host = self
             .host
             .clone()
@@ -165,7 +195,11 @@ impl Call {
         }
         text.push_str("\r\n");
         text.push_str(self.body.as_deref().unwrap_or_default());
-        raw(port, &text)
+        text
+    }
+
+    fn send(&self, port: u16) -> Reply {
+        raw(port, &self.text(port))
     }
 }
 
@@ -206,6 +240,13 @@ impl WorkbenchQuitPort for CountingQuit {
     }
 }
 
+/// The ports a test watches for any act that reached them.
+struct Watched {
+    acts: Arc<RecordingActs>,
+    quit: Arc<CountingQuit>,
+    window: Arc<CountingWindow>,
+}
+
 /// A server over its own facade and temporary home.
 struct Fixture {
     server: WorkbenchServer,
@@ -213,7 +254,7 @@ struct Fixture {
     /// The temporary home, removed after the server and the facade drop.
     root: Scratch,
     /// The fake computer an unfinished setup is read from, when the fixture tracks setup.
-    computer: Option<Arc<crate::workbench::setup::test_support::Computer>>,
+    computer: Option<Arc<Computer>>,
 }
 
 impl Fixture {
@@ -261,8 +302,7 @@ impl Fixture {
             &root.join("ghostlight"),
             &state,
         ));
-        let computer = setting_up
-            .then(|| Arc::new(crate::workbench::setup::test_support::Computer::default()));
+        let computer = setting_up.then(|| Arc::new(Computer::default()));
         let facade = match &computer {
             Some(computer) => {
                 facade.attach_setup(crate::workbench::setup::SetupProgress::load(
@@ -287,11 +327,33 @@ impl Fixture {
         }
     }
 
+    /// The fake computer of a fixture that tracks setup.
+    fn computer(&self) -> Arc<Computer> {
+        self.computer.clone().expect("a fixture that tracks setup")
+    }
+
     /// How many times the fake computer was read.
     fn reads(&self) -> usize {
         self.computer
             .as_ref()
             .map_or(0, |computer| computer.reads())
+    }
+
+    /// Attach ports that record every act, quit and window request that reaches them.
+    fn watched(&self) -> Watched {
+        let watched = Watched {
+            acts: Arc::new(RecordingActs::default()),
+            quit: Arc::new(CountingQuit::default()),
+            window: Arc::new(CountingWindow::default()),
+        };
+        self.facade.attach_native_acts(watched.acts.clone());
+        self.facade.attach_quit(watched.quit.clone());
+        self.facade.attach_presentation(watched.window.clone());
+        watched
+    }
+
+    fn user_policy_exists(&self) -> bool {
+        self.root.join("user-policy.json").exists()
     }
 
     fn port(&self) -> u16 {
@@ -311,6 +373,18 @@ impl Fixture {
     fn watch(&self, call: Call) -> Reply {
         call.send(self.port())
     }
+
+    /// Publish a document coverage that excluded `host`.
+    fn cover(&self, host: &str) {
+        self.facade.projection.document_coverage(HumanCoverage {
+            summary: "One frame was excluded.".into(),
+            explanation: "Excluded by policy.".into(),
+            invocation: "invocation_1".into(),
+            coverage: Coverage::default(),
+            excluded_hosts: vec![host.into()],
+            proactive: false,
+        });
+    }
 }
 
 impl Drop for Fixture {
@@ -327,86 +401,86 @@ fn post(path: &str, body: &str) -> Call {
     Call::new("POST", path).body(body)
 }
 
+fn runtime(intent: &str) -> Call {
+    post("/api/runtime", &json!({ "intent": intent }).to_string())
+}
+
 fn runtime_state(fixture: &Fixture) -> RuntimeControlState {
     fixture.facade.snapshot().service.runtime_state
 }
 
-#[test]
-fn the_default_port_comes_from_the_home_and_never_takes_the_preview_port() {
-    for name in [
-        "a",
-        "b",
-        "C:\\Users\\Ann\\.ghostlight",
-        "/home/ann/.ghostlight",
-    ] {
-        let home = Path::new(name);
-        let port = default_port(home);
-        assert!((41_000..=41_999).contains(&port), "{name}: {port}");
-        assert_ne!(port, 41_737);
-        assert_eq!(port, default_port(home));
+fn set_viewing(fixture: &Fixture, watch: bool) -> Reply {
+    fixture.control(
+        Call::new("PUT", "/api/controls/viewing").body(&json!({ "watch": watch }).to_string()),
+    )
+}
+
+/// The request that does `act`, so a new act must name its route here.
+fn act_call(act: WebAct) -> Call {
+    let policy = json!({ "document": READ_POLICY }).to_string();
+    match act {
+        WebAct::Search => post("/api/search", r#"{"query":"status"}"#),
+        WebAct::CheckPolicy => post("/api/policy/preview", &policy),
+        WebAct::Rescan => post("/api/integrations/rescan", "{}"),
+        WebAct::ContinueInWindow => post("/api/window", r#"{"view":"workbench"}"#),
+        WebAct::Hold => runtime("hold"),
+        WebAct::Resume => runtime("resume"),
+        WebAct::StartSession => runtime("start_session"),
+        WebAct::EndSession => runtime("end_session"),
+        WebAct::ApplyPolicy => Call::new("PUT", "/api/policy/user")
+            .header(header::IF_MATCH, "none")
+            .body(&policy),
+        WebAct::RemovePolicy => {
+            Call::new("DELETE", "/api/policy/user").header(header::IF_MATCH, "none")
+        }
+        WebAct::SetDiagnostics => {
+            Call::new("PUT", "/api/controls/diagnostics").body(r#"{"on":true}"#)
+        }
+        WebAct::SetWatching => Call::new("PUT", "/api/controls/viewing").body(r#"{"watch":false}"#),
+        WebAct::SetupAll => post("/api/integrations/setup-all", "{}"),
+        WebAct::HarnessAct => post(
+            "/api/integrations/act",
+            r#"{"id":"cursor","action":"install","expected_state":"not_detected"}"#,
+        ),
+        WebAct::TestNotification => post("/api/notifications/test", "{}"),
+        WebAct::Open => post("/api/open", r#"{"destination":"home"}"#),
+        WebAct::RevealDiagnostics => post("/api/diagnostics/reveal", "{}"),
+        WebAct::Locate => post("/api/integrations/locate", r#"{"id":"goose"}"#),
+        WebAct::SetupAct => post(
+            "/api/setup/act",
+            r#"{"kind":"add_in_browser","browser":"chrome"}"#,
+        ),
+        WebAct::Quit => post("/api/quit", "{}"),
     }
-    assert_eq!(
-        default_port(Path::new("C:\\USERS\\ANN\\.GHOSTLIGHT")),
-        default_port(Path::new("c:\\users\\ann\\.ghostlight"))
-    );
-    let mut seen = std::collections::HashSet::new();
-    for index in 0..200 {
-        let port = default_port(Path::new(&format!("/home/user{index}/.ghostlight")));
-        assert_ne!(port, 41_737);
-        seen.insert(port);
-    }
-    assert!(seen.len() > 100, "the homes should spread over the range");
 }
 
-#[test]
-fn a_taken_default_port_falls_back_to_one_the_system_picks() {
-    let holder = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    let taken = holder.local_addr().unwrap().port();
-    let pending = PendingWorkbench::bind_preferring(taken).unwrap();
-    assert!(!pending.address().usual());
-    assert_ne!(pending.address().port(), taken);
-    assert_eq!(
-        pending.address().url(),
-        format!("http://127.0.0.1:{}/", pending.address().port())
-    );
+/// A cached icon that starts like a PNG and cannot be decoded, so it is served as cached.
+const UNREADABLE_PNG: &[u8] = b"\x89PNG\r\n\x1a\nzed";
+
+/// A cache under `fixture` that has found Zed's icon, `bytes`, on a Linux computer.
+fn zed_icon_cache(fixture: &Fixture, bytes: &[u8]) -> crate::install::icons::IconCache {
+    use crate::install::icons::{IconCache, IconPlaces};
+
+    let share = fixture.root.join("share");
+    let entry = share.join("applications").join("dev.zed.Zed.desktop");
+    std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+    std::fs::write(&entry, "[Desktop Entry]\nName=Zed\nIcon=zed\n").unwrap();
+    let png = share.join("icons/hicolor/64x64/apps/zed.png");
+    std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+    std::fs::write(&png, bytes).unwrap();
+    let icons = fixture.root.join("state").join("icons");
+    let cache = IconCache::open(icons, IconPlaces::linux(vec![share]), None);
+    assert!(cache.refresh());
+    cache
 }
 
+/// Contract with the shell (tests/golden/desktop/workbench.json, which the shell's
+/// `well_formed_bearer` reads in its golden test) and the bearer rule of docs/trust
+/// security-overview "Window on loopback" (ADR-0199 amendment item 7): each start mints its own
+/// bearer in the golden's shape, and the bearer appears in no Debug print of the server, its
+/// shared state or a request head (f1b471a4), and in no response.
 #[test]
-fn a_free_default_port_is_the_usual_one() {
-    let free = {
-        let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        probe.local_addr().unwrap().port()
-    };
-    let pending = PendingWorkbench::bind_preferring(free).unwrap();
-    assert!(pending.address().usual());
-    assert_eq!(pending.address().port(), free);
-}
-
-#[test]
-fn a_stopped_server_can_start_again_on_its_port_after_answering() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    assert_eq!(get("/api/context").send(port).status, 200);
-    fixture.server.stop();
-    let pending = PendingWorkbench::bind_preferring(port).unwrap();
-    assert!(pending.address().usual());
-    assert_eq!(pending.address().port(), port);
-}
-
-#[test]
-fn secrets_compare_by_value_and_length() {
-    assert!(same_secret(b"abc", b"abc"));
-    assert!(!same_secret(b"abc", b"abd"));
-    assert!(!same_secret(b"abc", b"ab"));
-    assert!(!same_secret(b"", b"a"));
-    assert!(same_secret(b"", b""));
-}
-
-/// Contract with the shell: every start mints its own bearer, in the shape of the one the desktop
-/// golden carries (tests/golden/desktop/workbench.json), which the shell's own check reads in its
-/// golden test, so a bearer the service mints is one the shell takes.
-#[test]
-fn every_start_makes_its_own_bearer_in_the_shape_the_shell_takes() {
+fn each_start_makes_a_fresh_bearer_in_the_shells_shape_that_nothing_prints() {
     let one = Fixture::start();
     let two = Fixture::start();
     let golden: Value = serde_json::from_str(
@@ -428,1335 +502,247 @@ fn every_start_makes_its_own_bearer_in_the_shape_the_shell_takes() {
     assert_eq!(shape(&one.bearer()), pinned);
     assert_eq!(shape(&two.bearer()), pinned);
     assert_ne!(one.bearer(), two.bearer());
-}
 
-#[test]
-fn the_bearer_never_appears_in_what_the_server_prints() {
-    let fixture = Fixture::start();
-    let bearer = fixture.bearer();
-    let printed = format!("{:?}", fixture.server);
-    assert!(!printed.contains(&bearer));
-    assert!(printed.contains("[redacted]"));
-    let shared = format!("{:?}", fixture.server.shared);
-    assert!(!shared.contains(&bearer));
-}
+    let bearer = one.bearer();
+    let server = format!("{:?}", one.server);
+    assert!(!server.contains(&bearer), "{server}");
+    assert!(server.contains("[redacted]"), "{server}");
+    let shared = format!("{:?}", one.server.shared);
+    assert!(!shared.contains(&bearer), "{shared}");
 
-/// The command table of the page's transport: every route the page calls, in the page's words.
-const PAGE_TRANSPORT: &str = include_str!("../../../ui/lib/transport.js");
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    peer.write_all(
+        get("/api/context")
+            .bearer(&bearer)
+            .text(one.port())
+            .as_bytes(),
+    )
+    .unwrap();
+    let (accepted, _) = listener.accept().unwrap();
+    let (_, head) = super::http::Incoming::read_head(accepted, READ_DEADLINE);
+    let head = format!("{:?}", head.expect("a well-formed request"));
+    assert!(!head.contains(&bearer), "{head}");
+    assert!(head.contains(header::AUTHORIZATION), "{head}");
 
-#[test]
-fn the_route_table_is_closed_and_no_route_clears_history() {
-    use super::http::Method::{Delete, Get, Post, Put};
-
-    let mut table = routes::table();
-    table.sort_by_key(|(method, path)| (*path, format!("{method:?}")));
-    let mut expected = vec![
-        (Get, "/api/context"),
-        (Get, "/api/events"),
-        (Get, "/api/policy"),
-        (Get, "/api/snapshot"),
-        (Post, "/api/diagnostics/reveal"),
-        (Post, "/api/integrations/act"),
-        (Post, "/api/integrations/locate"),
-        (Post, "/api/integrations/rescan"),
-        (Post, "/api/integrations/setup-all"),
-        (Post, "/api/notifications/test"),
-        (Post, "/api/open"),
-        (Post, "/api/policy/preview"),
-        (Post, "/api/quit"),
-        (Post, "/api/runtime"),
-        (Post, "/api/search"),
-        (Post, "/api/setup/act"),
-        (Post, "/api/window"),
-        (Put, "/api/controls/diagnostics"),
-        (Put, "/api/controls/viewing"),
-        (Put, "/api/policy/user"),
-        (Delete, "/api/policy/user"),
-    ];
-    expected.sort_by_key(|(method, path)| (*path, format!("{method:?}")));
-    assert_eq!(table, expected, "a route was added or removed; say so here");
-    for (_, path) in &table {
-        for word in ["clear", "history", "audit", "purge", "wipe"] {
-            assert!(
-                !path.contains(word),
-                "{path}: clearing the monitor is the page's own view state, never a route"
-            );
-        }
-    }
-}
-
-#[test]
-fn every_route_the_page_calls_is_in_the_table_and_the_table_serves_nothing_else_to_the_page() {
-    let table = routes::table();
-    let called: Vec<&str> = PAGE_TRANSPORT
-        .split(['"', '`'])
-        .filter(|text| text.starts_with("/api/"))
-        .collect();
-    assert!(!called.is_empty());
-    for path in &called {
-        let path = path.split('?').next().unwrap_or(path);
+    for path in ["/api/context", "/api/snapshot", "/api/policy"] {
+        let reply = one.control(get(path));
+        assert_eq!(reply.status, 200, "{path}");
         assert!(
-            table.iter().any(|(_, served)| *served == path),
-            "the page calls {path}, which the server does not serve"
+            !String::from_utf8_lossy(&reply.body).contains(&bearer),
+            "{path}"
         );
     }
 }
 
+/// Protects access in three contexts (docs/1.0/ARCHITECTURE: Control with the per-start bearer,
+/// Watch, Closed; docs/trust/security-overview "Window on loopback"; ADR-0199 amendment items 2,
+/// 3 and 8): this start's bearer is the window; no bearer is a watcher while Others can watch is
+/// on and Closed while it is off, read live at each request; any other Authorization is refused
+/// on every path and never becomes a watcher. The context document tells the window it may do
+/// every act and opens links through the service, and tells a watcher it may do exactly search,
+/// check a policy, re-check clients, bring the window forward and pause, and opens links as
+/// anchors. Each act's route answers a watcher exactly when that document says it may (SURF-8),
+/// the controls part each context draws offers the same, a refused act changes nothing, and a
+/// watcher's pause says it came from a watching page. While watching is off a tab gets the pages
+/// and a context that holds only the product, and every data route, the stream and every agent
+/// image answer that watching is off, identically for any id (7267812a), while the window keeps
+/// control.
 #[test]
-fn the_right_bearer_makes_every_route_answer_as_control() {
-    let fixture = Fixture::start();
-    let context = fixture.control(get("/api/context")).json();
-    assert_eq!(context["context"], "control");
-    assert_eq!(context["acts"]["resume"]["available"], true);
-    assert_eq!(context["opener"], "service");
-    let snapshot = fixture.control(get("/api/snapshot"));
-    assert_eq!(snapshot.status, 200);
-    assert_eq!(fixture.control(get("/api/policy")).status, 200);
-    assert_eq!(fixture.control(get("/app.js")).status, 200);
-}
-
-#[test]
-fn a_wrong_bearer_is_refused_everywhere_and_never_becomes_a_watcher() {
-    let fixture = Fixture::start();
-    let before = fixture.server.wrong_key_count();
-    let paths = ["/", "/app.js", "/api/context", "/api/snapshot"];
-    for path in paths {
-        let reply = get(path)
-            .header("Authorization", "Bearer not-the-key")
-            .send(fixture.port());
-        assert_eq!(reply.status, 401, "{path}");
-        assert_eq!(reply.header("WWW-Authenticate"), Some("Bearer"));
-        assert_eq!(reply.code(), "wrong_key");
-        assert_eq!(reply.json()["error"]["message"], words::WRONG_KEY);
-    }
-    let other_scheme = get("/api/context")
-        .header("Authorization", &format!("Basic {}", fixture.bearer()))
-        .send(fixture.port());
-    assert_eq!(other_scheme.status, 401);
-    assert_eq!(
-        fixture.server.wrong_key_count(),
-        before + paths.len() as u64 + 1
-    );
-}
-
-#[test]
-fn without_a_bearer_a_tab_watches_while_watching_is_on() {
-    let fixture = Fixture::start();
-    let context = fixture.watch(get("/api/context")).json();
-    assert_eq!(context["context"], "watch");
-    assert_eq!(context["sentence"], words::SENTENCE_WATCH);
-    assert_eq!(context["acts"]["hold"]["available"], true);
-    assert_eq!(context["acts"]["resume"]["available"], false);
-    assert_eq!(
-        context["acts"]["resume"]["why_not"],
-        words::CHANGE_IN_WINDOW
-    );
-    assert_eq!(context["opener"], "anchor");
-}
-
-#[test]
-fn a_watcher_reads_projected_state_and_may_only_hold() {
-    let fixture = Fixture::start();
-    let snapshot = fixture.watch(get("/api/snapshot"));
-    assert_eq!(snapshot.status, 200);
-    let body = snapshot.json();
-    assert_eq!(body["instance"], "instance_test");
-    for part in Part::ALL {
-        if part == Part::Setup {
-            continue;
-        }
-        assert!(body["parts"][part.token()].is_object(), "{}", part.token());
-    }
-    assert!(
-        body["parts"].get(Part::Setup.token()).is_none(),
-        "a watcher is shown the ordinary workbench while setup is under way"
-    );
-    let asked = fixture.watch(get("/api/snapshot?parts=setup")).json();
-    assert!(asked["parts"].as_object().unwrap().is_empty());
-    assert_eq!(fixture.watch(get("/api/policy")).status, 200);
-
-    let held = fixture.watch(post("/api/runtime", r#"{"intent":"hold"}"#));
-    assert_eq!(held.status, 200);
-    assert_eq!(runtime_state(&fixture), RuntimeControlState::Held);
-
-    let resume = fixture.watch(post("/api/runtime", r#"{"intent":"resume"}"#));
-    assert_eq!(resume.status, 401);
-    assert_eq!(resume.code(), "needs_window");
-    assert_eq!(resume.header("WWW-Authenticate"), Some("Bearer"));
-    assert_eq!(runtime_state(&fixture), RuntimeControlState::Held);
-    for intent in ["end_session", "start_session"] {
-        let reply = fixture.watch(post("/api/runtime", &format!(r#"{{"intent":"{intent}"}}"#)));
-        assert_eq!(reply.status, 401, "{intent}");
-    }
-    assert_eq!(runtime_state(&fixture), RuntimeControlState::Held);
-}
-
-#[test]
-fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
+fn access_is_decided_per_route_by_the_bearer_and_the_live_watching_switch() {
     let fixture = Fixture::setting_up();
-    let computer = fixture
-        .computer
-        .clone()
-        .expect("a fixture that tracks setup");
+    let computer = fixture.computer();
     computer.install("chrome");
-    let tag = "none";
-    let calls = [
-        Call::new("PUT", "/api/policy/user")
-            .header("If-Match", tag)
-            .body(&json!({ "document": READ_POLICY }).to_string()),
-        Call::new("DELETE", "/api/policy/user").header("If-Match", tag),
-        Call::new("PUT", "/api/controls/diagnostics").body(r#"{"on":true}"#),
-        Call::new("PUT", "/api/controls/viewing").body(r#"{"watch":false}"#),
-        post("/api/integrations/setup-all", "{}"),
-        post(
-            "/api/integrations/act",
-            r#"{"id":"cursor","action":"install","expected_state":"not_detected"}"#,
-        ),
-        post("/api/notifications/test", "{}"),
-        post("/api/open", r#"{"destination":"home"}"#),
-        post("/api/diagnostics/reveal", "{}"),
-        post("/api/integrations/locate", r#"{"id":"goose"}"#),
-        post(
-            "/api/setup/act",
-            r#"{"kind":"add_in_browser","browser":"chrome"}"#,
-        ),
-        post("/api/quit", "{}"),
-    ];
-    let acts = Arc::new(RecordingActs::default());
-    fixture.facade.attach_native_acts(acts.clone());
-    let quit = Arc::new(CountingQuit::default());
-    fixture.facade.attach_quit(quit.clone());
-    for call in calls {
-        let label = format!("{} {}", call.method, call.path);
-        let reply = fixture.watch(call);
-        assert_eq!(reply.status, 401, "{label}");
-        assert_eq!(reply.code(), "needs_window", "{label}");
+    let watched = fixture.watched();
+    let port = fixture.port();
+    let links: serde_json::Map<String, Value> = WorkbenchDestination::all()
+        .into_iter()
+        .map(|destination| (destination.key().to_owned(), json!(destination.url())))
+        .collect();
+    assert!(links
+        .values()
+        .all(|url| url.as_str().is_some_and(|url| url.starts_with("https://"))));
+
+    let window = fixture.control(get("/api/context")).json();
+    assert_eq!(window["context"], WebContext::Control.token());
+    assert_eq!(window["opener"], page_constant("OPENER_SERVICE"));
+    assert_eq!(window["links"], Value::Object(links.clone()));
+    for act in WebAct::ALL {
+        assert_eq!(window["acts"][act.key()]["available"], true, "{act:?}");
     }
-    assert_eq!(acts.asked(), 0);
-    assert_eq!(quit.asked(), 0);
+
+    // The trust page's list of what a watcher may do, written as the promise.
+    let watcher_may = [
+        WebAct::Search,
+        WebAct::CheckPolicy,
+        WebAct::Rescan,
+        WebAct::ContinueInWindow,
+        WebAct::Hold,
+    ];
+    let watcher = fixture.watch(get("/api/context")).json();
+    assert_eq!(watcher["context"], WebContext::Watch.token());
+    assert_ne!(watcher["opener"], page_constant("OPENER_SERVICE"));
+    assert_eq!(watcher["links"], Value::Object(links.clone()));
+    for act in WebAct::ALL {
+        let offered = &watcher["acts"][act.key()];
+        assert_eq!(offered["available"], watcher_may.contains(&act), "{act:?}");
+        if !watcher_may.contains(&act) {
+            assert_eq!(offered["why_not"], words::CHANGE_IN_WINDOW, "{act:?}");
+        }
+    }
+
+    // The controls part Settings is drawn from offers what the context document does.
+    let controls = format!("/api/snapshot?parts={}", Part::Controls.token());
+    for (document, reply) in [
+        (&window, fixture.control(get(&controls))),
+        (&watcher, fixture.watch(get(&controls))),
+    ] {
+        let part = reply.json()["parts"][Part::Controls.token()].clone();
+        let mut offered = 0;
+        for section in part.as_object().expect("the controls part").values() {
+            for (key, availability) in section
+                .get("acts")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                assert_eq!(availability, &document["acts"][key.as_str()], "{key}");
+                offered += 1;
+            }
+        }
+        assert!(offered > 0, "the controls part offers acts");
+    }
+
+    // Any other Authorization is refused, everywhere, and never becomes a watcher.
+    let bearer = fixture.bearer();
+    let mut same_length = bearer.clone();
+    let last = same_length.pop().unwrap();
+    same_length.push(if last == 'A' { 'B' } else { 'A' });
+    for path in [
+        "/",
+        "/app.js",
+        "/api/context",
+        "/api/snapshot",
+        "/api/events",
+    ] {
+        for authorization in [
+            "Bearer not-the-key".to_owned(),
+            format!("Bearer {same_length}"),
+            format!("Basic {bearer}"),
+        ] {
+            let reply = get(path)
+                .header(header::AUTHORIZATION, &authorization)
+                .send(port);
+            let label = format!("{path} {authorization}");
+            assert_eq!(reply.status, 401, "{label}");
+            assert_eq!(
+                reply.header(header::WWW_AUTHENTICATE),
+                Some(BEARER_SCHEME),
+                "{label}"
+            );
+            assert_eq!(reply.message(), words::WRONG_KEY, "{label}");
+        }
+    }
+
+    // Each act's route answers a watcher exactly when the context document says it may.
+    for act in WebAct::ALL {
+        let reply = fixture.watch(act_call(act));
+        if watcher_may.contains(&act) {
+            assert_eq!(reply.status, 200, "{act:?}");
+        } else {
+            assert_eq!(reply.status, 401, "{act:?}");
+            assert_eq!(reply.message(), watcher["acts"][act.key()]["why_not"]);
+            assert_eq!(
+                reply.header(header::WWW_AUTHENTICATE),
+                Some(BEARER_SCHEME),
+                "{act:?}"
+            );
+        }
+    }
+    assert_eq!(watched.acts.asked(), 0);
+    assert_eq!(watched.quit.asked(), 0);
     assert_eq!(computer.started(), [], "a watcher starts no browser");
     assert!(fixture.facade.watching());
-    assert!(!fixture.root.join("state").join("watch.off").exists());
-    assert_eq!(fixture.facade.policy().layers.len(), 0);
-    assert!(fixture.facade.diagnostics_report().directory.is_some());
     assert_eq!(fixture.facade.diagnostics.directory(), None);
-    assert!(!fixture.root.join("user-policy.json").exists());
-}
+    assert!(!fixture.user_policy_exists());
+    assert_eq!(runtime_state(&fixture), RuntimeControlState::Held);
+    assert_eq!(
+        fixture.facade.snapshot().runtime_note.as_deref(),
+        Some(words::PAUSED_FROM_WATCHER)
+    );
 
-#[test]
-fn closed_serves_the_pages_and_the_product_and_nothing_else() {
-    let fixture = Fixture::closed();
-    for path in ["/", "/app.js", "/styles.css", "/lib/view.js"] {
-        assert_eq!(fixture.watch(get(path)).status, 200, "{path}");
-    }
-    let context = fixture.watch(get("/api/context"));
-    assert_eq!(context.status, 200);
-    let body = context.json();
-    let mut keys: Vec<&String> = body.as_object().unwrap().keys().collect();
+    // Watching goes off: from the next request on, a tab is closed and the window is not.
+    let cache = zed_icon_cache(&fixture, UNREADABLE_PNG);
+    fixture.facade.attach_icons(cache);
+    assert_eq!(set_viewing(&fixture, false).status, 200);
+    let closed = fixture.watch(get("/api/context"));
+    assert_eq!(closed.status, 200);
+    let closed = closed.json();
+    assert_eq!(closed["context"], page_constant("CONTEXT_CLOSED"));
+    assert_eq!(closed["context"], WebContext::Closed.token());
+    let mut keys: Vec<&String> = closed.as_object().unwrap().keys().collect();
     keys.sort();
     assert_eq!(keys, ["context", "links", "product", "sentence", "word"]);
-    assert_eq!(body["context"], "closed");
-    assert_eq!(body["product"]["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(body["product"]["license"], words::PRODUCT_LICENSE);
-    assert_eq!(body["sentence"], words::WATCHING_OFF);
-
-    let data_routes = [
+    assert_eq!(closed["product"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(closed["links"], Value::Object(links));
+    assert_eq!(
+        fixture.control(get("/api/context")).json()["context"],
+        WebContext::Control.token()
+    );
+    for path in ["/", "/app.js"] {
+        assert_eq!(fixture.watch(get(path)).status, 200, "{path}");
+    }
+    let reads = [
         get("/api/snapshot"),
         get("/api/snapshot?parts=setup"),
         get("/api/policy"),
-        post("/api/search", r#"{"query":"x"}"#),
-        post(
-            "/api/policy/preview",
-            &json!({ "document": READ_POLICY }).to_string(),
-        ),
-        post("/api/integrations/rescan", "{}"),
-        post("/api/window", r#"{"view":"workbench"}"#),
-        post("/api/runtime", r#"{"intent":"hold"}"#),
-        Call::new("PUT", "/api/policy/user").body("{}"),
-        Call::new("DELETE", "/api/policy/user"),
-        Call::new("PUT", "/api/controls/diagnostics").body(r#"{"on":true}"#),
-        post("/api/integrations/setup-all", "{}"),
-        post("/api/integrations/act", "{}"),
-        post("/api/notifications/test", "{}"),
-        post("/api/open", r#"{"destination":"home"}"#),
-        post("/api/diagnostics/reveal", "{}"),
-        post("/api/integrations/locate", r#"{"id":"goose"}"#),
-        post("/api/quit", "{}"),
+        get("/api/events"),
     ];
-    let acts = Arc::new(RecordingActs::default());
-    fixture.facade.attach_native_acts(acts.clone());
-    for call in data_routes {
+    for call in WebAct::ALL.into_iter().map(act_call).chain(reads) {
         let label = format!("{} {}", call.method, call.path);
         let reply = fixture.watch(call);
         assert_eq!(reply.status, 403, "{label}");
-        assert_eq!(reply.code(), "watching_off", "{label}");
-        let text = String::from_utf8(reply.body).unwrap();
-        assert!(!text.contains("readiness"), "{label}");
-        assert!(text.contains(words::WATCHING_OFF));
+        assert_eq!(reply.message(), words::WATCHING_OFF, "{label}");
     }
-    assert_eq!(runtime_state(&fixture), RuntimeControlState::Active);
-    assert_eq!(acts.asked(), 0);
-}
-
-#[test]
-fn the_window_still_controls_while_watching_is_off() {
-    let fixture = Fixture::closed();
-    let context = fixture.control(get("/api/context")).json();
-    assert_eq!(context["context"], "control");
-    assert_eq!(context["sentence"], words::SENTENCE_CONTROL_PRIVATE);
-    assert_eq!(fixture.control(get("/api/snapshot")).status, 200);
-}
-
-#[test]
-fn the_window_holds_and_resumes_through_the_runtime_route() {
-    let fixture = Fixture::start();
-    let reply = fixture.control(post("/api/runtime", r#"{"intent":"hold"}"#));
-    assert_eq!(reply.status, 200);
-    assert_eq!(reply.json()["runtime_state"], "held");
-    let snapshot = fixture.control(get("/api/snapshot?parts=status")).json();
-    assert_eq!(
-        snapshot["parts"]["status"]["service"]["runtime_state"],
-        "held"
-    );
-    fixture.control(post("/api/runtime", r#"{"intent":"resume"}"#));
-    assert_eq!(runtime_state(&fixture), RuntimeControlState::Active);
-}
-
-#[test]
-fn a_snapshot_holds_the_parts_it_is_asked_for() {
-    let fixture = Fixture::start();
-    let body = fixture
-        .control(get("/api/snapshot?parts=status,connections"))
-        .json();
-    let parts = body["parts"].as_object().unwrap();
-    let mut keys: Vec<&String> = parts.keys().collect();
-    keys.sort();
-    assert_eq!(keys, ["connections", "status"]);
-    for query in [
-        "parts=nonsense",
-        "parts=status,status",
-        "parts=",
-        "parts=status,",
-    ] {
-        let reply = fixture.control(get(&format!("/api/snapshot?{query}")));
-        assert_eq!(reply.status, 400, "{query}");
-        assert_eq!(reply.code(), "bad_request");
+    let images: Vec<Reply> = [
+        "/agent-icons/zed",
+        "/agent-icons/codex",
+        "/agent-icons/not-an-agent",
+    ]
+    .into_iter()
+    .map(|path| fixture.watch(get(path)))
+    .collect();
+    for image in &images {
+        assert_eq!(image.status, 403);
+        assert_eq!(image.message(), words::WATCHING_OFF);
     }
-    let everything = fixture.control(get("/api/snapshot")).json();
-    assert_eq!(
-        everything["parts"].as_object().unwrap().len(),
-        Part::ALL.len()
-    );
-    let setup = fixture.control(get("/api/snapshot?parts=setup")).json();
-    assert_eq!(setup["parts"]["setup"]["stage"], "retired");
-}
-
-#[test]
-fn only_a_request_for_the_setup_part_reads_this_computer() {
-    let fixture = Fixture::setting_up();
-    let before = fixture.reads();
-    for call in [
-        "/api/snapshot?parts=status",
-        "/api/snapshot?parts=status,connections,activity,integrations,diagnostics,controls",
-    ] {
-        assert_eq!(fixture.control(get(call)).status, 200, "{call}");
-    }
-    assert_eq!(
-        fixture.watch(get("/api/snapshot")).status,
-        200,
-        "a watcher is shown no setup part"
-    );
-    assert_eq!(fixture.watch(get("/api/snapshot?parts=setup")).status, 200);
-    assert_eq!(
-        fixture.reads(),
-        before,
-        "no snapshot that leaves the setup part out, or hides it, reads the computer"
-    );
-
-    let asked = fixture.control(get("/api/snapshot?parts=setup")).json();
-    assert_eq!(asked["parts"]["setup"]["stage"], "browser");
     assert!(
-        fixture.reads() > before,
-        "asking for the setup part reads it"
-    );
-}
-
-#[test]
-fn rules_are_written_only_against_the_tag_the_caller_read() {
-    let fixture = Fixture::start();
-    let document = json!({ "document": READ_POLICY }).to_string();
-    let put = |tag: Option<&str>| {
-        let mut call = Call::new("PUT", "/api/policy/user").body(&document);
-        if let Some(tag) = tag {
-            call = call.header("If-Match", tag);
-        }
-        fixture.control(call)
-    };
-    let unconditional = put(None);
-    assert_eq!(unconditional.status, 428);
-    assert_eq!(unconditional.code(), "stale");
-    assert_eq!(
-        unconditional.json()["error"]["message"],
-        words::STALE_POLICY
-    );
-    assert!(!fixture.root.join("user-policy.json").exists());
-
-    let wrong = put(Some("\"0123\""));
-    assert_eq!(wrong.status, 412);
-    assert!(!fixture.root.join("user-policy.json").exists());
-
-    let tag = fixture.control(get("/api/policy")).json()["etag"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_eq!(tag, "none");
-    let written = put(Some(&format!("\"{tag}\"")));
-    assert_eq!(
-        written.status,
-        200,
-        "{}",
-        String::from_utf8_lossy(&written.body)
-    );
-    assert!(fixture.root.join("user-policy.json").exists());
-
-    let after = fixture.control(get("/api/policy")).json();
-    assert_ne!(after["etag"], "none");
-    assert!(after["layers"][0]["document"]
-        .as_str()
-        .unwrap()
-        .contains("\"name\": \"read\""));
-
-    // The tag from before is now stale, and the removal needs the new one.
-    assert_eq!(put(Some(&tag)).status, 412);
-    let removal = |tag: Option<&str>| {
-        let mut call = Call::new("DELETE", "/api/policy/user");
-        if let Some(tag) = tag {
-            call = call.header("If-Match", tag);
-        }
-        fixture.control(call)
-    };
-    assert_eq!(removal(None).status, 428);
-    assert_eq!(removal(Some(&tag)).status, 412);
-    assert!(fixture.root.join("user-policy.json").exists());
-    assert_eq!(removal(after["etag"].as_str()).status, 200);
-    assert!(!fixture.root.join("user-policy.json").exists());
-}
-
-#[test]
-fn a_rules_document_that_is_not_a_policy_is_refused_with_the_authoritys_words() {
-    let fixture = Fixture::start();
-    let reply = fixture.control(
-        Call::new("PUT", "/api/policy/user")
-            .header("If-Match", "none")
-            .body(r#"{"document":"not a policy"}"#),
-    );
-    assert_eq!(reply.status, 422);
-    assert_eq!(reply.code(), "refused");
-    assert!(!fixture.root.join("user-policy.json").exists());
-}
-
-#[test]
-fn diagnostics_are_set_not_flipped() {
-    let fixture = Fixture::start();
-    let set = |on: bool| {
-        fixture.control(
-            Call::new("PUT", "/api/controls/diagnostics").body(&json!({ "on": on }).to_string()),
-        )
-    };
-    assert_eq!(set(true).json()["layer"], "marker");
-    assert_eq!(set(true).json()["layer"], "marker", "a retry leaves it on");
-    assert!(fixture.facade.diagnostics.directory().is_some());
-    assert_eq!(set(false).json()["layer"], "off");
-    assert_eq!(set(false).json()["layer"], "off", "a retry leaves it off");
-    assert!(fixture.facade.diagnostics.directory().is_none());
-    let bad =
-        fixture.control(Call::new("PUT", "/api/controls/diagnostics").body(r#"{"on":"yes"}"#));
-    assert_eq!(bad.status, 400);
-}
-
-#[test]
-fn a_client_act_against_a_state_the_page_did_not_draw_is_refused() {
-    let fixture = Fixture::start();
-    let roster = fixture.facade.cached_harnesses();
-    let first = &roster[0];
-    let wrong_state = if serde_json::to_value(first.state).unwrap() == "installed" {
-        "available"
-    } else {
-        "installed"
-    };
-    let reply = fixture.control(post(
-        "/api/integrations/act",
-        &json!({ "id": first.id, "action": "install", "expected_state": wrong_state }).to_string(),
-    ));
-    assert_eq!(reply.status, 409);
-    assert_eq!(reply.code(), "stale");
-    assert_eq!(reply.json()["error"]["message"], words::STALE_HARNESS);
-    let unchanged = fixture.facade.cached_harnesses();
-    assert_eq!(unchanged[0].state, first.state);
-
-    let check = fixture.control(post(
-        "/api/integrations/act",
-        &json!({ "id": first.id, "action": "check", "expected_state": "x" }).to_string(),
-    ));
-    assert_eq!(check.status, 400, "a check is not a routed act");
-}
-
-#[test]
-fn the_window_asks_for_the_window_once_per_five_seconds_when_it_is_a_watcher() {
-    let fixture = Fixture::start();
-    let window = Arc::new(CountingWindow::default());
-    fixture.facade.attach_presentation(window.clone());
-    let first = fixture.watch(post("/api/window", r#"{"view":"workbench"}"#));
-    assert_eq!(first.status, 200);
-    let second = fixture.watch(post("/api/window", r#"{"view":"workbench"}"#));
-    assert_eq!(second.status, 429);
-    assert!(
-        second
-            .header("Retry-After")
-            .unwrap()
-            .parse::<u64>()
-            .unwrap()
-            >= 1
-    );
-    assert_eq!(second.code(), "too_many");
-    // The window itself is never limited.
-    for _ in 0..3 {
-        assert_eq!(
-            fixture
-                .control(post("/api/window", r#"{"view":"workbench"}"#))
-                .status,
-            200
-        );
-    }
-    assert_eq!(window.asked().len(), 4);
-    let unknown = fixture.control(post("/api/window", r#"{"view":"setup"}"#));
-    assert_eq!(unknown.status, 400);
-}
-
-#[test]
-fn the_window_comes_forward_at_every_address_of_the_page() {
-    let fixture = Fixture::start();
-    let window = Arc::new(CountingWindow::default());
-    fixture.facade.attach_presentation(window.clone());
-    for address in PageAddress::ALL {
-        let body = json!({ "view": "workbench", "address": address.as_str() }).to_string();
-        assert_eq!(fixture.control(post("/api/window", &body)).status, 200);
-    }
-    assert_eq!(
-        fixture
-            .control(post("/api/window", r#"{"view":"workbench"}"#))
-            .status,
-        200,
-        "no address leaves the window where it was"
+        images.windows(2).all(|pair| pair[0].body == pair[1].body),
+        "every id is refused alike, so a refusal says nothing of what is installed"
     );
     assert_eq!(
-        fixture
-            .control(post(
-                "/api/window",
-                r#"{"view":"workbench","address":null}"#
-            ))
-            .status,
-        200
+        fixture.control(get("/agent-icons/zed")).body,
+        UNREADABLE_PNG,
+        "the window draws its agents either way"
     );
-    let mut wanted: Vec<Option<PageAddress>> = PageAddress::ALL.into_iter().map(Some).collect();
-    wanted.extend([None, None]);
-    assert_eq!(window.asked(), wanted);
-}
+    assert_eq!(watched.acts.asked(), 0);
+    assert_eq!(watched.quit.asked(), 0);
+    assert_eq!(computer.started(), []);
+    assert_eq!(runtime_state(&fixture), RuntimeControlState::Held);
 
-#[test]
-fn an_address_the_page_does_not_have_is_a_bad_request_and_reaches_no_window() {
-    let fixture = Fixture::start();
-    let window = Arc::new(CountingWindow::default());
-    fixture.facade.attach_presentation(window.clone());
-    for address in [
-        json!("settings/nowhere"),
-        json!("#settings"),
-        json!(""),
-        json!("monitor\"; alert(1); \""),
-        json!(7),
-        json!(["monitor"]),
-    ] {
-        let body = json!({ "view": "workbench", "address": address }).to_string();
-        let reply = fixture.control(post("/api/window", &body));
-        assert_eq!(reply.status, 400, "{address}");
-    }
-    assert!(window.asked().is_empty());
-}
-
-#[test]
-fn a_watchers_search_is_limited_and_the_windows_is_not() {
-    let fixture = Fixture::start();
-    for _ in 0..5 {
-        let reply = fixture.watch(post("/api/search", r#"{"query":"status"}"#));
-        assert_eq!(reply.status, 200);
-        assert!(reply.json().is_array());
-    }
-    let sixth = fixture.watch(post("/api/search", r#"{"query":"status"}"#));
-    assert_eq!(sixth.status, 429);
-    assert!(sixth.header("Retry-After").is_some());
-    assert_eq!(sixth.json()["error"]["message"], words::TOO_MANY);
-    for _ in 0..12 {
-        assert_eq!(
-            fixture
-                .control(post("/api/search", r#"{"query":"status"}"#))
-                .status,
-            200
-        );
-    }
-    let long = fixture.control(post(
-        "/api/search",
-        &json!({ "query": "x".repeat(121) }).to_string(),
-    ));
-    assert_eq!(long.status, 422);
-    assert_eq!(long.code(), "refused");
-}
-
-#[test]
-fn a_watchers_search_does_not_find_the_sites_it_may_not_see() {
-    let fixture = Fixture::start();
-    fixture.facade.projection.document_coverage(HumanCoverage {
-        summary: "One frame was excluded.".into(),
-        explanation: "Excluded by policy.".into(),
-        invocation: "invocation_1".into(),
-        coverage: Coverage::default(),
-        excluded_hosts: vec![EXCLUDED_HOST.into()],
-        proactive: false,
-    });
-    let reply = fixture.watch(post(
-        "/api/search",
-        &json!({ "query": EXCLUDED_HOST }).to_string(),
-    ));
-    assert_eq!(reply.status, 200);
-    assert_eq!(reply.json(), json!([]));
-}
-
-#[test]
-fn a_watcher_sees_excluded_sites_only_as_a_count() {
-    let fixture = Fixture::start();
-    fixture.facade.projection.document_coverage(HumanCoverage {
-        summary: "One frame was excluded.".into(),
-        explanation: "Excluded by policy.".into(),
-        invocation: "invocation_1".into(),
-        coverage: Coverage::default(),
-        excluded_hosts: vec![EXCLUDED_HOST.into()],
-        proactive: false,
-    });
-    let watcher = fixture.watch(get("/api/snapshot?parts=activity"));
-    let text = String::from_utf8(watcher.body.clone()).unwrap();
-    assert!(!text.contains(EXCLUDED_HOST));
-    let coverage = &watcher.json()["parts"]["activity"]["document_coverage"][0];
-    assert_eq!(coverage["excluded_host_count"], 1);
-    assert!(coverage.get("excluded_hosts").is_none());
-
-    let window = fixture.control(get("/api/snapshot?parts=activity")).json();
-    let coverage = &window["parts"]["activity"]["document_coverage"][0];
-    assert_eq!(coverage["excluded_hosts"], json!([EXCLUDED_HOST]));
-    assert_eq!(coverage["excluded_host_count"], 1);
-}
-
-#[test]
-fn a_watcher_sees_the_never_touch_list_only_as_a_count_and_no_policy_file() {
-    let policy = format!(
-        r#"{{"schema":4,"name":"mine","version":"1","grants":[{{"id":"read","hosts":{{"allow":["*"]}},"allowed":["read"]}}],"config":[{{"key":"content.security.sacred_domains","value":["{SACRED_HOST}","second.invalid"],"level":"mandatory"}}]}}"#
-    );
-    let fixture = Fixture::with_policy(&policy);
-    let watcher = fixture.watch(get("/api/policy"));
-    let text = String::from_utf8(watcher.body.clone()).unwrap();
-    assert!(!text.contains(SACRED_HOST));
-    assert!(!text.contains("second.invalid"));
-    let body = watcher.json();
-    assert_eq!(body["layers"][0]["document"], Value::Null);
-    let setting = &body["layers"][0]["settings"][0];
-    assert_eq!(setting["key"], "content.security.sacred_domains");
-    assert_eq!(setting["value"], "2");
-    assert_eq!(setting["count"], 2);
-    let ceilings = body["ceilings"].as_array().unwrap();
+    // And on again: a tab watches from the next request.
+    assert_eq!(set_viewing(&fixture, true).status, 200);
     assert_eq!(
-        ceilings.last().unwrap(),
-        &json!(words::never_touch_count(2))
-    );
-    assert!(ceilings
-        .iter()
-        .all(|line| !line.as_str().unwrap().contains(".invalid")));
-
-    let window = fixture.control(get("/api/policy")).json();
-    assert!(window["layers"][0]["document"]
-        .as_str()
-        .unwrap()
-        .contains(SACRED_HOST));
-    assert!(window["layers"][0]["settings"][0]["value"]
-        .as_str()
-        .unwrap()
-        .contains(SACRED_HOST));
-    assert!(window["layers"][0]["settings"][0].get("count").is_none());
-    assert!(window["ceilings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|line| line.as_str().unwrap().contains(SACRED_HOST)));
-}
-
-#[test]
-fn paths_are_home_relative_for_both_audiences_and_manual_setup_stays_exact() {
-    let fixture = Fixture::start();
-    let roster = fixture.facade.cached_harnesses();
-    let user_home = std::env::var_os(USER_HOME_VARIABLE).map(PathBuf::from);
-    for audience in [true, false] {
-        let body = if audience {
-            fixture.control(get("/api/snapshot?parts=integrations,diagnostics"))
-        } else {
-            fixture.watch(get("/api/snapshot?parts=integrations,diagnostics"))
-        }
-        .json();
-        let harnesses = body["parts"]["integrations"]["harnesses"]
-            .as_array()
-            .unwrap();
-        assert_eq!(harnesses.len(), roster.len());
-        for (shown, actual) in harnesses.iter().zip(&roster) {
-            assert_eq!(shown["manual_setup"], actual.manual_setup);
-            assert_eq!(shown["connector_command"], actual.connector_command);
-            assert!(shown.get("private_view").is_none());
-            if let Some(home) = &user_home {
-                let path = shown["config_path"].as_str().unwrap();
-                let home = home.to_string_lossy();
-                assert!(
-                    !path
-                        .to_ascii_lowercase()
-                        .starts_with(&home.to_ascii_lowercase()),
-                    "{path} is not home-relative"
-                );
-            }
-        }
-        let directory = body["parts"]["controls"]["diagnostics"]["folder"]
-            .as_str()
-            .unwrap_or_default();
-        if let Some(home) = &user_home {
-            let home = home.to_string_lossy().to_ascii_lowercase();
-            assert!(!directory.to_ascii_lowercase().starts_with(&home));
-        }
-        let text = body.to_string();
-        for dropped in ["overview", "generated_at_ms", "held_tab_count", "leased"] {
-            assert!(!text.contains(&format!("\"{dropped}\"")), "{dropped}");
-        }
-    }
-}
-
-#[test]
-fn two_rescans_by_a_watcher_inside_five_seconds_scan_once() {
-    let fixture = Fixture::start();
-    let before = fixture.server.scan_count();
-    let first = fixture.watch(post("/api/integrations/rescan", "{}"));
-    let second = fixture.watch(post("/api/integrations/rescan", "{}"));
-    assert_eq!((first.status, second.status), (200, 200));
-    assert_eq!(first.json(), second.json());
-    assert_eq!(fixture.server.scan_count(), before + 1);
-    // The window always scans.
-    assert_eq!(
-        fixture
-            .control(post("/api/integrations/rescan", "{}"))
-            .status,
-        200
-    );
-    assert_eq!(
-        fixture
-            .control(post("/api/integrations/rescan", "{}"))
-            .status,
-        200
-    );
-    assert_eq!(fixture.server.scan_count(), before + 3);
-}
-
-#[test]
-fn a_watchers_policy_check_runs_one_at_a_time_and_is_answered() {
-    let fixture = Fixture::start();
-    let reply = fixture.watch(post(
-        "/api/policy/preview",
-        &json!({ "document": READ_POLICY }).to_string(),
-    ));
-    assert_eq!(reply.status, 200);
-    assert!(reply.json()["summary"].is_string());
-    let bad = fixture.watch(post("/api/policy/preview", r#"{"document":"nope"}"#));
-    assert_eq!(bad.status, 422);
-    let empty = fixture.watch(post("/api/policy/preview", r#"{"document":"  "}"#));
-    assert_eq!(empty.status, 422);
-}
-
-#[test]
-fn a_page_for_localhost_moves_to_the_loopback_address_and_the_api_does_not() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let page = get("/").host(&format!("localhost:{port}")).send(port);
-    assert_eq!(page.status, 308);
-    assert_eq!(
-        page.header("Location"),
-        Some(format!("http://127.0.0.1:{port}/").as_str())
-    );
-    let deeper = get("/lib/view.js")
-        .host(&format!("localhost:{port}"))
-        .send(port);
-    assert_eq!(deeper.status, 308);
-    assert_eq!(
-        deeper.header("Location"),
-        Some(format!("http://127.0.0.1:{port}/lib/view.js").as_str())
-    );
-    let api = get("/api/context")
-        .host(&format!("localhost:{port}"))
-        .send(port);
-    assert_eq!(api.status, 421);
-    assert_eq!(api.code(), "misdirected");
-    let write = post("/api/search", r#"{"query":"x"}"#)
-        .host(&format!("localhost:{port}"))
-        .send(port);
-    assert_eq!(write.status, 421);
-}
-
-#[test]
-fn any_other_host_is_misdirected_and_runs_no_route() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let other_port = if port == 41_999 { port - 1 } else { port + 1 };
-    for host in [
-        format!("127.0.0.1:{other_port}"),
-        "evil.example".to_owned(),
-        format!("evil.example:{port}"),
-        "127.0.0.1".to_owned(),
-        format!("[::1]:{port}"),
-    ] {
-        for path in ["/", "/api/context"] {
-            let reply = get(path).host(&host).send(port);
-            assert_eq!(reply.status, 421, "{host} {path}");
-        }
-        let held = post("/api/runtime", r#"{"intent":"hold"}"#)
-            .host(&host)
-            .bearer(&fixture.bearer())
-            .send(port);
-        assert_eq!(held.status, 421, "{host}");
-    }
-    let missing = raw(
-        port,
-        "GET /api/context HTTP/1.1\r\nConnection: close\r\n\r\n",
-    );
-    assert_eq!(missing.status, 421);
-    let missing_page = raw(port, "GET / HTTP/1.1\r\n\r\n");
-    assert_eq!(missing_page.status, 421);
-    assert_eq!(runtime_state(&fixture), RuntimeControlState::Active);
-}
-
-#[test]
-fn methods_and_paths_are_closed() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let wrong = Call::new("POST", "/api/context").body("{}").send(port);
-    assert_eq!(wrong.status, 405);
-    assert_eq!(wrong.header("Allow"), Some("GET"));
-    let wrong = get("/api/search").send(port);
-    assert_eq!(wrong.status, 405);
-    assert_eq!(wrong.header("Allow"), Some("POST"));
-    let wrong = get("/api/policy/user").send(port);
-    assert_eq!(wrong.status, 405);
-    assert_eq!(wrong.header("Allow"), Some("PUT, DELETE"));
-    assert_eq!(
-        Call::new("POST", "/app.js").body("{}").send(port).status,
-        405
-    );
-    assert_eq!(Call::new("HEAD", "/api/context").send(port).status, 405);
-
-    for path in [
-        "/nothing",
-        "/lib/../app.js",
-        "/lib/%2e%2e/app.js",
-        "/api/other",
-        "/app.js%00",
-        "/lib\\view.js",
-        "/index.html",
-        "/integrations/codex.svg",
-    ] {
-        let reply = get(path).send(port);
-        assert_eq!(reply.status, 404, "{path}");
-    }
-    let options = Call::new("OPTIONS", "/api/context")
-        .header("Origin", "https://evil.example")
-        .header("Access-Control-Request-Method", "POST")
-        .send(port);
-    assert_eq!(options.status, 405);
-    assert!(options
-        .headers
-        .iter()
-        .all(|(name, _)| !name.to_ascii_lowercase().starts_with("access-control-")));
-    assert_eq!(Call::new("PATCH", "/api/context").send(port).status, 405);
-}
-
-#[test]
-fn upgrades_and_other_framings_are_refused() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let upgrade = get("/api/context")
-        .header("Upgrade", "websocket")
-        .header("Connection", "Upgrade")
-        .send(port);
-    assert_eq!(upgrade.status, 400);
-    let chunked = Call::new("POST", "/api/search")
-        .header("Transfer-Encoding", "chunked")
-        .body("0\r\n\r\n")
-        .send(port);
-    assert_eq!(chunked.status, 400);
-    let garbled = raw(port, "NOT AN HTTP REQUEST\r\n\r\n");
-    assert_eq!(garbled.status, 400);
-    let versioned = raw(port, "GET / HTTP/2\r\nHost: x\r\n\r\n");
-    assert_eq!(versioned.status, 400);
-}
-
-#[test]
-fn a_change_must_be_json_and_from_this_origin_even_with_the_bearer() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let bearer = fixture.bearer();
-    let plain = post("/api/runtime", r#"{"intent":"hold"}"#)
-        .content_type("text/plain")
-        .bearer(&bearer)
-        .send(port);
-    assert_eq!(plain.status, 415);
-    assert_eq!(plain.code(), "unsupported_type");
-    let charset = post("/api/search", r#"{"query":"x"}"#)
-        .content_type("application/json; charset=utf-8")
-        .send(port);
-    assert_eq!(charset.status, 200);
-    for (name, value) in [
-        ("Origin", "https://evil.example"),
-        ("Origin", "http://localhost:41000"),
-        ("Origin", "null"),
-        ("Sec-Fetch-Site", "cross-site"),
-        ("Sec-Fetch-Site", "same-site"),
-    ] {
-        for with_bearer in [false, true] {
-            let mut call = post("/api/runtime", r#"{"intent":"hold"}"#).header(name, value);
-            if with_bearer {
-                call = call.bearer(&bearer);
-            }
-            let reply = call.send(port);
-            assert_eq!(reply.status, 403, "{name}: {value}");
-            assert_eq!(reply.code(), "cross_site");
-        }
-    }
-    assert_eq!(runtime_state(&fixture), RuntimeControlState::Active);
-    let same = post("/api/search", r#"{"query":"x"}"#)
-        .header("Origin", &format!("http://127.0.0.1:{port}"))
-        .header("Sec-Fetch-Site", "same-origin")
-        .send(port);
-    assert_eq!(same.status, 200);
-    let typed = post("/api/search", r#"{"query":"x"}"#)
-        .header("Sec-Fetch-Site", "none")
-        .send(port);
-    assert_eq!(typed.status, 200);
-    let empty_delete = Call::new("DELETE", "/api/policy/user")
-        .header("If-Match", "none")
-        .bearer(&bearer)
-        .send(port);
-    assert_eq!(empty_delete.status, 200);
-}
-
-#[test]
-fn a_body_over_its_cap_is_refused_before_it_is_read() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let big = format!(r#"{{"query":"{}"}}"#, "x".repeat(5_000));
-    let reply = post("/api/search", &big).send(port);
-    assert_eq!(reply.status, 413);
-    assert_eq!(reply.code(), "too_large");
-    let policy = json!({ "document": "x".repeat(300 * 1024) }).to_string();
-    assert_eq!(post("/api/policy/preview", &policy).send(port).status, 413);
-    let within = json!({ "document": "x".repeat(100 * 1024) }).to_string();
-    assert_eq!(
-        post("/api/policy/preview", &within).send(port).status,
-        422,
-        "a document under the cap reaches the validator"
+        fixture.watch(get("/api/context")).json()["context"],
+        WebContext::Watch.token()
     );
 }
 
-#[test]
-fn a_body_that_is_not_the_routes_arguments_is_a_bad_request() {
-    let fixture = Fixture::start();
-    for body in [
-        "",
-        "not json",
-        "[]",
-        "\"query\"",
-        r#"{"query":1}"#,
-        r#"{"query":"x","extra":1}"#,
-        "{}",
-    ] {
-        let reply = fixture.control(post("/api/search", body));
-        assert_eq!(reply.status, 400, "{body}");
-        assert_eq!(reply.code(), "bad_request");
-    }
-    for body in ["", "not json", "[]", "\"x\"", r#"{"x":1}"#] {
-        for route in ["/api/integrations/rescan", "/api/integrations/setup-all"] {
-            let reply = fixture.control(post(route, body));
-            assert_eq!(reply.status, 400, "{route} {body}");
-            assert_eq!(reply.code(), "bad_request", "{route} {body}");
-        }
-    }
-}
-
-#[test]
-fn a_watcher_is_given_no_policy_etag_and_the_window_is() {
-    let fixture = Fixture::start();
-    assert!(fixture.control(get("/api/policy")).json()["etag"].is_string());
-    assert!(fixture
-        .watch(get("/api/policy"))
-        .json()
-        .get("etag")
-        .is_none());
-}
-
-#[test]
-fn no_response_allows_another_site_and_the_page_refuses_framing() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let mut replies = vec![
-        get("/").send(port),
-        get("/app.js").send(port),
-        get("/api/context").send(port),
-        get("/nothing").send(port),
-        Call::new("OPTIONS", "/").send(port),
-        post("/api/search", r#"{"query":"x"}"#)
-            .header("Origin", "https://evil.example")
-            .send(port),
-        get("/api/context").host("evil.example").send(port),
-    ];
-    replies.push(raw(port, "garbage\r\n\r\n"));
-    for reply in &replies {
-        for (name, _) in &reply.headers {
-            assert!(
-                !name.to_ascii_lowercase().starts_with("access-control-"),
-                "{name}"
-            );
-        }
-        assert_eq!(reply.header("X-Content-Type-Options"), Some("nosniff"));
-        assert_eq!(reply.header("Referrer-Policy"), Some("no-referrer"));
-        assert_eq!(
-            reply.header("Cross-Origin-Resource-Policy"),
-            Some("same-origin")
-        );
-        assert_eq!(reply.header("Connection"), Some("close"));
-        assert!(reply.header("Content-Length").is_some());
-    }
-    let index = &replies[0];
-    assert_eq!(index.header("X-Frame-Options"), Some("DENY"));
-    let policy = index.header("Content-Security-Policy").unwrap();
-    assert!(policy.contains("default-src 'self'"));
-    assert!(policy.contains("frame-ancestors 'none'"));
-    assert!(policy.contains("object-src 'none'"));
-    assert!(!policy.contains("unsafe-inline"));
-    assert_eq!(
-        index.header("Content-Type"),
-        Some("text/html; charset=utf-8")
-    );
-    assert!(replies[1].header("X-Frame-Options").is_none());
-    assert_eq!(replies[2].header("Cache-Control"), Some("no-store"));
-}
-
-#[test]
-fn every_page_file_is_served_with_its_closed_type() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    for asset in super::assets::ASSETS {
-        let reply = get(asset.path).send(port);
-        assert_eq!(reply.status, 200, "{}", asset.path);
-        assert_eq!(
-            reply.header("Content-Type"),
-            Some(asset.kind.media_type()),
-            "{}",
-            asset.path
-        );
-        assert_eq!(reply.body, asset.bytes, "{}", asset.path);
-        let tag = reply.header("ETag").unwrap().to_owned();
-        let again = get(asset.path).header("If-None-Match", &tag).send(port);
-        assert_eq!(again.status, 304, "{}", asset.path);
-        assert!(again.body.is_empty());
-    }
-    let head = Call::new("HEAD", "/app.js").send(port);
-    assert_eq!(head.status, 200);
-    assert!(head.body.is_empty());
-    assert!(
-        head.header("Content-Length")
-            .unwrap()
-            .parse::<usize>()
-            .unwrap()
-            > 0
-    );
-}
-
-#[test]
-fn the_page_files_are_never_rate_limited() {
-    let fixture = Fixture::start();
-    for _ in 0..30 {
-        assert_eq!(get("/").send(fixture.port()).status, 200);
-    }
-}
-
-#[test]
-fn a_server_stops_when_it_is_dropped() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let bearer = fixture.bearer();
-    fixture.server.stop();
-    fixture.server.stop();
-    // The freed port may already belong to a server another test started in parallel, so a
-    // connection alone proves nothing: this server is gone when nothing there answers its own
-    // bearer as the window. Every server mints its own bearer, so no other one would.
-    if let Ok(mut stream) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)) {
-        let request = format!(
-            "GET /api/context HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {bearer}\r\nConnection: close\r\n\r\n"
-        );
-        let _ = stream.write_all(request.as_bytes());
-        let mut reply = String::new();
-        let _ = stream.read_to_string(&mut reply);
-        assert!(
-            !reply.contains(r#""context":"control""#),
-            "the stopped server still answers its own bearer: {reply}"
-        );
-    }
-}
-
-#[test]
-fn a_busy_server_serves_a_connection_that_says_nothing_without_blocking_others() {
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let _idle: Vec<TcpStream> = (0..8)
-        .map(|_| TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap())
-        .collect();
-    assert_eq!(get("/api/context").send(port).status, 200);
-}
-
-#[test]
-fn the_snapshot_of_a_watcher_equals_the_windows_apart_from_what_it_may_not_see() {
-    let fixture = Fixture::start();
-    let window = fixture.control(get("/api/snapshot?parts=status,connections,diagnostics"));
-    let watcher = fixture.watch(get("/api/snapshot?parts=status,connections,diagnostics"));
-    let mut window = window.json();
-    let mut watcher = watcher.json();
-    window["parts"]["status"]["service"]["started_at_ms"] = Value::Null;
-    watcher["parts"]["status"]["service"]["started_at_ms"] = Value::Null;
-    assert_eq!(window["parts"], watcher["parts"]);
-}
-
-#[test]
-fn the_facade_reports_the_server_it_is_served_by() {
-    let fixture = Fixture::start();
-    let address = fixture.facade.web_address().unwrap();
-    assert_eq!(&address, fixture.server.address());
-    assert!(fixture.facade.watching());
-    let context = fixture
-        .facade
-        .context_document(crate::workbench::context::WebContext::Control);
-    assert_eq!(context["instance"], "instance_test");
-    assert_eq!(fixture.control(get("/api/context")).json(), context);
-    let closed = Fixture::closed();
-    assert!(!closed.facade.watching());
-}
-
-#[test]
-fn a_facade_with_no_server_reports_watching_on_and_no_address() {
-    let facade = WorkbenchFacade::new(
-        WorkbenchProjection::default(),
-        crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None),
-        Arc::new(crate::browser::RelayBrowserPort::new(
-            "epoch".into(),
-            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
-        )),
-        crate::diagnostics::DiagnosticsHub::for_tests(),
-    );
-    assert!(facade.web_address().is_none());
-    assert!(facade.watching());
-}
-
-#[test]
-fn the_window_quits_through_the_attached_port_and_is_told_so() {
-    let fixture = Fixture::start();
-    let unattached = fixture.control(post("/api/quit", "{}"));
-    assert_eq!(unattached.status, 422);
-    assert_eq!(unattached.code(), "refused");
-    assert_eq!(
-        unattached.json()["error"]["message"],
-        words::QUIT_UNAVAILABLE
-    );
-
-    let quit = Arc::new(CountingQuit::default());
-    fixture.facade.attach_quit(quit.clone());
-    let reply = fixture.control(post("/api/quit", "{}"));
-    assert_eq!(reply.status, 202);
-    assert_eq!(reply.json(), json!({ "message": words::QUITTING }));
-    assert_eq!(quit.asked(), 1);
-}
-
-#[test]
-fn quit_is_the_windows_alone_and_a_closed_view_cannot_reach_it() {
-    let watched = Fixture::start();
-    let quit = Arc::new(CountingQuit::default());
-    watched.facade.attach_quit(quit.clone());
-    let watcher = watched.watch(post("/api/quit", "{}"));
-    assert_eq!(watcher.status, 401);
-    assert_eq!(watcher.code(), "needs_window");
-    assert_eq!(watcher.json()["error"]["message"], words::CHANGE_IN_WINDOW);
-
-    let closed = Fixture::closed();
-    let closed_quit = Arc::new(CountingQuit::default());
-    closed.facade.attach_quit(closed_quit.clone());
-    let refused = closed.watch(post("/api/quit", "{}"));
-    assert_eq!(refused.status, 403);
-    assert_eq!(refused.code(), "watching_off");
-    assert_eq!(quit.asked() + closed_quit.asked(), 0);
-
-    // The window can still end Ghostlight while watching is off.
-    assert_eq!(closed.control(post("/api/quit", "{}")).status, 202);
-    assert_eq!(closed_quit.asked(), 1);
-}
-
-#[test]
-fn a_quit_from_another_site_or_with_arguments_is_refused() {
-    let fixture = Fixture::start();
-    let quit = Arc::new(CountingQuit::default());
-    fixture.facade.attach_quit(quit.clone());
-    let foreign = fixture.control(
-        post("/api/quit", "{}")
-            .header("Origin", "http://evil.example")
-            .header("Sec-Fetch-Site", "cross-site"),
-    );
-    assert_eq!(foreign.status, 403);
-    assert_eq!(foreign.code(), "cross_site");
-    let with_arguments = fixture.control(post("/api/quit", r#"{"now":true}"#));
-    assert_eq!(with_arguments.status, 400);
-    let wrong_method = fixture.control(get("/api/quit"));
-    assert_eq!(wrong_method.status, 405);
-    assert_eq!(quit.asked(), 0);
-}
-
-#[test]
-fn the_context_lists_quit_as_an_act_of_the_window_only() {
-    let fixture = Fixture::start();
-    let window = fixture.control(get("/api/context")).json();
-    assert_eq!(window["acts"]["quit"]["available"], true);
-    let tab = fixture.watch(get("/api/context")).json();
-    assert_eq!(tab["acts"]["quit"]["available"], false);
-    assert_eq!(tab["acts"]["quit"]["why_not"], words::CHANGE_IN_WINDOW);
-    let closed = Fixture::closed().watch(get("/api/context")).json();
-    assert!(closed.get("acts").is_none());
-}
-
-#[test]
-fn the_notification_test_reaches_the_window_only() {
-    let fixture = Fixture::start();
-    let unavailable = fixture.control(post("/api/notifications/test", "{}"));
-    assert_eq!(unavailable.status, 422);
-    fixture
-        .facade
-        .attach_presentation(Arc::new(CountingWindow::default()));
-    assert_eq!(
-        fixture
-            .control(post("/api/notifications/test", "{}"))
-            .status,
-        200
-    );
-}
-
-/// U-D6 (RFC 9110 9.3.2): a HEAD answer carries no body, a refusal's included. A read of each of
-/// these is refused with a JSON body; the HEAD is refused too (a data route takes no HEAD), and
-/// only its headers go out.
-#[test]
-fn a_head_answer_carries_no_body_a_refusals_included() {
-    let fixture = Fixture::closed();
-    let port = fixture.port();
-    let calls = [
-        Call::new("GET", "/api/snapshot"),
-        Call::new("GET", "/api/context").bearer("not-this-start"),
-        Call::new("GET", "/nothing").bearer(&fixture.bearer()),
-        Call::new("GET", "/api/context").host("example.invalid"),
-        Call::new("GET", "/api/search").bearer(&fixture.bearer()),
-    ];
-    for read in calls {
-        let path = read.path.clone();
-        let full = read.send(port);
-        let head = Call {
-            method: "HEAD",
-            ..read
-        }
-        .send(port);
-        assert!(full.status >= 400, "{path}: {}", full.status);
-        assert!(
-            !full.body.is_empty(),
-            "{path}: the read carries the refusal"
-        );
-        assert!(head.status >= 400, "{path}: {}", head.status);
-        assert!(
-            head.body.is_empty(),
-            "{path}: {}",
-            String::from_utf8_lossy(&head.body)
-        );
-    }
-}
-
-#[test]
-fn a_request_head_over_sixteen_kibibytes_is_refused() {
-    let fixture = Fixture::start();
-    let long = format!(
-        "GET /api/context HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nX-Padding: {}\r\n\r\n",
-        fixture.port(),
-        "a".repeat(17 * 1024)
-    );
-    assert_eq!(raw(fixture.port(), &long).status, 400);
-}
-
-/// U-D5: peers that only hold connections open never lock the window out. Idle peers fill the
-/// share without a bearer; past it, a request without the bearer is closed unanswered while the
-/// window's is answered, and once the idle peers go a tab is let in again.
-#[test]
-fn idle_peers_never_lock_the_window_out() {
-    use std::sync::atomic::Ordering;
-    use std::time::{Duration, Instant};
-
-    let fixture = Fixture::start();
-    let port = fixture.port();
-    let places = Arc::clone(&fixture.server.shared.places);
-    let settled = |served: usize, without_bearer: usize| {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while places.served.load(Ordering::Acquire) != served
-            || places.without_bearer.load(Ordering::Acquire) != without_bearer
-        {
-            assert!(Instant::now() < deadline, "{places:?}");
-            std::thread::yield_now();
-        }
-    };
-    let idle: Vec<TcpStream> = (0..super::MAX_WITHOUT_BEARER)
-        .map(|_| TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap())
-        .collect();
-    settled(super::MAX_WITHOUT_BEARER, super::MAX_WITHOUT_BEARER);
-
-    let mut stranger = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-    stranger
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
-    let _ = stranger.write_all(
-        format!("GET /api/context HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").as_bytes(),
-    );
-    let mut answer = Vec::new();
-    let _ = stranger.read_to_end(&mut answer);
-    assert!(answer.is_empty(), "{}", String::from_utf8_lossy(&answer));
-
-    assert_eq!(fixture.control(get("/api/context")).status, 200);
-    drop(idle);
-    settled(0, 0);
-    assert_eq!(fixture.watch(get("/api/context")).status, 200);
-}
-
-/// One block of a stream: the parts of an event, or a comment.
+/// One block of a stream: an event's name and data, or a comment.
 #[derive(Debug, Default)]
 struct Block {
     event: Option<String>,
-    id: Option<String>,
     data: Option<String>,
-    comment: Option<String>,
 }
 
 impl Block {
@@ -1784,9 +770,7 @@ impl Stream {
     /// Open a stream that must be accepted, and read its head.
     fn open(port: u16, bearer: Option<&str>) -> Self {
         let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-            .unwrap();
+        stream.set_read_timeout(Some(ANSWER_DEADLINE)).unwrap();
         let mut request = format!("GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
         if let Some(bearer) = bearer {
             request.push_str(&format!("Authorization: Bearer {bearer}\r\n"));
@@ -1797,23 +781,13 @@ impl Stream {
         let mut status = String::new();
         std::io::BufRead::read_line(&mut reader, &mut status).unwrap();
         assert!(status.starts_with("HTTP/1.1 200"), "{status}");
-        let mut headers = Vec::new();
         loop {
             let mut line = String::new();
             std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
             if line.trim_end().is_empty() {
                 break;
             }
-            headers.push(line.trim_end().to_ascii_lowercase());
         }
-        assert!(headers.contains(&"content-type: text/event-stream".to_owned()));
-        assert!(headers.contains(&"cache-control: no-store".to_owned()));
-        assert!(
-            !headers
-                .iter()
-                .any(|line| line.starts_with("content-length")),
-            "a stream has no length: {headers:?}"
-        );
         Self { reader }
     }
 
@@ -1835,29 +809,14 @@ impl Stream {
                 continue;
             }
             any = true;
-            if let Some(comment) = line.strip_prefix(": ") {
-                block.comment = Some(comment.to_owned());
-            } else if let Some(value) = line.strip_prefix("event: ") {
+            if let Some(value) = line.strip_prefix("event: ") {
                 block.event = Some(value.to_owned());
-            } else if let Some(value) = line.strip_prefix("id: ") {
-                block.id = Some(value.to_owned());
             } else if let Some(value) = line.strip_prefix("data: ") {
                 block.data = Some(value.to_owned());
-            } else {
+            } else if !line.starts_with(':') && !line.starts_with("id: ") {
                 panic!("not a stream line: {line}");
             }
         }
-    }
-
-    /// The next block when one comes within `wait`.
-    fn next_within(&mut self, wait: std::time::Duration) -> Option<Block> {
-        self.reader.get_ref().set_read_timeout(Some(wait)).unwrap();
-        let block = self.next();
-        self.reader
-            .get_ref()
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-            .unwrap();
-        block
     }
 
     /// Read until a block satisfies `wanted`, and return it.
@@ -1877,414 +836,610 @@ impl Stream {
     }
 }
 
+/// Protects the projection at the wire (docs/1.0/ARCHITECTURE "projects each part for its
+/// audience in the service"; docs/trust/security-overview: the never-touch list and excluded
+/// hosts show only as counts) and reproduces f1b471a4 (a watcher was given the policy's tag to
+/// test guesses against): the snapshot, the policy, search and the live stream each hand a
+/// watcher the watcher's projection, with no excluded or never-touched host, no policy text and
+/// no tag, while the window is given them.
 #[test]
-fn a_window_and_a_watcher_hear_the_same_change_each_as_it_may_see_it() {
-    let fixture = Fixture::start();
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    let mut tab = Stream::open(fixture.port(), None);
-    let window_hello = window.hello();
-    let tab_hello = tab.hello();
-    assert_eq!(window_hello["context"], "control");
-    assert_eq!(tab_hello["context"], "watch");
-    for hello in [&window_hello, &tab_hello] {
-        assert_eq!(hello["instance"], "instance_test");
-        assert_eq!(hello["seq"], fixture.facade.current_seq());
-    }
-
-    fixture.facade.projection.document_coverage(HumanCoverage {
-        summary: "One frame was excluded.".into(),
-        explanation: "Excluded by policy.".into(),
-        invocation: "invocation_1".into(),
-        coverage: Coverage::default(),
-        excluded_hosts: vec![EXCLUDED_HOST.into()],
-        proactive: false,
-    });
-    let at_window = window.until(|block| block.is("document_coverage_changed"));
-    let at_tab = tab.until(|block| block.is("document_coverage_changed"));
-    let seq = window_hello["seq"].as_u64().unwrap() + 1;
-    assert_eq!(at_window.id, Some(format!("instance_test-{seq}")));
-    assert_eq!(at_tab.id, at_window.id);
-    assert_eq!(at_window.json()["seq"], seq);
-
-    let details = &at_window.json()["change"]["details"];
-    assert_eq!(details["excluded_hosts"], json!([EXCLUDED_HOST]));
-    assert_eq!(details["excluded_host_count"], 1);
-    let watched = at_tab.json();
-    assert_eq!(watched["change"]["details"]["excluded_host_count"], 1);
-    assert!(watched["change"]["details"].get("excluded_hosts").is_none());
-    assert!(!at_tab.data.unwrap().contains(EXCLUDED_HOST));
-}
-
-#[test]
-fn an_act_answers_with_the_sequence_of_the_last_change_it_caused() {
-    let fixture = Fixture::start();
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    window.hello();
-
-    let reply = fixture.control(post("/api/runtime", r#"{"intent":"hold"}"#));
-    assert_eq!(reply.status, 200);
-    let seq: u64 = reply.header("Ghostlight-Seq").unwrap().parse().unwrap();
-    assert_eq!(seq, fixture.facade.current_seq());
-
-    let mut kinds = Vec::new();
-    let mut note = None;
-    loop {
-        let block = window.next().expect("the changes the act caused arrive");
-        let kind = block.kind().unwrap();
-        if kind == "status_changed" {
-            note = block.json()["change"]["status"]["runtime_note"]
-                .as_str()
-                .map(str::to_owned);
-        }
-        kinds.push(kind);
-        if block.id == Some(format!("instance_test-{seq}")) {
-            break;
-        }
-    }
-    assert!(kinds.contains(&"runtime_changed".to_owned()), "{kinds:?}");
-    assert_eq!(note.as_deref(), Some(words::PAUSED_IN_WINDOW));
-    assert!(window
-        .next_within(std::time::Duration::from_millis(300))
-        .is_none());
-
-    // A read answers without a sequence: it caused nothing.
-    assert!(fixture
-        .control(get("/api/snapshot"))
-        .header("Ghostlight-Seq")
-        .is_none());
-    // A refused act caused nothing either.
-    let refused = fixture.control(post("/api/runtime", r#"{"intent":"nonsense"}"#));
-    assert_eq!(refused.status, 400);
-    assert!(refused.header("Ghostlight-Seq").is_none());
-}
-
-#[test]
-fn a_pause_from_a_watching_page_says_so_on_every_screen() {
-    let fixture = Fixture::start();
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    window.hello();
-    let reply = fixture.watch(post("/api/runtime", r#"{"intent":"hold"}"#));
-    assert_eq!(reply.status, 200);
-    let status = window.until(|block| block.is("status_changed"));
-    assert_eq!(
-        status.json()["change"]["status"]["runtime_note"],
-        words::PAUSED_FROM_WATCHER
+fn every_read_a_watcher_makes_is_projected_for_a_watcher() {
+    let policy = format!(
+        r#"{{"schema":4,"name":"mine","version":"1","grants":[{{"id":"read","hosts":{{"allow":["*"]}},"allowed":["read"]}}],"config":[{{"key":"content.security.sacred_domains","value":["{SACRED_HOST}","second.invalid"],"level":"mandatory"}}]}}"#
     );
-    assert_eq!(
-        status.json()["change"]["status"]["service"]["runtime_state"],
-        serde_json::to_value(RuntimeControlState::Held).unwrap()
-    );
-}
-
-#[test]
-fn the_acts_that_change_a_part_hint_at_it_with_its_tag() {
-    let fixture = Fixture::start();
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    let fixture = Fixture::with_policy(&policy);
     let mut tab = Stream::open(fixture.port(), None);
-    window.hello();
     tab.hello();
-    let hint = |stream: &mut Stream, part: &str| {
-        stream.until(|block| block.is("part_changed") && block.json()["change"]["part"] == part)
-    };
+    fixture.cover(EXCLUDED_HOST);
 
-    let tag = fixture.control(get("/api/policy")).json()["etag"]
+    let streamed = tab.until(|block| block.is("document_coverage_changed"));
+    assert!(!streamed.data.as_deref().unwrap().contains(EXCLUDED_HOST));
+    assert_eq!(
+        streamed.json()["change"]["details"]["excluded_host_count"],
+        1
+    );
+
+    let activity = format!("/api/snapshot?parts={}", Part::Activity.token());
+    let seen = fixture.watch(get(&activity));
+    assert!(!String::from_utf8_lossy(&seen.body).contains(EXCLUDED_HOST));
+    assert_eq!(
+        seen.json()["parts"]["activity"]["document_coverage"][0]["excluded_host_count"],
+        1
+    );
+    let shown = fixture.control(get(&activity));
+    assert!(String::from_utf8_lossy(&shown.body).contains(EXCLUDED_HOST));
+
+    let seen = fixture.watch(get("/api/policy"));
+    let text = String::from_utf8_lossy(&seen.body);
+    assert!(!text.contains(SACRED_HOST) && !text.contains("second.invalid"));
+    let seen = seen.json();
+    assert_eq!(seen["layers"][0]["document"], Value::Null);
+    assert!(seen.get("etag").is_none());
+    assert_eq!(seen["layers"][0]["settings"][0]["count"], 2);
+    assert_eq!(
+        seen["ceilings"].as_array().unwrap().last().unwrap(),
+        &json!(words::never_touch_count(2))
+    );
+    let shown = fixture.control(get("/api/policy")).json();
+    let tag = shown["etag"].as_str().expect("the window's tag").to_owned();
+    assert!(shown["layers"][0]["document"]
         .as_str()
         .unwrap()
-        .to_owned();
-    let put = fixture.control(
+        .contains(SACRED_HOST));
+
+    let found = fixture.watch(post(
+        "/api/search",
+        &json!({ "query": EXCLUDED_HOST }).to_string(),
+    ));
+    assert_eq!(found.status, 200);
+    assert_eq!(found.json(), json!([]));
+
+    let written = fixture.control(
         Call::new("PUT", "/api/policy/user")
-            .header("If-Match", &tag)
+            .header(header::IF_MATCH, &format!("\"{tag}\""))
             .body(&json!({ "document": READ_POLICY }).to_string()),
     );
-    assert_eq!(put.status, 200);
-    let hinted = hint(&mut window, "policy");
-    let new_tag = fixture.control(get("/api/policy")).json()["etag"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_ne!(new_tag, tag);
-    // The policy hint is tagged with the authority now in force.
-    assert_eq!(hinted.json()["change"]["etag"], fixture.facade.policy().id);
-    assert_eq!(
-        hinted.id,
-        Some(format!(
-            "instance_test-{}",
-            put.header("Ghostlight-Seq").unwrap()
-        ))
-    );
-    // A watcher is told the part changed and is given no tag to test guesses against.
-    let watched = hint(&mut tab, "policy");
-    assert_eq!(watched.id, hinted.id);
-    assert!(watched.json()["change"].get("etag").is_none());
-
-    let diagnostics = fixture.control(
-        Call::new("PUT", "/api/controls/diagnostics").body(&json!({ "on": true }).to_string()),
-    );
-    assert_eq!(diagnostics.status, 200);
-    let hinted = hint(&mut window, "diagnostics");
-    assert_eq!(hinted.json()["change"]["etag"].as_str().unwrap().len(), 64);
-    // The last change the act caused is the sheet's new state, which follows the hint.
-    let sheet = window.until(|block| block.is("controls_changed"));
-    assert_eq!(
-        sheet.json()["change"]["controls"]["diagnostics"]["on"],
-        true
-    );
-    assert_eq!(
-        sheet.id,
-        Some(format!(
-            "instance_test-{}",
-            diagnostics.header("Ghostlight-Seq").unwrap()
-        ))
-    );
-
-    let rescan = fixture.control(post("/api/integrations/rescan", "{}"));
-    assert_eq!(rescan.status, 200);
-    let hinted = hint(&mut window, "integrations");
-    assert_eq!(hinted.json()["change"]["etag"].as_str().unwrap().len(), 64);
-    assert_eq!(
-        hinted.id,
-        Some(format!(
-            "instance_test-{}",
-            rescan.header("Ghostlight-Seq").unwrap()
-        ))
-    );
-    assert_eq!(
-        hint(&mut tab, "integrations").json()["change"]["etag"],
-        hinted.json()["change"]["etag"]
-    );
+    assert_eq!(written.status, 200);
+    let hint =
+        tab.until(|block| block.is("part_changed") && block.json()["change"]["part"] == "policy");
+    assert!(hint.json()["change"].get("etag").is_none());
 }
 
+/// Reproduces ec0f61f4: every GET /api/snapshot built the setup part, so any loopback caller
+/// could repeat the native-host and profile reads without a limit. The route builds the part
+/// only for a request that names it, and never for a watcher.
 #[test]
-fn only_so_many_screens_can_watch_and_the_next_is_told_why() {
-    let fixture = Fixture::start();
-    let bearer = fixture.bearer();
-    let windows: Vec<Stream> = (0..4)
-        .map(|_| Stream::open(fixture.port(), Some(&bearer)))
+fn only_a_request_for_the_setup_part_reads_this_computer() {
+    let fixture = Fixture::setting_up();
+    let before = fixture.reads();
+    let without_setup: Vec<&str> = Part::ALL
+        .into_iter()
+        .filter(|part| *part != Part::Setup)
+        .map(Part::token)
         .collect();
-    let refused = fixture.control(get("/api/events"));
-    assert_eq!(refused.status, 503);
-    assert_eq!(refused.code(), "too_many_screens");
-    assert_eq!(refused.json()["error"]["message"], words::TOO_MANY_SCREENS);
-    // The window's places are its own: a watcher still gets in.
-    let tabs: Vec<Stream> = (0..8).map(|_| Stream::open(fixture.port(), None)).collect();
-    let refused = fixture.watch(get("/api/events"));
-    assert_eq!(refused.status, 503);
-    assert_eq!(refused.code(), "too_many_screens");
-    drop((windows, tabs));
+    let setup = format!("/api/snapshot?parts={}", Part::Setup.token());
+    for call in [
+        format!("/api/snapshot?parts={}", Part::Status.token()),
+        format!("/api/snapshot?parts={}", without_setup.join(",")),
+    ] {
+        assert_eq!(fixture.control(get(&call)).status, 200, "{call}");
+    }
+    assert_eq!(
+        fixture.watch(get("/api/snapshot")).status,
+        200,
+        "a watcher is shown no setup part"
+    );
+    let hidden = fixture.watch(get(&setup));
+    assert_eq!(hidden.status, 200);
+    assert!(hidden.json()["parts"].as_object().unwrap().is_empty());
+    assert_eq!(
+        fixture.reads(),
+        before,
+        "no snapshot that leaves the setup part out, or hides it, reads the computer"
+    );
+
+    let asked = fixture.control(get(&setup)).json();
+    assert!(asked["parts"][Part::Setup.token()].is_object());
+    assert!(
+        fixture.reads() > before,
+        "asking for the setup part reads it"
+    );
 }
 
-#[test]
-fn a_closed_view_has_no_stream_and_the_window_still_does() {
-    let fixture = Fixture::closed();
-    let refused = fixture.watch(get("/api/events"));
-    assert_eq!(refused.status, 403);
-    assert_eq!(refused.code(), "watching_off");
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    assert_eq!(window.hello()["context"], "control");
-    let wrong = get("/api/events")
-        .bearer("not-the-key")
-        .send(fixture.port());
-    assert_eq!(wrong.status, 401);
+/// What a request the gate refuses must be answered with.
+enum Answer {
+    /// A refusal that says these words.
+    Says(&'static str),
+    /// A redirect to this address.
+    MovesTo(String),
+    /// The request passes the gate.
+    Passes,
 }
 
+/// Protects the loopback gate (docs/trust/security-overview "Window on loopback"; ADR-0199
+/// amendment items 2 and 7; ADR-0077 Decision 3): a request the gate does not admit gets the
+/// gate's answer and no route runs. Another Host is misdirected, which defeats DNS rebinding, and
+/// a page read for localhost:<port> moves to the same path on the loopback address; a request the
+/// server cannot read exactly (an upgrade, a chunked body, another HTTP version, an absolute
+/// target, a repeated access header, a malformed line) is a bad request; a path or method outside
+/// the table is not found or not allowed, whatever its encoding; a change that is not JSON or not
+/// from this origin is refused even with the bearer; a head over its bound is refused, and a
+/// declared body over its route's cap is refused from the head alone. A typed same-origin change
+/// and a body-less DELETE pass. And the table is exactly the routes the page calls (transport.js
+/// `ROUTES` and `EVENTS_PATH`), each with its method, so a route the page calls is never outside
+/// the gate and the gate admits no route the page does not call.
 #[test]
-fn a_stopped_server_ends_its_streams() {
+fn a_request_the_gate_does_not_admit_is_answered_before_any_route_runs() {
     let fixture = Fixture::start();
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    window.hello();
-    fixture.server.stop();
-    assert!(window.next().is_none());
-}
-
-#[test]
-fn a_screen_that_stops_reading_is_reset_and_another_keeps_receiving() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    const PATIENCE: std::time::Duration = std::time::Duration::from_secs(20);
-
-    let fixture = Fixture::start();
+    let watched = fixture.watched();
+    let port = fixture.port();
     let bearer = fixture.bearer();
-    let mut slow = Stream::open(fixture.port(), Some(&bearer));
-    let quick = Stream::open(fixture.port(), Some(&bearer));
-    let received = Arc::new(AtomicUsize::new(0));
-    let counting = {
-        let received = Arc::clone(&received);
-        std::thread::spawn(move || {
-            let mut quick = quick;
-            while let Some(block) = quick.next() {
-                if block.is("document_coverage_changed") {
-                    received.fetch_add(1, Ordering::AcqRel);
-                }
+    let own = format!("127.0.0.1:{port}");
+    let localhost = format!("localhost:{port}");
+    let other_port = port.wrapping_add(1);
+    let hold = || runtime("hold");
+    let mut rows: Vec<(String, u16, Answer)> = Vec::new();
+
+    for path in ["/", "/lib/view.js"] {
+        rows.push((
+            get(path).host(&localhost).text(port),
+            308,
+            Answer::MovesTo(format!("http://{own}{path}")),
+        ));
+    }
+    let mut misdirected = vec![
+        get("/api/context").host(&localhost).text(port),
+        post("/api/search", r#"{"query":"x"}"#)
+            .host(&localhost)
+            .text(port),
+        "GET /api/context HTTP/1.1\r\nConnection: close\r\n\r\n".to_owned(),
+        "GET / HTTP/1.1\r\n\r\n".to_owned(),
+    ];
+    for host in [
+        format!("127.0.0.1:{other_port}"),
+        "evil.example".to_owned(),
+        format!("evil.example:{port}"),
+        "127.0.0.1".to_owned(),
+        format!("[::1]:{port}"),
+    ] {
+        misdirected.push(get("/").host(&host).text(port));
+        misdirected.push(get("/api/context").host(&host).text(port));
+        misdirected.push(hold().host(&host).bearer(&bearer).text(port));
+    }
+    rows.extend(
+        misdirected
+            .into_iter()
+            .map(|text| (text, 421, Answer::Says(words::MISDIRECTED))),
+    );
+
+    let unreadable = [
+        get("/api/context")
+            .header("Upgrade", "websocket")
+            .header("Connection", "Upgrade")
+            .text(port),
+        post("/api/search", "0\r\n\r\n")
+            .header("Transfer-Encoding", "chunked")
+            .bearer(&bearer)
+            .text(port),
+        "NOT AN HTTP REQUEST\r\n\r\n".to_owned(),
+        format!("GET / HTTP/2\r\nHost: {own}\r\n\r\n"),
+        format!("GET\r\nHost: {own}\r\n\r\n"),
+        format!("GET / HTTP/1.1 extra\r\nHost: {own}\r\n\r\n"),
+        format!("GET http://evil.example/ HTTP/1.1\r\nHost: {own}\r\n\r\n"),
+        format!("GET /a b HTTP/1.1\r\nHost: {own}\r\n\r\n"),
+        format!("GET / HTTP/1.1\r\nHost: {own}\r\nNo-Colon\r\n\r\n"),
+        format!("GET / HTTP/1.1\r\nHost: {own}\r\n folded: a\r\n\r\n"),
+        format!("GET / HTTP/1.1\r\nHost: {own}\r\nHost: {own}\r\n\r\n"),
+        format!("GET / HTTP/1.1\r\nHost: {own}\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\n"),
+        format!("GET / HTTP/1.1\r\nHost: {own}\r\nContent-Length: -1\r\n\r\n"),
+        format!(
+            "GET /api/context HTTP/1.1\r\nHost: {own}\r\nAuthorization: Bearer {bearer}\r\nAuthorization: Bearer {bearer}\r\n\r\n"
+        ),
+        format!("GET / HTTP/1.1\r\nHost: {own}\r\nX-A: a\u{0001}b\r\n\r\n"),
+        format!(
+            "GET /api/context HTTP/1.1\r\nHost: {own}\r\nX-Padding: {}\r\n\r\n",
+            "a".repeat(HEAD_LIMIT + 1024)
+        ),
+    ];
+    rows.extend(
+        unreadable
+            .into_iter()
+            .map(|text| (text, 400, Answer::Says(words::BAD_REQUEST))),
+    );
+
+    for path in [
+        "/nothing",
+        "/lib/../app.js",
+        "/lib/%2e%2e/app.js",
+        "/api/other",
+        "/app.js%00",
+        "/lib\\view.js",
+        "/index.html",
+        "/integrations/codex.svg",
+        "/agent-icons/not-an-agent",
+        "/agent-icons/command_line",
+        "/agent-icons/",
+        "/agent-icons/zed/more",
+        "/agent-icons/..%2fzed",
+        "/agent-icons/zed.json",
+    ] {
+        rows.push((get(path).text(port), 404, Answer::Says(words::NOT_FOUND)));
+    }
+    for call in [
+        post("/api/context", "{}"),
+        get("/api/search"),
+        get("/api/policy/user"),
+        post("/app.js", "{}"),
+        Call::new("PATCH", "/api/context"),
+        Call::new("OPTIONS", "/api/context")
+            .header(header::ORIGIN, "https://evil.example")
+            .header("Access-Control-Request-Method", "POST"),
+        post("/agent-icons/zed", "{}"),
+    ] {
+        rows.push((
+            call.text(port),
+            405,
+            Answer::Says(words::METHOD_NOT_ALLOWED),
+        ));
+    }
+
+    rows.push((
+        hold().content_type("text/plain").bearer(&bearer).text(port),
+        415,
+        Answer::Says(words::UNSUPPORTED_TYPE),
+    ));
+    for (name, value) in [
+        (header::ORIGIN, "https://evil.example"),
+        (header::ORIGIN, "http://localhost:41000"),
+        (header::ORIGIN, "null"),
+        (header::SEC_FETCH_SITE, "cross-site"),
+        (header::SEC_FETCH_SITE, "same-site"),
+    ] {
+        for call in [hold(), hold().bearer(&bearer)] {
+            rows.push((
+                call.header(name, value).text(port),
+                403,
+                Answer::Says(words::CROSS_SITE),
+            ));
+        }
+    }
+    rows.push((
+        post("/api/quit", "{}")
+            .header(header::ORIGIN, "http://evil.example")
+            .bearer(&bearer)
+            .text(port),
+        403,
+        Answer::Says(words::CROSS_SITE),
+    ));
+    let search = || post("/api/search", r#"{"query":"x"}"#).bearer(&bearer);
+    for call in [
+        search().content_type("application/json; charset=utf-8"),
+        search()
+            .header(header::ORIGIN, &format!("http://{own}"))
+            .header(header::SEC_FETCH_SITE, "same-origin"),
+        search().header(header::SEC_FETCH_SITE, "none"),
+        Call::new("DELETE", "/api/policy/user")
+            .header(header::IF_MATCH, "none")
+            .bearer(&bearer),
+    ] {
+        rows.push((call.text(port), 200, Answer::Passes));
+    }
+
+    for (text, status, answer) in &rows {
+        let reply = raw(port, text);
+        let label = text.lines().next().unwrap_or_default();
+        assert_eq!(reply.status, *status, "{label}");
+        match answer {
+            Answer::Says(words) => assert_eq!(reply.message(), *words, "{label}"),
+            Answer::MovesTo(location) => {
+                assert_eq!(reply.header(header::LOCATION), Some(location.as_str()));
             }
-        })
-    };
-
-    // Each change names enough sites that the sockets between the two cannot hold the backlog.
-    let hosts: Vec<String> = (0..500)
-        .map(|index| format!("{index:03}-{}.invalid", "x".repeat(120)))
-        .collect();
-    let mut published = 0_usize;
-    let started = std::time::Instant::now();
-    let events = &fixture.server.shared.events;
-    while events.open_streams(WebContext::Control) == 2 {
-        assert!(
-            started.elapsed() < PATIENCE,
-            "the screen that never reads was never ended"
-        );
-        fixture.facade.projection.document_coverage(HumanCoverage {
-            summary: "Frames were excluded.".into(),
-            explanation: "Excluded by policy.".into(),
-            invocation: format!("invocation_{published}"),
-            coverage: Coverage::default(),
-            excluded_hosts: hosts.clone(),
-            proactive: false,
-        });
-        published += 1;
-        // The screen that reads is never allowed to fall far behind the one that does not.
-        while published > received.load(Ordering::Acquire) + 100 {
-            assert!(started.elapsed() < PATIENCE, "the quick screen stopped");
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            Answer::Passes => {}
         }
     }
 
-    let reset = slow.until(|block| block.event.as_deref() == Some("reset"));
-    assert_eq!(reset.json(), json!({ "reason": "behind" }));
-    assert!(slow.next().is_none(), "a reset ends the stream");
-    assert_eq!(events.open_streams(WebContext::Control), 1);
-
-    // The other screen lost nothing, and hears the next change too.
-    fixture.facade.projection.document_coverage(HumanCoverage {
-        summary: "Frames were excluded.".into(),
-        explanation: "Excluded by policy.".into(),
-        invocation: "invocation_last".into(),
-        coverage: Coverage::default(),
-        excluded_hosts: vec![EXCLUDED_HOST.into()],
-        proactive: false,
-    });
-    published += 1;
-    while received.load(Ordering::Acquire) < published {
-        assert!(
-            started.elapsed() < PATIENCE,
-            "the quick screen lost a change"
+    // A body over its cap is refused from the head: if the server waited for the body, the read
+    // would outlast its bound.
+    for (path, cap) in [
+        ("/api/search", SMALL_BODY),
+        ("/api/policy/preview", POLICY_BODY),
+    ] {
+        let head = format!(
+            "POST {path} HTTP/1.1\r\nHost: {own}\r\nAuthorization: Bearer {bearer}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            cap + 1
         );
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        let reply = raw_within(port, &head, READ_DEADLINE / 2);
+        assert_eq!(reply.status, 413, "{path}");
+        assert_eq!(reply.message(), words::TOO_LARGE, "{path}");
     }
-    fixture.server.stop();
-    counting.join().unwrap();
+
+    assert_eq!(runtime_state(&fixture), RuntimeControlState::Active);
+    assert_eq!(watched.quit.asked(), 0);
+    assert_eq!(watched.acts.asked(), 0);
+    assert!(!fixture.user_policy_exists());
+
+    let mut called = page_routes();
+    called.sort_unstable();
+    called.dedup();
+    let mut table: Vec<(&str, &str)> = super::routes::table()
+        .into_iter()
+        .map(|(method, path)| (method.token(), path))
+        .collect();
+    table.sort_unstable();
+    assert_eq!(called, table, "the routes the page calls are the table");
 }
 
+/// Every route the page's transport calls, as (method, path without its query): each entry of
+/// `ROUTES`, whose method names one of the page's method constants, and the stream at
+/// `EVENTS_PATH`.
+fn page_routes() -> Vec<(&'static str, &'static str)> {
+    const METHOD: &str = "method: ";
+    const PATH: &str = "path: ";
+    let (_, table) = PAGE_TRANSPORT
+        .split_once("const ROUTES = Object.freeze({")
+        .expect("transport.js has ROUTES");
+    let (mut table, _) = table.split_once("\n  });").expect("ROUTES ends");
+    let mut routes = vec![(page_constant("GET"), page_constant("EVENTS_PATH"))];
+    while let Some((_, rest)) = table.split_once(METHOD) {
+        let (method, rest) = rest.split_once(',').expect("a method ends with a comma");
+        let (_, rest) = rest
+            .split_once(PATH)
+            .expect("a method is followed by its path");
+        let quote = rest.chars().next().expect("a quoted path");
+        let (path, rest) = rest[1..].split_once(quote).expect("the path is quoted");
+        let path = path.split_once('?').map_or(path, |(path, _)| path);
+        routes.push((page_constant(method.trim()), path));
+        table = rest;
+    }
+    routes
+}
+
+/// Protects ACCEPTANCE desktop gate 11 (the page loads under the service's restrictive CSP) and
+/// the trust claims "sends no CORS header" and "refuses embedding": every response, refused ones
+/// included, carries no `access-control-*` header, nosniff, no-referrer, a same-origin resource
+/// policy and `Connection: close` with a length; the page refuses framing under its CSP; a data
+/// response is not stored; an agent image runs nothing.
 #[test]
-fn the_window_opens_a_destination_or_a_clients_download_and_nothing_else() {
+fn no_response_can_be_read_by_another_site_and_nothing_served_can_be_framed_or_run() {
     let fixture = Fixture::start();
-    let acts = Arc::new(RecordingActs::default());
-    fixture.facade.attach_native_acts(acts.clone());
-
-    let home = fixture.control(post("/api/open", r#"{"destination":"home"}"#));
-    assert_eq!(home.status, 200);
-    assert_eq!(
-        *acts.urls.lock().unwrap(),
-        [WorkbenchDestination::Home.url()]
-    );
-
-    let vscode = fixture
-        .facade
-        .cached_harnesses()
-        .into_iter()
-        .find(|summary| summary.id == "cline-vscode")
-        .unwrap();
-    let download = fixture.control(post(
-        "/api/open",
-        &json!({ "harness": vscode.id }).to_string(),
-    ));
-    assert_eq!(download.status, 200);
-    assert_eq!(
-        acts.urls.lock().unwrap()[1..],
-        [vscode.download_url.unwrap()]
-    );
-
-    for unknown in [
-        r#"{"harness":"not-a-harness"}"#,
-        r#"{"harness":"claude-desktop"}"#,
-    ] {
-        let unknown = fixture.control(post("/api/open", unknown));
-        assert_eq!(unknown.status, 422);
-        assert_eq!(unknown.code(), "refused");
+    let port = fixture.port();
+    let replies = [
+        get("/").send(port),
+        get("/app.js").send(port),
+        get("/api/context").send(port),
+        get("/agent-icons/zed").send(port),
+        get("/nothing").send(port),
+        Call::new("OPTIONS", "/").send(port),
+        post("/api/search", r#"{"query":"x"}"#)
+            .header(header::ORIGIN, "https://evil.example")
+            .send(port),
+        get("/api/context").host("evil.example").send(port),
+        raw(port, "garbage\r\n\r\n"),
+    ];
+    for reply in &replies {
+        for (name, _) in &reply.headers {
+            assert!(
+                !name.to_ascii_lowercase().starts_with("access-control-"),
+                "{name}"
+            );
+        }
+        assert_eq!(reply.header(header::NOSNIFF), Some(NOSNIFF));
+        assert_eq!(reply.header(header::REFERRER_POLICY), Some(NO_REFERRER));
+        assert_eq!(
+            reply.header(header::RESOURCE_POLICY),
+            Some(SAME_ORIGIN_ONLY)
+        );
+        assert_eq!(reply.header(header::CONNECTION), Some("close"));
+        assert_eq!(
+            reply.header(header::CONTENT_LENGTH),
+            Some(reply.body.len().to_string().as_str())
+        );
     }
 
+    let [index, _, api, image, ..] = &replies;
+    assert_eq!(index.header(header::FRAME_OPTIONS), Some(DENY_FRAMES));
+    let policy = index.header(header::CONTENT_SECURITY_POLICY).unwrap();
+    assert_eq!(policy, PAGE_POLICY);
+    for directive in [
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "script-src 'self'",
+    ] {
+        assert!(policy.contains(directive), "{directive}");
+    }
+    assert!(!policy.contains("unsafe-inline"));
+    assert_eq!(api.header(header::CACHE_CONTROL), Some(API_CACHE));
+    assert_eq!(image.status, 200);
+    let policy = image.header(header::CONTENT_SECURITY_POLICY).unwrap();
+    assert_eq!(policy, IMAGE_POLICY);
+    assert!(policy.contains("sandbox"));
+}
+
+/// Protects the act-to-stream numbering the page waits on (transport.js `SEQ_HEADER`, app.js
+/// waiting for that number, store.js treating any jump as a gap): a stream's hello names the
+/// current number, every change after it is numbered one higher than the last, and an act that
+/// happened answers in `Ghostlight-Seq` the number of its last change; a read and a refused act
+/// answer none.
+#[test]
+fn an_act_answers_with_the_number_of_the_last_change_it_caused() {
+    assert_eq!(header::SEQ, page_constant("SEQ_HEADER"));
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    let mut last = window.hello()["seq"].as_u64().unwrap();
+    assert_eq!(last, fixture.facade.current_seq());
+
+    let reply = fixture.control(runtime("hold"));
+    assert_eq!(reply.status, 200);
+    let caused: u64 = reply.header(header::SEQ).unwrap().parse().unwrap();
+    assert_eq!(caused, fixture.facade.current_seq());
+    while last < caused {
+        let seq = window.next().expect("the act's changes arrive").json()["seq"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(seq, last + 1, "the numbers have no gap");
+        last = seq;
+    }
+    assert_eq!(
+        fixture.facade.current_seq(),
+        caused,
+        "the act caused no later change"
+    );
+
+    assert!(fixture
+        .control(get("/api/snapshot"))
+        .header(header::SEQ)
+        .is_none());
+    let refused = fixture.control(runtime("nonsense"));
+    assert_eq!(refused.status, 400);
+    assert!(refused.header(header::SEQ).is_none());
+}
+
+/// Protects the stale contract with the page (app.js reads transport.js `STALE`): a rules write
+/// without the tag the caller read is 428 and with another tag 412, and a client act against a
+/// state the page did not draw is 409, each with the page's stale code and nothing written; a
+/// write carrying the tag just read, quoted as the page sends it, succeeds.
+#[test]
+fn a_change_drawn_from_a_stale_view_is_refused_as_stale_and_changes_nothing() {
+    let stale = page_constant("STALE");
+    let fixture = Fixture::start();
+    let document = json!({ "document": READ_POLICY }).to_string();
+    let quoted = |tag: &str| format!("\"{tag}\"");
+    let put = |tag: Option<&str>| {
+        let mut call = Call::new("PUT", "/api/policy/user").body(&document);
+        if let Some(tag) = tag {
+            call = call.header(header::IF_MATCH, tag);
+        }
+        fixture.control(call)
+    };
+    let remove = |tag: Option<&str>| {
+        let mut call = Call::new("DELETE", "/api/policy/user");
+        if let Some(tag) = tag {
+            call = call.header(header::IF_MATCH, tag);
+        }
+        fixture.control(call)
+    };
+    let refused = |reply: Reply, status: u16| {
+        assert_eq!(reply.status, status);
+        assert_eq!(reply.code(), stale);
+        assert_eq!(reply.message(), words::STALE_POLICY);
+    };
+
+    refused(put(None), 428);
+    refused(put(Some(&quoted("0123"))), 412);
+    assert!(!fixture.user_policy_exists());
+
+    let read = fixture.control(get("/api/policy")).json()["etag"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let written = put(Some(&quoted(&read)));
+    assert_eq!(
+        written.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&written.body)
+    );
+    assert!(fixture.user_policy_exists());
+    let now = fixture.control(get("/api/policy")).json()["etag"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(now, read);
+
+    refused(put(Some(&quoted(&read))), 412);
+    refused(remove(None), 428);
+    refused(remove(Some(&quoted(&read))), 412);
+    assert!(fixture.user_policy_exists());
+    assert_eq!(remove(Some(&quoted(&now))).status, 200);
+    assert!(!fixture.user_policy_exists());
+
+    let first = fixture.facade.cached_harnesses().remove(0);
+    let drawn = if serde_json::to_value(first.state).unwrap() == "installed" {
+        "available"
+    } else {
+        "installed"
+    };
+    let reply = fixture.control(post(
+        "/api/integrations/act",
+        &json!({ "id": first.id, "action": "install", "expected_state": drawn }).to_string(),
+    ));
+    assert_eq!(reply.status, 409);
+    assert_eq!(reply.code(), stale);
+    assert_eq!(reply.message(), words::STALE_HARNESS);
+    assert_eq!(fixture.facade.cached_harnesses()[0].state, first.state);
+}
+
+/// Reproduces f1b471a4 (the rescan route took any body) and guards the rule it restored: every
+/// route decodes its body as exactly its own arguments, so anything else is a bad request that
+/// opens no URL, reaches no window, starts no browser and changes no state.
+#[test]
+fn every_route_takes_exactly_its_arguments_and_anything_else_changes_nothing() {
+    let fixture = Fixture::setting_up();
+    let computer = fixture.computer();
+    computer.install("chrome");
+    let watched = fixture.watched();
+    let mut calls: Vec<Call> = Vec::new();
+    for body in [
+        "",
+        "not json",
+        "[]",
+        "\"query\"",
+        r#"{"query":1}"#,
+        r#"{"query":"x","extra":1}"#,
+        "{}",
+    ] {
+        calls.push(post("/api/search", body));
+    }
+    for body in ["", "not json", "[]", "\"x\"", r#"{"x":1}"#] {
+        calls.push(post("/api/integrations/rescan", body));
+        calls.push(post("/api/integrations/setup-all", body));
+    }
+    for route in [
+        "/api/quit",
+        "/api/notifications/test",
+        "/api/diagnostics/reveal",
+    ] {
+        calls.push(post(route, r#"{"x":1}"#));
+    }
+    for body in [r#"{"watch":"yes"}"#, "{}", r#"{"watch":false,"extra":1}"#] {
+        calls.push(Call::new("PUT", "/api/controls/viewing").body(body));
+    }
+    calls.push(Call::new("PUT", "/api/controls/diagnostics").body(r#"{"on":"yes"}"#));
+    calls.push(
+        Call::new("PUT", "/api/policy/user")
+            .header(header::IF_MATCH, "none")
+            .body("{}"),
+    );
+    calls.push(post("/api/policy/preview", r#"{"document":1}"#));
+    calls.push(post("/api/window", r#"{"view":"setup"}"#));
+    for address in [
+        json!("settings/nowhere"),
+        json!("#settings"),
+        json!(""),
+        json!("monitor\"; alert(1); \""),
+        json!(7),
+        json!(["monitor"]),
+    ] {
+        calls.push(post(
+            "/api/window",
+            &json!({ "view": "workbench", "address": address }).to_string(),
+        ));
+    }
     for body in [
         r#"{"destination":"https://example.com"}"#,
         r#"{"destination":"home","harness":"x"}"#,
-        r#"{}"#,
+        "{}",
         r#"{"url":"https://example.com"}"#,
         r#"{"product":"cline"}"#,
         r#"{"destination":null,"harness":null}"#,
     ] {
-        let reply = fixture.control(post("/api/open", body));
-        assert_eq!(reply.status, 400, "{body}");
+        calls.push(post("/api/open", body));
     }
-    assert_eq!(acts.urls.lock().unwrap().len(), 2);
-    assert_eq!(acts.asked(), 2);
-}
-
-#[test]
-fn the_window_starts_a_browser_for_a_setup_step_and_is_given_the_fresh_view() {
-    use crate::language::setup::STORE_LISTING_URL;
-
-    let fixture = Fixture::setting_up();
-    let computer = fixture
-        .computer
-        .clone()
-        .expect("a fixture that tracks setup");
-    computer.install("chrome");
-    computer.find_profiles(vec![crate::install::browser_profiles::BrowserProfiles {
-        browser: crate::install::native_host::BrowserIdentity {
-            id: "chrome",
-            name: "Google Chrome",
-            short: "Chrome",
-        },
-        scan: crate::install::browser_profiles::ProfileScan {
-            profiles: 2,
-            with_extension: vec![crate::install::browser_profiles::ExtensionProfile {
-                directory: "Profile 1".into(),
-                name: Some("Work".into()),
-            }],
-        },
-    }]);
-
-    let added = fixture.control(post(
-        "/api/setup/act",
-        r#"{"kind":"add_in_browser","browser":"chrome"}"#,
+    calls.push(post(
+        "/api/integrations/act",
+        r#"{"id":"cursor","action":"check","expected_state":"x"}"#,
     ));
-    assert_eq!(added.status, 200);
-    assert_eq!(
-        added.json()["stage"],
-        "browser",
-        "the answer is the setup view"
-    );
-    let opened = fixture.control(post(
-        "/api/setup/act",
-        r#"{"kind":"open_browser","browser":"chrome","profile":"Profile 1"}"#,
-    ));
-    assert_eq!(opened.status, 200);
-    let started = computer.started();
-    assert_eq!(started.len(), 2);
-    assert_eq!(started[0].arguments, [STORE_LISTING_URL]);
-    assert_eq!(started[1].arguments, ["--profile-directory=Profile 1"]);
-
-    // A step the computer does not offer is refused in words, and starts nothing.
-    for body in [
-        r#"{"kind":"open_browser","browser":"chrome","profile":"Profile 9"}"#,
-        r#"{"kind":"add_in_browser","browser":"edge"}"#,
-        r#"{"kind":"get_chrome"}"#,
-    ] {
-        let reply = fixture.control(post("/api/setup/act", body));
-        assert_eq!(reply.status, 422, "{body}");
-        assert_eq!(reply.code(), "refused", "{body}");
-        assert_eq!(
-            reply.json()["error"]["message"],
-            words::SETUP_STEP_NOT_OFFERED
-        );
-    }
+    calls.push(post("/api/integrations/locate", "{}"));
     for body in [
         "",
         "[]",
@@ -2292,604 +1447,215 @@ fn the_window_starts_a_browser_for_a_setup_step_and_is_given_the_fresh_view() {
         r#"{"kind":"nothing"}"#,
         r#"{"kind":"add_in_browser"}"#,
     ] {
-        let reply = fixture.control(post("/api/setup/act", body));
-        assert_eq!(reply.status, 400, "{body}");
-        assert_eq!(reply.code(), "bad_request", "{body}");
+        calls.push(post("/api/setup/act", body));
     }
-    assert_eq!(computer.started().len(), 2);
+    calls.push(runtime("nonsense"));
 
-    computer.end_the_session(true);
-    let ending = fixture.control(post(
-        "/api/setup/act",
-        r#"{"kind":"add_in_browser","browser":"chrome"}"#,
-    ));
-    assert_eq!(ending.status, 422);
-    assert_eq!(
-        ending.json()["error"]["message"],
-        words::SETUP_SESSION_ENDING
-    );
-    assert_eq!(computer.started().len(), 2, "nothing starts at sign-out");
-}
-
-#[test]
-fn a_closed_view_cannot_start_a_browser() {
-    let fixture = Fixture::closed();
-    let reply = fixture.watch(post(
-        "/api/setup/act",
-        r#"{"kind":"add_in_browser","browser":"chrome"}"#,
-    ));
-    assert_eq!(reply.status, 403);
-    assert_eq!(reply.code(), "watching_off");
-}
-
-#[test]
-fn get_chrome_is_in_the_table_of_links_the_page_opens_through_the_service() {
-    let fixture = Fixture::start();
-    let links = fixture.control(get("/api/context")).json()["links"].clone();
-    assert_eq!(links["get_chrome"], "https://www.google.com/chrome/");
-    let acts = Arc::new(RecordingActs::default());
-    fixture.facade.attach_native_acts(acts.clone());
-    let reply = fixture.control(post("/api/open", r#"{"destination":"get_chrome"}"#));
-    assert_eq!(reply.status, 200);
-    assert_eq!(
-        *acts.urls.lock().unwrap(),
-        ["https://www.google.com/chrome/"]
-    );
-}
-
-#[test]
-fn the_window_shows_the_diagnostics_folder_and_a_missing_adapter_is_told_so() {
-    let fixture = Fixture::start();
-    let unavailable = fixture.control(post("/api/diagnostics/reveal", "{}"));
-    assert_eq!(unavailable.status, 422);
-    assert_eq!(unavailable.code(), "refused");
-
-    let acts = Arc::new(RecordingActs::default());
-    fixture.facade.attach_native_acts(acts.clone());
-    assert_eq!(
-        fixture
-            .control(post("/api/diagnostics/reveal", "{}"))
-            .status,
-        200
-    );
-    assert_eq!(acts.folders.lock().unwrap().len(), 1);
-    assert_eq!(
-        fixture
-            .control(post("/api/diagnostics/reveal", r#"{"extra":1}"#))
-            .status,
-        400
-    );
-}
-
-#[test]
-fn locating_a_client_answers_its_result_or_null_when_the_dialog_is_closed() {
-    let fixture = Fixture::start();
-    let acts = Arc::new(RecordingActs::default());
-    fixture.facade.attach_native_acts(acts.clone());
-
-    let closed = fixture.control(post("/api/integrations/locate", r#"{"id":"goose"}"#));
-    assert_eq!(closed.status, 200);
-    assert_eq!(closed.json(), Value::Null);
-    assert!(closed.header("Ghostlight-Seq").is_some());
-
-    let located = fixture.root.join("portable/config.yaml");
-    std::fs::create_dir_all(located.parent().unwrap()).unwrap();
-    std::fs::write(
-        &located,
-        "provider: local
-",
-    )
-    .unwrap();
-    *acts.chosen.lock().unwrap() = Some(located.clone());
-    let result = fixture.control(post("/api/integrations/locate", r#"{"id":"goose"}"#));
-    assert_eq!(result.status, 200);
-    assert!(result.json()["summary"]["config_path"]
-        .as_str()
-        .unwrap()
-        .ends_with("config.yaml"));
-
-    let unknown = fixture.control(post("/api/integrations/locate", r#"{"id":"not-a-client"}"#));
-    assert_eq!(unknown.status, 422);
-}
-
-#[test]
-fn every_context_is_given_the_table_of_links_and_never_an_address_of_its_own() {
-    let fixture = Fixture::start();
-    let wanted: serde_json::Map<String, Value> = WorkbenchDestination::all()
-        .into_iter()
-        .map(|destination| (destination.key().to_owned(), json!(destination.url())))
-        .collect();
-    let closed = Fixture::closed();
-    for reply in [
-        fixture.control(get("/api/context")),
-        fixture.watch(get("/api/context")),
-        closed.watch(get("/api/context")),
-    ] {
-        let links = reply.json()["links"].clone();
-        assert_eq!(links, Value::Object(wanted.clone()));
-        for url in links.as_object().unwrap().values() {
-            assert!(url.as_str().unwrap().starts_with("https://"));
-        }
+    for call in calls {
+        let label = format!(
+            "{} {} {}",
+            call.method,
+            call.path,
+            call.body.as_deref().unwrap_or_default()
+        );
+        let reply = fixture.control(call);
+        assert_eq!(reply.status, 400, "{label}");
+        assert_eq!(reply.message(), words::BAD_REQUEST, "{label}");
     }
-}
-
-#[test]
-fn a_watcher_is_given_the_download_address_of_each_host_that_has_one() {
-    let fixture = Fixture::start();
-    let pages: HashMap<String, Option<String>> = fixture
-        .facade
-        .cached_harnesses()
-        .into_iter()
-        .map(|summary| (summary.id, summary.download_url))
-        .collect();
-    for reply in [
-        fixture.watch(get("/api/snapshot?parts=integrations")),
-        fixture.control(get("/api/snapshot?parts=integrations")),
-    ] {
-        let body = reply.json();
-        let harnesses = body["parts"]["integrations"]["harnesses"]
-            .as_array()
-            .unwrap();
-        let shown: HashMap<&str, Option<&str>> = harnesses
-            .iter()
-            .map(|harness| {
-                assert_eq!(
-                    harness["can_download"] == true,
-                    harness.get("download_url").is_some()
-                );
-                (
-                    harness["id"].as_str().unwrap(),
-                    harness.get("download_url").and_then(Value::as_str),
-                )
-            })
-            .collect();
-        assert_eq!(shown.len(), pages.len());
-        for (id, page) in &pages {
-            assert_eq!(shown[id.as_str()], page.as_deref(), "{id}");
-        }
-        assert_ne!(shown["cline-vscode"], shown["cline-cli"]);
-    }
-    let rescan = fixture.watch(post("/api/integrations/rescan", "{}")).json();
-    assert!(rescan
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|harness| harness.get("download_url").is_some()));
-}
-
-/// The marker a home holds only while watching is off.
-fn watch_off_marker(fixture: &Fixture) -> PathBuf {
-    fixture.root.join("state").join("watch.off")
-}
-
-fn set_viewing(fixture: &Fixture, watch: bool) -> Reply {
-    fixture.control(
-        Call::new("PUT", "/api/controls/viewing").body(&json!({ "watch": watch }).to_string()),
-    )
-}
-
-#[test]
-fn a_fresh_home_is_watched_and_the_controls_part_says_so_to_each_context() {
-    let fixture = Fixture::start();
+    assert_eq!(watched.acts.asked(), 0);
+    assert_eq!(watched.window.asked(), []);
+    assert_eq!(watched.quit.asked(), 0);
+    assert_eq!(computer.started(), []);
     assert!(fixture.facade.watching());
-    assert!(!watch_off_marker(&fixture).exists());
-
-    let window = fixture.control(get("/api/snapshot?parts=controls")).json();
-    let controls = &window["parts"]["controls"];
-    assert_eq!(controls["viewing"]["watch"], true);
-    assert_eq!(controls["viewing"]["url"], fixture.server.address().url());
-    assert_eq!(controls["viewing"]["word"], words::CONTROLS_VIEWING_ON);
-    assert_eq!(
-        controls["viewing"]["acts"]["set_watching"]["available"],
-        true
-    );
-    assert_eq!(controls["you"]["context"], "control");
-
-    let everything = fixture.control(get("/api/snapshot")).json();
-    assert!(everything["parts"].get("controls").is_some());
-
-    let tab = fixture.watch(get("/api/snapshot?parts=controls")).json();
-    let seen = &tab["parts"]["controls"];
-    assert_eq!(seen["you"]["context"], "watch");
-    assert_eq!(seen["you"]["sentence"], words::SENTENCE_WATCH);
-    assert_eq!(seen["viewing"]["acts"]["set_watching"]["available"], false);
-    assert_eq!(seen["runtime"]["acts"]["hold"]["available"], true);
+    assert_eq!(fixture.facade.diagnostics.directory(), None);
+    assert!(!fixture.user_policy_exists());
+    assert_eq!(runtime_state(&fixture), RuntimeControlState::Active);
 }
 
-#[test]
-fn turning_watching_off_closes_a_tab_at_once_and_the_window_keeps_its_stream() {
-    let fixture = Fixture::start();
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    let mut tab = Stream::open(fixture.port(), None);
-    window.hello();
-    tab.hello();
-
-    let off = set_viewing(&fixture, false);
-    assert_eq!(off.status, 200);
-    assert!(off.header("Ghostlight-Seq").is_some());
-    let answer = off.json();
-    assert_eq!(answer["viewing"]["watch"], false);
-    assert_eq!(answer["viewing"]["word"], words::CONTROLS_VIEWING_OFF);
-    assert_eq!(answer["you"]["sentence"], words::SENTENCE_CONTROL_PRIVATE);
-    assert!(watch_off_marker(&fixture).exists());
-    assert!(!fixture.facade.watching());
-
-    // A request with no key is closed from this moment.
-    assert_eq!(
-        fixture.watch(get("/api/context")).json()["context"],
-        "closed"
-    );
-    assert_eq!(fixture.watch(get("/api/snapshot")).status, 403);
-
-    // The watching stream is told why it ended, and is over.
-    let closed = tab.until(|block| block.event.as_deref() == Some("closed"));
-    assert_eq!(closed.json()["sentence"], words::WATCHING_OFF);
-    assert!(tab.next().is_none());
-
-    // The window hears the new state, and keeps receiving.
-    let sheet = window.until(|block| {
-        block.is("controls_changed")
-            && block.json()["change"]["controls"]["viewing"]["watch"] == false
-    });
-    assert_eq!(
-        sheet.json()["change"]["controls"]["you"]["sentence"],
-        words::SENTENCE_CONTROL_PRIVATE
-    );
-    assert_eq!(
-        fixture
-            .control(post("/api/runtime", r#"{"intent":"hold"}"#))
-            .status,
-        200
-    );
-    window.until(|block| {
-        block.is("status_changed")
-            && block.json()["change"]["status"]["service"]["runtime_state"] == "held"
-    });
-}
-
-#[test]
-fn turning_watching_on_removes_the_marker_and_a_tab_watches_again() {
-    let fixture = Fixture::closed();
-    assert!(watch_off_marker(&fixture).exists());
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    window.hello();
-    assert_eq!(
-        fixture.watch(get("/api/context")).json()["context"],
-        "closed"
-    );
-
-    let on = set_viewing(&fixture, true);
-    assert_eq!(on.status, 200);
-    assert_eq!(on.json()["viewing"]["watch"], true);
-    assert!(!watch_off_marker(&fixture).exists());
-    assert_eq!(
-        fixture.watch(get("/api/context")).json()["context"],
-        "watch"
-    );
-    window.until(|block| {
-        block.is("controls_changed")
-            && block.json()["change"]["controls"]["viewing"]["watch"] == true
-    });
-}
-
-#[test]
-fn setting_watching_to_what_it_already_is_changes_nothing_and_publishes_nothing() {
-    let fixture = Fixture::start();
-    assert_eq!(set_viewing(&fixture, true).status, 200);
-    let seq = fixture.facade.current_seq();
-    assert_eq!(set_viewing(&fixture, true).status, 200);
-    assert_eq!(fixture.facade.current_seq(), seq);
-}
-
-#[test]
-fn the_watching_route_takes_exactly_one_boolean() {
-    let fixture = Fixture::start();
-    for body in [
-        r#"{"watch":"yes"}"#,
-        r#"{}"#,
-        r#"{"watch":false,"extra":1}"#,
-    ] {
-        let reply = fixture.control(Call::new("PUT", "/api/controls/viewing").body(body));
-        assert_eq!(reply.status, 400, "{body}");
-        assert_eq!(reply.code(), "bad_request", "{body}");
-    }
-    assert!(fixture.facade.watching());
-}
-
-#[test]
-fn a_facade_that_is_not_served_cannot_change_watching() {
-    let facade = WorkbenchFacade::new(
-        WorkbenchProjection::default(),
-        crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None),
-        Arc::new(crate::browser::RelayBrowserPort::new(
-            "epoch".into(),
-            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
-        )),
-        crate::diagnostics::DiagnosticsHub::for_tests(),
-    );
-    let error = facade.set_watching(false).unwrap_err();
-    assert_eq!(error.to_string(), words::WATCHING_NOT_SERVED);
-    assert!(facade.watching());
-}
-
-#[test]
-fn a_facade_that_is_not_served_does_not_claim_anyone_can_watch() {
-    let facade = WorkbenchFacade::new(
-        WorkbenchProjection::default(),
-        crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None),
-        Arc::new(crate::browser::RelayBrowserPort::new(
-            "epoch".into(),
-            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
-        )),
-        crate::diagnostics::DiagnosticsHub::for_tests(),
-    );
-    let controls = facade.snapshot().controls;
-    assert!(!controls.viewing.watch);
-    assert_eq!(controls.viewing.url, None);
-    assert_eq!(controls.viewing.word, words::WATCHING_NOT_SERVED);
-    assert_eq!(controls.you.sentence, words::SENTENCE_CONTROL_PRIVATE);
-    let act = &controls.viewing.acts.set_watching;
-    assert!(!act.available);
-    assert_eq!(act.why_not.as_deref(), Some(words::WATCHING_NOT_SERVED));
-    let tab = controls.seen_by(WebContext::Watch);
-    assert!(!tab.viewing.acts.set_watching.available);
-}
-
-#[test]
-fn diagnostics_turned_on_from_a_terminal_reach_settings_within_one_refresher_tick() {
-    let fixture = Fixture::start();
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    window.hello();
-    fixture.facade.authority_refreshed();
-    window.until(|block| block.is("controls_changed"));
-
-    // The command line flips the same marker the window does, behind the facade's back.
-    fixture.facade.diagnostics.toggle();
-    fixture.facade.authority_refreshed();
-    let sheet = window.until(|block| {
-        block.is("controls_changed")
-            && block.json()["change"]["controls"]["diagnostics"]["on"] == true
-    });
-    assert!(sheet.json()["change"]["controls"]["diagnostics"]["word"]
-        .as_str()
-        .unwrap()
-        .starts_with("On ("));
-}
-
-#[test]
-fn a_pause_changes_the_runtime_row_of_every_screens_controls() {
-    let fixture = Fixture::start();
-    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
-    let mut tab = Stream::open(fixture.port(), None);
-    window.hello();
-    tab.hello();
-    assert_eq!(
-        fixture
-            .watch(post("/api/runtime", r#"{"intent":"hold"}"#))
-            .status,
-        200
-    );
-    let held = |block: &Block| {
-        block.is("controls_changed")
-            && block.json()["change"]["controls"]["runtime"]["state"] == "held"
-    };
-    let seen_by_window = window.until(held);
-    let seen_by_tab = tab.until(held);
-    let runtime = |block: &Block| block.json()["change"]["controls"]["runtime"].clone();
-    assert_eq!(runtime(&seen_by_window)["note"], words::PAUSED_FROM_WATCHER);
-    assert_eq!(
-        runtime(&seen_by_window)["acts"]["resume"]["available"],
-        true
-    );
-    assert_eq!(runtime(&seen_by_tab)["acts"]["resume"]["available"], false);
-    assert_eq!(
-        seen_by_tab.json()["change"]["controls"]["you"]["context"],
-        "watch"
-    );
-}
-
-/// A cached icon that starts like a PNG and cannot be decoded, so it is served as cached.
-const UNREADABLE_PNG: &[u8] = b"\x89PNG\r\n\x1a\nzed";
-
-/// A cache under `fixture` that has found Zed's icon, `bytes`, on a Linux computer, and those
-/// bytes.
-fn zed_icon_cache(fixture: &Fixture, bytes: &[u8]) -> (crate::install::icons::IconCache, Vec<u8>) {
-    use crate::install::icons::{IconCache, IconPlaces};
-
-    let share = fixture.root.join("share");
-    let entry = share.join("applications").join("dev.zed.Zed.desktop");
-    std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
-    std::fs::write(&entry, "[Desktop Entry]\nName=Zed\nIcon=zed\n").unwrap();
-    let png = share.join("icons/hicolor/64x64/apps/zed.png");
-    std::fs::create_dir_all(png.parent().unwrap()).unwrap();
-    let bytes = bytes.to_vec();
-    std::fs::write(&png, &bytes).unwrap();
-    let icons = fixture.root.join("state").join("icons");
-    let cache = IconCache::open(icons, IconPlaces::linux(vec![share]), None);
-    assert!(cache.refresh());
-    (cache, bytes)
-}
-
-/// The headers an agent's image is served with, which a HEAD answers too.
-const IMAGE_HEADERS: [&str; 6] = [
-    "Content-Type",
-    "Content-Length",
-    "ETag",
-    "X-Content-Type-Options",
-    "Content-Security-Policy",
-    "Cross-Origin-Resource-Policy",
-];
-
-#[test]
-fn every_catalog_agent_has_one_image_address_and_it_serves_the_best_image_there_is() {
-    let fixture = Fixture::start();
-    let monogram = include_bytes!("../../agent/monograms/zed.svg");
-
-    let first = fixture.watch(get("/agent-icons/zed"));
-    assert_eq!(first.status, 200, "a watcher draws the agents it is shown");
-    assert_eq!(first.header("Content-Type"), Some("image/svg+xml"));
-    assert_eq!(first.body, monogram, "no icon is cached, so the monogram");
-    assert_eq!(first.header("X-Content-Type-Options"), Some("nosniff"));
-    assert_eq!(
-        first.header("Content-Security-Policy"),
-        Some("default-src 'none'; sandbox")
-    );
-    assert_eq!(
-        first.header("Cross-Origin-Resource-Policy"),
-        Some("same-origin")
-    );
-    let monogram_tag = first.header("ETag").unwrap().to_owned();
-    let version = crate::agent::image::served("zed", None).unwrap().version;
-    assert_eq!(monogram_tag, format!("\"{version}\""));
-
-    for id in ["codex", "claude-code", "cline", "goose"] {
-        let reply = fixture.control(get(&format!("/agent-icons/{id}?v=0123456789ab")));
-        assert_eq!(reply.status, 200, "{id}");
-        assert_eq!(reply.header("Content-Type"), Some("image/svg+xml"), "{id}");
-    }
-
-    let (cache, bytes) = zed_icon_cache(&fixture, UNREADABLE_PNG);
-    fixture.facade.attach_icons(cache.clone());
-    let icon = fixture.control(get("/agent-icons/zed"));
-    assert_eq!(icon.status, 200);
-    assert_eq!(icon.header("Content-Type"), Some("image/png"));
-    assert_eq!(icon.body, bytes, "the cached icon comes first");
-    assert_eq!(
-        icon.header("Content-Security-Policy"),
-        Some("default-src 'none'; sandbox")
-    );
-    let icon_tag = icon.header("ETag").unwrap().to_owned();
-    assert_ne!(
-        icon_tag, monogram_tag,
-        "the version follows the served image"
-    );
-    assert_eq!(
-        icon_tag,
-        format!(
-            "\"{}\"",
-            crate::agent::image::served("zed", Some(&cache))
-                .unwrap()
-                .version
-        )
-    );
-    assert_eq!(
-        fixture
-            .watch(get("/agent-icons/codex"))
-            .header("Content-Type"),
-        Some("image/svg+xml"),
-        "an agent with no icon keeps its monogram"
-    );
-
-    let unchanged = fixture.watch(get("/agent-icons/zed").header("If-None-Match", &icon_tag));
-    assert_eq!(unchanged.status, 304);
-    let stale = fixture.watch(get("/agent-icons/zed").header("If-None-Match", &monogram_tag));
-    assert_eq!(
-        stale.status, 200,
-        "an old version is answered with the new image"
-    );
-
-    for path in ["/agent-icons/zed", "/agent-icons/codex"] {
-        let full = fixture.watch(get(path));
-        let head = fixture.watch(Call::new("HEAD", path));
-        assert_eq!(head.status, full.status, "{path}");
-        assert!(head.body.is_empty(), "{path}");
-        for name in IMAGE_HEADERS {
-            assert_eq!(head.header(name), full.header(name), "{path} {name}");
-        }
-    }
-
-    for path in [
-        "/agent-icons/not-an-agent",
-        "/agent-icons/command_line",
-        "/agent-icons/unknown",
-        "/agent-icons/",
-        "/agent-icons/zed/more",
-        "/agent-icons/..%2fzed",
-        "/agent-icons/zed.json",
-        "/integrations/zed.svg",
-    ] {
-        let reply = fixture.watch(get(path));
-        assert_eq!(reply.status, 404, "{path}");
-        assert_eq!(reply.code(), "not_found", "{path}");
-    }
-    assert_eq!(
-        fixture.watch(post("/agent-icons/zed", "{}")).status,
-        405,
-        "an image is only read"
-    );
-}
-
-#[test]
-fn an_app_icon_is_served_as_the_tile_the_service_made_for_it() {
-    let fixture = Fixture::start();
-    let source = include_bytes!("../../../../../tests/fixtures/workbench/agent-icon-white.png");
-    let (cache, _) = zed_icon_cache(&fixture, source);
-    fixture.facade.attach_icons(cache.clone());
-
-    let reply = fixture.control(get("/agent-icons/zed"));
-    assert_eq!(reply.status, 200);
-    assert_eq!(reply.header("Content-Type"), Some("image/png"));
-    assert_eq!(
-        reply.body,
-        include_bytes!("../../../../../tests/fixtures/workbench/agent-icon-white-tile.png"),
-        "the white icon on its dark ground, not the cached copy"
-    );
-    let served = crate::agent::image::served("zed", Some(&cache)).unwrap();
-    assert_eq!(
-        reply.header("ETag").map(str::to_owned),
-        Some(format!("\"{}\"", served.version)),
-        "the tag is the tile's version"
-    );
-    assert_eq!(
-        reply.header("Content-Security-Policy"),
-        Some("default-src 'none'; sandbox")
-    );
-}
-
-#[test]
-fn an_agents_image_answers_that_watching_is_off_and_never_shows_what_is_installed() {
-    let fixture = Fixture::closed();
-    let (cache, bytes) = zed_icon_cache(&fixture, UNREADABLE_PNG);
-    fixture.facade.attach_icons(cache);
-
-    let refusals: Vec<(u16, String, Vec<u8>)> = [
-        "/agent-icons/zed",
-        "/agent-icons/codex",
-        "/agent-icons/not-an-agent",
-    ]
-    .into_iter()
-    .flat_map(|path| [get(path), Call::new("HEAD", path)])
-    .map(|call| {
-        let reply = fixture.watch(call);
-        assert!(!reply.body.starts_with(&bytes[..4]));
-        // A HEAD refusal has only its status (U-D6); a read carries the code.
-        let code = if reply.body.is_empty() {
-            String::new()
+/// Every file below `directory`, at any depth.
+fn files_below(directory: &Path, out: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            files_below(&path, out);
         } else {
-            reply.code()
-        };
-        (reply.status, code, reply.body)
-    })
-    .collect();
-    for (index, (status, code, _)) in refusals.iter().enumerate() {
-        assert_eq!(*status, 403);
-        if index % 2 == 0 {
-            assert_eq!(code, "watching_off");
+            out.push(path);
         }
     }
-    let gets: Vec<&Vec<u8>> = refusals
-        .iter()
-        .step_by(2)
-        .map(|(_, _, body)| body)
+}
+
+/// Protects ACCEPTANCE release gate 10 (the bundled HTML, CSS and JS render): every file under
+/// `crates/orchestrator/ui`, and each extension file the setup view shares, is served at its
+/// path byte for byte with the media type its name says (a script or stylesheet served under
+/// nosniff with another type does not run) and revalidates by its tag; the table serves nothing
+/// else.
+#[test]
+fn every_file_the_page_ships_is_served_whole_with_the_type_its_name_says() {
+    // The setup view shares these with the extension's own pages: served path, extension file.
+    const SHARED: [(&str, &str); 2] = [
+        ("/extension/kit.css", "kit.css"),
+        (
+            "/extension/ghostlight-mascot.png",
+            "icons/ghostlight-mascot.png",
+        ),
+    ];
+    const TYPES: [(&str, &str); 4] = [
+        ("html", "text/html; charset=utf-8"),
+        ("css", "text/css; charset=utf-8"),
+        ("js", "text/javascript; charset=utf-8"),
+        ("png", "image/png"),
+    ];
+
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ui = manifest.join("ui");
+    let mut files = Vec::new();
+    files_below(&ui, &mut files);
+    let mut shipped: Vec<(String, PathBuf)> = files
+        .into_iter()
+        .map(|file| {
+            let parts: Vec<String> = file
+                .strip_prefix(&ui)
+                .unwrap()
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            let path = format!("/{}", parts.join("/"));
+            let path = if path == "/index.html" {
+                "/".to_owned()
+            } else {
+                path
+            };
+            (path, file)
+        })
+        .chain(
+            SHARED
+                .map(|(path, file)| (path.to_owned(), manifest.join("../../extension").join(file))),
+        )
         .collect();
-    assert!(
-        gets.windows(2).all(|pair| pair[0] == pair[1]),
-        "every id is refused the same way, so a refusal says nothing about the agent"
+    shipped.sort();
+    let mut served: Vec<&str> = super::assets::ASSETS
+        .iter()
+        .map(|asset| asset.path)
+        .collect();
+    served.sort_unstable();
+    assert_eq!(
+        served,
+        shipped
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>()
     );
 
-    let window = fixture.control(get("/agent-icons/zed"));
-    assert_eq!(window.status, 200, "the window draws its agents either way");
-    assert_eq!(window.body, bytes);
+    let fixture = Fixture::start();
+    let port = fixture.port();
+    for (path, file) in &shipped {
+        let extension = file.extension().unwrap().to_string_lossy();
+        let kind = TYPES
+            .iter()
+            .find(|(name, _)| *name == extension)
+            .unwrap_or_else(|| panic!("{path}: no type for .{extension}"))
+            .1;
+        let reply = get(path).send(port);
+        assert_eq!(reply.status, 200, "{path}");
+        assert_eq!(reply.header(header::CONTENT_TYPE), Some(kind), "{path}");
+        assert_eq!(reply.body, std::fs::read(file).unwrap(), "{path}");
+        let tag = reply.header(header::ETAG).unwrap().to_owned();
+        let again = get(path).header(header::IF_NONE_MATCH, &tag).send(port);
+        assert_eq!(again.status, 304, "{path}");
+        assert!(again.body.is_empty(), "{path}");
+    }
+}
+
+/// U-D6 (dc1c4fbf; RFC 9110 9.3.2): a HEAD answer carries no body, a refusal's included. A page
+/// file and an agent image answer a HEAD with the status and length their read has. Each refused
+/// read here carries its refusal in a JSON body; the HEAD is refused too (a data route takes no
+/// HEAD), and only its headers go out.
+#[test]
+fn a_head_answer_carries_no_body_a_refusals_included() {
+    let fixture = Fixture::closed();
+    let port = fixture.port();
+    let calls = [
+        Call::new("GET", "/app.js"),
+        Call::new("GET", "/agent-icons/zed").bearer(&fixture.bearer()),
+        Call::new("GET", "/api/snapshot"),
+        Call::new("GET", "/api/context").bearer("not-this-start"),
+        Call::new("GET", "/nothing").bearer(&fixture.bearer()),
+        Call::new("GET", "/api/context").host("example.invalid"),
+        Call::new("GET", "/api/search").bearer(&fixture.bearer()),
+    ];
+    for read in calls {
+        let path = read.path.clone();
+        let full = read.send(port);
+        let head = Call {
+            method: "HEAD",
+            ..read
+        }
+        .send(port);
+        assert!(
+            head.body.is_empty(),
+            "{path}: {}",
+            String::from_utf8_lossy(&head.body)
+        );
+        assert!(!full.body.is_empty(), "{path}: the read carries a body");
+        if full.status == 200 {
+            assert_eq!(head.status, 200, "{path}");
+            assert_eq!(
+                head.header(header::CONTENT_LENGTH),
+                Some(full.body.len().to_string().as_str()),
+                "{path}"
+            );
+        } else {
+            assert!(full.status >= 400, "{path}: {}", full.status);
+            assert!(head.status >= 400, "{path}: {}", head.status);
+        }
+    }
+}
+
+/// U-D5 (9db6e896): peers that only hold connections open never lock the window out. Idle peers
+/// fill the share without a bearer; past it, a request without the bearer is closed unanswered
+/// while the window's is answered, and once the idle peers go a tab is let in again.
+#[test]
+fn idle_peers_never_lock_the_window_out() {
+    use std::sync::atomic::Ordering;
+
+    let fixture = Fixture::start();
+    let port = fixture.port();
+    let places = Arc::clone(&fixture.server.shared.places);
+    let settled = |served: usize, without_bearer: usize| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while places.served.load(Ordering::Acquire) != served
+            || places.without_bearer.load(Ordering::Acquire) != without_bearer
+        {
+            assert!(Instant::now() < deadline, "{places:?}");
+            std::thread::yield_now();
+        }
+    };
+    let idle: Vec<TcpStream> = (0..super::MAX_WITHOUT_BEARER)
+        .map(|_| TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap())
+        .collect();
+    settled(super::MAX_WITHOUT_BEARER, super::MAX_WITHOUT_BEARER);
+
+    let mut stranger = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+    stranger
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let _ = stranger.write_all(
+        format!("GET /api/context HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").as_bytes(),
+    );
+    let mut answer = Vec::new();
+    let read = stranger.read_to_end(&mut answer);
+    assert!(answer.is_empty(), "{}", String::from_utf8_lossy(&answer));
+    // Closed, not merely kept waiting past the read's bound.
+    assert!(
+        !read.as_ref().is_err_and(|error| matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+        )),
+        "{read:?}"
+    );
+
+    assert_eq!(fixture.control(get("/api/context")).status, 200);
+    drop(idle);
+    settled(0, 0);
+    assert_eq!(fixture.watch(get("/api/context")).status, 200);
 }

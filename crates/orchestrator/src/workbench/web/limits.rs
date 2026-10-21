@@ -4,8 +4,6 @@
 //! applies to the window, which carries the key (ADR-0199, amendment of 2026-10-15).
 
 use std::collections::VecDeque;
-#[cfg(test)]
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -81,9 +79,6 @@ pub struct Limits {
     window: Mutex<Rate>,
     hold: Mutex<Rate>,
     rescan: Mutex<Option<Instant>>,
-    /// Scans started, counted for tests.
-    #[cfg(test)]
-    scans: AtomicU64,
 }
 
 /// A policy check in flight. Dropping it lets the next one start.
@@ -109,8 +104,6 @@ impl Default for Limits {
             window: Mutex::new(Rate::new(1, WINDOW_SPAN)),
             hold: Mutex::new(Rate::new(HOLDS_PER_MINUTE, MINUTE)),
             rescan: Mutex::new(None),
-            #[cfg(test)]
-            scans: AtomicU64::new(0),
         }
     }
 }
@@ -159,7 +152,7 @@ impl Limits {
         if last.is_some_and(|scanned| now.saturating_duration_since(scanned) < RESCAN_SPAN) {
             return cached();
         }
-        let result = self.scan(scan);
+        let result = scan();
         *last = Some(Instant::now());
         result
     }
@@ -167,65 +160,8 @@ impl Limits {
     /// The window's rescan: it always scans, and its scan counts as the latest one.
     pub fn rescan_for_window<R>(&self, scan: impl FnOnce() -> R) -> R {
         let mut last = lock(&self.rescan);
-        let result = self.scan(scan);
+        let result = scan();
         *last = Some(Instant::now());
         result
-    }
-
-    fn scan<R>(&self, scan: impl FnOnce() -> R) -> R {
-        #[cfg(test)]
-        self.scans.fetch_add(1, Ordering::AcqRel);
-        scan()
-    }
-
-    /// How many scans the server has started.
-    #[must_use]
-    #[cfg(test)]
-    pub fn scans(&self) -> u64 {
-        self.scans.load(Ordering::Acquire)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_window_admits_its_maximum_and_then_says_when() {
-        let mut rate = Rate::new(2, SECOND);
-        let start = Instant::now();
-        assert!(rate.take(start).is_ok());
-        assert!(rate.take(start + Duration::from_millis(100)).is_ok());
-        let wait = rate.take(start + Duration::from_millis(200)).unwrap_err();
-        assert_eq!(wait, Duration::from_millis(800));
-        assert!(rate.take(start + SECOND).is_ok());
-    }
-
-    #[test]
-    fn retry_after_is_whole_seconds_and_never_zero() {
-        assert_eq!(retry_after_seconds(Duration::from_millis(1)), 1);
-        assert_eq!(retry_after_seconds(Duration::from_millis(1500)), 2);
-        assert_eq!(retry_after_seconds(Duration::from_secs(3)), 3);
-        assert_eq!(retry_after_seconds(Duration::ZERO), 1);
-    }
-
-    #[test]
-    fn one_policy_check_runs_at_a_time() {
-        let limits = Limits::default();
-        let first = limits.preview().unwrap();
-        assert!(limits.preview().is_err());
-        drop(first);
-        assert!(limits.preview().is_ok());
-    }
-
-    #[test]
-    fn a_watchers_rescans_coalesce_and_the_windows_do_not() {
-        let limits = Limits::default();
-        let first = limits.rescan_for_watcher(|| "scanned", || "cached");
-        let second = limits.rescan_for_watcher(|| "scanned", || "cached");
-        assert_eq!((first, second), ("scanned", "cached"));
-        assert_eq!(limits.scans(), 1);
-        assert_eq!(limits.rescan_for_window(|| "scanned"), "scanned");
-        assert_eq!(limits.scans(), 2);
     }
 }

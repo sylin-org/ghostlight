@@ -379,131 +379,75 @@ mod tests {
         (directory, watching)
     }
 
-    #[test]
-    fn a_stream_carries_only_what_comes_after_its_hello() {
-        let hub = hub();
-        let stream = hub.open(WebContext::Control, || 3).unwrap();
-        assert!(stream.hello().contains("\"seq\":3"));
-        hub.publish(change(3));
-        hub.publish(change(4));
-        let Frame::Change(frame) = stream.next(Duration::from_millis(50)) else {
-            panic!("the change after the hello is queued");
-        };
-        assert!(frame.starts_with("id: instance_test-4\ndata: "), "{frame}");
-        assert!(frame.ends_with("\n\n"));
-        assert_eq!(stream.next(Duration::from_millis(20)), Frame::Keep);
-    }
-
-    #[test]
-    fn a_quiet_stream_keeps_and_a_dropped_stream_frees_its_place() {
-        let hub = hub();
-        let stream = hub.open(WebContext::Watch, || 0).unwrap();
-        assert_eq!(hub.open_streams(WebContext::Watch), 1);
-        assert_eq!(stream.next(Duration::from_millis(10)), Frame::Keep);
-        drop(stream);
-        assert_eq!(hub.open_streams(WebContext::Watch), 0);
-    }
-
-    #[test]
-    fn the_window_and_watchers_have_their_own_places() {
-        let hub = hub();
-        let mut control = Vec::new();
-        for _ in 0..MAX_CONTROL_STREAMS {
-            control.push(hub.open(WebContext::Control, || 0).unwrap());
-        }
-        assert_eq!(
-            hub.open(WebContext::Control, || 0).err(),
-            Some(Refused::TooManyScreens)
-        );
-        let mut watch = Vec::new();
-        for _ in 0..MAX_WATCH_STREAMS {
-            watch.push(hub.open(WebContext::Watch, || 0).unwrap());
-        }
-        assert_eq!(
-            hub.open(WebContext::Watch, || 0).err(),
-            Some(Refused::TooManyScreens)
-        );
-        drop(control.pop());
-        assert!(hub.open(WebContext::Control, || 0).is_ok());
-        assert_eq!(
-            hub.open(WebContext::Closed, || 0).err(),
-            Some(Refused::WatchingOff)
-        );
-    }
-
+    /// Protects the bounded fan-out (docs/1.0/ARCHITECTURE "a broken window never stops agent
+    /// work"; ADR-0199 amendment item 4): publishing never waits on a screen, a screen more than
+    /// `QUEUE_DEPTH` behind is ended with a reset after the changes it had queued, and every
+    /// other screen receives every change.
     #[test]
     fn a_stream_that_falls_behind_is_reset_and_the_others_keep_going() {
+        const PAST_THE_QUEUE: usize = 40;
+
         let hub = hub();
         let slow = hub.open(WebContext::Control, || 0).unwrap();
         let quick = hub.open(WebContext::Watch, || 0).unwrap();
         let mut quick_seen = 0;
-        for seq in 1..=(QUEUE_DEPTH as u64 + 40) {
+        for seq in 1..=(QUEUE_DEPTH + PAST_THE_QUEUE) as u64 {
             hub.publish(change(seq));
+            // Publishing queues the frames before it returns, so nothing needs waiting for.
             while let Frame::Change(_) = quick.next(Duration::ZERO) {
                 quick_seen += 1;
             }
         }
-        assert_eq!(quick_seen, QUEUE_DEPTH + 40);
+        assert_eq!(quick_seen, QUEUE_DEPTH + PAST_THE_QUEUE);
         assert_eq!(hub.open_streams(WebContext::Control), 0);
         let mut queued = 0;
         loop {
-            match slow.next(Duration::from_millis(10)) {
+            match slow.next(Duration::ZERO) {
                 Frame::Change(_) => queued += 1,
                 Frame::Reset => break,
                 other => panic!("unexpected {other:?}"),
             }
         }
         assert_eq!(queued, QUEUE_DEPTH);
-        assert!(reset_frame().contains("\"reason\":\"behind\""));
     }
 
+    /// Reproduces 01afea02: a change published between turning watching off and the controls
+    /// change reached a watcher. The hub reads the shared watching state, so once watching is off
+    /// every open watcher stream ends with `closed` on the next change of any kind and is sent
+    /// nothing, the `closed` event carries the words the page shows, a new watcher is refused
+    /// until watching is on again, and the window's streams are untouched.
     #[test]
-    fn closing_the_hub_ends_streams_without_a_reset() {
-        let hub = hub();
-        let stream = hub.open(WebContext::Control, || 0).unwrap();
-        hub.close();
-        assert_eq!(stream.next(Duration::from_millis(10)), Frame::End);
-    }
-
-    #[test]
-    fn a_watcher_is_refused_once_watching_is_off_and_the_window_is_not() {
-        let (_directory, watching) = switchable();
-        let hub = hub_watching(Arc::clone(&watching));
-        assert!(watching.set(false).unwrap());
-        hub.publish(change(1));
-        assert_eq!(
-            hub.open(WebContext::Watch, || 1).err(),
-            Some(Refused::WatchingOff)
-        );
-        assert_eq!(hub.open_streams(WebContext::Watch), 0);
-        let window = hub.open(WebContext::Control, || 1).unwrap();
-        hub.publish(change(2));
-        assert!(matches!(
-            window.next(Duration::from_millis(50)),
-            Frame::Change(_)
-        ));
-        assert!(watching.set(true).unwrap());
-        assert!(hub.open(WebContext::Watch, || 2).is_ok());
-    }
-
-    #[test]
-    fn a_watching_stream_ends_on_the_first_change_after_watching_goes_off() {
+    fn while_watching_is_off_no_watcher_stream_opens_or_hears_a_change_and_the_windows_carry_on() {
         let (_directory, watching) = switchable();
         let hub = hub_watching(Arc::clone(&watching));
         let watcher = hub.open(WebContext::Watch, || 0).unwrap();
         let window = hub.open(WebContext::Control, || 0).unwrap();
         hub.publish(change(1));
-        assert!(matches!(
-            watcher.next(Duration::from_millis(50)),
-            Frame::Change(_)
-        ));
-        // A change of any kind that comes between the flip and the controls change is not sent.
+        assert!(matches!(watcher.next(Duration::ZERO), Frame::Change(_)));
+
+        // A runtime change, not the controls change: any change ends a watcher once it is off.
         assert!(watching.set(false).unwrap());
         hub.publish(change(2));
-        assert_eq!(watcher.next(Duration::from_millis(50)), Frame::Closed);
+        assert_eq!(watcher.next(Duration::ZERO), Frame::Closed);
         assert_eq!(hub.open_streams(WebContext::Watch), 0);
+        let said: serde_json::Value = serde_json::from_str(
+            closed_frame()
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .expect("the closed event carries data"),
+        )
+        .unwrap();
+        assert_eq!(said["sentence"], words::WATCHING_OFF);
+        assert_eq!(
+            hub.open(WebContext::Watch, || 2).err(),
+            Some(Refused::WatchingOff)
+        );
+
         assert!(matches!(window.next(Duration::ZERO), Frame::Change(_)));
         assert!(matches!(window.next(Duration::ZERO), Frame::Change(_)));
         assert_eq!(hub.open_streams(WebContext::Control), 1);
+
+        assert!(watching.set(true).unwrap());
+        assert!(hub.open(WebContext::Watch, || 2).is_ok());
     }
 }
