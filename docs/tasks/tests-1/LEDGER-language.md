@@ -23,7 +23,7 @@ every test read-only first, then cut one file per commit.
 | --- | --- | --- | --- |
 | `language/` | 349 | 55 | 55 |
 | `workbench/` | 252 | 35 + 2 reserve | 37 |
-| `governance/` | 136 | 40 | 54 |
+| `governance/` | 136 | 40 | 45 |
 
 ## Slices
 
@@ -64,7 +64,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TG1 | test(cli, governance): the policy subcommands parse in the completions test, and governance drops its copy | 1 | 0 | - (moved to cli/parse.rs) | landed (8bd564fc) |
 | TG2 | test(governance): managed policy keeps the 13 tests of its published claims | 36 | 13 | 10 promise, 1 contract, 2 defect | landed (1198b684) |
 | TG3 | test(governance): the authority keeps the 18 tests of what policy decides | 64 | 18 | 10 promise, 2 contract, 5 defect, 1 unsafe | landed (44864318) |
-| TG4 | test(governance): the manifest and the host grammar keep the 4 tests of the file admins write | 16 | 4 | 1 promise, 2 contract, 1 defect | landed (this commit) |
+| TG4 | test(governance): the manifest and the host grammar keep the 4 tests of the file admins write | 16 | 4 | 1 promise, 2 contract, 1 defect | landed (c8100a25) |
+| TG5 | test(governance): migrate.rs keeps the schema-3 move and the file move | 11 | 2 | 2 promise | landed (this commit) |
 
 ## Notes
 

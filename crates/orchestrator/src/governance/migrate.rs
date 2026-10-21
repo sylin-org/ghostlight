@@ -234,12 +234,11 @@ impl Plan {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::scratch::Scratch;
+    use serde_json::json;
 
-    fn temporary(name: &str) -> Scratch {
-        Scratch::file(&format!("migrate-{name}.json"))
-    }
+    use super::*;
+    use crate::install::record::assert_owner_only;
+    use crate::scratch::Scratch;
 
     fn moved(text: &str) -> Migration {
         match migrate(text, "policy.json").expect("the document moves") {
@@ -255,215 +254,259 @@ mod tests {
         }
     }
 
+    /// A schema-3 document with `body` after its name and version.
+    fn schema_3(body: &str) -> String {
+        format!(r#"{{"schema":3,"name":"mine","version":"2",{body}}}"#)
+    }
+
     const GRANTS: &str =
         r#""grants":[{"id":"g","hosts":{"allow":["example.com"]},"allowed":["read"]}]"#;
 
+    /// The value schema 4 fixes a retired setting at, or any value for the user switch, whose
+    /// meaning schema 4 keeps whatever it said.
+    fn kept_meaning(retired: Retired) -> serde_json::Value {
+        match retired {
+            Retired::Frame(_, fixed) => json!(fixed),
+            Retired::UserPolicySwitch | Retired::Mode => json!(false),
+        }
+    }
+
+    /// ACCEPTANCE Governance 4 and ADR-0202 Decision 22a: a schema-3 document moves to schema 4
+    /// only when every part schema 4 drops already said what schema 4 does (enforce, the user
+    /// switch, a frame option at its fixed value), carrying its grants, channel switches,
+    /// settings, identity and organization. Otherwise it stays, with one sentence for each part
+    /// that would change meaning or that schema 4 would refuse.
     #[test]
-    fn every_shape_that_keeps_its_meaning_moves() {
-        let text = format!(
-            r#"{{"schema":3,"name":"mine","version":"2","mode":"enforce",{GRANTS},"config":[
-                {{"key":"channels.mcp.enabled","value":true,"level":"mandatory"}},
-                {{"key":"channels.cli.enabled","value":true,"level":"recommended"}},
-                {{"key":"policy.user.enabled","value":false,"level":"mandatory"}},
-                {{"key":"content.frames.handling","value":"permitted_content","level":"mandatory"}},
-                {{"key":"content.frames.notice","value":"when_affected","level":"mandatory"}},
-                {{"key":"browser.startup","value":"manual","level":"mandatory"}}]}}"#
-        );
+    fn a_schema_3_document_moves_only_where_its_meaning_is_kept() {
+        let mcp = manifest::PolicySetting::McpChannelEnabled;
+        let cli = manifest::PolicySetting::CliChannelEnabled;
+        let startup = manifest::PolicySetting::BrowserStartup;
+        let mut config = vec![
+            json!({"key": mcp.key(), "value": false, "level": "mandatory"}),
+            json!({"key": cli.key(), "value": true, "level": "recommended"}),
+        ];
+        for retired in RETIRED_SETTINGS {
+            config.push(json!({
+                "key": retired.config_key(),
+                "value": kept_meaning(retired),
+                "level": "mandatory"
+            }));
+        }
+        config.push(json!({"key": startup.key(), "value": "manual", "level": "mandatory"}));
+        let text = schema_3(&format!(
+            r#""mode":"{MODE_ENFORCE}",{GRANTS},"identity":{{"principal":"Ada"}},"organization":{{"name":"Example","contacts":[{{"kind":"email","value":"a@example.com"}}]}},"config":{}"#,
+            serde_json::Value::from(config)
+        ));
         let migration = moved(&text);
-        assert_eq!(migration.removed.len(), 4);
         let carried = manifest::parse(&migration.document, "moved").unwrap();
-        assert_eq!(carried.schema, 4);
+        let grants = manifest::parse(
+            &format!(r#"{{"schema":4,"name":"g","version":"1",{GRANTS}}}"#),
+            "grants",
+        )
+        .unwrap()
+        .grants;
+        assert_eq!(carried.schema, u32::try_from(SCHEMA).unwrap());
         assert_eq!(carried.name, "mine");
         assert_eq!(carried.version, "2");
-        assert_eq!(carried.grants.len(), 1);
+        assert_eq!(carried.grants, grants);
+        assert_eq!(carried.boolean_setting(mcp), Some(false));
+        assert_eq!(carried.boolean_setting(cli), Some(true));
+        assert_eq!(carried.config[1].level, manifest::SettingLevel::Recommended);
         assert_eq!(
             carried.browser_startup(),
             Some(manifest::BrowserStartup::Manual)
         );
-        assert_eq!(carried.config.len(), 3);
-        assert!(migration.document.ends_with("}\n"));
-    }
-
-    #[test]
-    fn the_schema_3_switches_migrate() {
-        let migration = moved(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[],"config":[{"key":"channels.mcp.enabled","value":false,"level":"mandatory"},{"key":"channels.cli.enabled","value":true,"level":"recommended"}]}"#,
-        );
-        assert!(migration.removed.is_empty(), "{:?}", migration.removed);
-        let carried = manifest::parse(&migration.document, "moved").unwrap();
-        assert_eq!(
-            carried.boolean_setting(manifest::PolicySetting::McpChannelEnabled),
-            Some(false)
-        );
-        assert_eq!(
-            carried.boolean_setting(manifest::PolicySetting::CliChannelEnabled),
-            Some(true)
-        );
-        assert_eq!(carried.config[1].level, manifest::SettingLevel::Recommended);
-        let off = refused(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[],"config":[{"key":"channels.mcp.enabled","value":"no","level":"mandatory"}]}"#,
-        );
-        assert_eq!(off.len(), 1);
-        assert!(off[0].contains("must be a boolean"), "{off:?}");
-    }
-
-    #[test]
-    fn a_grant_that_enforces_and_an_emptied_config_leave_a_plain_document() {
-        let migration = moved(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"g","mode":"enforce","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"policy.user.enabled","value":true,"level":"mandatory"}]}"#,
-        );
-        assert!(!migration.document.contains("config"));
-        assert!(!migration.document.contains("mode"));
-        assert!(migration
-            .removed
+        let keys: Vec<_> = carried
+            .config
             .iter()
-            .any(|line| line.contains("grants[0].mode")));
-        let carried = manifest::parse(&migration.document, "moved").unwrap();
-        assert!(carried.config.is_empty());
-    }
-
-    #[test]
-    fn the_organization_and_identity_blocks_survive() {
-        let migration = moved(
-            r#"{"schema":3,"name":"org","version":"1","identity":{"principal":"Ada"},"organization":{"name":"Example","contacts":[{"kind":"email","value":"a@example.com"}]},"grants":[]}"#,
-        );
-        let carried = manifest::parse(&migration.document, "moved").unwrap();
+            .map(|entry| entry.key.as_str())
+            .collect();
+        assert_eq!(keys, [mcp.key(), cli.key(), startup.key()]);
         assert_eq!(carried.identity.unwrap().principal.as_deref(), Some("Ada"));
         let organization = carried.organization.unwrap();
         assert_eq!(organization.name, "Example");
-        assert_eq!(organization.contacts.len(), 1);
-        assert!(!migration.document.contains("null"));
-    }
+        assert_eq!(organization.contacts[0].value, "a@example.com");
+        let mut expected = vec![migration::removed(Retired::Mode, MODE_KEY)];
+        expected.extend(RETIRED_SETTINGS.map(|retired| {
+            migration::removed(retired, retired.config_key().expect("a config key"))
+        }));
+        assert_eq!(migration.removed, expected);
+        assert!(migration.document.ends_with('\n'));
 
-    #[test]
-    fn every_shape_that_would_change_meaning_is_refused_with_one_sentence_each() {
-        let cases = [
-            (r#""mode":"observe","grants":[]"#, "observe mode"),
-            (
-                r#""grants":[{"id":"g","mode":"observe","hosts":{"allow":["*"]},"allowed":["read"]}]"#,
-                "grants[0].mode",
-            ),
-            (
-                r#""grants":[],"config":[{"key":"content.frames.handling","value":"complete_page","level":"mandatory"}]"#,
-                "content.frames.handling",
-            ),
-            (
-                r#""grants":[],"config":[{"key":"content.frames.notice","value":"on_demand","level":"mandatory"}]"#,
-                "content.frames.notice",
-            ),
-        ];
-        for (body, expected) in cases {
-            let text = format!(r#"{{"schema":3,"name":"mine","version":"1",{body}}}"#);
-            let reasons = refused(&text);
-            assert_eq!(reasons.len(), 1, "{body}: {reasons:?}");
-            assert!(reasons[0].contains(expected), "{body}: {reasons:?}");
-        }
-        let both = refused(
-            r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[],"config":[{"key":"content.frames.notice","value":"on_demand","level":"mandatory"}]}"#,
-        );
-        assert_eq!(both.len(), 2);
-    }
-
-    #[test]
-    fn content_schema_four_would_refuse_is_refused_not_carried() {
-        let reasons = refused(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"g","hosts":{"allow":["not a host"]},"allowed":["read"]}]}"#,
-        );
-        assert_eq!(reasons.len(), 1);
-        assert!(
-            reasons[0].contains("grants[0].hosts.allow[0]"),
-            "{reasons:?}"
-        );
-        let unknown = refused(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[],"config":[{"key":"browser.unheard","value":true,"level":"mandatory"}]}"#,
-        );
-        assert!(
-            unknown[0].contains("not a registered policy setting"),
-            "{unknown:?}"
-        );
-    }
-
-    #[test]
-    fn current_and_unreadable_documents_are_told_apart() {
+        let grant_mode = moved(&schema_3(&format!(
+            r#""grants":[{{"id":"g","{MODE_KEY}":"{MODE_ENFORCE}","hosts":{{"allow":["*"]}},"allowed":["read"]}}]"#
+        )));
+        let grant_path = format!("grants[0].{MODE_KEY}");
         assert_eq!(
-            migrate(r#"{"schema":4,"name":"n","version":"1","grants":[]}"#, "p").unwrap(),
-            Outcome::Current
+            grant_mode.removed,
+            [migration::removed(Retired::Mode, &grant_path)]
         );
-        for text in [
-            r#"{"schema":2,"name":"n","version":"1","grants":[]}"#,
-            r#"{"name":"n"}"#,
-            "{half",
+        assert!(manifest::parse(&grant_mode.document, "moved").is_ok());
+
+        let [_, handling, notice] = RETIRED_SETTINGS;
+        let setting = |retired: Retired, value: &str| {
+            format!(
+                r#"{{"key":"{}","value":"{value}","level":"mandatory"}}"#,
+                retired.config_key().expect("a config key")
+            )
+        };
+        let observe = json!("observe");
+        for (body, expected) in [
+            (
+                format!(r#""{MODE_KEY}":"observe","grants":[]"#),
+                vec![migration::refused(Retired::Mode, MODE_KEY, &observe)],
+            ),
+            (
+                format!(
+                    r#""grants":[{{"id":"g","{MODE_KEY}":"observe","hosts":{{"allow":["*"]}},"allowed":["read"]}}]"#
+                ),
+                vec![migration::refused(Retired::Mode, &grant_path, &observe)],
+            ),
+            (
+                format!(
+                    r#""grants":[],"config":[{}]"#,
+                    setting(handling, "complete_page")
+                ),
+                vec![migration::refused(
+                    handling,
+                    handling.config_key().unwrap(),
+                    &json!("complete_page"),
+                )],
+            ),
+            (
+                format!(r#""grants":[],"config":[{}]"#, setting(notice, "on_demand")),
+                vec![migration::refused(
+                    notice,
+                    notice.config_key().unwrap(),
+                    &json!("on_demand"),
+                )],
+            ),
+            (
+                format!(
+                    r#""{MODE_KEY}":"observe","grants":[],"config":[{}]"#,
+                    setting(notice, "on_demand")
+                ),
+                vec![
+                    migration::refused(Retired::Mode, MODE_KEY, &observe),
+                    migration::refused(notice, notice.config_key().unwrap(), &json!("on_demand")),
+                ],
+            ),
         ] {
-            assert!(matches!(
-                migrate(text, "p").unwrap_err(),
-                MigrateError::Unreadable(_)
-            ));
+            assert_eq!(refused(&schema_3(&body)), expected, "{body}");
         }
-        assert!(matches!(
-            migrate(r#"{"schema":4,"name":"","version":"1","grants":[]}"#, "p").unwrap_err(),
-            MigrateError::Unreadable(_)
-        ));
+
+        // Content schema 4 itself would refuse is refused, never carried, naming where it is.
+        for (body, path) in [
+            (
+                r#""grants":[{"id":"g","hosts":{"allow":["not a host"]},"allowed":["read"]}]"#,
+                "grants[0].hosts.allow[0]",
+            ),
+            (
+                r#""grants":[],"config":[{"key":"browser.unheard","value":true,"level":"mandatory"}]"#,
+                "config[0].key",
+            ),
+            (
+                r#""grants":[],"config":[{"key":"channels.mcp.enabled","value":"no","level":"mandatory"}]"#,
+                "config[0].value",
+            ),
+        ] {
+            let reasons = refused(&schema_3(body));
+            assert_eq!(reasons.len(), 1, "{body}: {reasons:?}");
+            assert!(reasons[0].contains(path), "{body}: {reasons:?}");
+        }
     }
 
+    /// Whether an error is the refusal a row expects.
+    type Refusal = fn(&MigrateError) -> bool;
+
+    /// ACCEPTANCE Governance 4 and fafb0cb5: policy migrate moves a named schema-3 file in place.
+    /// The original is kept beside it as <file>.schema3.bak, readable only by the user, the moved
+    /// file keeps the access it had, and a second run finds it current and changes nothing. A file
+    /// it cannot move stays byte for byte, with no backup written and an existing one untouched:
+    /// one whose meaning would change, one this build cannot read (never reported as current), or
+    /// one whose backup path already holds something else.
     #[test]
-    fn a_file_moves_with_a_backup_and_a_second_run_changes_nothing() {
-        let path = temporary("moves");
-        let original =
-            format!(r#"{{"schema":3,"name":"mine","version":"1","mode":"enforce",{GRANTS}}}"#);
+    fn policy_migrate_changes_a_file_only_by_one_whole_move_with_a_private_backup() {
+        const EARLIER_COPY: &str = "an earlier copy";
+        let path = Scratch::file("migrate-moves.json");
+        let original = schema_3(&format!(r#""mode":"{MODE_ENFORCE}",{GRANTS}"#));
         fs::write(&path, &original).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
         let (backup, migration) = migrate_file(&path, Access::Kept)
             .unwrap()
             .expect("the file moves");
-        assert_eq!(backup, backup_path(&path));
+        assert_eq!(
+            backup,
+            PathBuf::from(format!("{}{BACKUP_SUFFIX}", path.display()))
+        );
         assert_eq!(fs::read_to_string(&backup).unwrap(), original);
         assert_eq!(fs::read_to_string(&path).unwrap(), migration.document);
         assert!(manifest::parse(&migration.document, "moved").is_ok());
+        assert_owner_only(&backup);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o644,
+                "the moved file keeps the access it had"
+            );
+        }
         assert_eq!(migrate_file(&path, Access::Kept).unwrap(), None);
+        assert_eq!(fs::read_to_string(&path).unwrap(), migration.document);
         assert_eq!(fs::read_to_string(&backup).unwrap(), original);
-    }
 
-    #[cfg(unix)]
-    #[test]
-    fn a_migrated_file_keeps_its_access_and_its_backup_is_private() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let path = temporary("access");
-        let original = format!(r#"{{"schema":3,"name":"mine","version":"1",{GRANTS}}}"#);
-        fs::write(&path, &original).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-        let (backup, _) = migrate_file(&path, Access::Kept)
-            .unwrap()
-            .expect("the file moves");
-        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&path), 0o644);
-        assert_eq!(mode(&backup), 0o600);
-    }
-
-    #[test]
-    fn a_refused_file_is_left_untouched_with_no_backup() {
-        let path = temporary("refused");
-        let original = r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[]}"#;
-        fs::write(&path, original).unwrap();
-        assert!(matches!(
-            migrate_file(&path, Access::Kept).unwrap_err(),
-            MigrateError::Refused(_)
-        ));
-        assert_eq!(fs::read_to_string(&path).unwrap(), original);
-        assert!(!backup_path(&path).exists());
-    }
-
-    #[test]
-    fn a_backup_holding_something_else_stops_the_move_before_anything_changes() {
-        let path = temporary("in-the-way");
-        let original = format!(r#"{{"schema":3,"name":"mine","version":"1",{GRANTS}}}"#);
-        fs::write(&path, &original).unwrap();
-        let backup = backup_path(&path);
-        fs::write(&backup, "an earlier copy").unwrap();
-        assert!(matches!(
-            migrate_file(&path, Access::Kept).unwrap_err(),
-            MigrateError::Unwritable(_)
-        ));
-        assert_eq!(fs::read_to_string(&path).unwrap(), original);
-        assert_eq!(fs::read_to_string(&backup).unwrap(), "an earlier copy");
+        let refused_document = schema_3(r#""mode":"observe","grants":[]"#);
+        let movable = schema_3(GRANTS);
+        let rows: [(&str, &str, Option<&str>, Refusal); 6] = [
+            ("meaning would change", &refused_document, None, |error| {
+                matches!(error, MigrateError::Refused(_))
+            }),
+            ("not JSON", "{half", None, |error| {
+                matches!(error, MigrateError::Unreadable(_))
+            }),
+            (
+                "an invalid schema-4 document",
+                r#"{"schema":4,"name":"","version":"1","grants":[]}"#,
+                None,
+                |error| matches!(error, MigrateError::Unreadable(_)),
+            ),
+            (
+                "schema 2",
+                r#"{"schema":2,"name":"n","version":"1","grants":[]}"#,
+                None,
+                |error| matches!(error, MigrateError::Unreadable(_)),
+            ),
+            ("no schema", r#"{"name":"n"}"#, None, |error| {
+                matches!(error, MigrateError::Unreadable(_))
+            }),
+            (
+                "a backup in the way",
+                &movable,
+                Some(EARLIER_COPY),
+                |error| matches!(error, MigrateError::Unwritable(_)),
+            ),
+        ];
+        for (row, text, earlier, refusal) in rows {
+            let path = Scratch::file("migrate-stays.json");
+            fs::write(&path, text).unwrap();
+            let backup = backup_path(&path);
+            if let Some(earlier) = earlier {
+                fs::write(&backup, earlier).unwrap();
+            }
+            let error = migrate_file(&path, Access::Kept).unwrap_err();
+            assert!(refusal(&error), "{row}: {error}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), text, "{row}");
+            match earlier {
+                Some(earlier) => {
+                    assert_eq!(fs::read_to_string(&backup).unwrap(), earlier, "{row}");
+                }
+                None => assert!(!backup.exists(), "{row}: a backup was written"),
+            }
+        }
     }
 }
