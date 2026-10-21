@@ -35,14 +35,14 @@ In order. "After" names what a slice waits for.
 | SERV-8 | refactor(service): one end for the three exits | SERV-3 | SERV-8 | todo |
 | SERV-10 | refactor(service): one start function | SERV-3 | SERV-10; the two browser handles stay for the tests' fake | todo |
 | SERV-6 | refactor(intake): the service's vocabulary is read where the CLI reads it | - | SERV-6, both halves in one slice | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
-| SERV-12 | refactor(diagnostics): one typed record | - | SERV-12; optional fields, relay's writer pinned by a round-trip test | todo |
+| SERV-12 | refactor(diagnostics): one typed record | - | SERV-12; optional fields, relay's writer pinned by a round-trip test | moved to test-01 (LEDGER-core-language.md), 2026-10-21 |
 | SERV-11 | refactor(service): one name per meaning on the service side | SERV-3 | SERV-11's service half | todo |
 | SERV-14 | docs(service): the module docs map the crate | SERV-11 | SERV-14 | todo |
 | BROW-1 | refactor(browser): protocol 4's frames and hello validators move into protocol 4 | C3c | BROW-1 as corrected; the registry stays in `browser/`; cross-lane `browser/adapter/` | todo |
 | BROW-5 | refactor(browser): the `Work` alias goes | - | BROW-5 | todo |
 | BROW-8 | refactor(browser): the port's literals are named | - | BROW-8's port half; `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` as a check, not a tie | todo |
 | BROW-11 | docs(browser): the port's docs match the code | BROW-1 | BROW-11's port half | todo |
-| BROW-12 | refactor(browser): one SHA-256 helper | - | BROW-12's hash part | todo |
+| BROW-12 | refactor(browser): one SHA-256 helper | - | BROW-12's hash part | landed with the adapter's BROW-12a (52753883); nothing of it is left in this lane's files, and governance's own hex writers are policy's |
 | BROW-13 | refactor(browser): the display-session module says what it is | - | BROW-13 as corrected: the `session.rs` rename and the golden path | todo |
 
 ## Notes
@@ -91,4 +91,8 @@ changes, so relay revision 5 replaces 4 and the service admits both (`intake/lis
 `crates/relay`, the edges' wake tests in `port/tests.rs` and `forward/tests.rs`, `golden5.rs`, the
 listener's revisions test and the service's publication test. The live proof runs on a test
 machine: Quit, wait past 30 s, an agent call, and the browser is back within a second with no
-second window.
+second window. Done on 2026-10-21. On leo-desktop-02 Chrome attached 57 ms after the service
+was ready, with no second window, and `edges_woken woken=2` logged beside `service_ready`. On
+Bluefin, run 2 attached the browser 27 ms after the start, with no `browser_startup_manual`. The
+Linux relay and edge tests pass. A woken browser edge exits without removing its registration,
+and the next start sweeps it (`removed=1`), as the wake module says.

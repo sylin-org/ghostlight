@@ -1795,3 +1795,8 @@ or edge source" is amended once more, for that change alone. It bumps `RELAY` to
 service admits revisions 4 and 5. The running 2.0.x edges that the second sweep's Decision 19
 protects therefore keep working. EXT-3 and EXT-4 stay out: nothing else moves into the relay or
 the edge.
+
+Follow-up (2026-10-21): SERV-12 extracts the builder of the edge's diagnostics line in
+`crates/relay/src/log.rs` into `log::line`, so the bridge's typed record can pin it with a round
+trip. No byte or behavior changes, and it rides in the same unpublished revision 5, so the lock is
+lifted for that extraction too and for nothing else.

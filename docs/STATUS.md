@@ -218,6 +218,13 @@ Now:
   candidate is built and re-verified on every machine. Then, at the owner's go, the staged store
   submission is cancelled for the refactored extension, and the cutover of `docs/RELEASE.md`
   follows.
+- The second sweep's defect slices fixed the after-Quit reconnect too (S-D3, the owner's design of
+  2026-10-20, the ADR-0199 amendment of that day). A waiting edge registers a wake endpoint, and a
+  ready service wakes every one of them, with the backoff kept as the fallback. The edge and the
+  relay are now relay revision 5, and the service admits 4 and 5. The extension is unchanged.
+  Proven live on 2026-10-21. On leo-desktop-02, 54 s after a Quit, an agent call attached the open
+  Chrome 57 ms after the service was ready, with no second window. On Bluefin, 48 s after a Quit,
+  the browser edge attached 27 ms after the start, with no `browser_startup_manual`.
 - The public one-liner on the real installations, which the cutover went on without: done on
   CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
   service is kept until `--restore`, so a second candidate of one version is installed after an
