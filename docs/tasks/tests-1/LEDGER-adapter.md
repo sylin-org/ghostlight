@@ -12,14 +12,15 @@ ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (
 (`assets.rs`), A5 (`work.rs`), A6
 (`geometry/tests.rs`), A7 (`locator.rs`), A8
 (`scope/tests.rs`), A9 (`tree/tests.rs`),
-A10 (`merge/tests.rs`) and A11 (`link/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+A10 (`merge/tests.rs`), A11 (`link/tests.rs`) and A12 (`connection/tests.rs`) have
+landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 165 |
+| `browser/adapter/` | 337 | 55 | 156 |
 
 ## Slices
 
@@ -38,7 +39,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A8 | `protocol4/scope/tests.rs`: admission, the guard, the settle budget and coverage | 26 | 4 | promise 3, defect 1 | landed (6dcc12bf) |
 | A9 | `protocol4/tree/tests.rs`: the tree the service builds from the extension's inventory | 15 | 2 | contract 2 | landed (91439a0f) |
 | A10 | `protocol4/merge/tests.rs`: one answer across documents | 37 | 5 | promise 2, defect 3 | landed (72bdfc86) |
-| A11 | `protocol4/link/tests.rs`: what the Link promises the executor | 20 | 8 | promise 4, contract 2, defect 2 | landed (this commit) |
+| A11 | `protocol4/link/tests.rs`: what the Link promises the executor | 20 | 8 | promise 4, contract 2, defect 2 | landed (e7ab9fd6) |
+| A12 | `protocol4/connection/tests.rs`: one browser's connection, from hello to its end | 16 | 7 | promise 4, contract 1, defect 2 | landed (this commit) |
 
 ## Notes
 
@@ -130,6 +132,16 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   group-key digest, a spec-name check the golden pins, the recording-id test the request fixtures
   pin, and the tab lookup's private listing; the rest are rows of the kept tests. The deadline
   test's 200 ms lateness bound goes: a deadline only bounds a failure.
+- A12: kept seven: the service's answer to a first frame (accepted with the assets, refused with
+  why, or closed silently; contracts 5); the extension life each hello names and each departure
+  carries (ADR-0203 Decision 1); events through the real reader, attention, and unknown frames
+  ignored (executor H8); heartbeats keep liveness and silence fails nothing (contracts 17); an
+  undecodable frame ends nothing (P-D5, 583b637a); the end of the stream fails waiting calls and
+  detaches; and a publish during attach reaches the connection (4f7b3b69). The heartbeat test's
+  two fixed sleeps are now waits on heartbeat counts, with a 500 ms timeout in place of 60 ms, and
+  a 10 ms receive on a closed channel is a `try_recv`; ten runs in a row passed. Cut: a writer
+  test the link's cancel and notice tests prove through the real path, and a publish test the race
+  test repeats.
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden

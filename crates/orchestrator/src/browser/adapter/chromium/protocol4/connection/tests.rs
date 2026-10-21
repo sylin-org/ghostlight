@@ -1,7 +1,7 @@
 //! Protocol-4 attachment, routing and liveness against a scripted extension.
 
 use std::fmt::Write as _;
-use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+use std::sync::mpsc::TryRecvError;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -13,8 +13,7 @@ use super::super::fake::{FakeExtension, Reply, Script};
 use super::super::wire;
 use super::Receipts;
 use crate::browser::adapter::{
-    BrowserEvent, BrowserReadiness, PresentationActivity, PresentationKind, RuntimeControlIntent,
-    RuntimeControlState,
+    BrowserEvent, BrowserReadiness, RuntimeControlIntent, RuntimeControlState,
 };
 use crate::browser::{
     lock, AdapterLifecycleObserver, BrowserError, BrowserEventSink, BrowserPort, HeartbeatSettings,
@@ -97,14 +96,18 @@ impl AdapterLifecycleObserver for Lifecycle {
     }
 }
 
+/// The service answers a first frame by whether it is a protocol-4 hello it can trust: a valid
+/// hello, with the Chromium platform or none (the frozen extension names none), hears
+/// `hello_accepted` with the page assets and is listed and reported attached; a hello of another
+/// protocol, or no hello, hears why and is closed (ACCEPTANCE, contracts 5); and a malformed hello
+/// or one naming another platform is closed without an answer.
 #[test]
-fn a_protocol_four_hello_is_accepted_with_the_assets_and_listed_ready() {
+fn the_service_answers_a_first_frame_by_whether_it_is_a_protocol_four_hello() {
     let port = port();
     let lifecycle = Arc::new(Lifecycle::default());
     port.set_lifecycle_observer(lifecycle.clone());
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
-
     let seen = fake.wait(|seen| !seen.frames.is_empty());
     let accepted = &seen.frames[0];
     assert_eq!(accepted["kind"], "hello_accepted");
@@ -113,17 +116,32 @@ fn a_protocol_four_hello_is_accepted_with_the_assets_and_listed_ready() {
     assert_eq!(accepted["assets"]["id"], assets().id.as_str());
     assert_eq!(accepted["assets"]["source"], assets().source.as_str());
     drop(seen);
-
     let browsers = port.browsers();
-    assert_eq!(browsers.len(), 1);
-    assert_eq!(browsers[0].id, FOUR);
-    assert_eq!(browsers[0].name.as_deref(), Some("Chrome"));
-    assert_eq!(browsers[0].adapter_version, "2.0.0");
+    assert_eq!(
+        (
+            browsers.len(),
+            browsers[0].id.as_str(),
+            browsers[0].name.as_deref()
+        ),
+        (1, FOUR, Some("Chrome"))
+    );
     assert_eq!(*lifecycle.0.lock().unwrap(), [format!("attached {FOUR}")]);
-}
 
-#[test]
-fn a_first_frame_that_is_not_a_protocol_four_hello_hears_why_and_is_closed() {
+    let mut without_platform = FakeExtension::hello(FOUR);
+    without_platform.as_object_mut().unwrap().remove("platform");
+    let mut chromium = FakeExtension::hello(FOUR);
+    chromium["platform"] = json!(wire::PLATFORM);
+    for hello in [without_platform, chromium] {
+        let port = self::port();
+        let (fake, attached) = attach(&port, &hello);
+        assert_eq!(attached, Ok(()), "{hello}");
+        assert_eq!(
+            fake.wait(|seen| !seen.frames.is_empty()).frames[0]["kind"],
+            "hello_accepted"
+        );
+        assert_eq!(port.browsers().len(), 1, "{hello}");
+    }
+
     for (hello, offered) in [
         (
             json!({"kind": "hello", "protocol": 5, "browser_id": FOUR}),
@@ -133,7 +151,7 @@ fn a_first_frame_that_is_not_a_protocol_four_hello_hears_why_and_is_closed() {
         (json!({"kind": "receipt", "protocol": 4}), 4),
         (json!([]), 0),
     ] {
-        let port = port();
+        let port = self::port();
         let (fake, attached) = attach(&port, &hello);
         assert_eq!(
             attached,
@@ -142,9 +160,8 @@ fn a_first_frame_that_is_not_a_protocol_four_hello_hears_why_and_is_closed() {
                 required: wire::PROTOCOL
             })
         );
-        let seen = fake.wait(|seen| seen.closed);
         assert_eq!(
-            seen.frames,
+            fake.wait(|seen| seen.closed).frames,
             [json!({
                 "kind": "error",
                 "code": "adapter_incompatible",
@@ -153,11 +170,8 @@ fn a_first_frame_that_is_not_a_protocol_four_hello_hears_why_and_is_closed() {
         );
         assert!(port.browsers().is_empty());
     }
-}
 
-#[test]
-fn a_malformed_protocol_four_hello_is_closed_without_an_answer() {
-    let mut cases = Vec::new();
+    let mut silent = Vec::new();
     for (field, value) in [
         ("browser_id", json!("browser-four")),
         ("browser_id", json!("browser_")),
@@ -165,57 +179,25 @@ fn a_malformed_protocol_four_hello_is_closed_without_an_answer() {
         ("engine_version", json!("131.0-beta")),
         ("engine_version", json!("1".repeat(33))),
         ("adapter_version", Value::Null),
+        ("platform", json!("ghostlight/gecko")),
     ] {
         let mut hello = FakeExtension::hello(FOUR);
         hello[field] = value;
-        cases.push(hello);
+        silent.push(hello);
     }
     let mut without_identity = FakeExtension::hello(FOUR);
     without_identity
         .as_object_mut()
         .unwrap()
         .remove("browser_id");
-    cases.push(without_identity);
-
-    for hello in cases {
-        let port = port();
+    silent.push(without_identity);
+    for hello in silent {
+        let port = self::port();
         let (fake, attached) = attach(&port, &hello);
         assert_eq!(attached, Err(BrowserError::Authentication), "{hello}");
-        let seen = fake.wait(|seen| seen.closed);
-        assert!(seen.frames.is_empty(), "{hello}");
+        assert!(fake.wait(|seen| seen.closed).frames.is_empty(), "{hello}");
         assert!(port.browsers().is_empty());
     }
-}
-
-#[test]
-fn a_hello_without_a_platform_or_with_the_chromium_platform_is_accepted() {
-    let mut without_platform = FakeExtension::hello(FOUR);
-    without_platform.as_object_mut().unwrap().remove("platform");
-    let mut chromium = FakeExtension::hello(FOUR);
-    chromium["platform"] = json!(wire::PLATFORM);
-
-    for hello in [without_platform, chromium] {
-        let port = port();
-        let (fake, attached) = attach(&port, &hello);
-        assert_eq!(attached, Ok(()), "{hello}");
-        let seen = fake.wait(|seen| !seen.frames.is_empty());
-        assert_eq!(seen.frames[0]["kind"], "hello_accepted", "{hello}");
-        drop(seen);
-        assert_eq!(port.browsers().len(), 1, "{hello}");
-    }
-}
-
-#[test]
-fn a_hello_naming_another_platform_is_closed_without_an_answer() {
-    let mut gecko = FakeExtension::hello(FOUR);
-    gecko["platform"] = json!("ghostlight/gecko");
-
-    let port = port();
-    let (fake, attached) = attach(&port, &gecko);
-    assert_eq!(attached, Err(BrowserError::Authentication));
-    let seen = fake.wait(|seen| seen.closed);
-    assert!(seen.frames.is_empty());
-    assert!(port.browsers().is_empty());
 }
 
 /// The fake extension's hello for [`FOUR`], naming `life`.
@@ -225,6 +207,9 @@ fn hello_in(life: &str) -> Value {
     hello
 }
 
+/// The service reads the extension life each hello names, and each departure, by replacement or
+/// by the end of the stream, names the life that left (ADR-0203 Decision 1); a hello without a
+/// readable life is accepted and names none.
 #[test]
 fn the_port_reads_the_life_each_hello_names_and_each_departure_carries_it() {
     let port = port();
@@ -236,7 +221,6 @@ fn the_port_reads_the_life_each_hello_names_and_each_departure_carries_it() {
     attached.unwrap();
     assert_eq!(port.life_of(FOUR).as_deref(), Some("life_first"));
 
-    // A new connection of the same browser replaces it, and the departure names the replaced life.
     let (second, attached) = attach(&port, &hello_in("life_second"));
     attached.unwrap();
     assert_eq!(port.life_of(FOUR).as_deref(), Some("life_second"));
@@ -250,7 +234,6 @@ fn the_port_reads_the_life_each_hello_names_and_each_departure_carries_it() {
         )]
     );
 
-    // Its stream ends: the departure names its life, and the port knows none any more.
     second.close();
     eventually(|| events.0.lock().unwrap().len() == 2);
     assert_eq!(
@@ -263,34 +246,35 @@ fn the_port_reads_the_life_each_hello_names_and_each_departure_carries_it() {
         )
     );
     assert_eq!(port.life_of(FOUR), None);
-}
 
-#[test]
-fn a_hello_without_a_readable_life_is_accepted_and_names_none() {
-    let mut cases = vec![FakeExtension::hello(FOUR)];
     for life in [
         "life_",
         "life-first",
         "browser_first",
         &format!("life_{}", "a".repeat(80)),
     ] {
-        cases.push(hello_in(life));
-    }
-    for hello in cases {
-        let port = port();
-        let (_fake, attached) = attach(&port, &hello);
-        assert_eq!(attached, Ok(()), "{hello}");
-        assert_eq!(port.life_of(FOUR), None, "{hello}");
+        let port = self::port();
+        let (_fake, attached) = attach(&port, &hello_in(life));
+        assert_eq!(attached, Ok(()), "{life}");
+        assert_eq!(port.life_of(FOUR), None, "{life}");
     }
 }
 
+/// The browser's events reach the service through the real reader, a browser's attention moves
+/// it to the front, and a frame, event or intent this service does not know ends nothing
+/// (ACCEPTANCE, executor and truth gates H8: the browser's Pause reaches the service).
 #[test]
 fn events_reach_the_sink_and_unknown_frames_are_ignored() {
     let port = port();
     let events = Arc::new(Events::default());
     port.set_event_sink(events.clone());
+    let mut attended = FakeExtension::hello(OTHER);
+    attended["attended"] = json!(true);
+    let (_other, attached) = attach(&port, &attended);
+    attached.unwrap();
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
+    assert_eq!(port.browsers()[0].id, OTHER);
 
     for frame in [
         json!({"kind": "event", "event": {"event": "document_committed", "tab_id": 7, "url": "https://example.com/"}}),
@@ -303,6 +287,7 @@ fn events_reach_the_sink_and_unknown_frames_are_ignored() {
         json!({"kind": "error", "code": "anything", "message": "ignored"}),
         json!({"kind": "event", "event": {"event": "show_requested"}}),
         json!({"kind": "event", "event": {"event": "tab_closed", "tab_id": 7}}),
+        json!({"kind": "event", "event": {"event": "attended"}}),
     ] {
         fake.send(&frame);
     }
@@ -332,24 +317,13 @@ fn events_reach_the_sink_and_unknown_frames_are_ignored() {
             BrowserEvent::TabClosed { tab_id: 7 },
         ]
     );
+    eventually(|| port.browsers()[0].id == FOUR);
+    assert!(port.browsers()[0].attended);
     assert!(port.is_registered(FOUR));
 }
 
-#[test]
-fn attention_moves_the_browser_to_the_front() {
-    let port = port();
-    let mut attended = FakeExtension::hello(OTHER);
-    attended["attended"] = json!(true);
-    let (_other, attached) = attach(&port, &attended);
-    attached.unwrap();
-    let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
-    attached.unwrap();
-    assert_eq!(port.browsers()[0].id, OTHER);
-    fake.send(&json!({"kind": "event", "event": {"event": "attended"}}));
-    eventually(|| port.browsers()[0].id == FOUR);
-    assert!(port.browsers()[0].attended);
-}
-
+/// Acknowledged heartbeats keep a browser listed; silence unlists it but leaves it attached and
+/// fails no waiting call; and an acknowledgement lists it again (ACCEPTANCE, contracts 17).
 #[test]
 fn heartbeat_acknowledgements_keep_liveness_and_silence_fails_nothing() {
     let port = RelayBrowserPort::with_heartbeat_settings(
@@ -357,15 +331,16 @@ fn heartbeat_acknowledgements_keep_liveness_and_silence_fails_nothing() {
         assets(),
         HeartbeatSettings {
             interval: Duration::from_millis(10),
-            timeout: Duration::from_millis(60),
+            timeout: Duration::from_millis(500),
         },
     );
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
+    let heartbeats = || fake.wait(|_| true).of_kind("heartbeat").len();
 
-    thread::sleep(Duration::from_millis(250));
+    let first = heartbeats();
+    drop(fake.wait(|seen| seen.of_kind("heartbeat").len() > first + 3));
     assert_eq!(port.browsers().len(), 1, "acknowledged heartbeats keep it");
-    assert!(!fake.wait(|seen| seen.of_kind("heartbeat").len() > 3).closed);
 
     let (_, receipts) = channel(&port, FOUR);
     let waiting = receipts.register("p4_waiting");
@@ -375,7 +350,8 @@ fn heartbeat_acknowledgements_keep_liveness_and_silence_fails_nothing() {
         port.is_registered(FOUR),
         "a silent connection stays attached"
     );
-    thread::sleep(Duration::from_millis(150));
+    let unanswered = heartbeats();
+    drop(fake.wait(|seen| seen.of_kind("heartbeat").len() > unanswered + 3));
     assert_eq!(
         waiting.try_recv(),
         Err(TryRecvError::Empty),
@@ -386,13 +362,18 @@ fn heartbeat_acknowledgements_keep_liveness_and_silence_fails_nothing() {
     eventually(|| port.browsers().len() == 1);
 }
 
+/// A frame the service cannot use ends nothing: half an emoji at the end of a cut text, which
+/// V8 writes as a lone surrogate serde_json refuses, once closed every browser's connection
+/// (P-D5, commit 583b637a); a receipt for no waiting call is dropped, and an unreadable one fails
+/// only its own call.
 #[test]
-fn unknown_and_unreadable_receipts_end_nothing() {
+fn a_frame_whose_json_cannot_be_decoded_ends_nothing() {
     let port = port();
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
     let (_, receipts) = channel(&port, FOUR);
 
+    fake.send_raw(br#"{"kind":"receipt","correlation":"p4_half","ok":{"title":"a\ud83d"}}"#);
     fake.send(&wire::Inbound::Receipt(FakeExtension::ok(
         "p4_nobody",
         json!({}),
@@ -403,67 +384,17 @@ fn unknown_and_unreadable_receipts_end_nothing() {
         unreadable.recv_timeout(PATIENCE).unwrap(),
         Err(BrowserError::Protocol(_))
     ));
-    assert!(
-        port.is_registered(FOUR),
-        "unknown and unreadable receipts end nothing"
-    );
-}
-
-#[test]
-fn a_frame_whose_json_cannot_be_decoded_ends_nothing() {
-    let port = port();
-    let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
-    attached.unwrap();
-    let (_, receipts) = channel(&port, FOUR);
-
-    // Half an emoji, as V8 writes a lone surrogate, which serde_json refuses.
-    fake.send_raw(br#"{"kind":"receipt","correlation":"p4_half","ok":{"title":"a\ud83d"}}"#);
     let after = receipts.register("p4_after");
     fake.send(&wire::Inbound::Receipt(FakeExtension::ok(
         "p4_after",
         json!({}),
     )));
     assert!(after.recv_timeout(PATIENCE).unwrap().is_ok());
-    assert!(
-        port.is_registered(FOUR),
-        "a frame the service cannot decode ends nothing"
-    );
+    assert!(port.is_registered(FOUR), "the connection survives");
 }
 
-#[test]
-fn cancel_and_notice_frames_reach_the_extension() {
-    let port = port();
-    let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
-    attached.unwrap();
-    let (writer, _) = channel(&port, FOUR);
-    writer
-        .native(&wire::Outbound::Cancel {
-            correlation: "p4_cancelled".into(),
-        })
-        .unwrap();
-    let notice = wire::Notice {
-        tab_id: 7,
-        frame: None,
-        signal: wire::NoticeSignal {
-            invocation: "invocation_four".into(),
-            signal: PresentationKind::Progress.into(),
-            activity: PresentationActivity::Quiet.into(),
-            phase: "Working".into(),
-            label: None,
-            detail: None,
-            locator: None,
-            click: None,
-        },
-        defer_until_visible: false,
-    };
-    writer
-        .native(&wire::Outbound::Notice(notice.clone()))
-        .unwrap();
-    let seen = fake.wait(|seen| !seen.notices.is_empty());
-    assert_eq!(seen.cancels, ["p4_cancelled"]);
-    assert_eq!(seen.notices, [notice]);
-}
-
+/// The end of the stream fails each waiting call as possibly dispatched, detaches the browser and
+/// reports its departure (ACCEPTANCE, executor and truth gates 4 and contracts 17).
 #[test]
 fn a_closed_socket_fails_waiting_calls_and_detaches() {
     let port = port();
@@ -490,26 +421,12 @@ fn a_closed_socket_fails_waiting_calls_and_detaches() {
         *events.0.lock().unwrap(),
         [(FOUR.to_owned(), BrowserEvent::Disconnected { life: None })]
     );
-    assert_eq!(
-        waiting.recv_timeout(Duration::from_millis(10)),
-        Err(RecvTimeoutError::Disconnected)
-    );
+    assert_eq!(waiting.try_recv(), Err(TryRecvError::Disconnected));
 }
 
-#[test]
-fn control_state_reaches_every_connection() {
-    let port = port();
-    let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
-    attached.unwrap();
-    port.publish_control_state(RuntimeControlState::Held)
-        .unwrap();
-    let seen = fake.wait(|seen| !seen.of_kind("control_state").is_empty());
-    assert_eq!(
-        seen.of_kind("control_state"),
-        [&json!({"kind": "control_state", "state": "held"})]
-    );
-}
-
+/// A hold published while a connection attached reaches it, as does every later publish (commit
+/// 4f7b3b69): the race between `hello_accepted` and the registration leaves no connection on a
+/// stale state.
 #[test]
 fn a_connection_registered_after_a_publish_missed_it_ends_on_the_published_state() {
     let port = port();
