@@ -10,9 +10,9 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D5 and C17 (C17a and C17b) have landed; the coordinator's hold on C17's files is
-released. Next is C12b-1. A slice's hash is filled in by the next slice's commit, since a rebase
-before the push changes it.
+L-D1 to L-D5, C17 and LANG-4 have landed. C12b-1 waits on the coordinator's answer to its
+boundary proposal (Notes); until then the slices that need nothing go first. A slice's hash is
+filled in by the next slice's commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -25,9 +25,9 @@ In order. "After" names what a slice waits for.
 | L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed (09d78bd9) |
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed (b5135a14) |
-| C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b) |
+| C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b 1b693758) |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | todo |
-| LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | todo |
+| LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed |
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | todo |
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | todo |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | todo |
@@ -91,3 +91,16 @@ In order. "After" names what a slice waits for.
   list is gone (`a_new_limitation_field_reaches_the_lean_view`). One difference: a partial
   coverage object, which no result carries, now stays in the lean view instead of being dropped.
   Cross-lane: `work/composition.rs`, `work/receipt.rs`, `intake/mcp/lean.rs`.
+- C12b-1: proposed to the coordinator on 2026-10-20 as the language half: `Refusal::reason()`, the
+  closed causes (`FileProblem`, a closed export word, `ReasonCode` on `AuthorityBlocked` and
+  beside `ActionUnconfirmed`'s persisted `CheckFailure`, a `PrimitiveCause`), the (model code,
+  audit tag) table test, and work's constructor sites passing the cause they already know, with
+  every fact unchanged. C12b-2 makes the result write `reason()` and deletes the literals; the
+  adapter maps Decision 5.2's receipt codes onto the causes.
+- LANG-4: each directory entry is a named constant, and `requirements()` reads the entry an
+  exhaustive match over `Operation` reaches, so a requirement set is written once and no
+  operation can miss the directory (it fails closed by construction, not by a runtime default).
+  `DIRECTORY` keeps its order, so `ghostlight policy` prints the same table. The test fixture
+  now checks that each entry's fixture reaches that entry, and that no (tool, variant) repeats.
+  `work/tests/catalog_authority.rs` still keys requirements by (tool, variant); that copy is
+  core-work's.

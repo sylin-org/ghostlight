@@ -35,230 +35,304 @@ const fn variant(
     }
 }
 
-/// The complete current action directory.
+const TABS_LIST: CapabilityVariant = variant(
+    "browser_tabs",
+    Some("list"),
+    CapabilitySet::READ,
+    "List this workspace's bound tabs, read live from the browser.",
+);
+
+const TABS_FOCUS: CapabilityVariant = variant(
+    "browser_tabs",
+    Some("focus"),
+    CapabilitySet::EMPTY,
+    "Focus one controlled tab.",
+);
+
+const TABS_CLOSE: CapabilityVariant = variant(
+    "browser_tabs",
+    Some("close"),
+    CapabilitySet::ACTION,
+    "Close one controlled tab.",
+);
+
+const NAVIGATE: CapabilityVariant = variant(
+    "browser_navigate",
+    None,
+    CapabilitySet::READ,
+    "Retrieve a page in a controlled tab.",
+);
+
+const HISTORY: CapabilityVariant = variant(
+    "browser_history",
+    None,
+    CapabilitySet::ACTION,
+    "Traverse or reload browser history.",
+);
+
+const WINDOW_ZOOM: CapabilityVariant = variant(
+    "browser_window",
+    Some("zoom"),
+    CapabilitySet::READ,
+    "Change page zoom.",
+);
+
+const WINDOW_RESIZE: CapabilityVariant = variant(
+    "browser_window",
+    Some("resize"),
+    CapabilitySet::EMPTY,
+    "Resize browser chrome.",
+);
+
+const READ: CapabilityVariant = variant(
+    "browser_read",
+    None,
+    CapabilitySet::READ,
+    "Read bounded page text.",
+);
+
+const INSPECT: CapabilityVariant = variant(
+    "browser_inspect",
+    None,
+    CapabilitySet::READ,
+    "Inspect bounded page structure.",
+);
+
+const FIND: CapabilityVariant = variant(
+    "browser_find",
+    None,
+    CapabilitySet::READ,
+    "Find semantic page targets.",
+);
+
+const SCREENSHOT: CapabilityVariant = variant(
+    "browser_screenshot",
+    None,
+    CapabilitySet::READ,
+    "Capture a bounded page image.",
+);
+
+const CLICK: CapabilityVariant = variant(
+    "browser_click",
+    None,
+    CapabilitySet::ACTION,
+    "Activate a page target.",
+);
+
+const CLICK_SELECTOR: CapabilityVariant = variant(
+    "browser_click",
+    Some("selector"),
+    READ_ACTION,
+    "Find a named control and activate it.",
+);
+
+const CLICK_EXPECT: CapabilityVariant = variant(
+    "browser_click",
+    Some("expect"),
+    READ_ACTION,
+    "Activate a page target and observe the requested postcondition.",
+);
+
+const SCROLL: CapabilityVariant = variant(
+    "browser_scroll",
+    None,
+    CapabilitySet::READ,
+    "Scroll or reveal page content.",
+);
+
+const HOVER: CapabilityVariant = variant(
+    "browser_hover",
+    None,
+    CapabilitySet::READ,
+    "Hover over page content.",
+);
+
+const FILL: CapabilityVariant = variant(
+    "browser_fill_form",
+    Some("fill"),
+    READ_WRITE,
+    "Read targets and fill declared fields.",
+);
+
+const FILL_SUBMIT: CapabilityVariant = variant(
+    "browser_fill_form",
+    Some("submit"),
+    READ_WRITE_ACTION,
+    "Read targets, fill fields, and submit.",
+);
+
+const TYPE: CapabilityVariant = variant(
+    "browser_type_text",
+    None,
+    CapabilitySet::ACTION,
+    "Type through browser input events.",
+);
+
+const TYPE_SELECTOR: CapabilityVariant = variant(
+    "browser_type_text",
+    Some("selector"),
+    READ_ACTION,
+    "Find a named control and type through browser input events.",
+);
+
+const TYPE_EXPECT: CapabilityVariant = variant(
+    "browser_type_text",
+    Some("expect"),
+    READ_ACTION,
+    "Type through browser input events and observe the requested postcondition.",
+);
+
+const PRESS_KEY: CapabilityVariant = variant(
+    "browser_press_key",
+    None,
+    CapabilitySet::ACTION,
+    "Send one keyboard action.",
+);
+
+const PRESS_KEY_EXPECT: CapabilityVariant = variant(
+    "browser_press_key",
+    Some("expect"),
+    READ_ACTION,
+    "Send one keyboard action and observe the requested postcondition.",
+);
+
+const DRAG: CapabilityVariant = variant(
+    "browser_drag",
+    None,
+    CapabilitySet::ACTION,
+    "Perform one pointer drag.",
+);
+
+const UPLOAD: CapabilityVariant = variant(
+    "browser_upload",
+    None,
+    CapabilitySet::WRITE,
+    "Place declared files into a page input.",
+);
+
+const UPLOAD_SELECTOR: CapabilityVariant = variant(
+    "browser_upload",
+    Some("selector"),
+    READ_WRITE,
+    "Find a named file input and place declared files into it.",
+);
+
+const EXECUTE: CapabilityVariant = variant(
+    "browser_execute",
+    None,
+    CapabilitySet::EXECUTE,
+    "Evaluate explicit page JavaScript.",
+);
+
+const WAIT: CapabilityVariant = variant(
+    "browser_wait",
+    None,
+    CapabilitySet::READ,
+    "Observe one bounded page condition.",
+);
+
+const FLOW: CapabilityVariant = variant(
+    "browser_flow",
+    None,
+    CapabilitySet::EMPTY,
+    "Compose result-aware governed steps; each child authorizes normally.",
+);
+
+const DIALOG_STATUS: CapabilityVariant = variant(
+    "browser_dialog",
+    Some("status"),
+    CapabilitySet::READ,
+    "Inspect JavaScript dialog state.",
+);
+
+const DIALOG_RESOLVE: CapabilityVariant = variant(
+    "browser_dialog",
+    Some("resolve"),
+    CapabilitySet::ACTION,
+    "Accept, dismiss, or respond to a dialog.",
+);
+
+const RECORD_START: CapabilityVariant = variant(
+    "browser_record",
+    Some("start"),
+    CapabilitySet::READ,
+    "Start capturing a controlled page.",
+);
+
+const RECORD_INSPECT: CapabilityVariant = variant(
+    "browser_record",
+    Some("inspect"),
+    CapabilitySet::EMPTY,
+    "Inspect, stop, or discard volatile capture.",
+);
+
+const RECORD_SAVE_CLIENT: CapabilityVariant = variant(
+    "browser_record",
+    Some("save_client"),
+    CapabilitySet::READ,
+    "Return or download a captured page recording.",
+);
+
+const RECORD_SAVE_TARGET: CapabilityVariant = variant(
+    "browser_record",
+    Some("save_target"),
+    READ_WRITE,
+    "Read captured sources and place a recording into a page target.",
+);
+
+const DIAGNOSE: CapabilityVariant = variant(
+    "browser_diagnose",
+    None,
+    CapabilitySet::READ,
+    "Read bounded opt-in browser diagnostics.",
+);
+
+const POLICY_EXPLAIN: CapabilityVariant = variant(
+    "policy_explain",
+    None,
+    CapabilitySet::EMPTY,
+    "Explain the authority in force.",
+);
+
+/// The complete current action directory, in the order `ghostlight policy` prints it.
 pub const DIRECTORY: &[CapabilityVariant] = &[
-    variant(
-        "browser_tabs",
-        Some("list"),
-        CapabilitySet::READ,
-        "List this workspace's bound tabs, read live from the browser.",
-    ),
-    variant(
-        "browser_tabs",
-        Some("focus"),
-        CapabilitySet::EMPTY,
-        "Focus one controlled tab.",
-    ),
-    variant(
-        "browser_tabs",
-        Some("close"),
-        CapabilitySet::ACTION,
-        "Close one controlled tab.",
-    ),
-    variant(
-        "browser_navigate",
-        None,
-        CapabilitySet::READ,
-        "Retrieve a page in a controlled tab.",
-    ),
-    variant(
-        "browser_history",
-        None,
-        CapabilitySet::ACTION,
-        "Traverse or reload browser history.",
-    ),
-    variant(
-        "browser_window",
-        Some("zoom"),
-        CapabilitySet::READ,
-        "Change page zoom.",
-    ),
-    variant(
-        "browser_window",
-        Some("resize"),
-        CapabilitySet::EMPTY,
-        "Resize browser chrome.",
-    ),
-    variant(
-        "browser_read",
-        None,
-        CapabilitySet::READ,
-        "Read bounded page text.",
-    ),
-    variant(
-        "browser_inspect",
-        None,
-        CapabilitySet::READ,
-        "Inspect bounded page structure.",
-    ),
-    variant(
-        "browser_find",
-        None,
-        CapabilitySet::READ,
-        "Find semantic page targets.",
-    ),
-    variant(
-        "browser_screenshot",
-        None,
-        CapabilitySet::READ,
-        "Capture a bounded page image.",
-    ),
-    variant(
-        "browser_click",
-        None,
-        CapabilitySet::ACTION,
-        "Activate a page target.",
-    ),
-    variant(
-        "browser_click",
-        Some("selector"),
-        READ_ACTION,
-        "Find a named control and activate it.",
-    ),
-    variant(
-        "browser_click",
-        Some("expect"),
-        READ_ACTION,
-        "Activate a page target and observe the requested postcondition.",
-    ),
-    variant(
-        "browser_scroll",
-        None,
-        CapabilitySet::READ,
-        "Scroll or reveal page content.",
-    ),
-    variant(
-        "browser_hover",
-        None,
-        CapabilitySet::READ,
-        "Hover over page content.",
-    ),
-    variant(
-        "browser_fill_form",
-        Some("fill"),
-        READ_WRITE,
-        "Read targets and fill declared fields.",
-    ),
-    variant(
-        "browser_fill_form",
-        Some("submit"),
-        READ_WRITE_ACTION,
-        "Read targets, fill fields, and submit.",
-    ),
-    variant(
-        "browser_type_text",
-        None,
-        CapabilitySet::ACTION,
-        "Type through browser input events.",
-    ),
-    variant(
-        "browser_type_text",
-        Some("selector"),
-        READ_ACTION,
-        "Find a named control and type through browser input events.",
-    ),
-    variant(
-        "browser_type_text",
-        Some("expect"),
-        READ_ACTION,
-        "Type through browser input events and observe the requested postcondition.",
-    ),
-    variant(
-        "browser_press_key",
-        None,
-        CapabilitySet::ACTION,
-        "Send one keyboard action.",
-    ),
-    variant(
-        "browser_press_key",
-        Some("expect"),
-        READ_ACTION,
-        "Send one keyboard action and observe the requested postcondition.",
-    ),
-    variant(
-        "browser_drag",
-        None,
-        CapabilitySet::ACTION,
-        "Perform one pointer drag.",
-    ),
-    variant(
-        "browser_upload",
-        None,
-        CapabilitySet::WRITE,
-        "Place declared files into a page input.",
-    ),
-    variant(
-        "browser_upload",
-        Some("selector"),
-        READ_WRITE,
-        "Find a named file input and place declared files into it.",
-    ),
-    variant(
-        "browser_execute",
-        None,
-        CapabilitySet::EXECUTE,
-        "Evaluate explicit page JavaScript.",
-    ),
-    variant(
-        "browser_wait",
-        None,
-        CapabilitySet::READ,
-        "Observe one bounded page condition.",
-    ),
-    variant(
-        "browser_flow",
-        None,
-        CapabilitySet::EMPTY,
-        "Compose result-aware governed steps; each child authorizes normally.",
-    ),
-    variant(
-        "browser_dialog",
-        Some("status"),
-        CapabilitySet::READ,
-        "Inspect JavaScript dialog state.",
-    ),
-    variant(
-        "browser_dialog",
-        Some("resolve"),
-        CapabilitySet::ACTION,
-        "Accept, dismiss, or respond to a dialog.",
-    ),
-    variant(
-        "browser_record",
-        Some("start"),
-        CapabilitySet::READ,
-        "Start capturing a controlled page.",
-    ),
-    variant(
-        "browser_record",
-        Some("inspect"),
-        CapabilitySet::EMPTY,
-        "Inspect, stop, or discard volatile capture.",
-    ),
-    variant(
-        "browser_record",
-        Some("save_client"),
-        CapabilitySet::READ,
-        "Return or download a captured page recording.",
-    ),
-    variant(
-        "browser_record",
-        Some("save_target"),
-        READ_WRITE,
-        "Read captured sources and place a recording into a page target.",
-    ),
-    variant(
-        "browser_diagnose",
-        None,
-        CapabilitySet::READ,
-        "Read bounded opt-in browser diagnostics.",
-    ),
-    variant(
-        "policy_explain",
-        None,
-        CapabilitySet::EMPTY,
-        "Explain the authority in force.",
-    ),
+    TABS_LIST,
+    TABS_FOCUS,
+    TABS_CLOSE,
+    NAVIGATE,
+    HISTORY,
+    WINDOW_ZOOM,
+    WINDOW_RESIZE,
+    READ,
+    INSPECT,
+    FIND,
+    SCREENSHOT,
+    CLICK,
+    CLICK_SELECTOR,
+    CLICK_EXPECT,
+    SCROLL,
+    HOVER,
+    FILL,
+    FILL_SUBMIT,
+    TYPE,
+    TYPE_SELECTOR,
+    TYPE_EXPECT,
+    PRESS_KEY,
+    PRESS_KEY_EXPECT,
+    DRAG,
+    UPLOAD,
+    UPLOAD_SELECTOR,
+    EXECUTE,
+    WAIT,
+    FLOW,
+    DIALOG_STATUS,
+    DIALOG_RESOLVE,
+    RECORD_START,
+    RECORD_INSPECT,
+    RECORD_SAVE_CLIENT,
+    RECORD_SAVE_TARGET,
+    DIAGNOSE,
+    POLICY_EXPLAIN,
 ];
 
 /// Return every reachable requirement variant for one advertised tool.
@@ -269,47 +343,53 @@ pub fn variants(tool: &str) -> impl Iterator<Item = &'static CapabilityVariant> 
 /// Return the exact requirement set for one decoded operation.
 #[must_use]
 pub fn requirements(operation: &Operation) -> CapabilitySet {
+    entry(operation).requirements
+}
+
+/// The directory entry a decoded operation reaches. The match is exhaustive, so every operation
+/// has an entry and no requirement set is written anywhere but the directory.
+fn entry(operation: &Operation) -> &'static CapabilityVariant {
     match operation {
-        Operation::ListTabs(_) => CapabilitySet::READ,
-        Operation::ActivateTab(_) => CapabilitySet::EMPTY,
-        Operation::OpenPage(_) | Operation::NavigatePage(_) => CapabilitySet::READ,
-        Operation::NavigateHistory(_) | Operation::ReloadPage(_) => CapabilitySet::ACTION,
-        Operation::CloseTab(_) => CapabilitySet::ACTION,
-        Operation::ReadPage(_)
-        | Operation::InspectPage(_)
-        | Operation::Find(_)
-        | Operation::TakeScreenshot(_)
-        | Operation::ScrollPage(_)
-        | Operation::SetZoom(_)
-        | Operation::Hover(_)
-        | Operation::Wait(_)
-        | Operation::Diagnose(_) => CapabilitySet::READ,
-        Operation::ResizeWindow(_) => CapabilitySet::EMPTY,
-        Operation::ExplainPolicy(_) => CapabilitySet::EMPTY,
-        Operation::Click(value) if value.selector.is_some() || value.expect.is_some() => {
-            READ_ACTION
-        }
-        Operation::TypeText(value) if value.selector.is_some() || value.expect.is_some() => {
-            READ_ACTION
-        }
-        Operation::PressKey(value) if value.expect.is_some() => READ_ACTION,
-        Operation::Click(_)
-        | Operation::TypeText(_)
-        | Operation::PressKey(_)
-        | Operation::Drag(_) => CapabilitySet::ACTION,
-        Operation::FillForm(value) if value.submit_target.is_some() => READ_WRITE_ACTION,
-        Operation::FillForm(_) => READ_WRITE,
-        Operation::UploadFiles(value) if value.selector.is_some() => READ_WRITE,
-        Operation::UploadFiles(_) => CapabilitySet::WRITE,
-        Operation::RunScript(_) => CapabilitySet::EXECUTE,
+        Operation::ListTabs(_) => &TABS_LIST,
+        Operation::ActivateTab(_) => &TABS_FOCUS,
+        Operation::CloseTab(_) => &TABS_CLOSE,
+        Operation::OpenPage(_) | Operation::NavigatePage(_) => &NAVIGATE,
+        Operation::NavigateHistory(_) | Operation::ReloadPage(_) => &HISTORY,
+        Operation::SetZoom(_) => &WINDOW_ZOOM,
+        Operation::ResizeWindow(_) => &WINDOW_RESIZE,
+        Operation::ReadPage(_) => &READ,
+        Operation::InspectPage(_) => &INSPECT,
+        Operation::Find(_) => &FIND,
+        Operation::TakeScreenshot(_) => &SCREENSHOT,
+        Operation::Click(value) if value.selector.is_some() => &CLICK_SELECTOR,
+        Operation::Click(value) if value.expect.is_some() => &CLICK_EXPECT,
+        Operation::Click(_) => &CLICK,
+        Operation::ScrollPage(_) => &SCROLL,
+        Operation::Hover(_) => &HOVER,
+        Operation::FillForm(value) if value.submit_target.is_some() => &FILL_SUBMIT,
+        Operation::FillForm(_) => &FILL,
+        Operation::TypeText(value) if value.selector.is_some() => &TYPE_SELECTOR,
+        Operation::TypeText(value) if value.expect.is_some() => &TYPE_EXPECT,
+        Operation::TypeText(_) => &TYPE,
+        Operation::PressKey(value) if value.expect.is_some() => &PRESS_KEY_EXPECT,
+        Operation::PressKey(_) => &PRESS_KEY,
+        Operation::Drag(_) => &DRAG,
+        Operation::UploadFiles(value) if value.selector.is_some() => &UPLOAD_SELECTOR,
+        Operation::UploadFiles(_) => &UPLOAD,
+        Operation::RunScript(_) => &EXECUTE,
+        Operation::Wait(_) => &WAIT,
         // A flow classifies nothing itself; every child step authorizes normally.
-        Operation::RunFlow(_) => CapabilitySet::EMPTY,
-        Operation::HandleDialog(value) if value.action == "status" => CapabilitySet::READ,
-        Operation::HandleDialog(_) => CapabilitySet::ACTION,
-        Operation::Record(value) if value.action == "start" => CapabilitySet::READ,
-        Operation::Record(value) if value.action == "save" && value.target.is_some() => READ_WRITE,
-        Operation::Record(value) if value.action == "save" => CapabilitySet::READ,
-        Operation::Record(_) => CapabilitySet::EMPTY,
+        Operation::RunFlow(_) => &FLOW,
+        Operation::HandleDialog(value) if value.action == "status" => &DIALOG_STATUS,
+        Operation::HandleDialog(_) => &DIALOG_RESOLVE,
+        Operation::Record(value) if value.action == "start" => &RECORD_START,
+        Operation::Record(value) if value.action == "save" && value.target.is_some() => {
+            &RECORD_SAVE_TARGET
+        }
+        Operation::Record(value) if value.action == "save" => &RECORD_SAVE_CLIENT,
+        Operation::Record(_) => &RECORD_INSPECT,
+        Operation::Diagnose(_) => &DIAGNOSE,
+        Operation::ExplainPolicy(_) => &POLICY_EXPLAIN,
     }
 }
 
@@ -320,7 +400,7 @@ mod tests {
     use crate::governance::CapabilitySet;
     use serde_json::json;
 
-    use super::{requirements, variants, CapabilityVariant, DIRECTORY};
+    use super::{entry, requirements, variants, CapabilityVariant, DIRECTORY};
 
     fn decoded(tool: &str, input: serde_json::Value) -> CapabilitySet {
         requirements(&crate::language::decode(tool, input).expect("valid operation"))
@@ -525,13 +605,13 @@ mod tests {
 
     #[test]
     fn every_directory_entry_matches_what_decode_actually_requires() {
-        for entry in DIRECTORY {
+        for listed in DIRECTORY {
             let CapabilityVariant {
                 tool,
                 variant,
                 requirements: expected,
                 ..
-            } = *entry;
+            } = *listed;
             let input = fixture(tool, variant);
             let operation = crate::language::decode(tool, input.clone())
                 .unwrap_or_else(|error| panic!("tool={tool} variant={variant:?} input={input}: fixture must decode, got {error:?}"));
@@ -540,6 +620,31 @@ mod tests {
                 expected,
                 "tool={tool} variant={variant:?}: DIRECTORY's advertised requirement diverged \
                  from what requirements() actually returns for the decoded operation"
+            );
+            assert_eq!(
+                entry(&operation),
+                entry_of(tool, variant),
+                "tool={tool} variant={variant:?}: the decoded operation reaches another entry"
+            );
+        }
+    }
+
+    fn entry_of(tool: &str, variant: Option<&str>) -> &'static CapabilityVariant {
+        DIRECTORY
+            .iter()
+            .find(|entry| entry.tool == tool && entry.variant == variant)
+            .expect("the entry is in the directory")
+    }
+
+    #[test]
+    fn each_tool_and_variant_is_one_directory_entry() {
+        let mut seen = HashSet::new();
+        for entry in DIRECTORY {
+            assert!(
+                seen.insert((entry.tool, entry.variant)),
+                "{} {:?} appears twice",
+                entry.tool,
+                entry.variant
             );
         }
     }
