@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 144 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 136 |
 | `crates/desktop` | 161 | 20 | moved to the adapter lane (2026-10-21) |
 
 ## Slices
@@ -52,6 +52,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I28 | `cli/desktop.rs`: thirteen tests fold into two: a service start relaunches for its reason and leaves why it ended; open and call start a service for the person and reveal the window once. The open-reveal test no longer sleeps 2 s for a cold shell: its presentation refuses the first reveal and carries out the next, which proves the wait by order (service-lane note) | 189 | 178 | the start lifecycle, defect bd29366c, the open and call journeys | landed (this commit) |
 | T-I29 | `cli/setup.rs`: twenty-nine tests become three: setup and uninstall act only on what was asked and name what they did; inside an app container setup changes nothing private and says what it left; an install closes with the one next step the person needs. I-D2 is a compile-time assert beside `UNINSTALL_QUIT_WAIT`; the one-word-per-state words test goes; the scan-count test goes with `HarnessRegistry::scans`, the test-only counter it alone read (finding 5) | 178 | 152 | workbench gate 8, Desktop 24; defects 41a3f8bf, 31f2c835, 85fbfa83, 53a04ef2 | landed (this commit) |
 | T-I30 | `cli/doctor.rs`: nine tests fold into one: doctor names every state a person must act on, in text and in JSON | 152 | 144 | doctor as the support surface | landed (this commit) |
+| T-I31 | `cli/status.rs`: nine tests fold into one: status says what runs, who watches and why there is no window | 144 | 136 | the status words, as the spec gives them | landed (this commit) |
 
 ## Notes
 

@@ -172,132 +172,123 @@ mod tests {
         }
     }
 
+    /// Protects ghostlight status as the spec words it: a running service gives its counts and its
+    /// workbench and who watches, watching off and a workbench on another port say so, an older
+    /// service answers without them, each reason for the window gets its sentence and its word (an
+    /// open window only a word, no display the spec's sentence), and no service reads as not running
+    /// while an idle one that can start says how it starts.
     #[test]
-    fn a_service_with_counts_and_a_workbench_that_others_watch() {
-        let seen = observation(counts(), workbench(true, true));
-        assert_eq!(
-            runtime_lines(&seen, false),
-            [
-                "Ghostlight is running; 2 agents and 1 browser connected.",
-                "Workbench: http://127.0.0.1:47600/ -- others on this computer can watch",
-            ]
-        );
-        assert_eq!(
-            runtime_document(&seen),
-            json!({
-                "running": true,
-                "version": "2.0.0",
-                "instance": "instance_a",
-                "endpoint": ENDPOINT,
-                "connections": {"agents": 2, "mcp_clients": 3, "command_line": 0, "browsers": 1},
-                "workbench": {"url": URL, "watching": true, "usual_port": true},
-            })
-        );
-    }
-
-    #[test]
-    fn a_workbench_with_watching_off_says_so() {
-        let seen = observation(counts(), workbench(false, true));
-        assert_eq!(
-            runtime_lines(&seen, false)[1],
-            "Workbench: http://127.0.0.1:47600/ -- watching is off"
-        );
-        assert_eq!(runtime_document(&seen)["workbench"]["watching"], false);
-    }
-
-    #[test]
-    fn a_workbench_on_another_port_says_the_usual_one_was_taken() {
-        let seen = observation(counts(), workbench(true, false));
-        assert_eq!(
+    fn status_says_what_runs_who_watches_and_why_there_is_no_window() {
+        {
+            let seen = observation(counts(), workbench(true, true));
+            assert_eq!(
+                runtime_lines(&seen, false),
+                [
+                    "Ghostlight is running; 2 agents and 1 browser connected.",
+                    "Workbench: http://127.0.0.1:47600/ -- others on this computer can watch",
+                ]
+            );
+            assert_eq!(
+                runtime_document(&seen),
+                json!({
+                    "running": true,
+                    "version": "2.0.0",
+                    "instance": "instance_a",
+                    "endpoint": ENDPOINT,
+                    "connections": {"agents": 2, "mcp_clients": 3, "command_line": 0, "browsers": 1},
+                    "workbench": {"url": URL, "watching": true, "usual_port": true},
+                })
+            );
+        }
+        {
+            let seen = observation(counts(), workbench(false, true));
+            assert_eq!(
+                runtime_lines(&seen, false)[1],
+                "Workbench: http://127.0.0.1:47600/ -- watching is off"
+            );
+            assert_eq!(runtime_document(&seen)["workbench"]["watching"], false);
+        }
+        {
+            let seen = observation(counts(), workbench(true, false));
+            assert_eq!(
             runtime_lines(&seen, false)[1],
             "Workbench: http://127.0.0.1:47600/ -- others on this computer can watch (the usual port was taken)"
         );
-        assert_eq!(runtime_document(&seen)["workbench"]["usual_port"], false);
-    }
-
-    #[test]
-    fn an_older_service_answers_without_counts_or_a_workbench() {
-        let older: Status = serde_json::from_value(json!({
-            "service": "1.9.0",
-            "instance": "instance_old",
-            "pid": 7,
-            "started_by": "agent",
-        }))
-        .unwrap();
-        let seen = RuntimeObservation {
-            endpoint: ENDPOINT.into(),
-            status: Some(older),
-        };
-        assert_eq!(runtime_lines(&seen, true), ["Ghostlight is running."]);
-        assert_eq!(
-            runtime_document(&seen),
-            json!({
-                "running": true,
-                "version": "1.9.0",
-                "instance": "instance_old",
-                "endpoint": ENDPOINT,
-            })
-        );
-    }
-
-    #[test]
-    fn each_reason_for_the_window_gets_its_sentence_and_its_word() {
-        for reason in [
-            WindowReason::Tray,
-            WindowReason::NoDisplay,
-            WindowReason::NoInteractiveDesktop,
-            WindowReason::NoShellFile,
-            WindowReason::NoWebview,
-            WindowReason::NoTray,
-            WindowReason::DidNotStay,
-        ] {
-            let mut seen = observation(counts(), workbench(true, true));
-            seen.status.as_mut().unwrap().window = Some(reason);
-            let lines = runtime_lines(&seen, false);
-            assert_eq!(lines.len(), 3, "{reason:?}");
-            assert_eq!(lines[2], reason.sentence().unwrap());
-            assert_eq!(runtime_document(&seen)["window"], reason.as_str());
+            assert_eq!(runtime_document(&seen)["workbench"]["usual_port"], false);
         }
-        assert_eq!(
-            runtime_lines(&nothing_answers(), false).len(),
-            1,
-            "no service, no window sentence"
-        );
-    }
-
-    #[test]
-    fn an_open_window_has_a_word_and_no_sentence() {
-        let mut seen = observation(counts(), workbench(true, true));
-        seen.status.as_mut().unwrap().window = Some(WindowReason::Shown);
-        assert_eq!(runtime_lines(&seen, false).len(), 2);
-        assert_eq!(runtime_document(&seen)["window"], "shown");
-        seen.status.as_mut().unwrap().window = None;
-        assert!(runtime_document(&seen).get("window").is_none());
-    }
-
-    #[test]
-    fn the_status_sentence_for_no_display_is_the_one_in_the_spec() {
-        assert_eq!(
-            WindowReason::NoDisplay.sentence(),
-            Some("No Ghostlight window: no display is reachable from the service.")
-        );
-    }
-
-    #[test]
-    fn no_service_answering_reads_as_not_running() {
-        let seen = nothing_answers();
-        assert_eq!(runtime_lines(&seen, false), ["Ghostlight is not running."]);
-        assert_eq!(
-            runtime_document(&seen),
-            json!({"running": false, "endpoint": ENDPOINT})
-        );
-    }
-
-    #[test]
-    fn an_idle_service_that_can_start_says_how_it_starts() {
-        assert_eq!(
-            runtime_lines(&nothing_answers(), true),
-            ["Ghostlight is not running. It starts when a browser or an agent connects."]
-        );
+        {
+            let older: Status = serde_json::from_value(json!({
+                "service": "1.9.0",
+                "instance": "instance_old",
+                "pid": 7,
+                "started_by": "agent",
+            }))
+            .unwrap();
+            let seen = RuntimeObservation {
+                endpoint: ENDPOINT.into(),
+                status: Some(older),
+            };
+            assert_eq!(runtime_lines(&seen, true), ["Ghostlight is running."]);
+            assert_eq!(
+                runtime_document(&seen),
+                json!({
+                    "running": true,
+                    "version": "1.9.0",
+                    "instance": "instance_old",
+                    "endpoint": ENDPOINT,
+                })
+            );
+        }
+        {
+            for reason in [
+                WindowReason::Tray,
+                WindowReason::NoDisplay,
+                WindowReason::NoInteractiveDesktop,
+                WindowReason::NoShellFile,
+                WindowReason::NoWebview,
+                WindowReason::NoTray,
+                WindowReason::DidNotStay,
+            ] {
+                let mut seen = observation(counts(), workbench(true, true));
+                seen.status.as_mut().unwrap().window = Some(reason);
+                let lines = runtime_lines(&seen, false);
+                assert_eq!(lines.len(), 3, "{reason:?}");
+                assert_eq!(lines[2], reason.sentence().unwrap());
+                assert_eq!(runtime_document(&seen)["window"], reason.as_str());
+            }
+            assert_eq!(
+                runtime_lines(&nothing_answers(), false).len(),
+                1,
+                "no service, no window sentence"
+            );
+        }
+        {
+            let mut seen = observation(counts(), workbench(true, true));
+            seen.status.as_mut().unwrap().window = Some(WindowReason::Shown);
+            assert_eq!(runtime_lines(&seen, false).len(), 2);
+            assert_eq!(runtime_document(&seen)["window"], "shown");
+            seen.status.as_mut().unwrap().window = None;
+            assert!(runtime_document(&seen).get("window").is_none());
+        }
+        {
+            assert_eq!(
+                WindowReason::NoDisplay.sentence(),
+                Some("No Ghostlight window: no display is reachable from the service.")
+            );
+        }
+        {
+            let seen = nothing_answers();
+            assert_eq!(runtime_lines(&seen, false), ["Ghostlight is not running."]);
+            assert_eq!(
+                runtime_document(&seen),
+                json!({"running": false, "endpoint": ENDPOINT})
+            );
+        }
+        {
+            assert_eq!(
+                runtime_lines(&nothing_answers(), true),
+                ["Ghostlight is not running. It starts when a browser or an agent connects."]
+            );
+        }
     }
 }
