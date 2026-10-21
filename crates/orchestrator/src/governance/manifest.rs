@@ -551,15 +551,36 @@ fn validate(manifest: &Manifest, source: &str) -> Result<(), ManifestError> {
     Ok(())
 }
 
-/// Bounds mirror the signed presentation block so the same organization facts survive either
-/// delivery path unchanged.
+/// The bounds of an organization's facts in UTF-8 bytes, which the manifest's organization block
+/// and the signed presentation both enforce, so the same facts get the same answer on either
+/// delivery path (G-D3).
+pub(crate) mod organization_bounds {
+    /// The organization's name.
+    pub(crate) const NAME_BYTES: usize = 100;
+    /// Its statement, the presentation's rationale.
+    pub(crate) const STATEMENT_BYTES: usize = 500;
+    /// How many contacts it may list.
+    pub(crate) const CONTACTS: usize = 8;
+    /// A contact's kind.
+    pub(crate) const CONTACT_KIND_BYTES: usize = 32;
+    /// A contact's value.
+    pub(crate) const CONTACT_VALUE_BYTES: usize = 240;
+    /// A contact's label.
+    pub(crate) const CONTACT_LABEL_BYTES: usize = 80;
+}
+
+/// The organization block, within [`organization_bounds`], as the signed presentation is.
 fn validate_organization(
     organization: &OrganizationBlock,
     source: &str,
 ) -> Result<(), ManifestError> {
-    bounded_nonempty(&organization.name, 100, source, "organization.name")?;
+    use organization_bounds::{
+        CONTACTS, CONTACT_KIND_BYTES, CONTACT_LABEL_BYTES, CONTACT_VALUE_BYTES, NAME_BYTES,
+        STATEMENT_BYTES,
+    };
+    bounded_bytes(&organization.name, NAME_BYTES, source, "organization.name")?;
     if let Some(statement) = &organization.statement {
-        bounded_nonempty(statement, 500, source, "organization.statement")?;
+        bounded_bytes(statement, STATEMENT_BYTES, source, "organization.statement")?;
     }
     if let Some(url) = &organization.url {
         bounded_nonempty(url, 300, source, "organization.url")?;
@@ -567,7 +588,7 @@ fn validate_organization(
             return field(source, "organization.url", "must be an https address");
         }
     }
-    if organization.contacts.len() > 8 {
+    if organization.contacts.len() > CONTACTS {
         return field(
             source,
             "organization.contacts",
@@ -576,10 +597,25 @@ fn validate_organization(
     }
     for (index, contact) in organization.contacts.iter().enumerate() {
         let prefix = format!("organization.contacts[{index}]");
-        bounded_nonempty(&contact.kind, 32, source, &format!("{prefix}.kind"))?;
-        bounded_nonempty(&contact.value, 240, source, &format!("{prefix}.value"))?;
+        bounded_bytes(
+            &contact.kind,
+            CONTACT_KIND_BYTES,
+            source,
+            &format!("{prefix}.kind"),
+        )?;
+        bounded_bytes(
+            &contact.value,
+            CONTACT_VALUE_BYTES,
+            source,
+            &format!("{prefix}.value"),
+        )?;
         if let Some(label) = &contact.label {
-            bounded_nonempty(label, 80, source, &format!("{prefix}.label"))?;
+            bounded_bytes(
+                label,
+                CONTACT_LABEL_BYTES,
+                source,
+                &format!("{prefix}.label"),
+            )?;
         }
     }
     Ok(())
@@ -671,6 +707,22 @@ fn bounded_nonempty(
             path,
             &format!("must be at most {maximum} characters"),
         );
+    }
+    Ok(())
+}
+
+/// A text that is not empty and at most `maximum` UTF-8 bytes.
+fn bounded_bytes(
+    value: &str,
+    maximum: usize,
+    source: &str,
+    path: &str,
+) -> Result<(), ManifestError> {
+    if value.trim().is_empty() {
+        return field(source, path, "must not be empty");
+    }
+    if value.len() > maximum {
+        return field(source, path, &format!("must be at most {maximum} bytes"));
     }
     Ok(())
 }

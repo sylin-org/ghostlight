@@ -197,17 +197,29 @@ pub(super) fn validate_presentation(
     let Some(presentation) = presentation else {
         return Ok(());
     };
-    bounded(presentation.org_name.as_deref(), 100, "org_name")?;
-    bounded(presentation.rationale.as_deref(), 500, "rationale")?;
-    if presentation.contacts.len() > 8 {
-        return Err(BundleError::Presentation(
-            "contacts has more than 8 entries".into(),
-        ));
+    use crate::governance::manifest::organization_bounds::{
+        CONTACTS, CONTACT_KIND_BYTES, CONTACT_LABEL_BYTES, CONTACT_VALUE_BYTES, NAME_BYTES,
+        STATEMENT_BYTES,
+    };
+    bounded(presentation.org_name.as_deref(), NAME_BYTES, "org_name")?;
+    bounded(
+        presentation.rationale.as_deref(),
+        STATEMENT_BYTES,
+        "rationale",
+    )?;
+    if presentation.contacts.len() > CONTACTS {
+        return Err(BundleError::Presentation(format!(
+            "contacts has more than {CONTACTS} entries"
+        )));
     }
     for contact in &presentation.contacts {
-        bounded(Some(&contact.kind), 32, "contact kind")?;
-        bounded(Some(&contact.value), 240, "contact value")?;
-        bounded(contact.label.as_deref(), 80, "contact label")?;
+        bounded(Some(&contact.kind), CONTACT_KIND_BYTES, "contact kind")?;
+        bounded(Some(&contact.value), CONTACT_VALUE_BYTES, "contact value")?;
+        bounded(
+            contact.label.as_deref(),
+            CONTACT_LABEL_BYTES,
+            "contact label",
+        )?;
     }
     Ok(())
 }

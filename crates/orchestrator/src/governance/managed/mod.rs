@@ -1064,6 +1064,24 @@ mod tests {
                 assert!(!status_text.contains(withheld), "{row}: {status_text}");
             }
         }
+
+        // G-D3: both delivery paths bound a name in bytes, so a name one refuses the other refuses.
+        let bound = crate::governance::manifest::organization_bounds::NAME_BYTES;
+        let wide = "\u{e9}".repeat(bound / 2 + 10);
+        for (name, fits) in [("a".repeat(bound), true), (wide, false)] {
+            let manifest = json!({
+                "schema": 4, "name": "org", "version": "1", "grants": [],
+                "organization": {"name": name}
+            });
+            let block = crate::governance::manifest::parse(&manifest.to_string(), "test").is_ok();
+            let signed = bundle::validate_presentation(Some(&presentation(
+                &name,
+                SIGNED_STATEMENT,
+                SIGNED_CONTACT,
+            )))
+            .is_ok();
+            assert_eq!((block, signed), (fits, fits), "{} bytes", name.len());
+        }
     }
 
     /// One change to a published organization's files: its paths and its local source.

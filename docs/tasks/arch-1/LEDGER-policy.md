@@ -191,7 +191,8 @@ rows are done.
 | WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | landed (ed389024, 5dcd3eaf, b82ff05d and the re-export) |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (d00a7ede) |
 | G-D1 | fix(governance): a trailing-dot host is the same host to policy | - | found by test-01's tests-1 classification of `governance/`, 2026-10-21 (Notes below); the policy lane is closed, so test-01 lands it, cross-lane into core-work's three host copies | landed (e0e90fa2) |
-| G-D2 | fix(governance): publish refuses a bad source before it writes the bundle | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (this commit) |
+| G-D2 | fix(governance): publish refuses a bad source before it writes the bundle | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (375cb549) |
+| G-D3 | fix(governance): an organization's facts have one bound in bytes on both delivery paths | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (this commit) |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
 host), parsed once and lowercased. `PolicyLayer::new` parses its never-touch list and each grant's
@@ -225,6 +226,14 @@ wrote the bundle at the next sequence, then refused an `http://` `--source`, so 
 already advanced the published bundle. The bootstrap is now built and checked before anything is
 signed or written. The proof is a row in the kept publish test: the bundle is byte for byte
 unchanged after the refusal.
+
+G-D3, found the same day: the manifest's organization block counted characters and the signed
+presentation counted bytes, though a comment said they mirrored. An organization name of 60
+accented letters (120 bytes) passed the manifest and failed the signed presentation at verify,
+and that machine failed closed. The bounds now live once, in bytes, in
+`manifest::organization_bounds`, which both read; the manifest refuses such a name when it is
+validated, with "must be at most 100 bytes". The proof is a row in the kept organization test:
+both paths give the same answer at the bound and past it.
 
 WORK-15, `layer_denial`: the six policy refusals (a grant's, the screenshot, channel, never-touch,
 tab-close and audit-availability settings) go through `AuthoritySnapshot::layer_denial`, the one
