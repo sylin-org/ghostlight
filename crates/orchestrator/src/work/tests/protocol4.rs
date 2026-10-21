@@ -254,42 +254,116 @@ fn assert_plain(
     assert_eq!(result.facts["reason"], reason, "{}", result.summary);
 }
 
+/// ACCEPTANCE Executor 3-4 (contract): a protocol-4 failure reads to the model with its true effect.
+///
+/// A tab the browser no longer has, a click or typing the page refuses (alone or as a flow step,
+/// naming its own gesture and what works instead), and a read cancelled or out of time changed
+/// nothing and are safe to repeat. A document that changed before input is a stale target. An
+/// upload that failed after its files were attached, and a download save that outlived its
+/// deadline, have an unknown effect and are not safe to repeat.
 #[test]
-fn navigating_a_tab_the_browser_no_longer_has_is_a_plain_failure() {
-    let (executor, _fake, workspace) = opened(primitive_fault(
-        |primitive| matches!(primitive, wire::Primitive::Navigate(_)),
-        wire::Failure::TabMissing,
-    ));
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_navigate",
-        json!({"url": URL}),
-    );
-    assert_plain(
-        &result,
-        Status::Failed,
-        "The browser refused this job: browser tab is missing.",
-        "browser_primitive_failed",
-    );
-    assert_eq!(result.facts["detail"], "browser tab is missing");
-}
+fn a_protocol4_failure_reads_to_the_model_with_its_true_effect() {
+    // navigating a tab the browser no longer has is a plain failure.
+    {
+        let (executor, _fake, workspace) = opened(primitive_fault(
+            |primitive| matches!(primitive, wire::Primitive::Navigate(_)),
+            wire::Failure::TabMissing,
+        ));
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_navigate",
+            json!({"url": URL}),
+        );
+        assert_plain(
+            &result,
+            Status::Failed,
+            "The browser refused this job: browser tab is missing.",
+            "browser_primitive_failed",
+        );
+        assert_eq!(result.facts["detail"], "browser tab is missing");
+    }
 
-#[test]
-fn a_click_the_page_refuses_says_why_that_nothing_was_clicked_and_what_works() {
-    for (code, summary, tool) in [
-        (
-            "not_visible",
-            "That target is not visible on the page. Nothing was clicked.",
-            "browser_find",
-        ),
-        (
-            "disabled",
-            "That target is disabled. Nothing was clicked.",
-            "browser_inspect",
-        ),
-    ] {
-        let (executor, _fake, workspace) = opened(page_fault("activate", refused(code)));
+    // a click the page refuses says why that nothing was clicked and what works.
+    {
+        for (code, summary, tool) in [
+            (
+                "not_visible",
+                "That target is not visible on the page. Nothing was clicked.",
+                "browser_find",
+            ),
+            (
+                "disabled",
+                "That target is disabled. Nothing was clicked.",
+                "browser_inspect",
+            ),
+        ] {
+            let (executor, _fake, workspace) = opened(page_fault("activate", refused(code)));
+            let target = control(&executor, &workspace);
+            let result = execute(
+                &executor,
+                &workspace,
+                "browser_click",
+                json!({"target": target}),
+            );
+            assert_plain(&result, Status::Failed, summary, code);
+            assert!(result.facts.get("detail").is_none(), "{code}");
+            assert_eq!(result.next_steps.len(), 1, "{code}");
+            assert!(result.next_steps[0].contains(tool), "{code}");
+        }
+    }
+
+    // typing into a field the page refuses says nothing was typed.
+    {
+        for (code, summary) in [
+            ("read_only", "That field is read-only. Nothing was typed."),
+            (
+                "not_editable",
+                "That target does not take typed text. Nothing was typed.",
+            ),
+        ] {
+            let (executor, _fake, workspace) = opened(page_fault("type_text", refused(code)));
+            let target = control(&executor, &workspace);
+            let result = execute(
+                &executor,
+                &workspace,
+                "browser_type_text",
+                json!({"target": target, "text": "Ada"}),
+            );
+            assert_plain(&result, Status::Failed, summary, code);
+            assert!(
+                result.next_steps[0].contains("browser_find with scope control"),
+                "{code}"
+            );
+        }
+    }
+
+    // a flow step the page refuses names that steps own gesture.
+    {
+        let (executor, _fake, workspace) = opened(page_fault("activate", refused("disabled")));
+        let target = control(&executor, &workspace);
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_flow",
+            json!({"steps": [{"tool": "browser_click", "arguments": {"target": target}}]}),
+        );
+        assert_eq!(result.status, Status::Failed, "{}", result.summary);
+        assert_eq!(result.effect, Effect::None);
+        let step = &result.facts["steps"][0]["result"];
+        assert_eq!(
+            step["summary"],
+            "That target is disabled. Nothing was clicked."
+        );
+        assert_eq!(step["facts"]["reason"], "disabled");
+    }
+
+    // a document that changed before input is a stale target not unknown.
+    {
+        let (executor, _fake, workspace) = opened(primitive_fault(
+            |primitive| matches!(primitive, wire::Primitive::Input(_)),
+            wire::Failure::DocumentChanged,
+        ));
         let target = control(&executor, &workspace);
         let result = execute(
             &executor,
@@ -297,127 +371,131 @@ fn a_click_the_page_refuses_says_why_that_nothing_was_clicked_and_what_works() {
             "browser_click",
             json!({"target": target}),
         );
-        assert_plain(&result, Status::Failed, summary, code);
-        assert!(result.facts.get("detail").is_none(), "{code}");
-        assert_eq!(result.next_steps.len(), 1, "{code}");
-        assert!(result.next_steps[0].contains(tool), "{code}");
+        assert_eq!(
+            result.summary,
+            "That target belongs to an older version of the page."
+        );
+        assert_eq!(result.effect, Effect::None, "{}", result.summary);
+        assert!(result.repeat_safe, "{}", result.summary);
+        assert_eq!(result.facts["stale"], "navigated", "{}", result.summary);
     }
-}
 
-#[test]
-fn typing_into_a_field_the_page_refuses_says_nothing_was_typed() {
-    for (code, summary) in [
-        ("read_only", "That field is read-only. Nothing was typed."),
-        (
-            "not_editable",
-            "That target does not take typed text. Nothing was typed.",
-        ),
-    ] {
-        let (executor, _fake, workspace) = opened(page_fault("type_text", refused(code)));
+    // an upload that failed after the files were attached has an unknown effect.
+    {
+        let (executor, _fake, workspace) =
+            opened(page_fault("upload_files", refused("page_exception")));
         let target = control(&executor, &workspace);
         let result = execute(
             &executor,
             &workspace,
-            "browser_type_text",
-            json!({"target": target, "text": "Ada"}),
+            "browser_upload",
+            json!({"target": target, "files": [{"name": "note.txt", "data_base64": "eA=="}]}),
         );
-        assert_plain(&result, Status::Failed, summary, code);
-        assert!(
-            result.next_steps[0].contains("browser_find with scope control"),
-            "{code}"
+        assert_eq!(
+            result.summary,
+            "The browser never confirmed what the sent command did."
         );
+        assert_eq!(result.effect, Effect::Unknown, "{}", result.summary);
+        assert!(!result.repeat_safe, "{}", result.summary);
+        assert_eq!(result.facts["reason"], "browser_effect_unknown");
     }
-}
 
-#[test]
-fn a_flow_step_the_page_refuses_names_that_steps_own_gesture() {
-    let (executor, _fake, workspace) = opened(page_fault("activate", refused("disabled")));
-    let target = control(&executor, &workspace);
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_flow",
-        json!({"steps": [{"tool": "browser_click", "arguments": {"target": target}}]}),
-    );
-    assert_eq!(result.status, Status::Failed, "{}", result.summary);
-    assert_eq!(result.effect, Effect::None);
-    let step = &result.facts["steps"][0]["result"];
-    assert_eq!(
-        step["summary"],
-        "That target is disabled. Nothing was clicked."
-    );
-    assert_eq!(step["facts"]["reason"], "disabled");
-}
+    // a read that was cancelled or ran out of time changed nothing.
+    {
+        for (failure, status, summary, reason) in [
+            (
+                wire::Failure::Cancelled,
+                Status::Cancelled,
+                "Cancelled before anything reached the browser.",
+                "cancelled",
+            ),
+            (
+                wire::Failure::Timeout,
+                Status::Failed,
+                "The job ran out of time before anything changed in the browser.",
+                "deadline",
+            ),
+        ] {
+            let (executor, _fake, workspace) = opened(Box::new(move |correlation, primitive| {
+                let wire::Primitive::Call(call) = primitive else {
+                    return None;
+                };
+                call.calls
+                    .iter()
+                    .any(|world| world.message["kind"] == "read_text")
+                    .then(|| FakeExtension::failed(correlation, failure))
+            }));
+            let result = execute(&executor, &workspace, "browser_read", json!({}));
+            assert_plain(&result, status, summary, reason);
+        }
+    }
 
-#[test]
-fn a_document_that_changed_before_input_is_a_stale_target_not_unknown() {
-    let (executor, _fake, workspace) = opened(primitive_fault(
-        |primitive| matches!(primitive, wire::Primitive::Input(_)),
-        wire::Failure::DocumentChanged,
-    ));
-    let target = control(&executor, &workspace);
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_click",
-        json!({"target": target}),
-    );
-    assert_eq!(
-        result.summary,
-        "That target belongs to an older version of the page."
-    );
-    assert_eq!(result.effect, Effect::None, "{}", result.summary);
-    assert!(result.repeat_safe, "{}", result.summary);
-    assert_eq!(result.facts["stale"], "navigated", "{}", result.summary);
-}
+    // a download save that outlives its deadline is unknown and not repeat safe.
+    {
+        let (executor, fake, workspace, _audit) = opened_replying(
+            Box::new(|correlation, primitive| {
+                let wire::Primitive::Recording(op) = primitive else {
+                    return None;
+                };
+                let effect = |value: Value| wire::Receipt {
+                    dispatched: true,
+                    ..FakeExtension::ok(correlation, value)
+                };
+                Some(match op {
+                    wire::RecordingOp::Start { .. } => {
+                        Reply::Now(effect(json!({"result": "started",
+                        "summary": recording("recording"), "existing": false})))
+                    }
+                    wire::RecordingOp::Stop { .. } => {
+                        Reply::Now(effect(json!({"result": "stopped",
+                        "summary": recording("frozen"), "changed": true})))
+                    }
+                    wire::RecordingOp::Export {
+                        destination: wire::RecordingTarget::Download { .. },
+                        ..
+                    } => Reply::Never,
+                    _ => return None,
+                })
+            }),
+            GovernanceFacade::new(None),
+        );
+        let started = execute(
+            &executor,
+            &workspace,
+            "browser_record",
+            json!({"action": "start"}),
+        );
+        assert_eq!(started.status, Status::Succeeded, "{}", started.summary);
 
-#[test]
-fn an_upload_that_failed_after_the_files_were_attached_has_an_unknown_effect() {
-    let (executor, _fake, workspace) =
-        opened(page_fault("upload_files", refused("page_exception")));
-    let target = control(&executor, &workspace);
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_upload",
-        json!({"target": target, "files": [{"name": "note.txt", "data_base64": "eA=="}]}),
-    );
-    assert_eq!(
-        result.summary,
-        "The browser never confirmed what the sent command did."
-    );
-    assert_eq!(result.effect, Effect::Unknown, "{}", result.summary);
-    assert!(!result.repeat_safe, "{}", result.summary);
-    assert_eq!(result.facts["reason"], "browser_effect_unknown");
-}
+        let saved = execute(
+            &executor,
+            &workspace,
+            "browser_record",
+            json!({"action": "save", "download": true, "timeout_ms": 300}),
+        );
 
-#[test]
-fn a_read_that_was_cancelled_or_ran_out_of_time_changed_nothing() {
-    for (failure, status, summary, reason) in [
-        (
-            wire::Failure::Cancelled,
-            Status::Cancelled,
-            "Cancelled before anything reached the browser.",
-            "cancelled",
-        ),
-        (
-            wire::Failure::Timeout,
-            Status::Failed,
-            "The job ran out of time before anything changed in the browser.",
-            "deadline",
-        ),
-    ] {
-        let (executor, _fake, workspace) = opened(Box::new(move |correlation, primitive| {
-            let wire::Primitive::Call(call) = primitive else {
-                return None;
-            };
-            call.calls
-                .iter()
-                .any(|world| world.message["kind"] == "read_text")
-                .then(|| FakeExtension::failed(correlation, failure))
-        }));
-        let result = execute(&executor, &workspace, "browser_read", json!({}));
-        assert_plain(&result, status, summary, reason);
+        assert_eq!(saved.status, Status::Unknown, "{}", saved.summary);
+        assert_eq!(saved.effect, Effect::Unknown, "{}", saved.summary);
+        assert!(!saved.repeat_safe, "{}", saved.summary);
+        assert_eq!(saved.facts["phase"], "after_dispatch", "{}", saved.facts);
+        assert!(
+            saved
+                .summary
+                .contains("before the browser confirmed what the sent command did"),
+            "{}",
+            saved.summary
+        );
+        assert!(fake
+            .wait(|seen| !seen.cancels.is_empty())
+            .requests
+            .iter()
+            .any(|(_, primitive)| matches!(
+                primitive,
+                wire::Primitive::Recording(wire::RecordingOp::Export {
+                    destination: wire::RecordingTarget::Download { .. },
+                    ..
+                })
+            )));
     }
 }
 
@@ -471,218 +549,337 @@ fn requests_so_far(fake: &FakeExtension) -> usize {
     fake.wait(|_| true).requests.len()
 }
 
+/// ADR-0158 item 5 (c2df20e2, 925d573c): a dialog is answered from the browser's record and
+/// authorized by the document that raised it.
+///
+/// Status is one dialog primitive and responding looks once then handles, neither reading the
+/// frames. A dialog raised by a denied document is refused and never handled, its message out of
+/// the result and its host out of the audit; one that names no document cannot be authorized.
+/// Page work a dialog blocks says so and points at the dialog.
 #[test]
-fn dialog_status_is_one_dialog_primitive_and_never_reads_the_frames() {
-    let (executor, fake, workspace) = opened(dialog_fault(Some(URL)));
-    let before = requests_so_far(&fake);
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_dialog",
-        json!({"action": "status"}),
-    );
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    assert!(
-        result.summary.contains(DIALOG_MESSAGE),
-        "{}",
-        result.summary
-    );
-    assert_eq!(sent_since(&fake, before), ["dialog:status"]);
-}
-
-#[test]
-fn responding_to_a_dialog_looks_once_then_handles_and_never_reads_the_frames() {
-    let (executor, fake, workspace) = opened(dialog_fault(Some(URL)));
-    let before = requests_so_far(&fake);
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_dialog",
-        json!({"action": "respond", "text": "Ada"}),
-    );
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    assert_eq!(result.effect, Effect::Applied);
-    assert_eq!(
-        sent_since(&fake, before),
-        ["dialog:status", "dialog:handle"]
-    );
-}
-
-#[test]
-fn a_dialog_raised_by_a_denied_document_is_refused_and_its_message_stays_out() {
-    let policy = temporary_policy("dialog-denied");
-    fs::write(
-        &policy,
-        serde_json::to_vec(&json!({"schema": 4, "name": "dialogs", "version": "1",
-            "grants": [{"id": "main", "hosts": {"allow": ["example.com"]},
-                "allowed": ["read", "action", "write", "execute"]}],
-            "config": []}))
-        .unwrap(),
-    )
-    .unwrap();
-    let (executor, fake, workspace, audit) = opened_audited(
-        dialog_fault(Some(DIALOG_FRAME)),
-        GovernanceFacade::new(Some(policy.to_path_buf())),
-    );
-    let before = requests_so_far(&fake);
-    for arguments in [json!({"action": "status"}), json!({"action": "dismiss"})] {
-        let result = execute(&executor, &workspace, "browser_dialog", arguments);
-        assert_eq!(result.status, Status::Blocked, "{}", result.summary);
-        assert_eq!(result.effect, Effect::None);
+fn a_dialog_is_answered_from_the_browsers_record_and_authorized_by_its_document() {
+    // dialog status is one dialog primitive and never reads the frames.
+    {
+        let (executor, fake, workspace) = opened(dialog_fault(Some(URL)));
+        let before = requests_so_far(&fake);
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_dialog",
+            json!({"action": "status"}),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
         assert!(
-            !serde_json::to_string(&result)
+            result.summary.contains(DIALOG_MESSAGE),
+            "{}",
+            result.summary
+        );
+        assert_eq!(sent_since(&fake, before), ["dialog:status"]);
+    }
+
+    // responding to a dialog looks once then handles and never reads the frames.
+    {
+        let (executor, fake, workspace) = opened(dialog_fault(Some(URL)));
+        let before = requests_so_far(&fake);
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_dialog",
+            json!({"action": "respond", "text": "Ada"}),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        assert_eq!(result.effect, Effect::Applied);
+        assert_eq!(
+            sent_since(&fake, before),
+            ["dialog:status", "dialog:handle"]
+        );
+    }
+
+    // a dialog raised by a denied document is refused and its message stays out.
+    {
+        let policy = temporary_policy("dialog-denied");
+        fs::write(
+            &policy,
+            serde_json::to_vec(&json!({"schema": 4, "name": "dialogs", "version": "1",
+                "grants": [{"id": "main", "hosts": {"allow": ["example.com"]},
+                    "allowed": ["read", "action", "write", "execute"]}],
+                "config": []}))
+            .unwrap(),
+        )
+        .unwrap();
+        let (executor, fake, workspace, audit) = opened_audited(
+            dialog_fault(Some(DIALOG_FRAME)),
+            GovernanceFacade::new(Some(policy.to_path_buf())),
+        );
+        let before = requests_so_far(&fake);
+        for arguments in [json!({"action": "status"}), json!({"action": "dismiss"})] {
+            let result = execute(&executor, &workspace, "browser_dialog", arguments);
+            assert_eq!(result.status, Status::Blocked, "{}", result.summary);
+            assert_eq!(result.effect, Effect::None);
+            assert!(
+                !serde_json::to_string(&result)
+                    .unwrap()
+                    .contains(DIALOG_MESSAGE),
+                "the dialog's message never reaches a refused result"
+            );
+        }
+        assert!(
+            !sent_since(&fake, before).contains(&"dialog:handle".to_owned()),
+            "a refused dialog is never handled"
+        );
+        let audited = serde_json::to_string(
+            &audit
+                .0
+                .lock()
                 .unwrap()
-                .contains(DIALOG_MESSAGE),
-            "the dialog's message never reaches a refused result"
+                .iter()
+                .map(|record| record.permissions.clone())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert!(
+            !audited.contains("private-frame.invalid"),
+            "an embedded document's host never enters the durable audit: {audited}"
         );
     }
-    assert!(
-        !sent_since(&fake, before).contains(&"dialog:handle".to_owned()),
-        "a refused dialog is never handled"
-    );
-    let audited = serde_json::to_string(
-        &audit
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|record| record.permissions.clone())
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
-    assert!(
-        !audited.contains("private-frame.invalid"),
-        "an embedded document's host never enters the durable audit: {audited}"
-    );
-}
 
-#[test]
-fn a_dialog_that_names_no_document_cannot_be_authorized() {
-    let (executor, fake, workspace) = opened(dialog_fault(None));
-    let before = requests_so_far(&fake);
-    for arguments in [json!({"action": "status"}), json!({"action": "accept"})] {
-        let result = execute(&executor, &workspace, "browser_dialog", arguments);
-        assert_plain(
-            &result,
-            Status::Failed,
-            "Document access could not be verified.",
-            "document_unavailable",
-        );
-        assert!(!serde_json::to_string(&result)
-            .unwrap()
-            .contains(DIALOG_MESSAGE));
+    // a dialog that names no document cannot be authorized.
+    {
+        let (executor, fake, workspace) = opened(dialog_fault(None));
+        let before = requests_so_far(&fake);
+        for arguments in [json!({"action": "status"}), json!({"action": "accept"})] {
+            let result = execute(&executor, &workspace, "browser_dialog", arguments);
+            assert_plain(
+                &result,
+                Status::Failed,
+                "Document access could not be verified.",
+                "document_unavailable",
+            );
+            assert!(!serde_json::to_string(&result)
+                .unwrap()
+                .contains(DIALOG_MESSAGE));
+        }
+        assert!(!sent_since(&fake, before).contains(&"dialog:handle".to_owned()));
     }
-    assert!(!sent_since(&fake, before).contains(&"dialog:handle".to_owned()));
+
+    // page work blocked by a dialog says so and points at the dialog.
+    {
+        let blocked: [Fault; 3] = [
+            primitive_fault(
+                |primitive| matches!(primitive, wire::Primitive::Frames(_)),
+                wire::Failure::DialogOpen,
+            ),
+            primitive_fault(
+                |primitive| matches!(primitive, wire::Primitive::Call(_)),
+                wire::Failure::DialogOpen,
+            ),
+            Box::new(|correlation, primitive| {
+                let wire::Primitive::Call(call) = primitive else {
+                    return None;
+                };
+                let answer = json!({"status": "failed", "code": "dialog_open",
+                    "message": "A JavaScript dialog blocks the page.", "started": false});
+                Some(FakeExtension::ok(
+                    correlation,
+                    json!({"answers": call.calls.iter().map(|_| answer.clone()).collect::<Vec<_>>()}),
+                ))
+            }),
+        ];
+        for fault in blocked {
+            let (executor, _fake, workspace) = opened(fault);
+            let result = execute(&executor, &workspace, "browser_read", json!({}));
+            assert_plain(
+                &result,
+                Status::Failed,
+                "A JavaScript dialog is open on this page, so nothing was sent.",
+                "dialog_open",
+            );
+            assert_eq!(
+                result.next_steps,
+                crate::language::outcome::Refusal::DialogOpen.next_steps()
+            );
+            assert!(result.next_steps[0].contains("browser_dialog"));
+        }
+    }
 }
 
+/// What the service asks the page (3e80fb91, 8256f32d): a fill after a read spent the budget still
+/// asks the page to settle, a list reaches the page as a list and a boolean as a boolean, a
+/// selector wait over two matches reports no size limit, and no embedded host reaches the
+/// permission trace from a targeted read.
 #[test]
-fn page_work_blocked_by_a_dialog_says_so_and_points_at_the_dialog() {
-    let blocked: [Fault; 3] = [
-        primitive_fault(
-            |primitive| matches!(primitive, wire::Primitive::Frames(_)),
-            wire::Failure::DialogOpen,
-        ),
-        primitive_fault(
-            |primitive| matches!(primitive, wire::Primitive::Call(_)),
-            wire::Failure::DialogOpen,
-        ),
-        Box::new(|correlation, primitive| {
+fn what_the_service_asks_the_page() {
+    // a fill after a read spent the budget still asks the page to settle.
+    {
+        let seen: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+        let record = seen.clone();
+        let (executor, _fake, workspace) = opened(Box::new(move |correlation, primitive| {
             let wire::Primitive::Call(call) = primitive else {
                 return None;
             };
-            let answer = json!({"status": "failed", "code": "dialog_open",
-                "message": "A JavaScript dialog blocks the page.", "started": false});
-            Some(FakeExtension::ok(
-                correlation,
-                json!({"answers": call.calls.iter().map(|_| answer.clone()).collect::<Vec<_>>()}),
-            ))
-        }),
-    ];
-    for fault in blocked {
-        let (executor, _fake, workspace) = opened(fault);
-        let result = execute(&executor, &workspace, "browser_read", json!({}));
-        assert_plain(
-            &result,
-            Status::Failed,
-            "A JavaScript dialog is open on this page, so nothing was sent.",
-            "dialog_open",
-        );
-        assert_eq!(
-            result.next_steps,
-            crate::language::outcome::Refusal::DialogOpen.next_steps()
-        );
-        assert!(result.next_steps[0].contains("browser_dialog"));
-    }
-}
+            let mut messages = record.lock().unwrap();
+            messages.extend(call.calls.iter().map(|world| world.message.clone()));
+            call.calls
+                .iter()
+                .any(|world| world.message["kind"] == "prepare_fill")
+                .then(|| {
+                    let answers: Vec<Value> = call
+                        .calls
+                        .iter()
+                        .map(|world| {
+                            if world.message["kind"] == "prepare_fill" {
+                                refused("not_editable")
+                            } else {
+                                page(world)
+                            }
+                        })
+                        .collect();
+                    FakeExtension::ok(correlation, json!({"answers": answers}))
+                })
+        }));
+        seen.lock().unwrap().clear();
 
-#[test]
-fn a_fill_after_a_read_spent_the_budget_still_asks_the_page_to_settle() {
-    let seen: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
-    let record = seen.clone();
-    let (executor, _fake, workspace) = opened(Box::new(move |correlation, primitive| {
-        let wire::Primitive::Call(call) = primitive else {
-            return None;
+        let _ = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"selector": {"name": "Save"}, "value": "x"}]}),
+        );
+
+        let messages = seen.lock().unwrap();
+        let of = |kind: &str| {
+            messages
+                .iter()
+                .find(|message| message["kind"] == kind)
+                .unwrap_or_else(|| panic!("no {kind} message was sent"))
         };
-        let mut messages = record.lock().unwrap();
-        messages.extend(call.calls.iter().map(|world| world.message.clone()));
-        call.calls
+        let semantic = of("query_semantic");
+        assert!(semantic["settle_ms"].as_u64().unwrap() > 0);
+        assert_eq!(semantic["visual_settle"], true);
+        let prepare = of("prepare_fill");
+        assert_eq!(prepare["settle_ms"], 0, "the read spent the budget");
+        assert_eq!(
+            prepare["visual_settle"], true,
+            "a spent budget is not an opt-out"
+        );
+
+        drop(messages);
+        seen.lock().unwrap().clear();
+        let _ = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"selector": {"name": "Save"}, "value": "x"}], "visual_settle": false}),
+        );
+        let messages = seen.lock().unwrap();
+        let prepare = messages
             .iter()
-            .any(|world| world.message["kind"] == "prepare_fill")
-            .then(|| {
-                let answers: Vec<Value> = call
-                    .calls
-                    .iter()
-                    .map(|world| {
-                        if world.message["kind"] == "prepare_fill" {
-                            refused("not_editable")
-                        } else {
-                            page(world)
-                        }
-                    })
-                    .collect();
-                FakeExtension::ok(correlation, json!({"answers": answers}))
-            })
-    }));
-    seen.lock().unwrap().clear();
+            .find(|message| message["kind"] == "prepare_fill")
+            .expect("a declined settle still prepares the fill");
+        assert_eq!(prepare["visual_settle"], false);
+    }
 
-    let _ = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"selector": {"name": "Save"}, "value": "x"}]}),
-    );
+    // a list reaches the page as a list and a boolean stays a boolean.
+    {
+        let prepared: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+        let record = prepared.clone();
+        let verify = returned(json!({"retained": true, "fields": []}));
+        let (executor, _fake, workspace) = opened(form_page(move |world| {
+            match world.message["kind"].as_str() {
+                Some("prepare_fill") => {
+                    record.lock().unwrap().push(world.message["fields"].clone());
+                    Some(returned(
+                        json!({"prepared": true, "field_kinds": ["local", "local"]}),
+                    ))
+                }
+                Some("fill_local") => Some(returned(json!({"filled": true}))),
+                Some("verify_fill_retained") => Some(verify.clone()),
+                _ => None,
+            }
+        }));
+        let (role, agree) = form_handles(&executor, &workspace);
 
-    let messages = seen.lock().unwrap();
-    let of = |kind: &str| {
-        messages
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": ["Alpha", "beta"]}, {"target": agree, "value": true}]}),
+        );
+
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        let seen = prepared.lock().unwrap();
+        assert_eq!(seen[0][0]["value"], json!(["Alpha", "beta"]));
+        assert_eq!(seen[0][1]["value"], json!(true));
+    }
+
+    // a selector present wait over two matches reports no size limit.
+    {
+        let (executor, _fake, workspace) = opened(two_saves());
+
+        let waited = execute(
+            &executor,
+            &workspace,
+            "browser_wait",
+            json!({"condition": "selector_present", "selector": {"name": "Save"}}),
+        );
+
+        assert_eq!(waited.status, Status::Succeeded, "{}", waited.summary);
+        assert_ne!(
+            waited.facts["coverage"]["limited_by_size"], true,
+            "{}",
+            waited.facts
+        );
+        assert!(
+            !waited.model_text().contains("size limit"),
+            "{}",
+            waited.model_text()
+        );
+    }
+
+    // no embedded host reaches the permission trace from a targeted read.
+    {
+        let (executor, _fake, workspace, audit) =
+            opened_audited(embedding_page(), GovernanceFacade::new(None));
+        let inspected = execute(&executor, &workspace, "browser_inspect", json!({}));
+        assert_eq!(inspected.status, Status::Succeeded, "{}", inspected.summary);
+        let target = inspected.facts["items"]
+            .as_array()
+            .unwrap()
             .iter()
-            .find(|message| message["kind"] == kind)
-            .unwrap_or_else(|| panic!("no {kind} message was sent"))
-    };
-    let semantic = of("query_semantic");
-    assert!(semantic["settle_ms"].as_u64().unwrap() > 0);
-    assert_eq!(semantic["visual_settle"], true);
-    let prepare = of("prepare_fill");
-    assert_eq!(prepare["settle_ms"], 0, "the read spent the budget");
-    assert_eq!(
-        prepare["visual_settle"], true,
-        "a spent budget is not an opt-out"
-    );
+            .find(|item| item["name"] == "Inside")
+            .map(|item| item["target"].clone())
+            .expect("the embedded control is listed");
 
-    drop(messages);
-    seen.lock().unwrap().clear();
-    let _ = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"selector": {"name": "Save"}, "value": "x"}], "visual_settle": false}),
-    );
-    let messages = seen.lock().unwrap();
-    let prepare = messages
-        .iter()
-        .find(|message| message["kind"] == "prepare_fill")
-        .expect("a declined settle still prepares the fill");
-    assert_eq!(prepare["visual_settle"], false);
+        let read = execute(
+            &executor,
+            &workspace,
+            "browser_read",
+            json!({"target": target}),
+        );
+
+        assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
+        assert_eq!(
+            read.facts["text"], "Inside",
+            "the read ran in the embedded document"
+        );
+        let answered = serde_json::to_string(&read).unwrap();
+        assert!(!answered.contains("embedded.example"), "{answered}");
+        let traced = serde_json::to_string(
+            &audit
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|record| record.permissions.clone())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert!(traced.contains("example.com"), "{traced}");
+        assert!(
+            !traced.contains("embedded.example"),
+            "an embedded document's host never enters the durable audit: {traced}"
+        );
+    }
 }
 
 /// The two controls the fill tests inspect: a dropdown and a checkbox, in document order.
@@ -773,386 +970,366 @@ fn form_handles(
     (handle(0), handle(1))
 }
 
+/// A fill's answer says what the page did and names only what policy keeps (3e80fb91, 8256f32d).
+///
+/// A refused fill lists what would succeed and names each handle, or speaks in unnamed nouns when
+/// target names are withheld; a refusal the service cannot read stays the browser's own sentence; a
+/// problem for a field the call does not have is an invalid plan. A fill says what the page now
+/// holds, only how many fields without names, and echoes a normalized match with the caller's value
+/// unless names are withheld. A refused list entry is quoted alone. A fill the page partly undid is
+/// a partial failure with no dialog advice; a page that never settled is still an unknown effect
+/// with dialog advice.
 #[test]
-fn a_refused_fill_lists_what_would_succeed_and_names_each_handle() {
-    let detail = json!({"problems": [
-        {"field": 0, "problem": "option_missing", "options": ["Developer", "Administrator", "Other"]},
-        {"field": 1, "problem": "not_boolean"}
-    ]});
-    let (executor, _fake, workspace, audit) =
-        opened_audited(refusing_form(detail), GovernanceFacade::new(None));
-    let (role, agree) = form_handles(&executor, &workspace);
+fn a_fills_answer_says_what_the_page_did_and_names_only_what_policy_keeps() {
+    // a refused fill lists what would succeed and names each handle.
+    {
+        let detail = json!({"problems": [
+            {"field": 0, "problem": "option_missing", "options": ["Developer", "Administrator", "Other"]},
+            {"field": 1, "problem": "not_boolean"}
+        ]});
+        let (executor, _fake, workspace, audit) =
+            opened_audited(refusing_form(detail), GovernanceFacade::new(None));
+        let (role, agree) = form_handles(&executor, &workspace);
 
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "Engineer"}, {"target": agree, "value": "maybe"}]}),
-    );
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "Engineer"}, {"target": agree, "value": "maybe"}]}),
+        );
 
-    assert_eq!(result.status, Status::Failed);
-    assert_eq!(result.effect, Effect::None);
-    assert!(result.repeat_safe);
-    assert_eq!(
-        result.summary,
-        "Nothing was changed: 2 of 2 fields cannot take their values. The \"Role\" dropdown has no option \"Engineer\". It offers: Developer, Administrator, Other. The \"Agree\" checkbox takes true or false, not \"maybe\"."
-    );
-    assert_eq!(
-        result.next_steps,
-        vec![
-            format!("Repeat browser_fill_form with {role} set to one of the offered options."),
-            format!("Repeat with true or false for {agree}.")
-        ]
-    );
-    assert_eq!(result.facts["reason"], "field_value_rejected");
-    assert_eq!(
-        result.facts["problems"],
-        json!([
-            {"field": 0, "target": role, "problem": "option_missing",
-             "options": ["Developer", "Administrator", "Other"]},
-            {"field": 1, "target": agree, "problem": "not_boolean"}
-        ])
-    );
-    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
-    assert!(recorded
-        .contains("Refused a form fill before any edit: 2 fields could not take their values."));
-    for private in ["Developer", "Engineer", "maybe", "Role", "Agree"] {
-        assert!(!recorded.contains(private), "{private} reached the audit");
-    }
-}
-
-#[test]
-fn a_refused_fill_without_target_names_speaks_in_unnamed_nouns() {
-    let policy = temporary_policy("fill-refusal-names");
-    fs::write(
-        &policy,
-        all_open_policy_with(
-            r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
-        ),
-    )
-    .unwrap();
-    let detail = json!({"problems": [
-        {"field": 0, "problem": "option_missing", "options": ["PRIVATE_OPTION"]}
-    ]});
-    let (executor, _fake, workspace) = opened_under(
-        refusing_form(detail),
-        GovernanceFacade::new(Some(policy.to_path_buf())),
-    );
-    let (role, _) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "PRIVATE_VALUE"}]}),
-    );
-
-    assert_eq!(
-        result.summary,
-        "Nothing was changed. A dropdown has no matching option."
-    );
-    assert_eq!(result.facts["problems"][0]["target"], role);
-    assert_eq!(
-        result.facts["problems"][0]["options"],
-        json!(["PRIVATE_OPTION"])
-    );
-    assert!(!result.facts.to_string().contains("PRIVATE_VALUE"));
-    assert!(!result.model_text().contains("PRIVATE"));
-}
-
-#[test]
-fn a_refusal_the_service_cannot_read_stays_the_browsers_own_sentence() {
-    let detail = json!({"problems": [{"field": 0, "problem": "option_vanished"}]});
-    let (executor, _fake, workspace) = opened(refusing_form(detail));
-    let (role, _) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "Engineer"}]}),
-    );
-
-    assert_plain(
-        &result,
-        Status::Failed,
-        "The browser refused this job: select option not found.",
-        "browser_primitive_failed",
-    );
-}
-
-#[test]
-fn a_problem_for_a_field_the_call_does_not_have_is_an_invalid_plan() {
-    let detail = json!({"problems": [{"field": 7, "problem": "option_missing"}]});
-    let (executor, _fake, workspace) = opened(refusing_form(detail));
-    let (role, _) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "Engineer"}]}),
-    );
-
-    assert_eq!(result.status, Status::Failed);
-    assert_eq!(result.effect, Effect::None);
-    assert_eq!(result.facts["reason"], "browser_primitive_failed");
-    assert_eq!(
-        result.facts["detail"],
-        "content primitive returned an invalid fill plan"
-    );
-}
-
-#[test]
-fn a_fill_says_what_the_page_now_holds() {
-    let verify = returned(json!({"retained": true, "fields": [
-        {"field": 0, "now": "Administrator"},
-        {"field": 1, "now": "checked"}
-    ]}));
-    let (executor, _fake, workspace, audit) =
-        opened_audited(verifying_form(verify), GovernanceFacade::new(None));
-    let (role, agree) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "Administrator"}, {"target": agree, "value": true}]}),
-    );
-
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    assert_eq!(
-        result.summary,
-        "Filled 2 fields on example.com: Role = Administrator, Agree = checked."
-    );
-    assert_eq!(
-        result.facts["fields"],
-        json!([
-            {"target": role, "now": "Administrator"},
-            {"target": agree, "now": "checked"}
-        ])
-    );
-    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
-    assert!(recorded.contains("Filled 2 fields on example.com."));
-    for private in ["Administrator", "Role", "Agree"] {
-        assert!(!recorded.contains(private), "{private} reached the audit");
-    }
-}
-
-#[test]
-fn a_fill_without_target_names_says_only_how_many_fields_it_filled() {
-    let policy = temporary_policy("fill-echo-names");
-    fs::write(
-        &policy,
-        all_open_policy_with(
-            r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
-        ),
-    )
-    .unwrap();
-    let verify =
-        returned(json!({"retained": true, "fields": [{"field": 0, "now": "Administrator"}]}));
-    let (executor, _fake, workspace) = opened_under(
-        verifying_form(verify),
-        GovernanceFacade::new(Some(policy.to_path_buf())),
-    );
-    let (role, _) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "Administrator"}]}),
-    );
-
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    assert_eq!(result.summary, "Filled 1 field on example.com.");
-    assert_eq!(
-        result.facts["fields"],
-        json!([{"target": role, "now": "Administrator"}])
-    );
-}
-
-#[test]
-fn a_normalized_match_is_echoed_with_the_value_the_caller_gave() {
-    let verify = returned(json!({"retained": true, "fields": [
-        {"field": 0, "now": "Administrator", "matched": "normalized"}
-    ]}));
-    let (executor, _fake, workspace, audit) =
-        opened_audited(verifying_form(verify), GovernanceFacade::new(None));
-    let (role, _) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "administrator"}]}),
-    );
-
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    assert_eq!(
-        result.summary,
-        "Filled 1 field on example.com: Role = Administrator (matched \"administrator\")."
-    );
-    assert_eq!(
-        result.facts["fields"],
-        json!([{"target": role, "now": "Administrator", "match": "normalized"}])
-    );
-    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
-    for private in ["Administrator", "administrator", "normalized", "Role"] {
-        assert!(!recorded.contains(private), "{private} reached the audit");
-    }
-}
-
-#[test]
-fn a_normalized_match_without_target_names_keeps_the_given_value_out_of_the_sentence() {
-    let policy = temporary_policy("fill-match-names");
-    fs::write(
-        &policy,
-        all_open_policy_with(
-            r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
-        ),
-    )
-    .unwrap();
-    let verify = returned(json!({"retained": true, "fields": [
-        {"field": 0, "now": "Administrator", "matched": "normalized"}
-    ]}));
-    let (executor, _fake, workspace) = opened_under(
-        verifying_form(verify),
-        GovernanceFacade::new(Some(policy.to_path_buf())),
-    );
-    let (role, _) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "PRIVATE_GIVEN"}]}),
-    );
-
-    assert_eq!(result.summary, "Filled 1 field on example.com.");
-    assert_eq!(result.facts["fields"][0]["match"], "normalized");
-    assert!(!result.model_text().contains("PRIVATE_GIVEN"));
-    assert!(!result.facts.to_string().contains("PRIVATE_GIVEN"));
-}
-
-#[test]
-fn a_list_reaches_the_page_as_a_list_and_a_boolean_stays_a_boolean() {
-    let prepared: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
-    let record = prepared.clone();
-    let verify = returned(json!({"retained": true, "fields": []}));
-    let (executor, _fake, workspace) = opened(form_page(move |world| {
-        match world.message["kind"].as_str() {
-            Some("prepare_fill") => {
-                record.lock().unwrap().push(world.message["fields"].clone());
-                Some(returned(
-                    json!({"prepared": true, "field_kinds": ["local", "local"]}),
-                ))
-            }
-            Some("fill_local") => Some(returned(json!({"filled": true}))),
-            Some("verify_fill_retained") => Some(verify.clone()),
-            _ => None,
+        assert_eq!(result.status, Status::Failed);
+        assert_eq!(result.effect, Effect::None);
+        assert!(result.repeat_safe);
+        assert_eq!(
+            result.summary,
+            "Nothing was changed: 2 of 2 fields cannot take their values. The \"Role\" dropdown has no option \"Engineer\". It offers: Developer, Administrator, Other. The \"Agree\" checkbox takes true or false, not \"maybe\"."
+        );
+        assert_eq!(
+            result.next_steps,
+            vec![
+                format!("Repeat browser_fill_form with {role} set to one of the offered options."),
+                format!("Repeat with true or false for {agree}.")
+            ]
+        );
+        assert_eq!(result.facts["reason"], "field_value_rejected");
+        assert_eq!(
+            result.facts["problems"],
+            json!([
+                {"field": 0, "target": role, "problem": "option_missing",
+                 "options": ["Developer", "Administrator", "Other"]},
+                {"field": 1, "target": agree, "problem": "not_boolean"}
+            ])
+        );
+        let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        assert!(recorded.contains(
+            "Refused a form fill before any edit: 2 fields could not take their values."
+        ));
+        for private in ["Developer", "Engineer", "maybe", "Role", "Agree"] {
+            assert!(!recorded.contains(private), "{private} reached the audit");
         }
-    }));
-    let (role, agree) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": ["Alpha", "beta"]}, {"target": agree, "value": true}]}),
-    );
-
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    let seen = prepared.lock().unwrap();
-    assert_eq!(seen[0][0]["value"], json!(["Alpha", "beta"]));
-    assert_eq!(seen[0][1]["value"], json!(true));
-}
-
-#[test]
-fn a_refused_entry_of_a_list_quotes_that_entry_and_not_the_whole_list() {
-    let detail = json!({"problems": [
-        {"field": 0, "problem": "option_missing", "value_index": 1, "options": ["Alpha", "Beta"]}
-    ]});
-    let (executor, _fake, workspace) = opened(refusing_form(detail));
-    let (role, _) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": ["Beta", "Delta"]}]}),
-    );
-
-    assert_eq!(result.status, Status::Failed);
-    assert_eq!(result.effect, Effect::None);
-    assert_eq!(
-        result.summary,
-        "Nothing was changed. The \"Role\" dropdown has no option \"Delta\". It offers: Alpha, Beta."
-    );
-    assert_eq!(result.facts["problems"][0]["value_index"], 1);
-    assert!(!result.facts.to_string().contains("Delta"));
-}
-
-#[test]
-fn a_fill_the_page_partly_undid_is_a_partial_failure_with_no_dialog_advice() {
-    let verify = json!({"status": "returned", "envelope": {"ok": false, "error": {
-        "code": "not_retained",
-        "message": "target did not retain filled value",
-        "detail": {"problems": [{"field": 0, "problem": "reverted", "now": "Choose one..."}]}
-    }}});
-    let (executor, _fake, workspace, audit) =
-        opened_audited(verifying_form(verify), GovernanceFacade::new(None));
-    let (role, agree) = form_handles(&executor, &workspace);
-
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "Administrator"}, {"target": agree, "value": true}]}),
-    );
-
-    assert_eq!(result.status, Status::Failed);
-    assert_eq!(result.effect, Effect::Partial);
-    assert!(!result.repeat_safe);
-    assert_eq!(
-        result.summary,
-        "Set 1 of 2 fields; the \"Role\" dropdown went back to \"Choose one...\" after the page reacted."
-    );
-    assert_eq!(
-        result.next_steps,
-        vec![format!(
-            "Read {role} with browser_read to see its current value."
-        )]
-    );
-    assert_eq!(result.facts["reason"], "fields_reverted");
-    assert_eq!(result.facts["set"], 1);
-    assert_eq!(
-        result.facts["reverted"],
-        json!([{"field": 0, "target": role, "problem": "reverted", "now": "Choose one..."}])
-    );
-    assert!(!result.model_text().to_lowercase().contains("dialog"));
-    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
-    assert!(recorded.contains("A form fill was partly applied: 1 field held its value."));
-    for private in ["Choose one", "Role", "Administrator"] {
-        assert!(!recorded.contains(private), "{private} reached the audit");
     }
-}
 
-#[test]
-fn a_page_that_never_settled_is_still_an_unknown_effect_with_dialog_advice() {
-    let (executor, _fake, workspace) = opened(verifying_form(refused("not_retained")));
-    let (role, _) = form_handles(&executor, &workspace);
+    // a refused fill without target names speaks in unnamed nouns.
+    {
+        let policy = temporary_policy("fill-refusal-names");
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
+        let detail = json!({"problems": [
+            {"field": 0, "problem": "option_missing", "options": ["PRIVATE_OPTION"]}
+        ]});
+        let (executor, _fake, workspace) = opened_under(
+            refusing_form(detail),
+            GovernanceFacade::new(Some(policy.to_path_buf())),
+        );
+        let (role, _) = form_handles(&executor, &workspace);
 
-    let result = execute(
-        &executor,
-        &workspace,
-        "browser_fill_form",
-        json!({"fields": [{"target": role, "value": "Administrator"}]}),
-    );
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "PRIVATE_VALUE"}]}),
+        );
 
-    assert_eq!(result.status, Status::Unknown);
-    assert_eq!(result.effect, Effect::Unknown);
-    assert!(result.model_text().contains("browser_dialog"));
+        assert_eq!(
+            result.summary,
+            "Nothing was changed. A dropdown has no matching option."
+        );
+        assert_eq!(result.facts["problems"][0]["target"], role);
+        assert_eq!(
+            result.facts["problems"][0]["options"],
+            json!(["PRIVATE_OPTION"])
+        );
+        assert!(!result.facts.to_string().contains("PRIVATE_VALUE"));
+        assert!(!result.model_text().contains("PRIVATE"));
+    }
+
+    // a refusal the service cannot read stays the browsers own sentence.
+    {
+        let detail = json!({"problems": [{"field": 0, "problem": "option_vanished"}]});
+        let (executor, _fake, workspace) = opened(refusing_form(detail));
+        let (role, _) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "Engineer"}]}),
+        );
+
+        assert_plain(
+            &result,
+            Status::Failed,
+            "The browser refused this job: select option not found.",
+            "browser_primitive_failed",
+        );
+    }
+
+    // a problem for a field the call does not have is an invalid plan.
+    {
+        let detail = json!({"problems": [{"field": 7, "problem": "option_missing"}]});
+        let (executor, _fake, workspace) = opened(refusing_form(detail));
+        let (role, _) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "Engineer"}]}),
+        );
+
+        assert_eq!(result.status, Status::Failed);
+        assert_eq!(result.effect, Effect::None);
+        assert_eq!(result.facts["reason"], "browser_primitive_failed");
+        assert_eq!(
+            result.facts["detail"],
+            "content primitive returned an invalid fill plan"
+        );
+    }
+
+    // a fill says what the page now holds.
+    {
+        let verify = returned(json!({"retained": true, "fields": [
+            {"field": 0, "now": "Administrator"},
+            {"field": 1, "now": "checked"}
+        ]}));
+        let (executor, _fake, workspace, audit) =
+            opened_audited(verifying_form(verify), GovernanceFacade::new(None));
+        let (role, agree) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "Administrator"}, {"target": agree, "value": true}]}),
+        );
+
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        assert_eq!(
+            result.summary,
+            "Filled 2 fields on example.com: Role = Administrator, Agree = checked."
+        );
+        assert_eq!(
+            result.facts["fields"],
+            json!([
+                {"target": role, "now": "Administrator"},
+                {"target": agree, "now": "checked"}
+            ])
+        );
+        let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        assert!(recorded.contains("Filled 2 fields on example.com."));
+        for private in ["Administrator", "Role", "Agree"] {
+            assert!(!recorded.contains(private), "{private} reached the audit");
+        }
+    }
+
+    // a fill without target names says only how many fields it filled.
+    {
+        let policy = temporary_policy("fill-echo-names");
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
+        let verify =
+            returned(json!({"retained": true, "fields": [{"field": 0, "now": "Administrator"}]}));
+        let (executor, _fake, workspace) = opened_under(
+            verifying_form(verify),
+            GovernanceFacade::new(Some(policy.to_path_buf())),
+        );
+        let (role, _) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "Administrator"}]}),
+        );
+
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        assert_eq!(result.summary, "Filled 1 field on example.com.");
+        assert_eq!(
+            result.facts["fields"],
+            json!([{"target": role, "now": "Administrator"}])
+        );
+    }
+
+    // a normalized match is echoed with the value the caller gave.
+    {
+        let verify = returned(json!({"retained": true, "fields": [
+            {"field": 0, "now": "Administrator", "matched": "normalized"}
+        ]}));
+        let (executor, _fake, workspace, audit) =
+            opened_audited(verifying_form(verify), GovernanceFacade::new(None));
+        let (role, _) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "administrator"}]}),
+        );
+
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        assert_eq!(
+            result.summary,
+            "Filled 1 field on example.com: Role = Administrator (matched \"administrator\")."
+        );
+        assert_eq!(
+            result.facts["fields"],
+            json!([{"target": role, "now": "Administrator", "match": "normalized"}])
+        );
+        let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        for private in ["Administrator", "administrator", "normalized", "Role"] {
+            assert!(!recorded.contains(private), "{private} reached the audit");
+        }
+    }
+
+    // a normalized match without target names keeps the given value out of the sentence.
+    {
+        let policy = temporary_policy("fill-match-names");
+        fs::write(
+            &policy,
+            all_open_policy_with(
+                r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
+        let verify = returned(json!({"retained": true, "fields": [
+            {"field": 0, "now": "Administrator", "matched": "normalized"}
+        ]}));
+        let (executor, _fake, workspace) = opened_under(
+            verifying_form(verify),
+            GovernanceFacade::new(Some(policy.to_path_buf())),
+        );
+        let (role, _) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "PRIVATE_GIVEN"}]}),
+        );
+
+        assert_eq!(result.summary, "Filled 1 field on example.com.");
+        assert_eq!(result.facts["fields"][0]["match"], "normalized");
+        assert!(!result.model_text().contains("PRIVATE_GIVEN"));
+        assert!(!result.facts.to_string().contains("PRIVATE_GIVEN"));
+    }
+
+    // a refused entry of a list quotes that entry and not the whole list.
+    {
+        let detail = json!({"problems": [
+            {"field": 0, "problem": "option_missing", "value_index": 1, "options": ["Alpha", "Beta"]}
+        ]});
+        let (executor, _fake, workspace) = opened(refusing_form(detail));
+        let (role, _) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": ["Beta", "Delta"]}]}),
+        );
+
+        assert_eq!(result.status, Status::Failed);
+        assert_eq!(result.effect, Effect::None);
+        assert_eq!(
+            result.summary,
+            "Nothing was changed. The \"Role\" dropdown has no option \"Delta\". It offers: Alpha, Beta."
+        );
+        assert_eq!(result.facts["problems"][0]["value_index"], 1);
+        assert!(!result.facts.to_string().contains("Delta"));
+    }
+
+    // a fill the page partly undid is a partial failure with no dialog advice.
+    {
+        let verify = json!({"status": "returned", "envelope": {"ok": false, "error": {
+            "code": "not_retained",
+            "message": "target did not retain filled value",
+            "detail": {"problems": [{"field": 0, "problem": "reverted", "now": "Choose one..."}]}
+        }}});
+        let (executor, _fake, workspace, audit) =
+            opened_audited(verifying_form(verify), GovernanceFacade::new(None));
+        let (role, agree) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "Administrator"}, {"target": agree, "value": true}]}),
+        );
+
+        assert_eq!(result.status, Status::Failed);
+        assert_eq!(result.effect, Effect::Partial);
+        assert!(!result.repeat_safe);
+        assert_eq!(
+            result.summary,
+            "Set 1 of 2 fields; the \"Role\" dropdown went back to \"Choose one...\" after the page reacted."
+        );
+        assert_eq!(
+            result.next_steps,
+            vec![format!(
+                "Read {role} with browser_read to see its current value."
+            )]
+        );
+        assert_eq!(result.facts["reason"], "fields_reverted");
+        assert_eq!(result.facts["set"], 1);
+        assert_eq!(
+            result.facts["reverted"],
+            json!([{"field": 0, "target": role, "problem": "reverted", "now": "Choose one..."}])
+        );
+        assert!(!result.model_text().to_lowercase().contains("dialog"));
+        let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        assert!(recorded.contains("A form fill was partly applied: 1 field held its value."));
+        for private in ["Choose one", "Role", "Administrator"] {
+            assert!(!recorded.contains(private), "{private} reached the audit");
+        }
+    }
+
+    // a page that never settled is still an unknown effect with dialog advice.
+    {
+        let (executor, _fake, workspace) = opened(verifying_form(refused("not_retained")));
+        let (role, _) = form_handles(&executor, &workspace);
+
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_fill_form",
+            json!({"fields": [{"target": role, "value": "Administrator"}]}),
+        );
+
+        assert_eq!(result.status, Status::Unknown);
+        assert_eq!(result.effect, Effect::Unknown);
+        assert!(result.model_text().contains("browser_dialog"));
+    }
 }
 
 /// A page with two controls named Save. Its semantic query keeps the maximum it is sent and says
@@ -1185,30 +1362,6 @@ fn two_saves() -> Fault {
             .collect();
         Some(FakeExtension::ok(correlation, json!({"answers": answers})))
     })
-}
-
-#[test]
-fn a_selector_present_wait_over_two_matches_reports_no_size_limit() {
-    let (executor, _fake, workspace) = opened(two_saves());
-
-    let waited = execute(
-        &executor,
-        &workspace,
-        "browser_wait",
-        json!({"condition": "selector_present", "selector": {"name": "Save"}}),
-    );
-
-    assert_eq!(waited.status, Status::Succeeded, "{}", waited.summary);
-    assert_ne!(
-        waited.facts["coverage"]["limited_by_size"], true,
-        "{}",
-        waited.facts
-    );
-    assert!(
-        !waited.model_text().contains("size limit"),
-        "{}",
-        waited.model_text()
-    );
 }
 
 /// An address embedded in the page, on a host of its own.
@@ -1252,122 +1405,9 @@ fn embedding_page() -> Fault {
     })
 }
 
-/// A read aimed at a control inside an embedded document is the tab's read: the landing check,
-/// the host the agent reads and the durable permission trace all name the tab's own host.
-#[test]
-fn no_embedded_host_reaches_the_permission_trace_from_a_targeted_read() {
-    let (executor, _fake, workspace, audit) =
-        opened_audited(embedding_page(), GovernanceFacade::new(None));
-    let inspected = execute(&executor, &workspace, "browser_inspect", json!({}));
-    assert_eq!(inspected.status, Status::Succeeded, "{}", inspected.summary);
-    let target = inspected.facts["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["name"] == "Inside")
-        .map(|item| item["target"].clone())
-        .expect("the embedded control is listed");
-
-    let read = execute(
-        &executor,
-        &workspace,
-        "browser_read",
-        json!({"target": target}),
-    );
-
-    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
-    assert_eq!(
-        read.facts["text"], "Inside",
-        "the read ran in the embedded document"
-    );
-    let answered = serde_json::to_string(&read).unwrap();
-    assert!(!answered.contains("embedded.example"), "{answered}");
-    let traced = serde_json::to_string(
-        &audit
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|record| record.permissions.clone())
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
-    assert!(traced.contains("example.com"), "{traced}");
-    assert!(
-        !traced.contains("embedded.example"),
-        "an embedded document's host never enters the durable audit: {traced}"
-    );
-}
-
 /// The state of the scripted recording, as the extension reports it.
 fn recording(state: &str) -> Value {
     json!({"recording_id": "recording_1", "tab_id": TAB, "state": state, "frame_count": 3,
         "bytes_held": 100, "duration_ms": 900, "source_urls": [URL],
         "source_urls_complete": true})
-}
-
-/// A save to Downloads writes a file in the browser, so when its receipt never comes before the
-/// deadline the file may exist: the agent reads an unknown effect and is told to look first.
-#[test]
-fn a_download_save_that_outlives_its_deadline_is_unknown_and_not_repeat_safe() {
-    let (executor, fake, workspace, _audit) = opened_replying(
-        Box::new(|correlation, primitive| {
-            let wire::Primitive::Recording(op) = primitive else {
-                return None;
-            };
-            let effect = |value: Value| wire::Receipt {
-                dispatched: true,
-                ..FakeExtension::ok(correlation, value)
-            };
-            Some(match op {
-                wire::RecordingOp::Start { .. } => Reply::Now(effect(json!({"result": "started",
-                    "summary": recording("recording"), "existing": false}))),
-                wire::RecordingOp::Stop { .. } => Reply::Now(effect(json!({"result": "stopped",
-                    "summary": recording("frozen"), "changed": true}))),
-                wire::RecordingOp::Export {
-                    destination: wire::RecordingTarget::Download { .. },
-                    ..
-                } => Reply::Never,
-                _ => return None,
-            })
-        }),
-        GovernanceFacade::new(None),
-    );
-    let started = execute(
-        &executor,
-        &workspace,
-        "browser_record",
-        json!({"action": "start"}),
-    );
-    assert_eq!(started.status, Status::Succeeded, "{}", started.summary);
-
-    let saved = execute(
-        &executor,
-        &workspace,
-        "browser_record",
-        json!({"action": "save", "download": true, "timeout_ms": 300}),
-    );
-
-    assert_eq!(saved.status, Status::Unknown, "{}", saved.summary);
-    assert_eq!(saved.effect, Effect::Unknown, "{}", saved.summary);
-    assert!(!saved.repeat_safe, "{}", saved.summary);
-    assert_eq!(saved.facts["phase"], "after_dispatch", "{}", saved.facts);
-    assert!(
-        saved
-            .summary
-            .contains("before the browser confirmed what the sent command did"),
-        "{}",
-        saved.summary
-    );
-    assert!(fake
-        .wait(|seen| !seen.cancels.is_empty())
-        .requests
-        .iter()
-        .any(|(_, primitive)| matches!(
-            primitive,
-            wire::Primitive::Recording(wire::RecordingOp::Export {
-                destination: wire::RecordingTarget::Download { .. },
-                ..
-            })
-        )));
 }
