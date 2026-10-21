@@ -62,7 +62,7 @@ In order. "After" names what a slice waits for.
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | landed (6f37117f) |
 | SERV-6 | refactor(cli): the command line reads the service's own vocabulary | - | SERV-6 with its skeptic's correction, moved from core-service; cross-lane into `cli/` and `intake/mcp.rs` | landed (15b38451) |
 | SERV-12 | refactor(diagnostics): one typed record, written by the service and read by `diagnostics show`, with the edge's line pinned | - | SERV-12 with its skeptic's correction, moved from core-service; cross-lane into `crates/bridge`, `cli/diagnostics.rs` and `crates/relay/src/log.rs` (coordinator's go) | landed (40e4ff71) |
-| BROW-2 | refactor(browser): the dead recovery decisions go | test-03's C16 | BROW-2, moved from core-service; cross-lane into `browser/recovery.rs` and `work/mod.rs` | todo |
+| BROW-2 | refactor(browser): the dead recovery decisions go | test-03's C16 | BROW-2, moved from core-service; cross-lane into `browser/recovery.rs` and `work/mod.rs` | landed |
 
 ## Notes
 
@@ -251,3 +251,8 @@ In order. "After" names what a slice waits for.
   and `an_edge_line_reads_as_a_record` pins it. On test-01's real diagnostics directory the old
   and new `diagnostics show`, plain and `--json`, printed identical output (304 and 2,589 lines).
   `crates/bridge` gains its `serde` dependency; the connectors guard passes.
+- BROW-2: `RecoveryDecision::Launch`, which nothing constructed, is gone with the two
+  `unreachable!` arms that matched it in `work/mod.rs`. Recovery's `decide`, `decide_browser` and
+  `start_plan` return the `FlightPhase` directly, so `RecoveryPlan` and `phase_from_plan` (whose
+  both-false arm was unreachable) go; `starts_on_request` matches the launching phases. `From<
+  RecoveryWaitError> for BrowserError` replaces the mapping `work/mod.rs` wrote twice.

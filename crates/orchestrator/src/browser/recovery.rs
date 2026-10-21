@@ -125,13 +125,6 @@ pub enum RecoveryDecision {
         /// Installed browsers with a current Ghostlight native-host registration.
         browsers: Vec<RecoveryCandidate>,
     },
-    /// A later physical seam may make one bounded attempt for this exact browser.
-    Launch {
-        /// The uniquely selected installed browser.
-        browser: RecoveryCandidate,
-        /// Whether an owned stale registration may be reconciled first.
-        repair_owned_registration: bool,
-    },
     /// One connected adapter is ready for the ordinary resolver. For a request that named an
     /// installed browser, it is a connection of that browser, which may be another profile.
     Ready {
@@ -154,6 +147,16 @@ pub enum RecoveryWaitError {
     Cancelled,
     /// The invocation deadline expired before any physical attempt.
     Deadline,
+}
+
+impl From<RecoveryWaitError> for super::BrowserError {
+    /// A wait that ended before any physical attempt sent nothing.
+    fn from(error: RecoveryWaitError) -> Self {
+        match error {
+            RecoveryWaitError::Cancelled => Self::CancelledBeforeDispatch,
+            RecoveryWaitError::Deadline => Self::DeadlineBeforeDispatch,
+        }
+    }
 }
 
 trait BrowserInventory: Send + Sync {
@@ -451,20 +454,6 @@ fn start_reaped(mut command: Command) -> std::io::Result<u32> {
 type RecoveryResult = Result<RecoveryDecision, RecoveryWaitError>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum RecoveryPlan {
-    Complete(RecoveryDecision),
-    Prepare {
-        browser: RecoveryCandidate,
-        repair_owned_registration: bool,
-        launch: bool,
-    },
-    /// Repair every stale Ghostlight-owned registration, then leave startup to the person.
-    RepairAll {
-        queue: Vec<RecoveryCandidate>,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 enum FlightPhase {
     Inspecting,
     Repairing {
@@ -612,10 +601,10 @@ impl BrowserRecovery {
         let candidates = self.inventory.inspect().ok()?;
         let remembered = self.browser.last_connected_browser();
         match decide(mode, &candidates, remembered.as_deref()) {
-            RecoveryPlan::Prepare {
+            FlightPhase::Launching { browser }
+            | FlightPhase::Repairing {
                 browser,
-                launch: true,
-                ..
+                launch_after: true,
             } => Some(browser.name),
             _ => None,
         }
@@ -774,11 +763,11 @@ impl BrowserRecovery {
                     |()| unreadable_inventory(),
                     |candidates| {
                         let remembered = self.browser.last_connected_browser();
-                        phase_from_plan(decide(
+                        decide(
                             self.governance.browser_startup(),
                             &candidates,
                             remembered.as_deref(),
-                        ))
+                        )
                     },
                 ))
             }
@@ -869,7 +858,7 @@ impl BrowserRecovery {
         }
         self.inventory.inspect().map_or_else(
             |()| unreadable_inventory(),
-            |candidates| phase_from_plan(decide_browser(&candidates, installed)),
+            |candidates| decide_browser(&candidates, installed),
         )
     }
 
@@ -917,7 +906,7 @@ fn decide(
     mode: BrowserStartup,
     candidates: &[RecoveryCandidate],
     remembered: Option<&str>,
-) -> RecoveryPlan {
+) -> FlightPhase {
     let installed: Vec<_> = candidates
         .iter()
         .filter(|candidate| startable(candidate))
@@ -937,10 +926,15 @@ fn decide(
                 | NativeHostState::NeedsAttention => None,
             };
             if let Some(repair_owned_registration) = repair_owned_registration {
-                return RecoveryPlan::Prepare {
-                    browser: browser.clone(),
-                    repair_owned_registration,
-                    launch: true,
+                return if repair_owned_registration {
+                    FlightPhase::Repairing {
+                        browser: browser.clone(),
+                        launch_after: true,
+                    }
+                } else {
+                    FlightPhase::Launching {
+                        browser: browser.clone(),
+                    }
                 };
             }
         }
@@ -953,7 +947,7 @@ fn decide(
             .cloned()
             .collect();
         if !connectable.is_empty() {
-            return RecoveryPlan::Complete(RecoveryDecision::Manual {
+            return FlightPhase::Complete(RecoveryDecision::Manual {
                 browsers: connectable,
             });
         }
@@ -963,7 +957,10 @@ fn decide(
             .cloned()
             .collect();
         if !repairable.is_empty() {
-            return RecoveryPlan::RepairAll { queue: repairable };
+            return FlightPhase::RepairingQueue {
+                remaining: repairable.into(),
+                named: Vec::new(),
+            };
         }
         // A registration another installation owns explains the whole machine at once, so it
         // wins over the generic unusable-registration remedy (ADR-0149 amendment).
@@ -973,12 +970,12 @@ fn decide(
             .map(|browser| browser.name.clone())
             .collect();
         if !elsewhere.is_empty() {
-            return RecoveryPlan::Complete(RecoveryDecision::Failed {
+            return FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::OwnedElsewhere,
                 details: elsewhere,
             });
         }
-        return RecoveryPlan::Complete(RecoveryDecision::Failed {
+        return FlightPhase::Complete(RecoveryDecision::Failed {
             reason: RecoveryFailure::NativeHostUnavailable,
             details: installed
                 .iter()
@@ -992,7 +989,7 @@ fn decide(
             .filter(|candidate| candidate.package.sandboxed())
             .map(|candidate| candidate.package_detail.clone())
             .collect();
-        return RecoveryPlan::Complete(RecoveryDecision::Failed {
+        return FlightPhase::Complete(RecoveryDecision::Failed {
             reason: if sandboxed.is_empty() {
                 RecoveryFailure::BrowserAbsent
             } else {
@@ -1008,13 +1005,13 @@ fn decide(
 /// Plan starting the installed browser `installed` and no other, under `on_demand`. A browser
 /// Ghostlight cannot start, because it is not installed or has no verified ordinary executable,
 /// leaves startup to the person.
-fn decide_browser(candidates: &[RecoveryCandidate], installed: &str) -> RecoveryPlan {
+fn decide_browser(candidates: &[RecoveryCandidate], installed: &str) -> FlightPhase {
     candidates
         .iter()
         .find(|candidate| candidate.id == installed && startable(candidate))
         .map_or_else(
             || {
-                RecoveryPlan::Complete(RecoveryDecision::Manual {
+                FlightPhase::Complete(RecoveryDecision::Manual {
                     browsers: Vec::new(),
                 })
             },
@@ -1029,33 +1026,28 @@ fn startable(candidate: &RecoveryCandidate) -> bool {
 }
 
 /// Plan starting the one selected `browser` under `mode`, by its registration.
-fn start_plan(mode: BrowserStartup, browser: RecoveryCandidate) -> RecoveryPlan {
+fn start_plan(mode: BrowserStartup, browser: RecoveryCandidate) -> FlightPhase {
     match browser.registration {
         NativeHostState::Missing | NativeHostState::NeedsAttention => {
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::NativeHostUnavailable,
                 details: vec![browser.name],
             })
         }
-        NativeHostState::OwnedElsewhere => RecoveryPlan::Complete(RecoveryDecision::Failed {
+        NativeHostState::OwnedElsewhere => FlightPhase::Complete(RecoveryDecision::Failed {
             reason: RecoveryFailure::OwnedElsewhere,
             details: vec![browser.name],
         }),
-        NativeHostState::Updatable => RecoveryPlan::Prepare {
+        NativeHostState::Updatable => FlightPhase::Repairing {
             browser,
-            repair_owned_registration: true,
-            launch: mode == BrowserStartup::OnDemand,
+            launch_after: mode == BrowserStartup::OnDemand,
         },
         NativeHostState::Current if mode == BrowserStartup::Manual => {
-            RecoveryPlan::Complete(RecoveryDecision::Manual {
+            FlightPhase::Complete(RecoveryDecision::Manual {
                 browsers: vec![browser],
             })
         }
-        NativeHostState::Current => RecoveryPlan::Prepare {
-            browser,
-            repair_owned_registration: false,
-            launch: true,
-        },
+        NativeHostState::Current => FlightPhase::Launching { browser },
     }
 }
 
@@ -1075,36 +1067,6 @@ fn discovered_mechanism() -> Arc<dyn RecoveryMechanism> {
     #[cfg(test)]
     let mechanism = Arc::new(TestLaunch(Box::new(|| {})));
     mechanism
-}
-
-fn phase_from_plan(plan: RecoveryPlan) -> FlightPhase {
-    match plan {
-        RecoveryPlan::Complete(decision) => FlightPhase::Complete(decision),
-        RecoveryPlan::RepairAll { queue } => FlightPhase::RepairingQueue {
-            remaining: queue.into(),
-            named: Vec::new(),
-        },
-        RecoveryPlan::Prepare {
-            browser,
-            repair_owned_registration: true,
-            launch,
-        } => FlightPhase::Repairing {
-            browser,
-            launch_after: launch,
-        },
-        RecoveryPlan::Prepare {
-            browser,
-            repair_owned_registration: false,
-            launch: true,
-        } => FlightPhase::Launching { browser },
-        RecoveryPlan::Prepare {
-            browser,
-            repair_owned_registration: false,
-            launch: false,
-        } => FlightPhase::Complete(RecoveryDecision::Manual {
-            browsers: vec![browser],
-        }),
-    }
 }
 
 #[cfg(test)]
@@ -1552,10 +1514,8 @@ mod tests {
 
         assert!(matches!(
             decision,
-            RecoveryPlan::Prepare {
+            FlightPhase::Launching {
                 browser: RecoveryCandidate { name, .. },
-                repair_owned_registration: false,
-                launch: true,
             } if name == "Google Chrome"
         ));
     }
@@ -1574,7 +1534,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::BrowserAbsent,
                 details: Vec::new(),
             })
@@ -1602,7 +1562,7 @@ mod tests {
 
         assert!(matches!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Manual { browsers })
+            FlightPhase::Complete(RecoveryDecision::Manual { browsers })
                 if browsers.iter().map(|browser| browser.name.as_str())
                     .eq(["Google Chrome", "Microsoft Edge"])
         ));
@@ -1629,7 +1589,7 @@ mod tests {
 
         assert!(matches!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Manual { browsers })
+            FlightPhase::Complete(RecoveryDecision::Manual { browsers })
                 if browsers.iter().map(|browser| browser.name.as_str())
                     .eq(["Google Chrome", "Microsoft Edge"])
         ));
@@ -1649,7 +1609,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::NativeHostUnavailable,
                 details: vec!["Microsoft Edge".into()],
             })
@@ -1697,7 +1657,7 @@ mod tests {
         );
         assert!(matches!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::SandboxedPackage,
                 details
             }) if details[0].contains("Snap") && details[0].contains("native browser package")
@@ -1720,7 +1680,7 @@ mod tests {
         );
         assert_eq!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::NativeHostUnavailable,
                 details: vec!["Google Chrome".into(), "Chromium".into()],
             })
@@ -1740,7 +1700,7 @@ mod tests {
         );
         assert_eq!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::OwnedElsewhere,
                 details: vec!["Google Chrome".into()],
             })
@@ -1767,7 +1727,7 @@ mod tests {
         );
         assert!(matches!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Manual { browsers })
+            FlightPhase::Complete(RecoveryDecision::Manual { browsers })
                 if browsers.iter().map(|browser| browser.name.as_str())
                     .eq(["Google Chrome"])
         ));
@@ -1793,7 +1753,7 @@ mod tests {
         );
         assert_eq!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::OwnedElsewhere,
                 details: vec!["Google Chrome".into(), "Chromium".into()],
             })
@@ -1820,7 +1780,7 @@ mod tests {
         );
         assert!(matches!(
             decision,
-            RecoveryPlan::Complete(RecoveryDecision::Manual { browsers })
+            FlightPhase::Complete(RecoveryDecision::Manual { browsers })
                 if browsers.iter().map(|browser| browser.name.as_str())
                     .eq(["Microsoft Edge"])
         ));
@@ -1993,18 +1953,14 @@ mod tests {
         let candidates = chrome_and_edge(NativeHostState::Current);
         assert_eq!(
             decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
-            RecoveryPlan::Prepare {
+            FlightPhase::Launching {
                 browser: candidates[0].clone(),
-                repair_owned_registration: false,
-                launch: true,
             }
         );
         assert_eq!(
             decide(BrowserStartup::OnDemand, &candidates, Some("edge")),
-            RecoveryPlan::Prepare {
+            FlightPhase::Launching {
                 browser: candidates[1].clone(),
-                repair_owned_registration: false,
-                launch: true,
             }
         );
     }
@@ -2014,10 +1970,9 @@ mod tests {
         let candidates = chrome_and_edge(NativeHostState::Updatable);
         assert_eq!(
             decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
-            RecoveryPlan::Prepare {
+            FlightPhase::Repairing {
                 browser: candidates[0].clone(),
-                repair_owned_registration: true,
-                launch: true,
+                launch_after: true,
             }
         );
 
@@ -2055,7 +2010,7 @@ mod tests {
     #[test]
     fn without_a_usable_remembered_browser_plural_evidence_still_names_every_browser() {
         let candidates = chrome_and_edge(NativeHostState::Current);
-        let named_both = RecoveryPlan::Complete(RecoveryDecision::Manual {
+        let named_both = FlightPhase::Complete(RecoveryDecision::Manual {
             browsers: candidates.clone(),
         });
         for remembered in [None, Some("brave"), Some("not-a-browser")] {
@@ -2072,7 +2027,7 @@ mod tests {
         uninstalled.push(installed("brave", "Brave", NativeHostState::Current));
         assert_eq!(
             decide(BrowserStartup::OnDemand, &uninstalled, Some("chrome")),
-            RecoveryPlan::Complete(RecoveryDecision::Manual {
+            FlightPhase::Complete(RecoveryDecision::Manual {
                 browsers: uninstalled[1..].to_vec(),
             })
         );
@@ -2086,7 +2041,7 @@ mod tests {
             let candidates = chrome_and_edge(unusable);
             assert_eq!(
                 decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
-                RecoveryPlan::Complete(RecoveryDecision::Manual {
+                FlightPhase::Complete(RecoveryDecision::Manual {
                     browsers: vec![candidates[1].clone()],
                 }),
                 "{unusable:?}"
@@ -2099,7 +2054,7 @@ mod tests {
         let candidates = chrome_and_edge(NativeHostState::Current);
         assert_eq!(
             decide(BrowserStartup::Manual, &candidates, Some("chrome")),
-            RecoveryPlan::Complete(RecoveryDecision::Manual {
+            FlightPhase::Complete(RecoveryDecision::Manual {
                 browsers: candidates.clone(),
             })
         );
@@ -2155,10 +2110,9 @@ mod tests {
     fn a_named_browser_with_a_stale_registration_is_repaired_then_started() {
         assert_eq!(
             decide_browser(&chrome_and_edge(NativeHostState::Updatable), "chrome"),
-            RecoveryPlan::Prepare {
+            FlightPhase::Repairing {
                 browser: installed("chrome", "Google Chrome", NativeHostState::Updatable),
-                repair_owned_registration: true,
-                launch: true,
+                launch_after: true,
             }
         );
         let browser = Arc::new(FakeBrowser::default());
@@ -2484,7 +2438,7 @@ mod tests {
         uninstalled[0].ordinary_executable = None;
         assert_eq!(
             decide_browser(&uninstalled, "chrome"),
-            RecoveryPlan::Complete(left_to_the_person)
+            FlightPhase::Complete(left_to_the_person)
         );
         assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 0);
         assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
@@ -2494,14 +2448,14 @@ mod tests {
     fn a_named_browser_without_a_usable_registration_names_the_remedy() {
         assert_eq!(
             decide_browser(&chrome_and_edge(NativeHostState::Missing), "chrome"),
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::NativeHostUnavailable,
                 details: vec!["Google Chrome".into()],
             })
         );
         assert_eq!(
             decide_browser(&chrome_and_edge(NativeHostState::OwnedElsewhere), "chrome"),
-            RecoveryPlan::Complete(RecoveryDecision::Failed {
+            FlightPhase::Complete(RecoveryDecision::Failed {
                 reason: RecoveryFailure::OwnedElsewhere,
                 details: vec!["Google Chrome".into()],
             })
@@ -2606,9 +2560,8 @@ mod tests {
         );
         assert!(matches!(
             decision,
-            RecoveryPlan::Prepare {
-                repair_owned_registration: true,
-                launch: true,
+            FlightPhase::Repairing {
+                launch_after: true,
                 ..
             }
         ));

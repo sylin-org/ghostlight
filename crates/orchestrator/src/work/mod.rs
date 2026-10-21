@@ -36,9 +36,7 @@ use base64::Engine;
 use serde_json::{json, Value};
 use url::Url;
 
-use crate::browser::recovery::{
-    BrowserRecovery, RecoveryDecision, RecoveryFailure, RecoveryWaitError,
-};
+use crate::browser::recovery::{BrowserRecovery, RecoveryDecision, RecoveryFailure};
 use crate::browser::{
     addressed_tab, choose_browser, Availability, BrowserError, BrowserPort, RETURN_GRACE,
 };
@@ -1571,11 +1569,7 @@ impl ApplicationExecutor {
             Ok(RecoveryDecision::Failed { reason, details }) => {
                 Err(BrowserError::RecoveryFailed { reason, details })
             }
-            Ok(RecoveryDecision::Launch { .. }) => {
-                unreachable!("the recovery service consumes its internal launch plan")
-            }
-            Err(RecoveryWaitError::Cancelled) => Err(BrowserError::CancelledBeforeDispatch),
-            Err(RecoveryWaitError::Deadline) => Err(BrowserError::DeadlineBeforeDispatch),
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -1617,11 +1611,7 @@ impl ApplicationExecutor {
                 Err(BrowserError::RecoveryFailed { reason, details })
             }
             Ok(RecoveryDecision::Ready { browser }) => Ok(browser),
-            Ok(RecoveryDecision::Launch { .. }) => {
-                unreachable!("the recovery service consumes its internal launch plan")
-            }
-            Err(RecoveryWaitError::Cancelled) => Err(BrowserError::CancelledBeforeDispatch),
-            Err(RecoveryWaitError::Deadline) => Err(BrowserError::DeadlineBeforeDispatch),
+            Err(error) => Err(error.into()),
         }
     }
 
