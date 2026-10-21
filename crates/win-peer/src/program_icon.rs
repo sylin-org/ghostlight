@@ -334,89 +334,87 @@ mod tests {
         Path::new(&root).join("System32").join(name)
     }
 
+    /// Covers the icon-resource FFI (unsafe): notepad gives an icon file of its largest images, one per
+    /// size, deepest colour and largest first, each placed after the directory; a small limit keeps
+    /// only the images that fit, or none; and a program without an icon resource gives none while a
+    /// file that is no program is an error.
     #[test]
-    fn notepad_gives_an_icon_file_with_its_largest_images() {
-        let icon = of_program(&system_program("notepad.exe"), 1024 * 1024)
-            .unwrap()
-            .expect("notepad has an icon");
-        let images = images_of(&icon);
-        assert!(!images.is_empty() && images.len() <= MAX_IMAGES);
-        assert!(images.iter().all(|(_, image)| is_icon_image(image)));
-        let widths: Vec<u32> = images
-            .iter()
-            .map(|(width, _)| if *width == 0 { 256 } else { u32::from(*width) })
-            .collect();
-        assert!(
-            widths.windows(2).all(|pair| pair[0] > pair[1]),
-            "{widths:?}"
-        );
-    }
-
-    #[test]
-    fn a_small_limit_keeps_only_the_images_that_fit_or_none() {
-        let notepad = system_program("notepad.exe");
-        let whole = of_program(&notepad, 1024 * 1024).unwrap().unwrap();
-        let smaller = of_program(&notepad, whole.len() - 1).unwrap();
-        assert!(smaller.is_none_or(|icon| icon.len() < whole.len()));
-        assert_eq!(of_program(&notepad, DIRECTORY_BYTES).unwrap(), None);
-    }
-
-    #[test]
-    fn a_program_without_an_icon_resource_gives_none_and_a_non_program_is_an_error() {
-        let this_test = std::env::current_exe().unwrap();
-        assert_eq!(of_program(&this_test, 1024 * 1024).unwrap(), None);
-        let scratch = crate::scratch::Scratch::named("program-icon");
-        let text = scratch.join("not-a-program.exe");
-        std::fs::write(&text, b"MZ not a program").unwrap();
-        assert!(of_program(&text, 1024 * 1024).is_err());
-    }
-
-    #[test]
-    fn a_group_keeps_one_image_per_size_deepest_colour_and_largest_first() {
-        let entry = |width: u8, bit_count: u16, id: u16| GroupEntry {
-            width,
-            height: width,
-            colors: 0,
-            planes: 1,
-            bit_count,
-            id,
-        };
-        let mut directory = vec![0, 0, 1, 0, 4, 0];
-        for item in [
-            entry(16, 32, 1),
-            entry(0, 32, 2),
-            entry(48, 8, 3),
-            entry(48, 32, 4),
-        ] {
-            directory.extend_from_slice(&[item.width, item.height, item.colors, 0]);
-            directory.extend_from_slice(&item.planes.to_le_bytes());
-            directory.extend_from_slice(&item.bit_count.to_le_bytes());
-            directory.extend_from_slice(&100u32.to_le_bytes());
-            directory.extend_from_slice(&item.id.to_le_bytes());
+    fn a_programs_icon_resource_becomes_an_icon_file_of_its_largest_images_that_fit() {
+        {
+            let icon = of_program(&system_program("notepad.exe"), 1024 * 1024)
+                .unwrap()
+                .expect("notepad has an icon");
+            let images = images_of(&icon);
+            assert!(!images.is_empty() && images.len() <= MAX_IMAGES);
+            assert!(images.iter().all(|(_, image)| is_icon_image(image)));
+            let widths: Vec<u32> = images
+                .iter()
+                .map(|(width, _)| if *width == 0 { 256 } else { u32::from(*width) })
+                .collect();
+            assert!(
+                widths.windows(2).all(|pair| pair[0] > pair[1]),
+                "{widths:?}"
+            );
         }
-        let ids: Vec<u16> = largest_first(&group_entries(&directory))
-            .iter()
-            .map(|entry| entry.id)
-            .collect();
-        assert_eq!(ids, [2, 4, 1]);
-        assert!(group_entries(&directory[..20]).is_empty());
-        assert!(group_entries(&[0, 0, 2, 0, 0, 0]).is_empty(), "a cursor");
-    }
-
-    #[test]
-    fn an_icon_file_places_each_image_after_the_directory() {
-        let png = [PNG_SIGNATURE, b"large"].concat();
-        let bitmap = [&BITMAP_HEADER_BYTES.to_le_bytes()[..], b"small"].concat();
-        let entry = |width: u8| GroupEntry {
-            width,
-            height: width,
-            colors: 0,
-            planes: 1,
-            bit_count: 32,
-            id: 1,
-        };
-        let file = icon_file(&[(entry(0), png.clone()), (entry(32), bitmap.clone())]);
-        assert_eq!(images_of(&file), [(0, png), (32, bitmap)]);
-        assert!(!is_icon_image(b"neither"));
+        {
+            let notepad = system_program("notepad.exe");
+            let whole = of_program(&notepad, 1024 * 1024).unwrap().unwrap();
+            let smaller = of_program(&notepad, whole.len() - 1).unwrap();
+            assert!(smaller.is_none_or(|icon| icon.len() < whole.len()));
+            assert_eq!(of_program(&notepad, DIRECTORY_BYTES).unwrap(), None);
+        }
+        {
+            let this_test = std::env::current_exe().unwrap();
+            assert_eq!(of_program(&this_test, 1024 * 1024).unwrap(), None);
+            let scratch = crate::scratch::Scratch::named("program-icon");
+            let text = scratch.join("not-a-program.exe");
+            std::fs::write(&text, b"MZ not a program").unwrap();
+            assert!(of_program(&text, 1024 * 1024).is_err());
+        }
+        {
+            let entry = |width: u8, bit_count: u16, id: u16| GroupEntry {
+                width,
+                height: width,
+                colors: 0,
+                planes: 1,
+                bit_count,
+                id,
+            };
+            let mut directory = vec![0, 0, 1, 0, 4, 0];
+            for item in [
+                entry(16, 32, 1),
+                entry(0, 32, 2),
+                entry(48, 8, 3),
+                entry(48, 32, 4),
+            ] {
+                directory.extend_from_slice(&[item.width, item.height, item.colors, 0]);
+                directory.extend_from_slice(&item.planes.to_le_bytes());
+                directory.extend_from_slice(&item.bit_count.to_le_bytes());
+                directory.extend_from_slice(&100u32.to_le_bytes());
+                directory.extend_from_slice(&item.id.to_le_bytes());
+            }
+            let ids: Vec<u16> = largest_first(&group_entries(&directory))
+                .iter()
+                .map(|entry| entry.id)
+                .collect();
+            assert_eq!(ids, [2, 4, 1]);
+            assert!(group_entries(&directory[..20]).is_empty());
+            assert!(group_entries(&[0, 0, 2, 0, 0, 0]).is_empty(), "a cursor");
+        }
+        {
+            let png = [PNG_SIGNATURE, b"large"].concat();
+            let bitmap = [&BITMAP_HEADER_BYTES.to_le_bytes()[..], b"small"].concat();
+            let entry = |width: u8| GroupEntry {
+                width,
+                height: width,
+                colors: 0,
+                planes: 1,
+                bit_count: 32,
+                id: 1,
+            };
+            let file = icon_file(&[(entry(0), png.clone()), (entry(32), bitmap.clone())]);
+            assert_eq!(images_of(&file), [(0, png), (32, bitmap)]);
+            assert!(!is_icon_image(b"neither"));
+        }
     }
 }

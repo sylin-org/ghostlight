@@ -30,7 +30,7 @@ mod package;
 mod private_file;
 #[cfg(target_os = "windows")]
 mod program_icon;
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 mod scratch;
 #[cfg(target_os = "windows")]
 mod settings_change;
@@ -120,24 +120,4 @@ pub fn interactive_window_station() -> bool {
     return window_station::is_visible();
     #[cfg(not(target_os = "windows"))]
     true
-}
-
-#[cfg(all(test, target_os = "windows"))]
-mod tests {
-    /// An ordinary test run happens in a person's desktop session, whose station is visible.
-    ///
-    /// A run with no desktop (a build service in session 0) reports false. The test then skips
-    /// with a note when the `CI` variable is set, which the project's CI sets, and fails
-    /// otherwise, so a developer's machine that reports false is looked at.
-    #[test]
-    fn a_desktop_session_has_the_visible_window_station() {
-        if super::interactive_window_station() {
-            return;
-        }
-        assert!(
-            std::env::var_os("CI").is_some(),
-            "this run has no visible window station and is not CI"
-        );
-        eprintln!("skipped: CI runs this test without a desktop session");
-    }
 }

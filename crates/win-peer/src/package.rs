@@ -147,30 +147,32 @@ fn install_folder(full_name: &[u16]) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    /// Covers the package FFI (unsafe): a package family nothing installed has no install folder, and a
+    /// name is read only inside the buffer the system filled, before any dereference.
     #[test]
-    fn a_family_nothing_installed_has_no_install_folder() {
-        assert!(install_folders("Ghostlight.NoSuchPackage_0000000000000").is_empty());
-        assert!(install_folders("").is_empty());
-        assert!(install_folders("not a family name").is_empty());
-    }
-
-    #[test]
-    fn a_name_is_read_only_inside_its_buffer() {
-        let mut buffer: Vec<u16> = "first\0second\0".encode_utf16().collect();
-        let start = buffer.as_mut_ptr();
-        // The pointers are made only to be compared as addresses, never dereferenced.
-        let second = start.wrapping_add(6);
-        let outside = start.wrapping_add(buffer.len() + 4);
-        assert_eq!(
-            name_at(&buffer, start),
-            Some("first\0".encode_utf16().collect())
-        );
-        assert_eq!(
-            name_at(&buffer, second),
-            Some("second\0".encode_utf16().collect())
-        );
-        assert_eq!(name_at(&buffer, outside), None);
-        assert_eq!(name_at(&buffer, start.wrapping_sub(1)), None);
-        assert_eq!(name_at(&buffer, start.wrapping_add(5)), None, "empty name");
+    fn a_package_is_read_only_inside_its_buffer_and_an_absent_one_has_no_folder() {
+        {
+            assert!(install_folders("Ghostlight.NoSuchPackage_0000000000000").is_empty());
+            assert!(install_folders("").is_empty());
+            assert!(install_folders("not a family name").is_empty());
+        }
+        {
+            let mut buffer: Vec<u16> = "first\0second\0".encode_utf16().collect();
+            let start = buffer.as_mut_ptr();
+            // The pointers are made only to be compared as addresses, never dereferenced.
+            let second = start.wrapping_add(6);
+            let outside = start.wrapping_add(buffer.len() + 4);
+            assert_eq!(
+                name_at(&buffer, start),
+                Some("first\0".encode_utf16().collect())
+            );
+            assert_eq!(
+                name_at(&buffer, second),
+                Some("second\0".encode_utf16().collect())
+            );
+            assert_eq!(name_at(&buffer, outside), None);
+            assert_eq!(name_at(&buffer, start.wrapping_sub(1)), None);
+            assert_eq!(name_at(&buffer, start.wrapping_add(5)), None, "empty name");
+        }
     }
 }

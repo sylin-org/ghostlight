@@ -162,12 +162,24 @@ impl ProcessToken {
 mod tests {
     use super::ProcessToken;
 
-    /// The token answers both questions, and its user is a SID string.
+    /// Covers the token and window-station FFI (unsafe): this process's token answers whether it
+    /// is elevated and whose it is, as a SID string, and an ordinary run sits in a person's desktop
+    /// session, whose window station is visible. A run with no desktop (a build service in session
+    /// 0) reports an invisible station; that passes, with a note, only where the `CI` variable is
+    /// set, which the project's CI sets, so a developer's machine that reports one is looked at.
     #[test]
-    fn the_process_token_says_whether_it_is_elevated_and_whose_it_is() {
+    fn this_process_reads_its_own_token_and_window_station() {
         let token = ProcessToken::current().expect("the process token opens");
         token.is_elevated().expect("the elevation can be read");
         let sid = token.user_sid().expect("the user can be read");
         assert!(sid.starts_with("S-1-"), "{sid} is a SID string");
+
+        if !crate::interactive_window_station() {
+            assert!(
+                std::env::var_os("CI").is_some(),
+                "this run has no visible window station and is not CI"
+            );
+            eprintln!("note: CI runs this test without a desktop session");
+        }
     }
 }

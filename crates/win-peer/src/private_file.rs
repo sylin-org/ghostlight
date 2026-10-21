@@ -255,45 +255,42 @@ mod tests {
     use crate::scratch::Scratch;
     use crate::token::ProcessToken;
 
-    /// An owner-private file is closed to everyone else, and the check sees each way a file can
-    /// be open to someone: a read grant, a full grant, a grant to rewrite its list, a generic
-    /// read grant, and no list at all. A grant to write alone reads nothing.
+    /// Covers the access-list FFI (unsafe): only a file whose list grants the
+    /// current user and SYSTEM alone is closed to everyone else, and a file another principal owns is
+    /// open.
     #[test]
     fn only_an_owner_private_file_is_closed_to_everyone_else() {
-        let scratch = Scratch::named("private-file");
-        let private = scratch.join("private");
-        drop(create(&private).expect("the private file is created"));
-        assert!(!others_can_read(&private).expect("its access list is read"));
+        {
+            let scratch = Scratch::named("private-file");
+            let private = scratch.join("private");
+            drop(create(&private).expect("the private file is created"));
+            assert!(!others_can_read(&private).expect("its access list is read"));
 
-        let sid = ProcessToken::current().unwrap().user_sid().unwrap();
-        let owner_only = format!("O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;SY)");
-        for (label, grant, open) in [
-            ("read", "(A;;FR;;;BU)", true),
-            ("full", "(A;;FA;;;WD)", true),
-            ("rewrite", "(A;;WD;;;AU)", true),
-            ("generic", "(A;;GR;;;BA)", true),
-            ("write", "(A;;FW;;;BU)", false),
-        ] {
-            let path = scratch.join(label);
-            drop(create_with(&path, &format!("{owner_only}{grant}")).unwrap());
-            assert_eq!(others_can_read(&path).unwrap(), open, "{label} grant");
+            let sid = ProcessToken::current().unwrap().user_sid().unwrap();
+            let owner_only = format!("O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;SY)");
+            for (label, grant, open) in [
+                ("read", "(A;;FR;;;BU)", true),
+                ("full", "(A;;FA;;;WD)", true),
+                ("rewrite", "(A;;WD;;;AU)", true),
+                ("generic", "(A;;GR;;;BA)", true),
+                ("write", "(A;;FW;;;BU)", false),
+            ] {
+                let path = scratch.join(label);
+                drop(create_with(&path, &format!("{owner_only}{grant}")).unwrap());
+                assert_eq!(others_can_read(&path).unwrap(), open, "{label} grant");
+            }
+            let unlisted = scratch.join("unlisted");
+            drop(create_with(&unlisted, &format!("O:{sid}D:NO_ACCESS_CONTROL")).unwrap());
+            assert!(others_can_read(&unlisted).unwrap(), "a file with no list");
         }
-        let unlisted = scratch.join("unlisted");
-        drop(create_with(&unlisted, &format!("O:{sid}D:NO_ACCESS_CONTROL")).unwrap());
-        assert!(others_can_read(&unlisted).unwrap(), "a file with no list");
-    }
-
-    /// A file owned by anyone but this user and SYSTEM is open, because its owner can always
-    /// rewrite the list, even when the list itself grants only this user and SYSTEM. Making such
-    /// a file for real needs the restore privilege, so this asks the decision directly.
-    #[test]
-    fn a_file_another_principal_owns_is_open() {
-        let user = "S-1-5-21-1-2-3-1001";
-        let full = 0x001F_01FF;
-        let owner_only = [(full, user.to_owned()), (full, SYSTEM_SID.to_owned())];
-        assert!(!open_to_others(user, user, &owner_only));
-        assert!(!open_to_others(user, SYSTEM_SID, &owner_only));
-        assert!(open_to_others(user, "S-1-5-32-544", &owner_only));
-        assert!(open_to_others(user, "S-1-5-21-1-2-3-1002", &[]));
+        {
+            let user = "S-1-5-21-1-2-3-1001";
+            let full = 0x001F_01FF;
+            let owner_only = [(full, user.to_owned()), (full, SYSTEM_SID.to_owned())];
+            assert!(!open_to_others(user, user, &owner_only));
+            assert!(!open_to_others(user, SYSTEM_SID, &owner_only));
+            assert!(open_to_others(user, "S-1-5-32-544", &owner_only));
+            assert!(open_to_others(user, "S-1-5-21-1-2-3-1002", &[]));
+        }
     }
 }
