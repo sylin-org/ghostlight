@@ -1794,56 +1794,73 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     let private = context.private_to(definition);
     let registration = registration_state(context, definition);
     let retired = matches!(registration, Ok(RegistrationState::Retired));
-    let state = match &registration {
-        Ok(RegistrationState::Missing) if detected => HarnessState::Available,
-        Ok(RegistrationState::Missing) => HarnessState::NotDetected,
-        Ok(RegistrationState::Current) => HarnessState::Installed,
-        Ok(RegistrationState::Updatable | RegistrationState::Retired) => HarnessState::Updatable,
-        Ok(RegistrationState::Launcher(_) | RegistrationState::Foreign(_)) | Err(_) => {
-            HarnessState::NeedsAttention
+    // One reading of the registration gives the state, the words naming a blocked cause, the
+    // evidence beside them, the attention cause and whether Fix may replace the entry. The blocked
+    // causes are named from what the inspection actually saw, never conflated (ADR-0135).
+    let reading = match &registration {
+        Ok(RegistrationState::Missing) => Reading::plain(if detected {
+            HarnessState::Available
+        } else {
+            HarnessState::NotDetected
+        }),
+        Ok(RegistrationState::Current) => Reading::plain(HarnessState::Installed),
+        Ok(RegistrationState::Updatable | RegistrationState::Retired) => {
+            Reading::plain(HarnessState::Updatable)
         }
+        Ok(RegistrationState::Launcher(launcher)) => Reading {
+            state: HarnessState::NeedsAttention,
+            cause: Some(words::launcher_detail(launcher)),
+            evidence: Some(words::launcher_evidence(launcher, &context.edge)),
+            attention: Some(Attention::Launcher(launcher.pin)),
+            fixable: true,
+        },
+        Ok(RegistrationState::Foreign(found_command)) => Reading {
+            state: HarnessState::NeedsAttention,
+            cause: Some(words::CLIENT_FOREIGN_ENTRY.into()),
+            evidence: Some(match found_command {
+                Some(found) => {
+                    words::other_program_evidence(&found.program, found.arguments, &context.edge)
+                }
+                None => words::no_command_evidence(&context.edge),
+            }),
+            attention: Some(Attention::ForeignEntry),
+            fixable: true,
+        },
+        Err(error @ HarnessError::Malformed(_)) => Reading {
+            state: HarnessState::NeedsAttention,
+            cause: Some(error.to_string()),
+            evidence: None,
+            attention: Some(Attention::Malformed),
+            fixable: false,
+        },
+        Err(_) => Reading {
+            state: HarnessState::NeedsAttention,
+            cause: Some(words::CLIENT_UNREADABLE.into()),
+            evidence: None,
+            attention: Some(Attention::Unreadable),
+            fixable: false,
+        },
     };
-    // The blocked causes are named from what the inspection actually saw, never conflated
-    // (ADR-0135). The evidence line carries the specifics beside the claim.
-    let mut detail: String = match (&registration, private) {
-        (_, Some(container)) if !manual => words::client_kept_private(&container.app),
-        (Ok(RegistrationState::Launcher(launcher)), _) => words::launcher_detail(launcher),
-        (Ok(RegistrationState::Foreign(_)), _) => words::CLIENT_FOREIGN_ENTRY.into(),
-        (Err(error @ HarnessError::Malformed(_)), _) => error.to_string(),
-        (Err(_), _) => words::CLIENT_UNREADABLE.into(),
+    let Reading {
+        state,
+        cause,
+        evidence,
+        attention,
+        fixable,
+    } = reading;
+    // A container's private view comes first: the cause behind it cannot be acted on here.
+    let mut detail: String = match (private, cause) {
+        (Some(container), _) if !manual => words::client_kept_private(&container.app),
+        (_, Some(cause)) => cause,
         _ if manual => manual_setup_sentence(definition),
         _ => words::client_detail(state, edge_ready, retired.then_some(RETIRED_ENTRY)),
-    };
-    let evidence: Option<String> = match &registration {
-        Ok(RegistrationState::Launcher(launcher)) => {
-            Some(words::launcher_evidence(launcher, &context.edge))
-        }
-        Ok(RegistrationState::Foreign(found_command)) => Some(match found_command {
-            Some(found) => {
-                words::other_program_evidence(&found.program, found.arguments, &context.edge)
-            }
-            None => words::no_command_evidence(&context.edge),
-        }),
-        _ => None,
     };
     if definition.located_stale {
         detail = words::with_located_path_missing(&detail);
     }
     let changeable = private.is_none();
-    let can_fix = changeable
-        && edge_ready
-        && matches!(
-            registration,
-            Ok(RegistrationState::Launcher(_) | RegistrationState::Foreign(_))
-        );
+    let can_fix = changeable && edge_ready && fixable;
     let owned_copies = owned_other_copies(context, definition);
-    let attention = match &registration {
-        Ok(RegistrationState::Launcher(launcher)) => Some(Attention::Launcher(launcher.pin)),
-        Ok(RegistrationState::Foreign(_)) => Some(Attention::ForeignEntry),
-        Err(HarnessError::Malformed(_)) => Some(Attention::Malformed),
-        Err(_) => Some(Attention::Unreadable),
-        Ok(_) => None,
-    };
     let mut summary = HarnessSummary {
         id: definition.id.into(),
         product_id: definition.product_id.into(),
@@ -1881,6 +1898,30 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     summary
 }
 
+/// What one reading of a registration means for its summary.
+struct Reading {
+    state: HarnessState,
+    /// The words naming a blocked cause, when the registration has one.
+    cause: Option<String>,
+    evidence: Option<String>,
+    attention: Option<Attention>,
+    /// Whether Fix may replace the entry.
+    fixable: bool,
+}
+
+impl Reading {
+    /// A state with no blocked cause.
+    const fn plain(state: HarnessState) -> Self {
+        Self {
+            state,
+            cause: None,
+            evidence: None,
+            attention: None,
+            fixable: false,
+        }
+    }
+}
+
 fn product_config_parent_exists(context: &HarnessContext, path: &Path) -> bool {
     let Some(parent) = path.parent().filter(|parent| parent.exists()) else {
         return false;
@@ -1907,6 +1948,14 @@ enum RegistrationState {
     /// An entry sits under Ghostlight's key that Ghostlight does not own. The payload names
     /// the program found there, when one could be read (ADR-0135); never its arguments.
     Foreign(Option<ForeignCommand>),
+}
+
+impl RegistrationState {
+    /// Whether the entry is Ghostlight's own, whatever its age: the one owned-entry predicate
+    /// (ADR-0203 Decision 10.2).
+    const fn is_owned(&self) -> bool {
+        matches!(self, Self::Current | Self::Updatable | Self::Retired)
+    }
 }
 
 /// What Ghostlight discloses about a foreign entry's command: the program and how many
@@ -2170,10 +2219,7 @@ fn toml_entry_state(
     let args = toml_entry_args(entry);
     let state =
         command_registration_state(command, args.as_deref(), &context.edge, context.windows);
-    if !matches!(
-        state,
-        RegistrationState::Current | RegistrationState::Updatable | RegistrationState::Retired
-    ) {
+    if !state.is_owned() {
         return Ok(state);
     }
     // Every entry this install owns is validated, so inspection refuses the same malformed
@@ -2346,10 +2392,7 @@ fn holds_owned_entry(
     definition: &HarnessDefinition,
     path: &Path,
 ) -> bool {
-    matches!(
-        registration_state_at(context, definition, path),
-        Ok(RegistrationState::Current | RegistrationState::Updatable | RegistrationState::Retired)
-    )
+    registration_state_at(context, definition, path).is_ok_and(|state| state.is_owned())
 }
 
 /// Remove Ghostlight's own entry from the file at `path`, read as the configuration of
