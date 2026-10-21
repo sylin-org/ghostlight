@@ -57,8 +57,9 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
     by `crates/desktop/src/tray.rs`), the window bearer's shape (the workbench and the shell each test
     their own), and the workbench address (the shell's golden test compares the URL for equality
     instead of parsing it). Each wants a golden both sides read; the desktop half is the install
-    lane's file. The clear-diagnostics limit (256 on both sides, in no shared vocabulary) gets the
-    same pin from the coordinator after the pilot.
+    lane's file. The clear-diagnostics limit (256 on both sides, in no shared vocabulary) is now
+    the vocabulary's `clear_diagnostics_tabs`, which `golden.rs` and the extension's protocol test
+    pin, and the extension test that restated 256 goes.
   - A client before MCP revision 2025-06-18 gets a cut-off or expired answer without the lean JSON
     C21 promises (`intake/mcp.rs` builds the templates at the latest revision). A defect to fix,
     not a test to keep.

@@ -576,6 +576,10 @@ fn the_constants_and_limits_equal_the_vocabulary() {
     assert_eq!(limits["max_world_calls"], wire::MAX_WORLD_CALLS);
     assert_eq!(limits["max_input_steps"], wire::MAX_INPUT_STEPS);
     assert_eq!(limits["max_unseen"], wire::MAX_UNSEEN);
+    assert_eq!(
+        vocabulary["clear_diagnostics_tabs"],
+        crate::service::DIAGNOSTIC_CLEAR_BATCH_SIZE
+    );
 }
 
 /// The extension refuses a longer group title, and the agent it names could open no tab.

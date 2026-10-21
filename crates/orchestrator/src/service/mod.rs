@@ -92,7 +92,9 @@ use presence::Presence;
 use shell::{ShellRoute, Shells};
 use toolset::Toolsets;
 
-const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
+/// The most tabs one diagnostics clear names: the extension takes no more, and the protocol 4
+/// vocabulary's `clear_diagnostics_tabs` pins the two together.
+pub(crate) const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
 
 /// The longest one release command may take: a diagnostics clear or a tab close.
 const RELEASE_CALL_LIMIT: Duration = Duration::from_secs(2);

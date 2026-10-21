@@ -80,6 +80,8 @@ test("protocol.js scalar constants come from the vocabulary", () => {
   assert.equal(protocol.URL_CHARS, vocabulary.limits.url_chars);
   assert.equal(protocol.TITLE_CHARS, vocabulary.limits.title_chars);
   assert.equal(protocol.GROUP_TITLE_CHARS, vocabulary.group_title_chars);
+  // The most tabs one clear names: the service sends batches of this size, the extension takes no more.
+  assert.equal(require("../lib/diagnostics.js").MAX_CLEAR_TABS, vocabulary.clear_diagnostics_tabs);
   assert.equal(protocol.HELLO_TIMEOUT_MS, vocabulary.limits.hello_timeout_ms);
 });
 

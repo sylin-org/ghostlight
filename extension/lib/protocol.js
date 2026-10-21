@@ -59,6 +59,7 @@
     legacy_group_title_prefixes: ["Ghostlight - "],
     group_title_chars: 120,
     chunk_limits: { chunk_payload_bytes: 524288, transfer_max_bytes: 8388608, transfer_max_chunks: 64 },
+    clear_diagnostics_tabs: 256,
     limits: {
       direct_frame_bytes: 786432,
       max_world_calls: 256,

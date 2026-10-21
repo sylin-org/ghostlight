@@ -335,7 +335,6 @@ test("bulk teardown validates every tab id before forgetting bounded capture sta
   assert.equal(diagnostics.forgetMany([9, 10, 11]), 2);
   assert.equal(diagnostics.isEnabled(9), false);
   assert.equal(diagnostics.isEnabled(10), false);
-  assert.equal(diagnosticsApi.MAX_CLEAR_TABS, 256);
 });
 
 test("accepted events and reads refresh idle expiry before volatile cleanup", () => {
