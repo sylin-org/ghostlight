@@ -1,3 +1,4 @@
+// Ghostlight -- the closed vocabulary and bounds of adapter protocol 4.
 (function installGhostlightProtocol(root, factory) {
   const api = factory();
   root.GhostlightProtocol = api;

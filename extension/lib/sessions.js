@@ -1,3 +1,4 @@
+// Ghostlight -- the debugger sessions of adapter protocol 4, the only path to CDP.
 (function installGhostlightSessions(root, factory) {
   const api = factory();
   root.GhostlightSessions = api;

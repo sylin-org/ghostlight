@@ -17,6 +17,8 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
 - `lib/protocol.js`: the closed protocol-4 vocabulary and bounds, pinned by
   `../tests/golden/protocol4/`.
 - `lib/primitives.js`: the primitive dispatcher. One request is one primitive and one receipt.
+- `lib/arguments.js`: the argument checks the primitives share, and the one check that a tab id
+  names an open tab.
 - `lib/sessions.js`: debugger attachment, flat child sessions and their lifetime.
 - `lib/world.js`, `lib/inventory.js`: the service-supplied isolated world and the frame inventory
   with its document guard.
@@ -29,13 +31,23 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
   console and network evidence, and plural bounded recordings.
 - `lib/connection-log.js`, `lib/state.js`, `lib/shared.js`: local connection evidence, stored
   preferences, and the small helpers the worker and the other modules share.
-- `lib/setup-view.js`: the setup page's words, commands and three steps as a pure function of the
-  connection snapshot and the computer.
+- `lib/setup-view.js`, `lib/popup-view.js`: the setup page's words, commands and three steps, and
+  the toolbar popup's words and actions, each a pure function of the connection snapshot and the
+  computer.
 - `popup.html`, `options.html`, `setup.html` and their scripts: the extension's own pages. On
   install, the worker opens `setup.html` once, and only when the first connection finds the
   Ghostlight service absent. The page shows the step for this computer and follows the connection
   live. It fetches nothing.
 - `offscreen.html` and `offscreen.js`: bundled browser-local GIF encoding that closes after use.
+- `kit.css`, `options.css`: the pages' styles. `kit.css` is the sylin.org kit, whose same bytes the
+  service serves to the Ghostlight window's setup view; `options.css` lays out the options page on
+  its tokens.
+- `vendor/acorn.js` and `vendor/gifenc.js`, each with its license (and acorn's provenance): the
+  script parser `lib/evaluate.js` uses and the GIF encoder `lib/gif.js` uses.
+- `icons/`: the toolbar and store icons and the mascot. `icon512.png`, `mascot.png` and
+  `ghost-mark.svg` are source art; the package carries the rest.
+- `package.json` and `tests/`: the extension's tests (`npm test`). Neither is packaged; the
+  package also carries the repository's licenses.
 
 The page code that runs inside tabs is not in this directory. The service ships it in the hello
 answer, and the extension verifies its checksum before installing it.

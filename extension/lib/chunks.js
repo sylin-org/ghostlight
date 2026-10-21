@@ -1,3 +1,5 @@
+// Ghostlight -- the reassembly of chunked service commands of adapter protocol 4: bounded in
+// count, size and time, and verified by SHA-256 before the command it carries runs.
 (function installGhostlightCommandChunks(root, factory) {
   const api = factory();
   root.GhostlightCommandChunks = api;
