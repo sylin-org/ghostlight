@@ -190,7 +190,8 @@ rows are done.
 | WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | landed (ddd76f9c, 86013a28, cacb1062) |
 | WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | landed (ed389024, 5dcd3eaf, b82ff05d and the re-export) |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (d00a7ede) |
-| G-D1 | fix(governance): a trailing-dot host is the same host to policy | - | found by test-01's tests-1 classification of `governance/`, 2026-10-21 (Notes below); the policy lane is closed, so test-01 lands it, cross-lane into core-work's three host copies | landed (this commit) |
+| G-D1 | fix(governance): a trailing-dot host is the same host to policy | - | found by test-01's tests-1 classification of `governance/`, 2026-10-21 (Notes below); the policy lane is closed, so test-01 lands it, cross-lane into core-work's three host copies | landed (e0e90fa2) |
+| G-D2 | fix(governance): publish refuses a bad source before it writes the bundle | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (this commit) |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
 host), parsed once and lowercased. `PolicyLayer::new` parses its never-touch list and each grant's
@@ -218,6 +219,12 @@ any never-touch list, so a list that names `localhost` no longer takes the credi
 it stays Ghostlight's own ceiling, credited to no policy layer, as docs/trust/security-overview.md
 says. The proof is rows in kept tests (never-touch, a grant's deny under `*`, the workbench
 origin), which fail with the fix reverted.
+
+G-D2, found the same day by a row tests-1 wrote for `managed/cli.rs`: `policy publish` signed and
+wrote the bundle at the next sequence, then refused an `http://` `--source`, so a refused call had
+already advanced the published bundle. The bootstrap is now built and checked before anything is
+signed or written. The proof is a row in the kept publish test: the bundle is byte for byte
+unchanged after the refusal.
 
 WORK-15, `layer_denial`: the six policy refusals (a grant's, the screenshot, channel, never-touch,
 tab-close and audit-availability settings) go through `AuthoritySnapshot::layer_denial`, the one

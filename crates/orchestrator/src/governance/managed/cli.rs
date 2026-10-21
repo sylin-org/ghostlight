@@ -289,6 +289,17 @@ fn publish(options: &PublishOptions, out: &mut impl Write) -> Result<()> {
             .as_ref(),
     )
     .expect("derived signing keys are valid");
+    // The bootstrap is checked before anything is signed or written, so a refused source leaves
+    // the published bundle as it was (G-D2).
+    let bootstrap = Bootstrap {
+        source: options.source.clone(),
+        pubkey_ed25519: encode_hex(&crypto::signing::ed25519_public(&ed25519)),
+        pubkey_mldsa: mldsa
+            .as_ref()
+            .map(|seed| encode_hex(&crypto::signing::mldsa_public(seed))),
+        ..Bootstrap::default()
+    };
+    validate_bootstrap(&bootstrap).map_err(anyhow::Error::msg)?;
     let sequence = match fs::read(&options.output) {
         Ok(existing) => bundle::verify(&existing, &key)
             .context("existing output is not a bundle signed by these keys")?
@@ -308,15 +319,6 @@ fn publish(options: &PublishOptions, out: &mut impl Write) -> Result<()> {
         options.presentation.as_deref(),
     )?;
     write_bundle(&options.output, &bytes)?;
-    let bootstrap = Bootstrap {
-        source: options.source.clone(),
-        pubkey_ed25519: encode_hex(&crypto::signing::ed25519_public(&ed25519)),
-        pubkey_mldsa: mldsa
-            .as_ref()
-            .map(|seed| encode_hex(&crypto::signing::mldsa_public(seed))),
-        ..Bootstrap::default()
-    };
-    validate_bootstrap(&bootstrap).map_err(anyhow::Error::msg)?;
     writeln!(
         out,
         "Published policy sequence {sequence} to {}.",
@@ -492,6 +494,16 @@ mod tests {
         publish.push(format!("--source={SOURCE}"));
         publish.push(format!("--out={}", bundle.display()));
         policy(&publish).unwrap();
+
+        // G-D2: a source the bootstrap would refuse is refused before anything is written, so the
+        // published bundle stays as it was.
+        let first = fs::read(&bundle).unwrap();
+        let mut insecure = signing("publish");
+        insecure.push("--source=http://insecure.example/policy".into());
+        insecure.push(format!("--out={}", bundle.display()));
+        assert!(policy(&insecure).is_err());
+        assert_eq!(fs::read(&bundle).unwrap(), first);
+
         let out = policy(&publish).unwrap();
 
         let (_, provisioned) = out.split_once(PROVISION).expect(PROVISION);
