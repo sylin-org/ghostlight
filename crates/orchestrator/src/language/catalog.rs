@@ -196,10 +196,6 @@ pub fn catalog() -> Vec<ToolDefinition> {
     ]
 }
 
-/// The tool a policy with screenshots off removes from the catalog: every call of it would be
-/// refused, and no other tool takes a screenshot.
-const SCREENSHOT_TOOL: &str = "browser_screenshot";
-
 /// Project the canonical catalog through one immutable authority snapshot.
 ///
 /// A tool is listed when some host admits what one of its variants needs, and the screenshot
@@ -210,7 +206,9 @@ pub fn catalog_for(snapshot: &AuthoritySnapshot) -> Vec<ToolDefinition> {
     catalog()
         .into_iter()
         .filter(|tool| {
-            (screenshots || tool.name != SCREENSHOT_TOOL)
+            // With screenshots off every screenshot call would be refused, and no other tool
+            // takes one.
+            (screenshots || tool.name != Tool::Screenshot.name())
                 && super::capability_map::variants(&tool.name)
                     .any(|variant| snapshot.could_admit(variant.requirements))
         })
@@ -1651,7 +1649,7 @@ mod tests {
 
     use super::{
         boolean, catalog, catalog_for, constant, enumeration, handle, integer, object, text, union,
-        CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES, SCREENSHOT_TOOL,
+        CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES,
     };
     use crate::governance::GovernanceFacade;
 
@@ -1726,7 +1724,7 @@ mod tests {
             .map(|tool| tool.name)
             .collect();
         let mut expected: Vec<_> = catalog().into_iter().map(|tool| tool.name).collect();
-        expected.retain(|name| name != SCREENSHOT_TOOL);
+        expected.retain(|name| name != crate::language::Tool::Screenshot.name());
         assert_eq!(listed, expected);
     }
 
