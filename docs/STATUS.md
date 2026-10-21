@@ -243,6 +243,9 @@ Now:
   cut inside an emoji (a long tab title, a script's result) dropped the browser connection for
   every session; the extension now sends text well formed, and the service skips a frame it cannot
   decode.
+- Owed before the new 2.0.1 candidate: the changelog and `release/notes-v2.0.1.md` take the
+  second sweep's user-visible fixes. About twenty landed after the changelog's last entry
+  (7cecdda7), and of those only P-D3, P-D4 and P-D5 wrote theirs.
 - Second sweep state after that night. core-language and adapter are done, and so is the policy
   lane. package: EXT-6, EXT-12 and B-final are next. core-work: W-D4 is next: after a Quit, closing
   a handle the Quit released says "That tab was already closed." while the tab stays open.
