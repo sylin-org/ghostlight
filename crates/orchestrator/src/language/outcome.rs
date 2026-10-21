@@ -481,10 +481,6 @@ pub enum Outcome {
     SelectorUnresolved { matched: usize, more: bool },
     /// One governed flow finished with an explicit progress account.
     CompositionRan(super::composition::CompositionProgress),
-    /// Confirmed children while the parent is still active.
-    CompositionProgress { completed: usize, total: usize },
-    /// A restored group has child evidence but no parent completion record.
-    CompositionUnrecorded,
     /// Invalid child inputs prevented entering the ordinary executor.
     StepNotStarted,
 
@@ -697,10 +693,6 @@ impl Outcome {
                 }
             }
             Self::CompositionRan(progress) => progress.summary(),
-            Self::CompositionProgress { completed, total } => {
-                format!("Completed {completed} of {total} steps.")
-            }
-            Self::CompositionUnrecorded => "Completion was not recorded.".into(),
             Self::StepNotStarted => "This step could not start.".into(),
 
             Self::SelectorUnresolved { matched, more } => {
@@ -1190,10 +1182,6 @@ impl Outcome {
                 count: measured(progress.counts.succeeded),
                 ..Observed::default()
             },
-            Self::CompositionProgress { completed, .. } => Observed {
-                count: measured(*completed),
-                ..Observed::default()
-            },
             Self::SelectorUnresolved { matched: count, .. } => Observed {
                 count: measured(*count),
                 ..Observed::default()
@@ -1282,7 +1270,6 @@ impl Outcome {
             | Self::TabAlreadyClosed
             | Self::DialogHandled { .. }
             | Self::DialogObserved { .. }
-            | Self::CompositionUnrecorded
             | Self::StepNotStarted
             | Self::RecordingDiscarded => Observed::default(),
         }

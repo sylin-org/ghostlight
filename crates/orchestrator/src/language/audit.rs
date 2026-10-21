@@ -179,8 +179,6 @@ impl Outcome {
             | Self::PolicyExplained { .. }
             | Self::SelectorUnresolved { .. }
             | Self::CompositionRan(_)
-            | Self::CompositionProgress { .. }
-            | Self::CompositionUnrecorded
             | Self::StepNotStarted
             | Self::DocumentInspected { .. }
             | Self::TabActivated { .. }

@@ -301,8 +301,6 @@ variant_names!(outcome_variant, OUTCOME_VARIANTS, Outcome:
     PolicyExplained,
     SelectorUnresolved,
     CompositionRan,
-    CompositionProgress,
-    CompositionUnrecorded,
     StepNotStarted,
     DocumentInspected,
     TabActivated,
@@ -659,11 +657,6 @@ fn outcome_samples() -> Vec<Outcome> {
             matched: 8,
             more: true,
         },
-        Outcome::CompositionProgress {
-            completed: 1,
-            total: 3,
-        },
-        Outcome::CompositionUnrecorded,
         Outcome::StepNotStarted,
         Outcome::DocumentInspected {
             nodes: 0,

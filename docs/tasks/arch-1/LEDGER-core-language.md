@@ -36,9 +36,9 @@ In order. "After" names what a slice waits for.
 | LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
 | LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed (ec0166d5) |
 | LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | landed (6b5f619e) |
-| LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | todo |
+| LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | landed |
 | LANG-11 | docs(language): the item docs match the code | - | LANG-11 | landed (df9e4cac) |
-| LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | landed |
+| LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | landed (fb359bf5) |
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | todo |
 
 ## Notes
@@ -167,3 +167,8 @@ In order. "After" names what a slice waits for.
   `invites_control` stays, as the row says. Not taken here: moving `EnvironmentFacts::observe`
   and `current()` out of language/. Its callers are `cli/doctor.rs` and `cli/setup.rs` (install
   lane), and it needs a home outside language/; raised with the coordinator.
+- LANG-8: the live-history sentences of a running flow and of a restored one with no
+  completion record are `composition::running_summary` and `composition::UNRECORDED_SUMMARY`,
+  so `Outcome::CompositionProgress` (which shared its name with the struct) and
+  `Outcome::CompositionUnrecorded` are gone. `StepNotStarted` stays, the typed author of the
+  persisted not-started line. Cross-lane: `workbench/history.rs`, two lines. No word changes.

@@ -81,6 +81,16 @@ pub struct StepIssue {
     pub cause: StepCause,
 }
 
+/// What live history says of a flow still running: how many of its steps succeeded so far.
+#[must_use]
+pub fn running_summary(completed: usize, total: usize) -> String {
+    format!("Completed {completed} of {total} steps.")
+}
+
+/// What live history says of a restored flow whose steps were recorded but whose completion
+/// was not.
+pub const UNRECORDED_SUMMARY: &str = "Completion was not recorded.";
+
 /// One composition's bounded, payload-free account, shared by results and retained history.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CompositionProgress {
