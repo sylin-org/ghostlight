@@ -14,20 +14,3 @@ pub const UPDATE_NOW: &str = "open chrome://extensions, turn on Developer mode a
 /// The message of the `adapter_incompatible` error frame: the extension speaks an adapter
 /// protocol this service does not serve.
 pub const ADAPTER_INCOMPATIBLE: &str = "Ghostlight in Browser is out of date. It updates itself within a day; to update now, open chrome://extensions, turn on Developer mode and click Update.";
-
-#[cfg(test)]
-mod tests {
-    use super::{ADAPTER_INCOMPATIBLE, UPDATE_NOW};
-
-    #[test]
-    fn the_incompatible_sentence_is_plain_ascii() {
-        assert!(ADAPTER_INCOMPATIBLE.is_ascii());
-        assert!(ADAPTER_INCOMPATIBLE.ends_with('.'));
-    }
-
-    #[test]
-    fn the_incompatible_sentence_says_how_to_update_now() {
-        assert!(ADAPTER_INCOMPATIBLE.contains(UPDATE_NOW));
-        assert!(ADAPTER_INCOMPATIBLE.starts_with("Ghostlight in Browser is out of date."));
-    }
-}

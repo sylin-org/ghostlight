@@ -12,7 +12,7 @@ In progress since 2026-10-21. Every test in `language/` and `workbench/` was cla
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `language/` | 349 | 55 | 210 |
+| `language/` | 349 | 55 | 203 |
 | `workbench/` | 252 | 35 | 252 |
 
 ## Slices
@@ -31,7 +31,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL7 | test(language): readiness.rs keeps the precedence and what the answer means | 15 | 2 | 2 promise | landed (d09fc923) |
 | TL8 | test(language): environment.rs keeps one table of the machine row | 7 | 1 | 1 promise | landed (0df9c6e8) |
 | TL9 | test(language): channel_switch.rs keeps the policy sentence | 4 | 1 | 1 promise | landed (959fbe82) |
-| TL10 | test(language): agent_icon.rs keeps the doctor line | 2 | 1 | 1 promise | landed (this commit) |
+| TL10 | test(language): agent_icon.rs keeps the doctor line | 2 | 1 | 1 promise | landed (a8ed4199) |
+| TL11 | test(language): intake.rs, migration.rs and adapter.rs drop tests of their literals | 7 | 0 | - | landed (this commit) |
 
 ## Notes
 
