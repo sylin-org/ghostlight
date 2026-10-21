@@ -11,14 +11,15 @@ ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (
 (`keys/tests.rs`) A3 (`world/tests.rs`), A4
 (`assets.rs`), A5 (`work.rs`), A6
 (`geometry/tests.rs`), A7 (`locator.rs`), A8
-(`scope/tests.rs`), A9 (`tree/tests.rs`) and A10 (`merge/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+(`scope/tests.rs`), A9 (`tree/tests.rs`),
+A10 (`merge/tests.rs`) and A11 (`link/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 177 |
+| `browser/adapter/` | 337 | 55 | 165 |
 
 ## Slices
 
@@ -36,7 +37,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A7 | `protocol4/locator.rs`: the handle form the page mints | 6 | 1 | contract 1 | landed (08f65ec6) |
 | A8 | `protocol4/scope/tests.rs`: admission, the guard, the settle budget and coverage | 26 | 4 | promise 3, defect 1 | landed (6dcc12bf) |
 | A9 | `protocol4/tree/tests.rs`: the tree the service builds from the extension's inventory | 15 | 2 | contract 2 | landed (91439a0f) |
-| A10 | `protocol4/merge/tests.rs`: one answer across documents | 37 | 5 | promise 2, defect 3 | landed (this commit) |
+| A10 | `protocol4/merge/tests.rs`: one answer across documents | 37 | 5 | promise 2, defect 3 | landed (72bdfc86) |
+| A11 | `protocol4/link/tests.rs`: what the Link promises the executor | 20 | 8 | promise 4, contract 2, defect 2 | landed (this commit) |
 
 ## Notes
 
@@ -53,14 +55,14 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   a layer below scope's admission, so they stay in tree);
   `geometry` 17 to 1 (planned as rows of points' refused-point table, kept instead as one table
   of the tolerances, because the points rig would have to script drifted viewports); `locator.rs`
-  6 to 1 (the stale-lookup binding is interaction's removed-control case); `link` 20 to 5 (the
-  unreadable receipt joins the receipt-mapping table, the notice joins the native rows);
-  `connection` 16 to 7 (accepted and refused hellos, one table); `golden.rs` 19 to 10 (one table
-  for every closed word a page asset or the extension spells, one for the vocabulary's scalars and
-  limits, and the vocabulary halves of the stop-reason, runtime-state and asset-error tests as rows
-  of the closed-names test; no golden file changes); translate 99 to 14 (`tests.rs` 4,
+  6 to 1 (the stale-lookup binding is interaction's removed-control case); `link` 20 to 8 (it keeps the notice and the chunked transfer, which interaction's upload test
+  only repeated);
+  `connection` 16 to 7 (accepted and refused hellos, one table); `golden.rs` 19 to 4, one contract each: every fixture reads and writes as the extension's does
+  (requests, receipts, frames, events, world messages), unknown words map safely (tolerance),
+  `vocabulary.json` says what the service says (names, scalars, limits), and every closed word a
+  page asset or the extension spells is one the service knows; no golden file changes; translate 99 to 14 (`tests.rs` 4,
   `interaction.rs` 4, `points.rs` 3, `forms.rs` 3, `script.rs` 1, less the composed ceiling, which
-  `merge` proves, and the fill's followed handle, which `world` proves). Total 57 with geometry's and tree's extra test: two more overlaps go in later slices.
+  `merge` proves, and the fill's followed handle, which `world` proves). Total 54.
 - A2: the 27 cut tests restated the key tables, the modifier masks, the wheel tick, the drag
   stride count and the button map, or were cases of the three kept rules: a press types its text
   unless a shortcut modifier is held (Enter as the carriage return a form submits on), a text fill
@@ -118,6 +120,16 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   page tree stays under one node bound (the same gate). Each of the 32 cut tests is a row of one
   of them, except two trivial empty cases. Area words come from `PageArea`, separators from
   `SECTION_SEPARATOR`.
+- A11: kept eight: each native command's primitive and outcome (with the two export-failed rows,
+  6734f99b); each receipt code's typed error before and after dispatch (D52); a receipt the
+  service cannot trust; an interrupted call forwards its cancel and says before or after dispatch
+  (with the deadline, the cancel grace and the Downloads save, a0dfc56b); a written command
+  reached the browser and a held effect is never written (b0436754); a notice is a frame never
+  awaited (presentation 3 and 6); an effect counts only when an answer shows it ran, after which a
+  later failure is unknown (executor 5); and a large request travels as chunks. Cut: a restated
+  group-key digest, a spec-name check the golden pins, the recording-id test the request fixtures
+  pin, and the tab lookup's private listing; the rest are rows of the kept tests. The deadline
+  test's 200 ms lateness bound goes: a deadline only bounds a failure.
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden

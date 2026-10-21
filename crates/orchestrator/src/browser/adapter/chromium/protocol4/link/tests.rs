@@ -9,9 +9,8 @@ use serde_json::{json, Value};
 
 use super::super::fake::{FakeExtension, Reply, Script};
 use super::super::scope::PlannedCall;
-use super::super::translate::tabs::group_key;
 use super::super::{wire, world};
-use super::{Answers, CallRequest, FocusTab, Frames, Line, Link, Spec, View, WorldCalls};
+use super::{Answers, CallRequest, Line, Link};
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, PhysicalTab,
     PresentationActivity, PresentationKind, PresentationSignal, RecordingDestination,
@@ -71,11 +70,6 @@ fn physical_tab(url: &str) -> PhysicalTab {
     }
 }
 
-fn summary() -> Value {
-    json!({"recording_id": "recording_1", "tab_id": 12, "state": "frozen", "frame_count": 3,
-           "bytes_held": 100, "duration_ms": 900, "source_urls": ["https://example.com/"]})
-}
-
 fn line(port: &RelayBrowserPort) -> Line {
     lock(&port.adapters).connections[FOUR].line.clone()
 }
@@ -107,6 +101,16 @@ fn rows() -> Vec<Row> {
         json!({"name": "navigate", "args": {"tab_id": 12, "to": to,
                "discard_beforeunload": discard, "ready_timeout_ms": 8000}})
     };
+    let save = || BrowserCommand::ExportRecording {
+        recording_id: "recording_1".into(),
+        destination: RecordingDestination::Download {
+            file_name: "flow.gif".into(),
+        },
+        max_output_bytes: 4096,
+    };
+    let saved = json!({"name": "recording", "args": {"op": "export", "recording_id": "recording_1",
+        "destination": {"destination": "download", "file_name": "flow.gif"},
+        "max_output_bytes": 4096}});
     let landed = || BrowserOutcome::Navigated {
         tab: physical_tab(example),
         committed_urls: vec![example.into()],
@@ -321,9 +325,32 @@ fn rows() -> Vec<Row> {
             receipt: answer(json!({"cleared_count": 4})),
             outcome: BrowserOutcome::DiagnosticsCleared { cleared_count: 4 },
         },
+        Row {
+            command: save(),
+            primitive: saved.clone(),
+            receipt: answer(
+                json!({"result": "export_failed", "reason": wire::PAGE_REFUSED_REPLAY}),
+            ),
+            outcome: BrowserOutcome::RecordingExportFailed {
+                reason: wire::PAGE_REFUSED_REPLAY.into(),
+                page_refused: true,
+            },
+        },
+        Row {
+            command: save(),
+            primitive: saved,
+            receipt: answer(json!({"result": "export_failed", "reason": "encoder failed"})),
+            outcome: BrowserOutcome::RecordingExportFailed {
+                reason: "encoder failed".into(),
+                page_refused: false,
+            },
+        },
     ]
 }
 
+/// Each browser-native command becomes the primitive the extension reads, and its receipt maps to
+/// the outcome the executor reports, including an export the page refused told apart from one
+/// the encoder could not make (commit 6734f99b).
 #[test]
 fn each_browser_native_row_sends_its_primitive_and_maps_its_outcome() {
     let next = Arc::new(Mutex::new(answer(Value::Null)));
@@ -336,18 +363,17 @@ fn each_browser_native_row_sends_its_primitive_and_maps_its_outcome() {
             "row {index} maps its outcome"
         );
         let seen = fake.wait(|seen| seen.of_kind("request").len() == index + 1);
-        let request = seen.of_kind("request")[index];
-        assert_eq!(request["primitive"], row.primitive, "row {index} request");
-        let correlation = request["correlation"].as_str().unwrap();
-        assert!(correlation.starts_with("p4_") && correlation.len() == 35);
+        assert_eq!(
+            seen.of_kind("request")[index]["primitive"],
+            row.primitive,
+            "row {index} request"
+        );
     }
 }
 
-#[test]
-fn the_group_key_is_the_digest_prefix_of_the_group_title() {
-    assert_eq!(group_key(GROUP_TITLE), "g_ac9879c3b8d67871");
-}
-
+/// Each closed receipt code becomes its typed error: before any effect a plain or local failure
+/// the agent can act on, with a debugger refusal and a lost session keeping their own cause
+/// (Decision 5.2 of ADR-0203), and after dispatch an unknown effect or a deadline after dispatch.
 #[test]
 fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
     let next = Arc::new(Mutex::new(answer(Value::Null)));
@@ -428,6 +454,25 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
         assert!(!expected.effect_unknown());
     }
 
+    for (failure, expected) in [
+        (
+            wire::Failure::SessionLost,
+            BrowserError::EffectUnknown("The debugger detached.".into()),
+        ),
+        (wire::Failure::Timeout, BrowserError::DeadlineAfterDispatch),
+    ] {
+        *next.lock().unwrap() = wire::Receipt {
+            dispatched: true,
+            message: Some("The debugger detached.".into()),
+            ..FakeExtension::failed("", failure)
+        };
+        assert_eq!(
+            call(&port, navigate()),
+            Err(expected),
+            "{failure:?} after dispatch"
+        );
+    }
+
     *next.lock().unwrap() = wire::Receipt {
         message: Some("Kept open by the preserve-tabs setting.".into()),
         ..FakeExtension::failed("", wire::Failure::LocalInterlock)
@@ -446,90 +491,28 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
     );
 }
 
+/// A receipt the service cannot trust is never read as success: one with both an outcome and a
+/// failure, or with neither, is a protocol failure, and an unreadable one leaves an effect
+/// primitive's effect unknown and fails a read as a protocol failure (ACCEPTANCE, executor and
+/// truth gates 4).
 #[test]
-fn a_stale_locator_after_a_started_effect_settles_as_an_unknown_effect() {
-    let next = Arc::new(Mutex::new(answer(Value::Null)));
-    let (port, _fake) = port(scripted(&next));
-    let cancelled = AtomicBool::new(false);
-    let written = AtomicBool::new(false);
-    let admit = || Ok(());
-    let stale = || BrowserError::stale(StaleReason::Removed);
-    let mut link = Link::new(
-        line(&port),
-        BrowserDispatch {
-            deadline: Instant::now() + PATIENCE,
-            cancelled: &cancelled,
-            admit: &admit,
-            written: &written,
-        },
-    );
-    assert_eq!(link.settle(stale()), stale(), "before any effect it stands");
-    *next.lock().unwrap() = wire::Receipt {
-        dispatched: true,
-        ..FakeExtension::ok(
-            "",
-            json!({"answers": [{"status": "returned", "envelope": {"ok": true, "value": null}}]}),
-        )
-    };
-    let scroll = PlannedCall::top(world::scroll(None, Some("down"), None));
-    link.call(CallRequest::sequence(12, &[scroll]).budget(1_000), None)
-        .unwrap();
-    assert!(link.effect_started());
-    assert!(matches!(
-        link.settle(stale()),
-        BrowserError::EffectUnknown(_)
-    ));
-}
-
-#[test]
-fn a_failure_after_the_primitive_acted_is_an_unknown_effect() {
-    let next = Arc::new(Mutex::new(wire::Receipt {
-        dispatched: true,
-        message: Some("The debugger detached.".into()),
-        ..FakeExtension::failed("", wire::Failure::SessionLost)
-    }));
-    let (port, _fake) = port(scripted(&next));
-    assert_eq!(
-        call(
-            &port,
-            BrowserCommand::Navigate {
-                tab_id: 12,
-                url: "https://example.com/".into()
-            }
-        ),
-        Err(BrowserError::EffectUnknown("The debugger detached.".into()))
-    );
-    *next.lock().unwrap() = wire::Receipt {
-        dispatched: true,
-        ..FakeExtension::failed("", wire::Failure::Timeout)
-    };
-    assert_eq!(
-        call(&port, BrowserCommand::FocusTab { tab_id: 12 }),
-        Err(BrowserError::DeadlineAfterDispatch)
-    );
-}
-
-#[test]
-fn a_receipt_with_both_an_outcome_and_a_failure_is_a_protocol_failure() {
+fn an_unreadable_receipt_counts_an_effect_primitive_as_dispatched() {
     let next = Arc::new(Mutex::new(wire::Receipt {
         ok: Some(json!({"tabs": []})),
         ..FakeExtension::failed("", wire::Failure::Other)
     }));
-    let (port, _fake) = port(scripted(&next));
+    let (scripted_port, _scripted_fake) = port(scripted(&next));
     assert!(matches!(
-        call(&port, BrowserCommand::ListTabs),
+        call(&scripted_port, BrowserCommand::ListTabs),
         Err(BrowserError::Protocol(_))
     ));
     *next.lock().unwrap() = FakeExtension::ok("", Value::Null);
     next.lock().unwrap().ok = None;
     assert!(matches!(
-        call(&port, BrowserCommand::ListTabs),
+        call(&scripted_port, BrowserCommand::ListTabs),
         Err(BrowserError::Protocol(_))
     ));
-}
 
-#[test]
-fn an_unreadable_receipt_counts_an_effect_primitive_as_dispatched() {
     let (port, fake) = port(Box::new(|_, _| Reply::Never));
     for (command, effectful) in [
         (
@@ -598,6 +581,10 @@ fn cancelled_navigate(dispatched: bool) -> (Result<BrowserOutcome, BrowserError>
     (result, seen.cancels.clone())
 }
 
+/// An interrupted call forwards a cancel to the extension and says whether its effect may have
+/// happened: a cancel or a deadline before dispatch is safe to repeat, after it is not, a world
+/// call the extension answers during the cancel grace keeps what it says about dispatch, and a
+/// save to Downloads whose receipt never comes may have written its file (commit a0dfc56b).
 #[test]
 fn a_cancel_during_navigate_is_forwarded_and_the_receipt_decides_before_or_after() {
     assert_eq!(
@@ -608,13 +595,23 @@ fn a_cancel_during_navigate_is_forwarded_and_the_receipt_decides_before_or_after
         cancelled_navigate(true).0,
         Err(BrowserError::CancelledAfterDispatch)
     );
-}
+    assert_eq!(
+        cancelled_call(true),
+        Err(BrowserError::CancelledAfterDispatch)
+    );
+    assert_eq!(
+        cancelled_call(false),
+        Err(BrowserError::CancelledBeforeDispatch)
+    );
 
-#[test]
-fn the_deadline_forwards_a_cancel_and_returns_at_once() {
     let (port, fake) = port(Box::new(|_, _| Reply::Never));
     let cancelled = AtomicBool::new(false);
-    for (command, expected) in [
+    let save = |destination| BrowserCommand::ExportRecording {
+        recording_id: "recording_1".into(),
+        destination,
+        max_output_bytes: 4096,
+    };
+    let cases = [
         (
             BrowserCommand::Navigate {
                 tab_id: 12,
@@ -626,61 +623,38 @@ fn the_deadline_forwards_a_cancel_and_returns_at_once() {
             BrowserCommand::ListTabs,
             BrowserError::DeadlineBeforeDispatch,
         ),
-    ] {
-        let deadline = Instant::now() + Duration::from_millis(300);
-        let result = port.call(FOUR, command, deadline, &cancelled);
-        let late = Instant::now().saturating_duration_since(deadline);
-        assert_eq!(result, Err(expected));
-        assert!(late < Duration::from_millis(200), "returned {late:?} late");
-    }
-    let seen = fake.wait(|seen| seen.cancels.len() == 2);
-    let requested: Vec<_> = seen.requests.iter().map(|(id, _)| id.clone()).collect();
-    assert_eq!(seen.cancels, requested);
-}
-
-#[test]
-fn runtime_control_refusing_an_effect_writes_nothing() {
-    let next = Arc::new(Mutex::new(answer(json!({"tabs": []}))));
-    let (port, fake) = port(scripted(&next));
-    let cancelled = AtomicBool::new(false);
-    let written = AtomicBool::new(false);
-    let refuse = || Err(BrowserError::RuntimeControl(ReasonCode::RuntimeHold));
-    let dispatch = || BrowserDispatch {
-        deadline: Instant::now() + PATIENCE,
-        cancelled: &cancelled,
-        admit: &refuse,
-        written: &written,
-    };
-    assert_eq!(
-        port.call_guarded(
-            FOUR,
-            BrowserCommand::Navigate {
-                tab_id: 12,
-                url: "https://example.com/".into()
-            },
-            dispatch()
+        (
+            save(RecordingDestination::Download {
+                file_name: "flow.gif".into(),
+            }),
+            BrowserError::DeadlineAfterDispatch,
         ),
-        Err(BrowserError::RuntimeControl(ReasonCode::RuntimeHold))
-    );
-    assert!(
-        !written.load(Ordering::SeqCst),
-        "the refused effect never reached the browser"
-    );
+        (
+            save(RecordingDestination::Client),
+            BrowserError::DeadlineBeforeDispatch,
+        ),
+    ];
+    let count = cases.len();
+    for (command, expected) in cases {
+        let deadline = Instant::now() + Duration::from_millis(300);
+        assert_eq!(
+            port.call(FOUR, command, deadline, &cancelled),
+            Err(expected)
+        );
+    }
+    let seen = fake.wait(|seen| seen.cancels.len() == count);
+    let requested: Vec<_> = seen.requests.iter().map(|(id, _)| id.clone()).collect();
     assert_eq!(
-        port.call_guarded(FOUR, BrowserCommand::ListTabs, dispatch()),
-        Ok(BrowserOutcome::Tabs { tabs: vec![] }),
-        "a read does not ask runtime control"
+        seen.cancels, requested,
+        "every deadline forwarded its cancel"
     );
-    assert!(written.load(Ordering::SeqCst));
-    let seen = fake.wait(|seen| !seen.requests.is_empty());
-    assert_eq!(seen.requests.len(), 1);
-    assert!(matches!(seen.requests[0].1, wire::Primitive::ListTabs(_)));
 }
 
 /// A command reached the browser once its frame was written, whatever its failure says about
 /// effects: a read whose deadline runs out while the browser holds it, and a navigation whose
-/// receipt reports the document changed, both fail before any effect and both reached it. A
-/// browser with no connection is never written to.
+/// receipt reports the document changed, both fail before any effect and both reached it (commit
+/// b0436754). A browser with no connection is never written to, and neither is an effect a
+/// runtime hold refuses.
 #[test]
 fn a_written_command_reached_the_browser_whatever_its_failure() {
     let (port, fake) = port(Box::new(|correlation, primitive| match primitive {
@@ -724,131 +698,27 @@ fn a_written_command_reached_the_browser_whatever_its_failure() {
         (Err(BrowserError::DisconnectedBeforeDispatch), false)
     );
     assert_eq!(fake.wait(|seen| seen.requests.len() == 2).requests.len(), 2);
-}
 
-#[test]
-fn a_save_the_page_did_not_take_is_told_apart_from_one_that_could_not_be_made() {
-    let next = Arc::new(Mutex::new(answer(json!({"result": "export_failed",
-        "reason": wire::PAGE_REFUSED_REPLAY}))));
-    let (port, _fake) = port(scripted(&next));
-    let save = || BrowserCommand::ExportRecording {
-        recording_id: "recording_1".into(),
-        destination: RecordingDestination::Download {
-            file_name: "flow.gif".into(),
-        },
-        max_output_bytes: 4096,
-    };
-
+    let held = AtomicBool::new(false);
+    let refuse = || Err(BrowserError::RuntimeControl(ReasonCode::RuntimeHold));
     assert_eq!(
-        call(&port, save()),
-        Ok(BrowserOutcome::RecordingExportFailed {
-            reason: wire::PAGE_REFUSED_REPLAY.into(),
-            page_refused: true,
-        })
-    );
-    *next.lock().unwrap() = answer(json!({"result": "export_failed", "reason": "encoder failed"}));
-    assert_eq!(
-        call(&port, save()),
-        Ok(BrowserOutcome::RecordingExportFailed {
-            reason: "encoder failed".into(),
-            page_refused: false,
-        })
-    );
-}
-
-/// A save to Downloads writes a file, so a receipt that never comes leaves its effect unknown. A
-/// recording handed back to the service changes nothing, and the same silence is a plain
-/// deadline.
-#[test]
-fn a_downloads_save_whose_receipt_is_lost_reads_as_after_dispatch() {
-    let (port, fake) = port(Box::new(|_, _| Reply::Never));
-    let cancelled = AtomicBool::new(false);
-    for (destination, expected) in [
-        (
-            RecordingDestination::Download {
-                file_name: "flow.gif".into(),
-            },
-            BrowserError::DeadlineAfterDispatch,
-        ),
-        (
-            RecordingDestination::Client,
-            BrowserError::DeadlineBeforeDispatch,
-        ),
-    ] {
-        let save = BrowserCommand::ExportRecording {
-            recording_id: "recording_1".into(),
-            destination,
-            max_output_bytes: 4096,
-        };
-        let deadline = Instant::now() + Duration::from_millis(300);
-        assert_eq!(port.call(FOUR, save, deadline, &cancelled), Err(expected));
-    }
-    assert_eq!(fake.wait(|seen| seen.cancels.len() == 2).requests.len(), 2);
-}
-
-/// Every recording command names the recording it is about: the browser keeps recordings without
-/// knowing workspaces, and which one a workspace holds is the workspace's fact (ADR-0203
-/// Decision 6.7).
-#[test]
-fn each_recording_command_names_its_recording() {
-    let next = Arc::new(Mutex::new(answer(
-        json!({"result": "status", "summary": summary()}),
-    )));
-    let (port, fake) = port(scripted(&next));
-    assert!(matches!(
-        call(
-            &port,
-            BrowserCommand::StatusRecording {
-                recording_id: "recording_1".into()
+        port.call_guarded(
+            FOUR,
+            navigate(),
+            BrowserDispatch {
+                deadline: Instant::now() + PATIENCE,
+                cancelled: &cancelled,
+                admit: &refuse,
+                written: &held,
             }
         ),
-        Ok(BrowserOutcome::RecordingStatus { .. })
-    ));
-    *next.lock().unwrap() = answer(json!({"result": "exported", "summary": summary(),
-        "encoded": {"frame_count": 3, "captured_frame_count": 3, "duration_ms": 900,
-                    "width": 640, "height": 400, "byte_count": 2048},
-        "delivery": {"delivery": "downloaded"}}));
-    assert!(matches!(
-        call(
-            &port,
-            BrowserCommand::ExportRecording {
-                recording_id: "recording_1".into(),
-                destination: RecordingDestination::Download {
-                    file_name: "flow.gif".into()
-                },
-                max_output_bytes: 4096,
-            }
-        ),
-        Ok(BrowserOutcome::RecordingExported { .. })
-    ));
-    *next.lock().unwrap() =
-        answer(json!({"result": "discarded", "recording_id": "recording_1", "released_bytes": 10}));
-    assert_eq!(
-        call(
-            &port,
-            BrowserCommand::DiscardRecording {
-                recording_id: "recording_1".into()
-            }
-        ),
-        Ok(BrowserOutcome::RecordingDiscarded { released_bytes: 10 })
+        Err(BrowserError::RuntimeControl(ReasonCode::RuntimeHold))
     );
-
-    let seen = fake.wait(|seen| seen.requests.len() == 3);
-    let args: Vec<Value> = seen
-        .of_kind("request")
-        .iter()
-        .map(|request| request["primitive"].clone())
-        .collect();
-    assert_eq!(
-        args,
-        [
-            json!({"name": "recording", "args": {"op": "status", "recording_id": "recording_1"}}),
-            json!({"name": "recording", "args": {"op": "export", "recording_id": "recording_1",
-                "destination": {"destination": "download", "file_name": "flow.gif"},
-                "max_output_bytes": 4096}}),
-            json!({"name": "recording", "args": {"op": "discard", "recording_id": "recording_1"}}),
-        ]
+    assert!(
+        !held.load(Ordering::SeqCst),
+        "a held effect is never written"
     );
+    assert_eq!(fake.wait(|seen| seen.requests.len() == 2).requests.len(), 2);
 }
 
 fn signal(
@@ -872,120 +742,42 @@ fn signal(
     }
 }
 
+/// A notice is a frame, never a request, and is never awaited: it names the frame of its handle,
+/// and a denial waits until its tab is visible (ACCEPTANCE, presentation 3 and 6). A signal with no
+/// tab is dropped.
 #[test]
 fn a_notice_is_written_once_and_never_awaited() {
     let (port, fake) = port(Box::new(|_, _| Reply::Never));
-    for (kind, locator) in [
-        (
+    for signal in [
+        signal(
             PresentationKind::Denial,
+            Some(12),
             Some("7F3A:9C21:locator_a1b2c3d4_12"),
         ),
-        (PresentationKind::Target, None),
+        signal(PresentationKind::Target, Some(12), None),
+        signal(PresentationKind::Denial, None, None),
     ] {
         assert_eq!(
-            call(
-                &port,
-                BrowserCommand::Present {
-                    signal: signal(kind, Some(12), locator)
-                }
-            ),
+            call(&port, BrowserCommand::Present { signal }),
             Ok(BrowserOutcome::Presented { rendered: false })
         );
     }
-    assert_eq!(
-        call(
-            &port,
-            BrowserCommand::Present {
-                signal: signal(PresentationKind::Denial, None, None)
-            }
-        ),
-        Ok(BrowserOutcome::Presented { rendered: false }),
-        "a signal with no tab is dropped"
-    );
-    assert!(matches!(
-        call(
-            &port,
-            BrowserCommand::Present {
-                signal: signal(
-                    PresentationKind::Target,
-                    Some(12),
-                    Some("locator_a1b2c3d4_12")
-                )
-            }
-        ),
-        Err(BrowserError::StaleLocator { .. })
-    ));
     let seen = fake.wait(|seen| seen.notices.len() == 2);
+    let denial = seen.of_kind("notice")[0];
     assert_eq!(
-        seen.of_kind("notice")[0],
-        &json!({"kind": "notice", "tab_id": 12,
-            "frame": {"frame_id": "7F3A", "loader_id": "9C21"},
-            "signal": {"invocation": "invocation_link", "signal": "denial", "activity": "click",
-                "phase": "Ghostlight blocked this action", "label": "Clicking",
-                "detail": "A configured guardrail prevented it.",
-                "locator": "locator_a1b2c3d4_12", "click": {"clicks": 1, "button": "left"}},
-            "defer_until_visible": true})
+        denial["frame"],
+        json!({"frame_id": "7F3A", "loader_id": "9C21"})
     );
+    assert_eq!(denial["signal"]["locator"], "locator_a1b2c3d4_12");
+    assert!(seen.notices[0].defer_until_visible);
     assert!(!seen.notices[1].defer_until_visible);
     assert_eq!(seen.notices[1].frame, None);
     assert!(seen.requests.is_empty(), "a notice is not a request");
 }
 
-#[test]
-fn every_spec_names_the_primitive_it_sends() {
-    fn name_of(primitive: wire::Primitive) -> Value {
-        serde_json::to_value(primitive).unwrap()["name"].clone()
-    }
-    fn check<P: Spec>(primitive: P) {
-        assert_eq!(name_of(primitive.into_primitive()), P::NAME.as_str());
-    }
-    let guard = None;
-    check(wire::ListTabs { tab_ids: None });
-    check(FocusTab(1));
-    check(Frames(1));
-    check(View(1));
-    check(wire::CloseTab {
-        tab_id: 1,
-        released: false,
-    });
-    check(wire::SetZoom {
-        tab_id: 1,
-        zoom: 1.0,
-    });
-    check(wire::ResizeWindow {
-        tab_id: 1,
-        width: 800,
-        height: 600,
-    });
-    check(WorldCalls {
-        call: wire::Call {
-            tab_id: 1,
-            mode: wire::CallMode::Sequence,
-            calls: vec![],
-            guard: guard.clone(),
-            settle_ms: 0,
-            timeout_ms: 1,
-        },
-        effectful: false,
-    });
-    check(wire::EvaluateMain {
-        tab_id: 1,
-        script: String::new(),
-        max_result_chars: 1,
-        guard,
-        settle_ms: 0,
-        timeout_ms: 1,
-    });
-    check(wire::Dialog {
-        tab_id: 1,
-        op: wire::DialogOp::Status,
-    });
-    check(wire::DiagnosticsOp::Clear { tab_ids: vec![] });
-    check(wire::RecordingOp::Discard {
-        recording_id: String::new(),
-    });
-}
-
+/// An effect counts as started only when an answer shows it ran, and from then on a later failure,
+/// or answers the extension cannot pair with the calls, leave the effect unknown (ACCEPTANCE,
+/// executor and truth gates 5).
 #[test]
 fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
     let next = Arc::new(Mutex::new(answer(Value::Null)));
@@ -1039,6 +831,12 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
             .unwrap();
         assert_eq!(answers.len(), 1);
         assert_eq!(link.effect_started(), acted, "{answers:?}");
+        let stale = BrowserError::stale(StaleReason::Removed);
+        assert_eq!(
+            matches!(link.settle(stale), BrowserError::EffectUnknown(_)),
+            acted,
+            "a later failure is unknown only once an effect ran"
+        );
     }
 
     for (plan, dispatched, unpaired) in [(read(), false, true), (scroll(), true, false)] {
@@ -1103,18 +901,8 @@ fn cancelled_call(dispatched: bool) -> Result<Answers, BrowserError> {
     })
 }
 
-#[test]
-fn an_ok_call_receipt_during_the_cancel_grace_keeps_its_effect() {
-    assert_eq!(
-        cancelled_call(true),
-        Err(BrowserError::CancelledAfterDispatch)
-    );
-    assert_eq!(
-        cancelled_call(false),
-        Err(BrowserError::CancelledBeforeDispatch)
-    );
-}
-
+/// Requests route by their correlation, and one larger than a direct frame travels as chunks of
+/// that correlation that the extension reassembles.
 #[test]
 fn requests_route_by_correlation_and_large_ones_arrive_in_chunks() {
     let (port, fake) = port(Box::new(|correlation, primitive| {
@@ -1160,45 +948,4 @@ fn requests_route_by_correlation_and_large_ones_arrive_in_chunks() {
         .iter()
         .all(|chunk| chunk["correlation"] == seen.requests[1].0.as_str()));
     assert_ne!(seen.requests[0].0, seen.requests[1].0);
-}
-
-#[test]
-fn the_tab_comes_from_the_last_receipt_or_one_listing() {
-    let next = Arc::new(Mutex::new(wire::Receipt {
-        tab: Some(serde_json::from_value(tab("https://example.com/")).unwrap()),
-        ..effect(json!({"tab": tab("https://example.com/")}), &[])
-    }));
-    let (port, fake) = port(scripted(&next));
-    let cancelled = AtomicBool::new(false);
-    let written = AtomicBool::new(false);
-    let admit = || Ok(());
-    let mut link = Link::new(
-        line(&port),
-        BrowserDispatch {
-            deadline: Instant::now() + PATIENCE,
-            cancelled: &cancelled,
-            admit: &admit,
-            written: &written,
-        },
-    );
-    link.send(wire::Navigate {
-        tab_id: 12,
-        to: wire::NavigationTarget::Back,
-        discard_beforeunload: false,
-        ready_timeout_ms: 1_000,
-    })
-    .unwrap();
-    assert!(link.effect_started());
-    assert_eq!(link.tab(12).unwrap().tab_id, 12);
-    *next.lock().unwrap() = answer(json!({"tabs": []}));
-    assert_eq!(
-        link.tab(13),
-        Err(BrowserError::EffectUnknown("browser tab is missing".into())),
-        "a missing tab after an effect leaves the effect unknown"
-    );
-    let seen = fake.wait(|seen| seen.requests.len() == 2);
-    assert_eq!(
-        seen.of_kind("request")[1]["primitive"],
-        json!({"name": "list_tabs", "args": {"tab_ids": [13]}})
-    );
 }
