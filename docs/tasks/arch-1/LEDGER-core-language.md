@@ -10,10 +10,10 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D5, C17, LANG-4, C12b-1, LANG-1 and LANG-2 have landed. LANG-3 waits for test-02's
-BROW-15 (agreed: it lands first and reports its commit); meanwhile LANG-7, LANG-9, LANG-11 and
-LANG-12 need nothing. A slice's hash is filled in by the next slice's commit, since a rebase
-before the push changes it.
+L-D1 to L-D5, C17, LANG-4, C12b-1, LANG-1, LANG-2, LANG-11, LANG-7, LANG-9 and LANG-12 have
+landed. LANG-3 waits for test-02's BROW-15 (agreed: it lands first and reports its commit); then
+LANG-10, LANG-5 and LANG-8 follow in order, and C20 after I9b. A slice's hash is filled in by
+the next slice's commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -34,11 +34,11 @@ In order. "After" names what a slice waits for.
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | todo |
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
 | LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
-| LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed |
-| LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | landed |
+| LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed (ec0166d5) |
+| LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | landed (6b5f619e) |
 | LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | todo |
 | LANG-11 | docs(language): the item docs match the code | - | LANG-11 | landed (df9e4cac) |
-| LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | todo |
+| LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | landed |
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | todo |
 
 ## Notes
@@ -162,3 +162,8 @@ In order. "After" names what a slice waits for.
   surface's `tabs_count` and `join_list` and install's `either_of` can move onto it in their
   lanes. The hand-written plurals in `composition.rs`, `coverage.rs` and `audit_health.rs` stay:
   `counted` groups digits from 1,000, so adopting it there is a visible choice, not this slice.
+- LANG-12: `object()` no longer forwards to `raw_object()` (one function), and
+  `page_recovered_summary` and `tab_already_closed_summary` are private to `outcome.rs`.
+  `invites_control` stays, as the row says. Not taken here: moving `EnvironmentFacts::observe`
+  and `current()` out of language/. Its callers are `cli/doctor.rs` and `cli/setup.rs` (install
+  lane), and it needs a home outside language/; raised with the coordinator.

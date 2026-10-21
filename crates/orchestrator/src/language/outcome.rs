@@ -2545,7 +2545,7 @@ pub fn model_text<S: AsRef<str>>(summary: &str, next_steps: &[S]) -> String {
 
 /// Authored sentence for a navigation that recreated a dead tab binding.
 #[must_use]
-pub fn page_recovered_summary(host: Option<&str>) -> String {
+fn page_recovered_summary(host: Option<&str>) -> String {
     match host {
         Some(host) => format!("That tab was gone; opened {host} in a new tab."),
         None => "That tab was gone; opened the requested page in a new tab.".into(),
@@ -2554,7 +2554,7 @@ pub fn page_recovered_summary(host: Option<&str>) -> String {
 
 /// Authored sentence for closing what was already closed.
 #[must_use]
-pub fn tab_already_closed_summary() -> String {
+fn tab_already_closed_summary() -> String {
     "That tab was already closed.".into()
 }
 

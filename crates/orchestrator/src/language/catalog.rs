@@ -1228,10 +1228,6 @@ fn diagnose_schema() -> Value {
 }
 
 fn object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
-    raw_object(fields, required)
-}
-
-fn raw_object(fields: Vec<(&str, Value)>, required: Vec<&str>) -> Value {
     let properties: BTreeMap<_, _> = fields.into_iter().collect();
     let mut schema = json!({"type":"object","additionalProperties":false,"properties":properties});
     if !required.is_empty() {
