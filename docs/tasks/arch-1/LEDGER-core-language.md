@@ -33,14 +33,14 @@ In order. "After" names what a slice waits for.
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | landed (test f54e2469, block 512ad4d1) |
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | landed (01cc55e6) |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | landed (d15f5ba5) |
-| LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
+| LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | move landed; mount, root doc and step limit todo |
 | LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
 | LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed (ec0166d5) |
 | LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | landed (6b5f619e) |
 | LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | landed (0b6c3817) |
 | LANG-11 | docs(language): the item docs match the code | - | LANG-11 | landed (df9e4cac) |
 | LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | landed (fb359bf5) |
-| LANG-12b | refactor(cli): the command line reads the machine, and language/ does no I/O | LANG-12 | LANG-12's environment part, given by the coordinator; cross-lane into `cli/` | landed |
+| LANG-12b | refactor(cli): the command line reads the machine, and language/ does no I/O | LANG-12 | LANG-12's environment part, given by the coordinator; cross-lane into `cli/` | landed (e91c5518) |
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | todo |
 
 ## Notes
@@ -192,3 +192,8 @@ In order. "After" names what a slice waits for.
   resolves the row (`machine::environment()`); `language/environment.rs` keeps
   `EnvironmentFacts`, `Environment` and `resolve` and does no machine I/O. The three call sites
   in `cli/doctor.rs` and `cli/setup.rs` follow, under test-04's hold.
+- LANG-10, the move: `language/mod.rs` (3,255 lines) splits into the module root (808: the
+  module list, re-exports, `LanguageError`, the instructions, the role and key vocabularies and
+  the tests), `operation.rs` (the request types and their serde defaults) and `decode.rs`
+  (decoding and validation). Every original line is in one of the three, checked by line
+  multiset; the only new lines are the two module docs, `use super::*;` and the re-exports.
