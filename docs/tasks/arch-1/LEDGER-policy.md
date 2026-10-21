@@ -191,9 +191,9 @@ rows are done.
 | WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | landed (ed389024, 5dcd3eaf, b82ff05d and the re-export) |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (d00a7ede) |
 | G-D1 | fix(governance): a trailing-dot host is the same host to policy | - | found by test-01's tests-1 classification of `governance/`, 2026-10-21 (Notes below); the policy lane is closed, so test-01 lands it, cross-lane into core-work's three host copies | landed (e0e90fa2) |
-| G-D2 | fix(governance): publish refuses a bad source before it writes the bundle | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (375cb549) |
-| G-D3 | fix(governance): an organization's facts have one bound in bytes on both delivery paths | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (4086aed9) |
-| G-D4 | fix(governance): the same publication re-encoded is not a reused sequence | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (this commit) |
+| G-D2 | fix(governance): publish refuses a bad source before it writes the bundle | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (00d0d101) |
+| G-D3 | fix(governance): an organization's facts have one bound in bytes on both delivery paths | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (dc3a9d06) |
+| G-D4 | fix(governance): the same publication re-encoded is not a reused sequence | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (1923212f) |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
 host), parsed once and lowercased. `PolicyLayer::new` parses its never-touch list and each grant's

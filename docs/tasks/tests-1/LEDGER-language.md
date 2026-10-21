@@ -6,16 +6,12 @@ Machine: test-01 (CachyOS). Paths without a crate are under `crates/orchestrator
 
 ## RESUME HERE
 
-Both areas are cut, on 2026-10-21. `language/` closed at 55 of 349, its budget, in TL1-TL23.
-`workbench/` closed at 37 of 252 in TW1-TW6: its budget of 35, plus the U-D5 and U-D6
-reproductions, which landed after the allocation was written. The coordinator granted 2 from the
-reserve for them. Every test was first classified read-only (keep, rewrite or delete,
-each with what it protects), and one review per area fitted the plans into the budget without
-merging unrelated behaviors. The cut found three product defects, each fixed first with one test:
-arch-1 L-D7 (decoder), U-D5 and U-D6 (the loopback workbench).
-
-Next: `governance/`, moved here from the work lane on 2026-10-21 with its budget of 40. Classify
-every test read-only first, then cut one file per commit.
+Every area of this lane is cut, on 2026-10-21, and the lane has stopped, as the coordinator asked
+when the owner cut token spend. `language/` closed at 55 of 349 (TL1-TL23), `workbench/` at 37 of 252
+(TW1-TW6; 35 plus 2 from the reserve for the U-D5 and U-D6 reproductions), and `governance/` at 40
+of 136 (TG1-TG6). The cut found product defects, and each landed first with its proof as a row or
+one test: arch-1 L-D7, U-D5, U-D6, G-D1 (a trailing-dot host stepped around deny lists), G-D2,
+G-D3 and G-D4. S-D7 also came to this lane and landed, with its live check on test-01.
 
 ## Areas
 
@@ -61,12 +57,12 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TW4 | test(workbench): setup.rs keeps the 5 tests of the setup journey, and parts/ its none | 54 | 5 | 4 promise, 1 defect | landed (15cf6d1a) |
 | TW5 | test(workbench): watching.rs keeps the marker rule | 3 | 1 | 1 promise | landed (3e477cde) |
 | TW6 | test(workbench): input.rs keeps the search bound, checked against the page | 2 | 1 | 1 promise | landed (f7b86902) |
-| TG1 | test(cli, governance): the policy subcommands parse in the completions test, and governance drops its copy | 1 | 0 | - (moved to cli/parse.rs) | landed (8bd564fc) |
-| TG2 | test(governance): managed policy keeps the 13 tests of its published claims | 36 | 13 | 10 promise, 1 contract, 2 defect | landed (1198b684) |
-| TG3 | test(governance): the authority keeps the 18 tests of what policy decides | 64 | 18 | 10 promise, 2 contract, 5 defect, 1 unsafe | landed (44864318) |
-| TG4 | test(governance): the manifest and the host grammar keep the 4 tests of the file admins write | 16 | 4 | 1 promise, 2 contract, 1 defect | landed (c8100a25) |
-| TG5 | test(governance): migrate.rs keeps the schema-3 move and the file move | 11 | 2 | 2 promise | landed (0c74aee4) |
-| TG6 | test(governance): simulate and the decision evidence keep their 3 tests | 8 | 3 | 2 promise, 1 defect | landed (this commit) |
+| TG1 | test(cli, governance): the policy subcommands parse in the completions test, and governance drops its copy | 1 | 0 | - (moved to cli/parse.rs) | landed (0cee90cc) |
+| TG2 | test(governance): managed policy keeps the 13 tests of its published claims | 36 | 13 | 10 promise, 1 contract, 2 defect | landed (370ea14d) |
+| TG3 | test(governance): the authority keeps the 18 tests of what policy decides | 64 | 18 | 10 promise, 2 contract, 5 defect, 1 unsafe | landed (570b13ba) |
+| TG4 | test(governance): the manifest and the host grammar keep the 4 tests of the file admins write | 16 | 4 | 1 promise, 2 contract, 1 defect | landed (c3f7f4e6) |
+| TG5 | test(governance): migrate.rs keeps the schema-3 move and the file move | 11 | 2 | 2 promise | landed (73454678) |
+| TG6 | test(governance): simulate and the decision evidence keep their 3 tests | 8 | 3 | 2 promise, 1 defect | landed (8cef6994) |
 
 ## Notes
 
@@ -108,3 +104,9 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   the watcher rate limits, the stream keep-alive against the page's dead timer, the stream places
   per audience, and the facade with no server attached. `WorkbenchServer::start` is now called
   only by the test fixture.
+- `governance/` kept for, by main kind: 25 promise, 5 contract, 9 defect, 1 unsafe (the workspace
+  unsafe-confinement guard AGENTS.md names, which lives in `governance/tests.rs`). One review fitted
+  the two plans (46) into 40 by folding the same rule seen from two files. The policy subcommand
+  check moved into `cli/parse.rs`'s completions test (TG1), with test-04's hold and the coordinator's
+  approval. Gaps left open: no test drives an HTTPS managed source through the authority or shows a
+  pinned CA honored, since both need a TLS test server as a new dev-dependency, the owner's call.
