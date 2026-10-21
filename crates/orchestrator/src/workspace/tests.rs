@@ -1158,7 +1158,7 @@ fn the_record_limit_evicts_earlier_generations_before_the_current_one() {
     let current = lease.register_targets(&second, &controls(1500)).unwrap();
     let records =
         |store: &WorkspaceStore| store.lock().workspaces[&workspace].targets.records.len();
-    assert_eq!(records(&store), super::TARGET_RECORD_LIMIT);
+    assert_eq!(records(&store), super::targets::TARGET_RECORD_LIMIT);
     assert!(current
         .iter()
         .all(|(handle, _)| lease.resolve_target(handle.as_str(), None).is_ok()));
@@ -1170,16 +1170,16 @@ fn the_record_limit_evicts_earlier_generations_before_the_current_one() {
                 .is_some()
         })
         .count();
-    assert_eq!(survivors, super::TARGET_RECORD_LIMIT - 1500);
+    assert_eq!(survivors, super::targets::TARGET_RECORD_LIMIT - 1500);
     let index_len = store.lock().workspaces[&workspace].targets.index.len();
-    assert_eq!(index_len, super::TARGET_RECORD_LIMIT);
+    assert_eq!(index_len, super::targets::TARGET_RECORD_LIMIT);
 
     let third = lease
         .apply_landing(&tab.handle, &physical(1, "https://example.com/3"))
         .unwrap();
     let crowded = lease.register_targets(&third, &controls(2500)).unwrap();
-    assert_eq!(records(&store), super::TARGET_RECORD_LIMIT);
-    let dropped = 2500 - super::TARGET_RECORD_LIMIT;
+    assert_eq!(records(&store), super::targets::TARGET_RECORD_LIMIT);
+    let dropped = 2500 - super::targets::TARGET_RECORD_LIMIT;
     for (position, (handle, _)) in crowded.iter().enumerate() {
         let resolved = lease.resolve_target(handle.as_str(), None);
         if position < dropped {
@@ -1397,11 +1397,14 @@ fn a_re_render_the_page_proves_keeps_one_handle_and_one_record() {
 fn tombstones_are_bounded_and_the_oldest_are_dropped() {
     let mut book = TargetBook::default();
     let handle = |position: usize| TargetHandle(format!("target_{position}"));
-    for position in 0..super::TARGET_RECORD_LIMIT + 10 {
+    for position in 0..super::targets::TARGET_RECORD_LIMIT + 10 {
         book.retire(handle(position), StaleReason::Navigated);
     }
-    assert_eq!(book.retired.len(), super::TARGET_RECORD_LIMIT);
-    assert_eq!(book.retired_order.len(), super::TARGET_RECORD_LIMIT);
+    assert_eq!(book.retired.len(), super::targets::TARGET_RECORD_LIMIT);
+    assert_eq!(
+        book.retired_order.len(),
+        super::targets::TARGET_RECORD_LIMIT
+    );
     assert_eq!(book.retired_reason(&handle(0)), None);
     assert_eq!(book.retired_reason(&handle(9)), None);
     assert_eq!(
