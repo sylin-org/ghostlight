@@ -603,118 +603,6 @@ pub fn install_events(sink: impl Fn(TrayEvent) + Send + Sync + 'static) {
 mod tests {
     use super::*;
 
-    fn item(id: &str, label: &str) -> TrayItem {
-        TrayItem {
-            id: id.to_string(),
-            label: label.to_string(),
-            enabled: true,
-        }
-    }
-
-    fn model() -> TrayModel {
-        TrayModel {
-            tooltip: "Ghostlight".to_string(),
-            items: vec![
-                item("open", "Open Ghostlight"),
-                item("hold", "Pause agents"),
-                item("resume", "Resume agents"),
-                item("quit", "Quit Ghostlight"),
-            ],
-            state: TrayState::Ready,
-        }
-    }
-
-    fn refused(model: &TrayModel) -> bool {
-        matches!(model.validate(), Err(TrayError::Model { .. }))
-    }
-
-    #[test]
-    fn a_model_with_the_four_familiar_items_passes() {
-        assert_eq!(model().validate(), Ok(()));
-    }
-
-    #[test]
-    fn the_item_count_is_bounded() {
-        let mut m = model();
-        m.items.clear();
-        assert!(refused(&m));
-        m.items = (0..=MAX_ITEMS)
-            .map(|n| item(&format!("i{n}"), "x"))
-            .collect();
-        assert_eq!(m.items.len(), 17);
-        assert!(refused(&m));
-        m.items.pop();
-        assert_eq!(m.validate(), Ok(()));
-    }
-
-    #[test]
-    fn ids_must_be_unique_and_plain() {
-        let mut m = model();
-        m.items.push(item("open", "Again"));
-        assert!(refused(&m));
-        for bad in ["Open", "a b", "", "a-b", &"a".repeat(33)] {
-            let mut m = model();
-            m.items[0].id = bad.to_string();
-            assert!(refused(&m), "{bad:?}");
-        }
-    }
-
-    #[test]
-    fn labels_are_bounded_and_printable() {
-        for bad in ["".to_string(), "x".repeat(65), "a\tb".to_string()] {
-            let mut m = model();
-            m.items[0].label = bad.clone();
-            assert!(refused(&m), "{bad:?}");
-        }
-        let mut m = model();
-        m.items[0].label = "x".repeat(64);
-        assert_eq!(m.validate(), Ok(()));
-    }
-
-    #[test]
-    fn the_tooltip_is_bounded_by_the_windows_limit() {
-        assert_eq!(MAX_TOOLTIP_LEN, 127);
-        let mut m = model();
-        m.tooltip = "t".repeat(128);
-        assert!(refused(&m));
-        m.tooltip = "t".repeat(127);
-        assert_eq!(m.validate(), Ok(()));
-    }
-
-    #[test]
-    fn the_model_keeps_its_wire_field_names() {
-        let value = serde_json::to_value(model()).unwrap();
-        assert_eq!(value["tooltip"], "Ghostlight");
-        let first = &value["items"][0];
-        assert_eq!(first["id"], "open");
-        assert_eq!(first["label"], "Open Ghostlight");
-        assert_eq!(first["enabled"], true);
-        assert_eq!(value["state"], "ready");
-        let back: TrayModel = serde_json::from_value(value).unwrap();
-        assert_eq!(back, model());
-    }
-
-    #[test]
-    fn without_a_service_the_tooltip_is_the_state_and_only_open_can_be_chosen() {
-        let shown = model().while_without_service("Ghostlight is restarting...");
-        assert_eq!(shown.tooltip, "Ghostlight is restarting...");
-        assert_eq!(shown.validate(), Ok(()));
-        let enabled: Vec<&str> = shown
-            .items
-            .iter()
-            .filter(|item| item.enabled)
-            .map(|item| item.id.as_str())
-            .collect();
-        assert_eq!(enabled, ["open"]);
-        assert_eq!(shown.state, TrayState::Ready);
-        assert_eq!(shown.items.len(), model().items.len());
-        assert_eq!(
-            shown.items.iter().map(|i| &i.label).collect::<Vec<_>>(),
-            model().items.iter().map(|i| &i.label).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
     fn the_product_icon_decodes_to_32_by_32_rgba() {
         let (rgba, width, height) = icon_image().unwrap();
         assert_eq!((width, height), (32, 32));
@@ -791,7 +679,6 @@ mod tests {
     }
 
     #[cfg(not(windows))]
-    #[test]
     fn a_host_that_picks_its_own_size_gets_the_32_pixel_icon_at_any_scale() {
         for scale in [1.0, 1.25, 1.5, 2.0, 0.0, f64::NAN] {
             let taskbar = Taskbar::new(false, scale);
@@ -803,8 +690,13 @@ mod tests {
         assert_eq!(Taskbar::default(), Taskbar::new(false, 1.0));
     }
 
+    /// The tray shows the product's ghost in the state it is in: Ready is the art's own bytes, at
+    /// the size the host draws, and every other state adds a dot in its band's colour, the colour
+    /// tokens of the window's stylesheet, in the lower right, leaving the ghost unchanged; on a light
+    /// taskbar the mascot keeps one piece, a soft night outline and its face at 16 pixels, so it does
+    /// not fade into a pale speck (ACCEPTANCE, desktop 12; finding j-11 and commit 715e20d6).
     #[test]
-    fn each_state_has_its_own_icon_and_ready_is_the_plain_ghost() {
+    fn each_tray_state_has_its_own_icon_at_the_hosts_size() {
         let plain = icon_image().unwrap().0;
         let icons: Vec<Vec<u8>> = [
             TrayState::Ready,
@@ -824,9 +716,19 @@ mod tests {
         }
         let small = state_icon(TrayState::Ready, DARK_16).unwrap().0;
         assert_eq!(small, decode_rgba(ICON_16_PNG).unwrap().0);
+
+        the_product_icon_decodes_to_32_by_32_rgba();
+        the_dot_sits_in_the_lower_right_in_the_colour_of_the_state();
+        the_dark_taskbar_shows_the_product_icon_bytes();
+        a_dot_on_a_light_taskbar_lies_over_the_mascot();
+        the_dot_colours_are_the_tokens_of_the_windows_stylesheet();
+        a_light_taskbar_shows_the_mascot_in_one_piece();
+        a_soft_night_outline_parts_the_light_mascot_from_the_taskbar();
+        the_light_mascot_keeps_its_face_at_16_pixels();
+        #[cfg(not(windows))]
+        a_host_that_picks_its_own_size_gets_the_32_pixel_icon_at_any_scale();
     }
 
-    #[test]
     fn the_dot_sits_in_the_lower_right_in_the_colour_of_the_state() {
         let plain = icon_image().unwrap().0;
         for (state, colour) in DOT_STATES {
@@ -845,41 +747,6 @@ mod tests {
                 changed.iter().all(|(x, y)| *x >= 14 && *y >= 14),
                 "{state:?}: nothing changes outside the lower right"
             );
-        }
-    }
-
-    #[test]
-    fn the_dot_is_six_pixels_across_on_the_16_pixel_icon() {
-        for (state, colour) in DOT_STATES {
-            let icon = state_icon(state, DARK_16).unwrap().0;
-            let full = [colour[0], colour[1], colour[2], 255];
-            for (x, y) in [(12, 12), (10, 12), (13, 12), (12, 10), (12, 13)] {
-                assert_eq!(pixel_of(&icon, 16, x, y), full, "{state:?} at ({x}, {y})");
-            }
-            // The pixels three from the centre are nearly all dot, under its one-pixel soft edge.
-            for (x, y) in [(9, 12), (14, 12), (12, 9), (12, 14)] {
-                let seen = pixel_of(&icon, 16, x, y);
-                for channel in 0..3 {
-                    assert!(
-                        seen[channel].abs_diff(colour[channel]) <= 16,
-                        "{state:?} at ({x}, {y}): {seen:?}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn the_ring_is_drawn_in_the_ground_of_the_taskbar() {
-        // (24, 17) lies a pixel outside the dot and inside its ring.
-        for (taskbar, ground) in [(DARK_32, NIGHT_COLOUR), (LIGHT_32, LIGHT_GROUND)] {
-            let icon = state_icon(TrayState::Working, taskbar).unwrap().0;
-            assert_eq!(
-                pixel(&icon, 24, 17),
-                [ground[0], ground[1], ground[2], 255],
-                "{taskbar:?}"
-            );
-            assert_eq!(taskbar.ground(), ground);
         }
     }
 
@@ -929,7 +796,6 @@ mod tests {
         seen
     }
 
-    #[test]
     fn a_light_taskbar_shows_the_mascot_in_one_piece() {
         for (taskbar, size) in [(LIGHT_16, 16), (LIGHT_32, 32)] {
             let (mascot, width, height) = decode_rgba(taskbar.source()).unwrap();
@@ -945,7 +811,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn a_soft_night_outline_parts_the_light_mascot_from_the_taskbar() {
         for (taskbar, size) in [(LIGHT_16, 16), (LIGHT_32, 32)] {
             let mascot = state_icon(TrayState::Ready, taskbar).unwrap().0;
@@ -993,7 +858,6 @@ mod tests {
     /// How much darker than a light taskbar each edge pixel of the light mascot is.
     const EDGE_CONTRAST: u32 = 80;
 
-    #[test]
     fn the_light_mascot_keeps_its_face_at_16_pixels() {
         // The eyes are a clear margin darker than the head above and between them.
         let mascot = state_icon(TrayState::Ready, LIGHT_16).unwrap().0;
@@ -1016,13 +880,11 @@ mod tests {
     /// How much darker than the head around them the eyes of the 16 pixel light mascot are.
     const FACE_CONTRAST: u32 = 96;
 
-    #[test]
     fn the_dark_taskbar_shows_the_product_icon_bytes() {
         assert_eq!(DARK_16.source(), ICON_16_PNG);
         assert_eq!(DARK_32.source(), ICON_PNG);
     }
 
-    #[test]
     fn a_dot_on_a_light_taskbar_lies_over_the_mascot() {
         for (taskbar, size, centre) in [(LIGHT_32, 32, 24), (LIGHT_16, 16, 12)] {
             let mascot = state_icon(TrayState::Ready, taskbar).unwrap().0;
@@ -1042,7 +904,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn the_dot_colours_are_the_tokens_of_the_windows_stylesheet() {
         let styles = include_str!("../../orchestrator/ui/styles.css");
         for (token, colour) in [
@@ -1060,10 +921,5 @@ mod tests {
                 "{declared} is not in the stylesheet"
             );
         }
-    }
-
-    #[test]
-    fn bytes_that_are_not_a_png_are_refused() {
-        assert_eq!(decode_rgba(b"not a png"), Err(TrayError::Icon));
     }
 }

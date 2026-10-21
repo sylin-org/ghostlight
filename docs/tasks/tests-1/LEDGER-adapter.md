@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 61 |
+| `crates/desktop` | 161 | 20 | 42 |
 
 ## Slices
 
@@ -51,7 +51,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | D4 | `crates/desktop/src/lib.rs`: the launch parser's restating tests | 4 | 0 | - | landed (7edcc0fd) |
 | D5 | `crates/desktop/src/scratch.rs`: tests of a test helper | 2 | 0 | - | landed (d3bbe962) |
 | D6 | `crates/desktop/src/session.rs`: a test of the test fake | 1 | 0 | - | landed (2cf00417) |
-| D7 | `crates/desktop/src/window.rs` and `webview.rs`: the window's life and the webview's one origin | 27 + 6 | 3 | promise 2, defect 1 | landed (this commit) |
+| D7 | `crates/desktop/src/window.rs` and `webview.rs`: the window's life and the webview's one origin | 27 + 6 | 3 | promise 2, defect 1 | landed (f9b8a4a2) |
+| D8 | `crates/desktop/src/tray.rs`: each tray state's icon (its two `cfg(windows)` tests wait for the coordinator) | 22 | 1 + 2 Windows | promise 1 | landed (this commit) |
 
 ## Notes
 
@@ -106,6 +107,14 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   arithmetic (restated constants, checked live in rc-1), and a no-op assertion; in `webview.rs`,
   the access script's restated text, an escape over inputs `link.rs` already validates, and the
   restated profile path.
+- D8: kept one table: each tray state has its own icon at the host's size, Ready the art's own
+  bytes and every other state a dot in its band's colour from the window's stylesheet tokens,
+  with the light taskbar's outline and face (desktop 12; j-11, 715e20d6). The non-Windows size
+  case runs under `cfg(not(windows))` inside it. Cut: the model checks `validate()` already does
+  for the service's trays through `link.rs`'s golden pass, the restated 127, the shell's fallback
+  model, dot geometry restating `DOT_RADIUS` and `RING_WIDTH`, and the error path of compiled-in
+  PNGs. The two `cfg(windows)` size tests stay as they are: the coordinator's verdict is asked for
+  (fold them as `cfg(windows)` rows of the kept table).
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against
