@@ -582,8 +582,16 @@ mod tests {
     use super::*;
 
     fn presence() -> (Presence, Arc<Fake>) {
+        presence_with(Duration::from_millis(80))
+    }
+
+    /// How long a request to show the window waits in a test that attaches a shell for it. Only a
+    /// failure waits it out, so a loaded machine cannot time the request out before the attach.
+    const DELIVERY_PATIENCE: Duration = Duration::from_secs(10);
+
+    fn presence_with(patience: Duration) -> (Presence, Arc<Fake>) {
         let fake = Arc::new(Fake::default());
-        let presence = Presence::with_patience(fake.world(), Duration::from_millis(80));
+        let presence = Presence::with_patience(fake.world(), patience);
         (presence, fake)
     }
 
@@ -705,7 +713,7 @@ mod tests {
 
     #[test]
     fn a_shell_that_attaches_during_a_request_to_show_is_handed_the_address() {
-        let (presence, fake) = presence();
+        let (presence, fake) = presence_with(DELIVERY_PATIENCE);
         let presence = Arc::new(presence);
         let waiting = {
             let presence = Arc::clone(&presence);
@@ -727,7 +735,7 @@ mod tests {
 
     #[test]
     fn a_second_request_while_a_launch_is_pending_only_updates_the_address() {
-        let (presence, fake) = presence();
+        let (presence, fake) = presence_with(DELIVERY_PATIENCE);
         let presence = Arc::new(presence);
         let first = {
             let presence = Arc::clone(&presence);
@@ -740,15 +748,14 @@ mod tests {
             let presence = Arc::clone(&presence);
             thread::spawn(move || presence.request_show(Some(PageAddress::Status)))
         };
-        thread::sleep(Duration::from_millis(20));
+        let status = Some(Wanted {
+            address: Some(PageAddress::Status),
+        });
+        while lock(&presence.state).wanted != status {
+            thread::sleep(Duration::from_millis(2));
+        }
         assert_eq!(fake.launches(), [false], "one launch for both");
-        let wanted = presence.attached(None);
-        assert_eq!(
-            wanted,
-            Some(Wanted {
-                address: Some(PageAddress::Status)
-            })
-        );
+        assert_eq!(presence.attached(None), status);
         assert_eq!(first.join().unwrap(), Ok(Shown::Delivered));
         assert_eq!(second.join().unwrap(), Ok(Shown::Delivered));
     }
