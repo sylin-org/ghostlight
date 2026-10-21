@@ -854,9 +854,10 @@ fn failure_call_result(failure: EdgeFailure) -> Value {
         "next_steps": next_steps,
     });
     // A template is built before any client negotiates a revision and the MCP edge fills only its
-    // id, so it is written for the latest revision: structured content only, no text copy.
+    // id, so it is written for the oldest revision: the lean JSON travels as structured content
+    // and in the text block, which a client of every revision reads (S-D6).
     call_tool_result(
-        LATEST_REVISION,
+        OLDEST_REVISION,
         failure.call_text(),
         envelope,
         true,

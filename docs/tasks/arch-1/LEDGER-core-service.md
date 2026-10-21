@@ -28,7 +28,7 @@ In order. "After" names what a slice waits for.
 | S-D3 | fix(relay): a ready service wakes the edges that wait for it | - | BROW-9's open half, the owner's design (ADR-0199 amendment of 2026-10-20); relay revision 5 | landed (e4a9fade, b0290246) |
 | S-D4 | fix(cli): a start relaunches itself, so a tree kill of its starter cannot reach the service | - | leo-desktop-02's finding while proving S-D3 (ADR-0199 amendment of 2026-10-21); cross-lane `cli/parse.rs`, `cli/mod.rs`, `cli/desktop.rs`, `cli/start.rs` under test-04's hold | landed (this commit) |
 | S-D5 | fix(intake): a batch is answered as one array, its tool results in it | - | tests-1's service plan; the owner's question of 2026-10-21, sent back to the coordinator (Notes) | todo |
-| S-D6 | fix(intake): a client before MCP 2025-06-18 gets the lean JSON in a cut-off or expired answer too | - | tests-1's service plan (Notes) | todo |
+| S-D6 | fix(intake): a client before MCP 2025-06-18 gets the lean JSON in a cut-off or expired answer too | - | tests-1's service plan (Notes) | landed (this commit) |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
 | BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |

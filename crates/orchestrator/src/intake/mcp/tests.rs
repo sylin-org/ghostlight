@@ -79,7 +79,9 @@ fn initialize_echoes_a_served_revision_and_counteroffers_the_latest_otherwise() 
 
 /// ACCEPTANCE C21 (ADR-0198 Decision 24): a client of a revision before 2025-06-18 cannot read
 /// `structuredContent`, so its text block also carries the same lean JSON after the result label,
-/// while a client of 2025-06-18 or later gets the summary alone. An image stays its own block.
+/// while a client of 2025-06-18 or later gets the summary alone. An image stays its own block. The
+/// edge's own answers are written before any revision is negotiated, so they carry the text copy
+/// for every client (defect S-D6).
 #[test]
 fn older_revisions_get_the_lean_json_in_the_text_block() {
     for revision in SUPPORTED_REVISIONS {
@@ -113,6 +115,19 @@ fn older_revisions_get_the_lean_json_in_the_text_block() {
             assert_eq!(text, "Captured the view.", "{revision}");
         }
         assert_eq!(result["content"][1]["type"], "image");
+    }
+    let templates = failure_templates();
+    for failure in [Failure::CutOff, Failure::Expired] {
+        let answer = templates
+            .template(failure, "tools/call")
+            .expect("a template");
+        let result = &answer["result"];
+        let text = result["content"][0]["text"].as_str().unwrap();
+        let lean = &result["structuredContent"];
+        assert!(
+            text.ends_with(&format!("{TEXT_RESULT_LABEL}{lean}")),
+            "{failure:?}: {text}"
+        );
     }
 }
 
