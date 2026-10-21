@@ -41,22 +41,25 @@ mod tests {
 
     use super::*;
 
+    /// Protects ADR-0199 Decisions 13 and 14: every process that is not the service leaves at once on
+    /// the final session signal, and only then, while serve registers its own listener, which says
+    /// goodbye on every stream before it leaves.
     #[test]
-    fn only_the_final_signal_makes_a_command_leave() {
-        let left = Cell::new(0);
-        for event in [SessionEvent::Query, SessionEvent::Cancelled] {
-            leave_on_final(event, || left.set(left.get() + 1));
+    fn a_command_leaves_on_the_final_signal_and_only_serve_keeps_its_own_listener() {
+        {
+            let left = Cell::new(0);
+            for event in [SessionEvent::Query, SessionEvent::Cancelled] {
+                leave_on_final(event, || left.set(left.get() + 1));
+            }
+            assert_eq!(left.get(), 0);
+            leave_on_final(SessionEvent::Terminating, || left.set(left.get() + 1));
+            assert_eq!(left.get(), 1);
         }
-        assert_eq!(left.get(), 0);
-        leave_on_final(SessionEvent::Terminating, || left.set(left.get() + 1));
-        assert_eq!(left.get(), 1);
-    }
-
-    #[test]
-    fn serve_registers_its_own_listener_and_every_other_command_leaves_at_once() {
-        let serve: Vec<OsString> = ["serve", "--reason", "agent"].map(OsString::from).to_vec();
-        assert!(listen_unless_serving(&serve).is_none());
-        let version: Vec<OsString> = vec![OsString::from("--version")];
-        assert!(listen_unless_serving(&version).is_some());
+        {
+            let serve: Vec<OsString> = ["serve", "--reason", "agent"].map(OsString::from).to_vec();
+            assert!(listen_unless_serving(&serve).is_none());
+            let version: Vec<OsString> = vec![OsString::from("--version")];
+            assert!(listen_unless_serving(&version).is_some());
+        }
     }
 }
