@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 470 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 382 |
 | `crates/desktop` | 161 | 20 | 161 |
 
 ## Slices
@@ -41,6 +41,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I17 | `install/swap.rs`: six tests fold into one; three of the sweep's private details go (the moved-image stop in `deployment.rs` covers the listing) | 509 | 501 | promise 1 (ADR-0197 D14), defect fafb0cb5 as a case | landed (this commit) |
 | T-I18 | `install/record.rs`: twenty tests fold into four: the record reads any release's file, payloads install only forward on the launchers' shared version vectors (the image hash as a case), a replace publishes whole or not at all, and its access is private or kept as asked; the refusal-words test goes (the refusal is proven in `deployment.rs`) | 501 | 485 | promise 1 (ADR-0197 D14), ADR-0203 D11.1 and D11.2 | landed (this commit) |
 | T-I19 | `install/reconcile.rs`: sixteen tests fold into one: a reconcile points what it owns at `bin` once and leaves the rest, with another app's container naming instead of writing, the client's own container rewriting, and the Windows entries as a case; the tests of report words and dry-run naming go (wording, not a promise) | 485 | 470 | ADR-0197 D13 and D14, ADR-0199 D1 | landed (this commit) |
+| T-I20 | `install/deployment.rs` and `install/version_directories.rs`: ninety-six tests fold into eight, one per promise of an install (place, repair or refuse; the edge rule; the development channel; the 1.x replacement with its policy; the replace order with the new instance's answer; older layouts retired; the quit-for-replacement wait; strays). The real stray now runs a copied system sleeper, not an ignored stand-in test; the quit wait proves the lock by order, not a 300 ms sleep; `v1.4` and `1.3.5` join the planted names that are not version directories. Gone: the version_directories unit tests (deployment proves them through an install), the Flatpak duplicate, the sleep-based held-lock test (nothing now proves two installs wait for each other; no ACCEPTANCE item names it) and the doctor-json mapping | 470 | 382 | ACCEPTANCE 14, ADR-0197 D14, the ADR-0199 development channel; defects e3e861b7, 26d6edba, 64164332, 83aa61f0, 80810b08, 31f2c835, bd29366c, 5b818ffc, a663e83d | landed (this commit) |
 
 ## Notes
 

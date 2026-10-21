@@ -1301,9 +1301,8 @@ mod tests {
     use std::fs;
 
     use super::super::migration::{
-        FlatpakLeftovers, FlatpakPart, FlatpakResult, LegacyInstallation, MigrationError,
-        AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME, LEGACY_DEPLOY_LOCK_NAME, LEGACY_RECORD_NAME,
-        LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
+        LegacyInstallation, MigrationError, AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME,
+        LEGACY_DEPLOY_LOCK_NAME, LEGACY_RECORD_NAME, LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
     };
     use super::super::native_host::NativeHostRegistry;
     use super::super::HarnessRegistry;
@@ -1690,322 +1689,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_fresh_install_places_everything_and_records_it_once_the_service_answers() {
-        let fixture = Fixture::new();
-        let control = FakeControl::new();
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-        assert_eq!(
-            fixture.record(),
-            Some(InstallRecord {
-                service_version: VERSION.to_owned(),
-                relay_revision: RELAY.to_owned(),
-                service_sha256: fixture.build(VERSION).image_sha256,
-                edge_sha256: Some(record::sha256_file(&fixture.layout.edge()).unwrap()),
-                channel: Channel::Release,
-            })
-        );
-        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
-        assert!(outcome.registrations.is_some());
-    }
-
-    #[test]
-    fn a_restart_stops_what_an_older_installation_left_running_after_the_quit_and_before_the_start()
-    {
-        let fixture = Fixture::new();
-        let mut control = FakeControl::new();
-        control.strays = vec![StrayProcess {
-            pid: 4242,
-            image: fixture
-                .layout
-                .bin()
-                .join(retired_connector_names()[0].as_str()),
-            kind: StrayKind::RetiredConnector,
-        }];
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(
-            control.calls(),
-            [
-                Call::Quit,
-                Call::StopStrays(vec![4242]),
-                Call::Start,
-                Call::Wait
-            ]
-        );
-    }
-
-    #[test]
-    fn a_stray_that_would_not_stop_is_reported_and_blocks_nothing() {
-        let fixture = Fixture::new();
-        let mut control = FakeControl::new();
-        let stray = StrayProcess {
-            pid: 4242,
-            image: fixture.layout.bin().join(&retired_connector_names()[1]),
-            kind: StrayKind::RetiredConnector,
-        };
-        control.strays = vec![stray.clone()];
-        control.strays_stay = true;
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(outcome.strays_left, [stray]);
-        assert_eq!(
-            control.calls(),
-            [
-                Call::Quit,
-                Call::StopStrays(vec![4242]),
-                Call::Start,
-                Call::Wait
-            ]
-        );
-    }
-
-    #[test]
-    fn a_stray_search_separates_what_stopped_from_what_stayed() {
-        let layout = Layout::new("home");
-        let stray = |pid: u32, name: &str| StrayProcess {
-            pid,
-            image: layout.bin().join(name),
-            kind: StrayKind::RetiredConnector,
-        };
-        let mut control = FakeControl::new();
-        assert_eq!(
-            stop_found_strays(&control, &layout, Some(9)),
-            StrayStop::default()
-        );
-        assert!(control.calls().is_empty());
-
-        control.strays = vec![stray(1, "one"), stray(2, "two")];
-        let stop = stop_found_strays(&control, &layout, Some(9));
-        assert_eq!(stop.stopped, control.strays);
-        assert!(stop.stuck.is_empty());
-
-        control.strays_stay = true;
-        let stop = stop_found_strays(&control, &layout, None);
-        assert!(stop.stopped.is_empty());
-        assert_eq!(stop.stuck, control.strays);
-    }
-
-    #[test]
-    fn an_install_that_finds_no_stray_stops_none() {
-        let fixture = Fixture::new();
-        let control = FakeControl::new();
-        fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert!(!control
-            .calls()
-            .iter()
-            .any(|call| matches!(call, Call::StopStrays(_))));
-    }
-
-    #[test]
-    fn the_same_version_is_left_alone() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        let before = fixture.snapshot();
-        let mut control = FakeControl::new();
-        control.strays = vec![StrayProcess {
-            pid: 4242,
-            image: fixture
-                .layout
-                .bin()
-                .join(retired_connector_names()[0].as_str()),
-            kind: StrayKind::RetiredConnector,
-        }];
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert!(outcome.plan.unchanged);
-        assert!(control.calls().is_empty());
-        assert_eq!(fixture.snapshot(), before);
-    }
-
-    #[test]
-    fn the_same_version_with_a_missing_or_changed_edge_is_not_left_alone() {
-        for damage in [None, Some("another edge")] {
-            let fixture = Fixture::new();
-            fixture
-                .run(Mode::Release, VERSION, &FakeControl::new())
-                .unwrap();
-            match damage {
-                None => fs::remove_file(fixture.layout.edge()).unwrap(),
-                Some(text) => fs::write(fixture.layout.edge(), text).unwrap(),
-            }
-            let control = FakeControl::new();
-            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-            assert!(!outcome.plan.unchanged, "{damage:?}");
-            assert!(
-                placed_names(&outcome.plan).contains(&EDGE_EXECUTABLE_NAME),
-                "{damage:?}"
-            );
-            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-            assert_eq!(outcome.service_started, Some(true));
-            let recorded = fixture.record().unwrap().edge_sha256;
-            assert_eq!(
-                recorded,
-                Some(record::sha256_file(&fixture.layout.edge()).unwrap())
-            );
-            // Repaired, so the next identical install is a no-op again.
-            let outcome = fixture
-                .run(Mode::Release, VERSION, &FakeControl::new())
-                .unwrap();
-            assert!(outcome.plan.unchanged, "{damage:?}");
-        }
-    }
-
-    #[test]
-    fn an_older_payload_is_refused_and_changes_nothing() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        let before = fixture.snapshot();
-        let control = FakeControl::new();
-        let error = fixture.run(Mode::Release, "2.0.0", &control).unwrap_err();
-        assert!(error.is::<PayloadRefused>(), "{error}");
-        assert!(control.calls().is_empty());
-        assert_eq!(fixture.snapshot(), before);
-    }
-
-    #[test]
-    fn a_damaged_service_image_is_repaired() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        fs::write(fixture.layout.service_executable(), "damaged").unwrap();
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(!outcome.plan.unchanged);
-        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-    }
-
-    #[test]
-    fn the_edge_stays_when_the_relay_revision_matches() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        let recorded = fixture.record().unwrap().edge_sha256;
-        Fixture::write_payload(&fixture.payload, "next service");
-        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
-        let outcome = fixture
-            .run(Mode::Release, "2.2.0", &FakeControl::new())
-            .unwrap();
-        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
-        assert_eq!(outcome.plan.edge_replaced, None);
-        assert_eq!(
-            fixture.read(fixture.layout.service_executable()),
-            "next service"
-        );
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-        let record = fixture.record().unwrap();
-        assert_eq!(record.service_version, "2.2.0");
-        assert_eq!(record.edge_sha256, recorded);
-    }
-
-    #[test]
-    fn the_edge_is_replaced_when_the_relay_revision_changes() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        Fixture::write_payload(&fixture.payload, "next service");
-        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "next edge").unwrap();
-        let control = FakeControl::new();
-        let build = Build {
-            relay_revision: "5".to_owned(),
-            ..fixture.build("2.2.0")
-        };
-        let outcome = install(
-            &fixture.context(build, &control),
-            &Request {
-                payload: None,
-                mode: Mode::Release,
-                plan_only: false,
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            outcome.plan.edge_replaced,
-            Some(EdgeReplacement::RelayRevision)
-        );
-        assert_eq!(fixture.read(fixture.layout.edge()), "next edge");
-        let record = fixture.record().unwrap();
-        assert_eq!(record.relay_revision, "5");
-        assert_eq!(
-            record.edge_sha256,
-            Some(record::sha256_file(&fixture.layout.edge()).unwrap())
-        );
-    }
-
-    #[test]
-    fn a_pre_edge_layout_is_replaced_and_its_connectors_go_after_an_exact_image_stop() {
-        let fixture = Fixture::new();
-        let bin = fixture.layout.bin();
-        fs::create_dir_all(&bin).unwrap();
-        // An earlier development build: the service under the edge's name, both connectors, and
-        // a record that names no edge.
-        fs::write(fixture.layout.edge(), "pre-edge service").unwrap();
-        for name in retired_connector_names() {
-            fs::write(bin.join(name), "retired connector").unwrap();
-        }
-        InstallRecord {
-            service_version: VERSION.to_owned(),
-            relay_revision: RELAY.to_owned(),
-            service_sha256: "0".repeat(64),
-            edge_sha256: None,
-            channel: Channel::Release,
-        }
-        .write(&fixture.layout.install_record())
-        .unwrap();
-        let control = FakeControl::new();
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        let calls = control.calls();
-        let Call::Stop(images) = &calls[0] else {
-            panic!("{calls:?}");
-        };
-        let mut expected = vec![bin.join(format!("{EDGE_EXECUTABLE_NAME}.old-1"))];
-        expected.extend(retired_connector_names().map(|name| bin.join(name)));
-        assert_eq!(images, &expected);
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-        for name in retired_connector_names() {
-            assert!(!bin.join(&name).exists(), "{name}");
-        }
-        assert_eq!(
-            fixture.record().unwrap().edge_sha256,
-            Some(record::sha256_file(&fixture.layout.edge()).unwrap())
-        );
-    }
-
-    #[test]
-    fn a_service_that_does_not_quit_is_stopped_by_its_exact_image() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        Fixture::write_payload(&fixture.payload, "next service");
-        let mut control = FakeControl::new();
-        control.quits = false;
-        fixture.run(Mode::Release, "2.2.0", &control).unwrap();
-        let calls = control.calls();
-        let Call::Stop(images) = &calls[1] else {
-            panic!("{calls:?}");
-        };
-        assert!(images.contains(
-            &fixture
-                .layout
-                .bin()
-                .join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"))
-        ));
-        assert_eq!(calls[2..], [Call::Start, Call::Wait]);
-    }
-
     /// The names of the files a plan places, in order.
     fn placed_names(plan: &InstallPlan) -> Vec<&str> {
         plan.swaps
@@ -2035,482 +1718,6 @@ mod tests {
         images
     }
 
-    #[test]
-    fn a_development_install_swaps_the_service_into_bin_and_keeps_an_unchanged_edge() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        let recorded = fixture.record().unwrap();
-        assert_eq!(recorded.channel, Channel::Release);
-        Fixture::write_payload(&fixture.payload, "development service");
-        let control = FakeControl::new();
-        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
-        assert_eq!(outcome.plan.edge_replaced, None);
-        let printed = serde_json::to_value(&outcome.plan).unwrap();
-        assert!(printed.get("edge_replaced").is_none(), "{printed}");
-        assert_eq!(
-            fixture.read(fixture.layout.service_executable()),
-            "development service"
-        );
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-        let record = fixture.record().unwrap();
-        assert_eq!(record.channel, Channel::Development);
-        assert_eq!(record.edge_sha256, recorded.edge_sha256);
-        assert_eq!(
-            record.service_sha256,
-            record::sha256_file(&fixture.layout.service_executable()).unwrap()
-        );
-        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
-        assert!(!fixture.layout.retired_development_directory().exists());
-        assert!(!fixture.layout.retired_development_marker().exists());
-    }
-
-    #[test]
-    fn a_development_install_replaces_an_edge_its_build_changed_and_only_then() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        let first = fixture.record().unwrap().edge_sha256;
-        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
-        let control = FakeControl::new();
-        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(
-            placed_names(&outcome.plan),
-            [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
-        );
-        assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Rebuilt));
-        let printed = serde_json::to_value(&outcome.plan).unwrap();
-        assert_eq!(
-            printed["edge_replaced"],
-            words::edge_replaced(EdgeReplacement::Rebuilt)
-        );
-        // The same swap and restart a relay revision change gets, and nothing more.
-        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
-        assert_eq!(fixture.read(fixture.layout.edge()), "rebuilt edge");
-        let record = fixture.record().unwrap();
-        assert_eq!(record.channel, Channel::Development);
-        assert_eq!(
-            record.edge_sha256,
-            Some(record::sha256_file(&fixture.layout.edge()).unwrap())
-        );
-        assert_ne!(record.edge_sha256, first);
-
-        // A deploy right after it, whose build did not change the edge, replaces no edge.
-        Fixture::write_payload(&fixture.payload, "next service");
-        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
-        assert_eq!(outcome.plan.edge_replaced, None);
-        assert_eq!(fixture.record().unwrap().edge_sha256, record.edge_sha256);
-    }
-
-    #[test]
-    fn a_restore_over_a_development_install_brings_back_the_release_edge() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "release edge").unwrap();
-        let outcome = fixture
-            .run(Mode::Restore, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(
-            outcome.plan.edge_replaced,
-            Some(EdgeReplacement::LeavingDevelopment)
-        );
-        assert_eq!(fixture.read(fixture.layout.edge()), "release edge");
-        assert_eq!(fixture.record().unwrap().channel, Channel::Release);
-
-        // Once back on the release, a restore of the same release keeps its intact edge.
-        let again = fixture
-            .run(Mode::Restore, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(placed_names(&again.plan), [SERVICE_EXECUTABLE_NAME]);
-        assert_eq!(again.plan.edge_replaced, None);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_running_edge_a_development_build_changed_is_moved_aside_without_failing_the_deploy() {
-        use std::os::windows::fs::OpenOptionsExt;
-
-        /// The sharing Windows gives a running image: it may be read and renamed, not written.
-        const RUNNING_IMAGE_SHARING: u32 = 0x1 | 0x4;
-
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        let running = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(RUNNING_IMAGE_SHARING)
-            .open(fixture.layout.edge())
-            .unwrap();
-        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Rebuilt));
-        assert_eq!(fixture.read(fixture.layout.edge()), "rebuilt edge");
-        let moved_aside = fixture
-            .layout
-            .bin()
-            .join(format!("{EDGE_EXECUTABLE_NAME}.old-1"));
-        assert_eq!(fixture.read(moved_aside), edge_text(RELAY));
-        drop(running);
-    }
-
-    #[test]
-    fn a_development_install_with_no_record_also_swaps_the_edge() {
-        let fixture = Fixture::new();
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(
-            placed_names(&outcome.plan),
-            [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
-        );
-        assert_eq!(
-            outcome.plan.edge_replaced,
-            Some(EdgeReplacement::Unrecorded)
-        );
-        assert!(outcome
-            .plan
-            .swaps
-            .iter()
-            .all(|placed| placed.directory == fixture.layout.bin()));
-        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-        let record = fixture.record().unwrap();
-        assert_eq!(record.channel, Channel::Development);
-        assert_eq!(
-            record.edge_sha256,
-            Some(record::sha256_file(&fixture.layout.edge()).unwrap())
-        );
-        assert!(!fixture.layout.retired_development_directory().exists());
-    }
-
-    #[test]
-    fn a_development_install_swaps_an_edge_that_is_not_the_recorded_one() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        let recorded = fixture.record().unwrap().edge_sha256;
-        fs::write(fixture.layout.edge(), "changed edge").unwrap();
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(
-            placed_names(&outcome.plan),
-            [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
-        );
-        assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Altered));
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-        assert_eq!(fixture.record().unwrap().edge_sha256, recorded);
-
-        fs::remove_file(fixture.layout.edge()).unwrap();
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(placed_names(&outcome.plan).contains(&EDGE_EXECUTABLE_NAME));
-        assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Missing));
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-    }
-
-    #[test]
-    fn a_development_install_of_the_same_version_swaps_and_restarts_every_time() {
-        let fixture = Fixture::new();
-        for round in 0..3 {
-            Fixture::write_payload(&fixture.payload, &format!("build {round}"));
-            let control = FakeControl::new();
-            let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
-            assert!(!outcome.plan.unchanged, "round {round}");
-            assert_eq!(outcome.service_started, Some(true), "round {round}");
-            assert_eq!(
-                fixture.read(fixture.layout.service_executable()),
-                format!("build {round}")
-            );
-            assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
-        }
-    }
-
-    #[test]
-    fn a_development_install_accepts_any_version() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Development, "2.5.0", &FakeControl::new())
-            .unwrap();
-        for version in ["2.0.0", "3.0.0"] {
-            Fixture::write_payload(&fixture.payload, version);
-            fixture
-                .run(Mode::Development, version, &FakeControl::new())
-                .unwrap();
-            assert_eq!(fixture.record().unwrap().service_version, version);
-            assert_eq!(fixture.read(fixture.layout.service_executable()), version);
-        }
-    }
-
-    #[test]
-    fn a_release_install_over_a_development_installation_is_refused_and_changes_nothing() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        let before = fixture.snapshot();
-        for version in ["2.0.0", VERSION, "9.9.9"] {
-            let control = FakeControl::new();
-            let error = fixture.run(Mode::Release, version, &control).unwrap_err();
-            assert!(error.is::<DevelopmentInstalled>(), "{error}");
-            let message = error.to_string();
-            assert!(
-                message.contains("npx ghostlight deployment install --restore"),
-                "{message}"
-            );
-            assert!(message.contains("get.ps1"), "{message}");
-            assert!(message.contains("get.sh"), "{message}");
-            assert!(
-                !message.contains(&fixture.payload.display().to_string()),
-                "a staged payload is gone once its carrier exits: {message}"
-            );
-            assert!(error.to_string().contains("development build"), "{error}");
-            assert!(control.calls().is_empty());
-            assert_eq!(fixture.snapshot(), before, "{version}");
-        }
-    }
-
-    #[test]
-    fn a_release_install_run_in_place_reports_the_in_place_payload_not_a_restore() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        let before = fixture.snapshot();
-        // The installed edge hands `ghostlight deployment install` to bin/ghostlight-service,
-        // so the payload is bin itself.
-        let control = FakeControl::new();
-        let in_place = Context {
-            payload: fixture.layout.bin(),
-            ..fixture.context(fixture.build(VERSION), &control)
-        };
-        let error = plan(&in_place, Mode::Release).unwrap_err();
-        assert!(
-            matches!(
-                error.downcast_ref::<PayloadError>(),
-                Some(PayloadError::InPlace(_))
-            ),
-            "{error}"
-        );
-        assert!(!error.to_string().contains("--restore"), "{error}");
-        assert_eq!(fixture.snapshot(), before);
-    }
-
-    #[test]
-    fn a_restore_from_a_payload_older_than_the_development_installation_installs_a_release() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Development, "2.5.0", &FakeControl::new())
-            .unwrap();
-        Fixture::write_payload(&fixture.payload, "release service");
-        let control = FakeControl::new();
-        let outcome = fixture.run(Mode::Restore, "2.0.0", &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert!(!outcome.plan.unchanged);
-        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
-        assert_eq!(
-            fixture.read(fixture.layout.service_executable()),
-            "release service"
-        );
-        let record = fixture.record().unwrap();
-        assert_eq!(record.service_version, "2.0.0");
-        assert_eq!(record.channel, Channel::Release);
-        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
-
-        // The installation is a release again: the same package is nothing to do.
-        let outcome = fixture
-            .run(Mode::Release, "2.0.0", &FakeControl::new())
-            .unwrap();
-        assert!(outcome.plan.unchanged);
-    }
-
-    #[test]
-    fn a_restore_replaces_the_edge_by_the_normal_rule_and_is_not_offline() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        Fixture::write_payload(&fixture.payload, "release service");
-        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "release edge").unwrap();
-        let build = Build {
-            relay_revision: "5".to_owned(),
-            ..fixture.build("2.0.0")
-        };
-        install(
-            &fixture.context(build, &FakeControl::new()),
-            &Request {
-                payload: None,
-                mode: Mode::Restore,
-                plan_only: false,
-            },
-        )
-        .unwrap();
-        assert_eq!(fixture.read(fixture.layout.edge()), "release edge");
-        let record = fixture.record().unwrap();
-        assert_eq!(record.relay_revision, "5");
-        assert_eq!(record.channel, Channel::Release);
-    }
-
-    #[test]
-    fn a_restore_with_nothing_installed_is_an_install() {
-        let fixture = Fixture::new();
-        let outcome = fixture
-            .run(Mode::Restore, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-        assert_eq!(fixture.record().unwrap().channel, Channel::Release);
-    }
-
-    #[test]
-    fn the_retired_development_layout_is_planned_and_removed_after_the_bin_swap() {
-        let fixture = Fixture::new();
-        let images = plant_retired_development(&fixture);
-        let directory = fixture.layout.retired_development_directory();
-        let marker = fixture.layout.retired_development_marker();
-        let before = fixture.snapshot();
-
-        let planned = plan(
-            &fixture.context(fixture.build(VERSION), &FakeControl::new()),
-            Mode::Development,
-        )
-        .unwrap();
-        assert_eq!(planned.deletions, [directory.clone(), marker.clone()]);
-        for image in &images {
-            assert!(planned.processes_to_stop.contains(image), "{image:?}");
-        }
-        assert_eq!(fixture.snapshot(), before, "a plan changes nothing");
-
-        let control = fixture.watching_control();
-        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert!(outcome.left_behind.is_empty());
-        assert!(!directory.exists());
-        assert!(!marker.exists());
-        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-
-        // The scan stops what runs from the directory, so no second stop by image follows.
-        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
-        for sighting in control.sightings() {
-            assert!(
-                sighting.registered,
-                "registrations name bin before any stop"
-            );
-        }
-        assert!(fixture.manifest_names_bin_edge());
-    }
-
-    #[test]
-    fn a_program_running_from_the_retired_directory_is_stopped_once_by_pid() {
-        let fixture = Fixture::new();
-        let images = plant_retired_development(&fixture);
-        let mut control = FakeControl::new();
-        control.strays = vec![StrayProcess {
-            pid: 41,
-            image: images[1].clone(),
-            kind: StrayKind::RetiredDevelopment,
-        }];
-        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
-        assert!(outcome.strays_left.is_empty());
-        assert!(outcome.left_behind.is_empty());
-        assert_eq!(
-            control.calls(),
-            [
-                Call::Quit,
-                Call::StopStrays(vec![41]),
-                Call::Start,
-                Call::Wait
-            ]
-        );
-    }
-
-    #[test]
-    fn a_retired_program_that_will_not_stop_is_reported_and_blocks_nothing() {
-        let fixture = Fixture::new();
-        let images = plant_retired_development(&fixture);
-        let stuck = StrayProcess {
-            pid: 41,
-            image: images[1].clone(),
-            kind: StrayKind::RetiredDevelopment,
-        };
-        let mut control = FakeControl::new();
-        control.strays = vec![stuck.clone()];
-        control.strays_stay = true;
-        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(outcome.strays_left, [stuck]);
-        assert!(!fixture.layout.retired_development_directory().exists());
-    }
-
-    #[test]
-    fn a_service_still_running_from_the_retired_directory_is_stopped_by_its_exact_image() {
-        let fixture = Fixture::new();
-        let images = plant_retired_development(&fixture);
-        let mut control = FakeControl::new();
-        control.quits = false;
-        fixture.run(Mode::Release, VERSION, &control).unwrap();
-        let calls = control.calls();
-        let Call::Stop(first) = &calls[1] else {
-            panic!("{calls:?}");
-        };
-        assert!(first.contains(&images[0]), "{first:?}");
-        assert!(!fixture.layout.retired_development_directory().exists());
-    }
-
-    #[test]
-    fn a_marker_with_no_directory_and_a_directory_with_no_marker_are_each_removed() {
-        let fixture = Fixture::new();
-        fs::create_dir_all(fixture.layout.home()).unwrap();
-        fs::write(fixture.layout.retired_development_marker(), "{}").unwrap();
-        let control = FakeControl::new();
-        fixture.run(Mode::Development, VERSION, &control).unwrap();
-        assert!(!fixture.layout.retired_development_marker().exists());
-        assert!(!control
-            .calls()
-            .iter()
-            .any(|call| matches!(call, Call::Stop(_))));
-
-        fs::create_dir_all(fixture.layout.retired_development_directory()).unwrap();
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(!fixture.layout.retired_development_directory().exists());
-    }
-
-    #[test]
-    fn a_same_release_with_a_retired_development_layout_still_cleans_it_up() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        plant_retired_development(&fixture);
-        let control = FakeControl::new();
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert!(!outcome.plan.unchanged);
-        assert!(outcome.plan.swaps.is_empty());
-        assert!(!fixture.layout.retired_development_directory().exists());
-        assert!(!fixture.layout.retired_development_marker().exists());
-        assert_eq!(control.calls()[0], Call::Quit);
-    }
-
     /// Put what the 1.x launchers left in `bin`: `v1.3.5` with an audit log and runtime files,
     /// `v1.3.6` with executables, and two entries that are not version directories.
     fn plant_version_directories(fixture: &Fixture) -> (PathBuf, PathBuf) {
@@ -2531,8 +1738,10 @@ mod tests {
         ] {
             fs::write(first.join(name), "runtime").unwrap();
         }
-        fs::create_dir_all(bin.join("vnext")).unwrap();
-        fs::write(bin.join("vnext").join("keep"), "keep").unwrap();
+        for name in NOT_VERSION_NAMES {
+            fs::create_dir_all(bin.join(name)).unwrap();
+            fs::write(bin.join(name).join("keep"), "keep").unwrap();
+        }
         fs::write(bin.join("v1.3.7"), "a file").unwrap();
         (first, second)
     }
@@ -2540,346 +1749,18 @@ mod tests {
     /// What `v1.3.5` held as its audit log.
     const VERSION_AUDIT: &[u8] = b"{\"event\":\"1.x\"}\n";
 
+    /// Directories in `bin` whose names are not a `v` and a semantic version.
+    const NOT_VERSION_NAMES: [&str; 3] = ["vnext", "v1.4", "1.3.5"];
+
     /// The entries of `bin` that are not version directories, to show they stay.
-    fn untouched_entries(fixture: &Fixture) -> [PathBuf; 2] {
+    fn untouched_entries(fixture: &Fixture) -> Vec<PathBuf> {
         let bin = fixture.layout.bin();
-        [bin.join("vnext").join("keep"), bin.join("v1.3.7")]
-    }
-
-    #[test]
-    fn a_development_deploy_archives_and_removes_the_1x_version_directories() {
-        let fixture = Fixture::new();
-        let (first, second) = plant_version_directories(&fixture);
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert!(outcome.left_behind.is_empty());
-        assert_eq!(outcome.plan.deletions, [first.clone(), second.clone()]);
-        assert!(!first.exists());
-        assert!(!second.exists());
-        assert_eq!(
-            fs::read(fixture.layout.state().join("audit-v1.3.5.jsonl")).unwrap(),
-            VERSION_AUDIT
-        );
-        assert_eq!(
-            outcome.archived_version_audits,
-            [Move {
-                from: first.join(AUDIT_FILE_NAME),
-                to: fixture.layout.state().join("audit-v1.3.5.jsonl"),
-            }]
-        );
-        for kept in untouched_entries(&fixture) {
-            assert!(kept.is_file(), "{}", kept.display());
-        }
-        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-    }
-
-    #[test]
-    fn a_release_and_a_restore_remove_them_too_and_a_second_install_has_nothing_to_do() {
-        for mode in [Mode::Release, Mode::Restore] {
-            let fixture = Fixture::new();
-            let (first, second) = plant_version_directories(&fixture);
-            let outcome = fixture.run(mode, VERSION, &FakeControl::new()).unwrap();
-            assert!(outcome.left_behind.is_empty(), "{mode:?}");
-            assert!(!first.exists() && !second.exists(), "{mode:?}");
-            assert!(fixture.layout.state().join("audit-v1.3.5.jsonl").is_file());
-
-            let again = fixture.run(mode, VERSION, &FakeControl::new()).unwrap();
-            assert!(again.plan.deletions.is_empty(), "{mode:?}");
-            assert!(again.plan.version_audit_archives.is_empty(), "{mode:?}");
-        }
-    }
-
-    #[test]
-    fn the_same_release_still_removes_the_1x_version_directories() {
-        let fixture = Fixture::new();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        let (first, second) = plant_version_directories(&fixture);
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(!outcome.plan.unchanged);
-        assert!(outcome.plan.swaps.is_empty());
-        assert!(!first.exists() && !second.exists());
-    }
-
-    #[test]
-    fn a_plan_lists_the_1x_version_directories_and_their_archives_and_changes_nothing() {
-        let fixture = Fixture::new();
-        let (first, second) = plant_version_directories(&fixture);
-        let before = fixture.snapshot();
-        let control = FakeControl::new();
-        let outcome = install(
-            &fixture.context(fixture.build(VERSION), &control),
-            &Request {
-                payload: None,
-                mode: Mode::Development,
-                plan_only: true,
-            },
-        )
-        .unwrap();
-        assert_eq!(outcome.plan.deletions, [first.clone(), second]);
-        assert_eq!(
-            outcome.plan.version_audit_archives,
-            [Move {
-                from: first.join(AUDIT_FILE_NAME),
-                to: fixture.layout.state().join("audit-v1.3.5.jsonl"),
-            }]
-        );
-        assert_eq!(fixture.snapshot(), before);
-        assert!(control.calls().is_empty());
-    }
-
-    #[test]
-    fn a_program_running_from_a_1x_version_directory_is_stopped_before_the_directory_goes() {
-        let fixture = Fixture::new();
-        let (first, second) = plant_version_directories(&fixture);
-        let mut control = FakeControl::new();
-        control.watched_directory = Some(second.clone());
-        control.strays = vec![StrayProcess {
-            pid: 52,
-            image: second.join(EDGE_EXECUTABLE_NAME),
-            kind: StrayKind::RetiredVersionDirectory,
-        }];
-        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
-        assert!(outcome.strays_left.is_empty());
-        assert_eq!(
-            control.calls(),
-            [
-                Call::Quit,
-                Call::StopStrays(vec![52]),
-                Call::Start,
-                Call::Wait
-            ]
-        );
-        assert_eq!(*control.watched_present.borrow(), [true]);
-        assert!(!first.exists() && !second.exists());
-    }
-
-    #[test]
-    fn a_1x_state_directory_that_is_a_version_directory_has_its_log_archived_once() {
-        let mut fixture = Fixture::new();
-        let (first, second) = plant_version_directories(&fixture);
-        fixture.legacy_state = Some(first.clone());
-        fs::create_dir_all(fixture.layout.home()).unwrap();
-        fs::write(fixture.legacy_record(), "{}").unwrap();
-        let log = first.join(AUDIT_FILE_NAME);
-        let migration_archive = Move {
-            from: log.clone(),
-            to: fixture.layout.state().join("audit-pre-2.0.jsonl"),
-        };
-
-        let planned = install(
-            &fixture.context(fixture.build(VERSION), &FakeControl::new()),
-            &Request {
-                payload: None,
-                mode: Mode::Development,
-                plan_only: true,
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            planned.plan.migration.audit_archive,
-            Some(migration_archive)
-        );
-        assert!(planned.plan.version_audit_archives.is_empty());
-
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(outcome.left_behind.is_empty());
-        assert!(outcome.archived_version_audits.is_empty());
-        assert_eq!(
-            fs::read(fixture.layout.state().join("audit-pre-2.0.jsonl")).unwrap(),
-            VERSION_AUDIT
-        );
-        assert!(!fixture.layout.state().join("audit-v1.3.5.jsonl").exists());
-        assert!(!first.exists() && !second.exists());
-    }
-
-    #[test]
-    fn a_log_that_cannot_be_archived_keeps_its_directory_and_is_reported() {
-        let fixture = Fixture::new();
-        let (first, second) = plant_version_directories(&fixture);
-        fs::create_dir_all(fixture.layout.state()).unwrap();
-        let archive = fixture.layout.state().join("audit-v1.3.5.jsonl");
-        fs::write(&archive, "an earlier archive").unwrap();
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(outcome.left_behind, std::slice::from_ref(&first));
-        assert!(outcome.archived_version_audits.is_empty());
-        assert_eq!(
-            fs::read(first.join(AUDIT_FILE_NAME)).unwrap(),
-            VERSION_AUDIT
-        );
-        assert_eq!(fixture.read(archive), "an earlier archive");
-        assert!(!second.exists());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn an_entry_that_cannot_be_removed_is_reported_and_does_not_fail_the_install() {
-        use std::os::windows::fs::OpenOptionsExt;
-
-        let fixture = Fixture::new();
-        let images = plant_retired_development(&fixture);
-        // A program running from an image holds it open without sharing delete.
-        let held = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(0)
-            .open(&images[0])
-            .unwrap();
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(
-            outcome.left_behind,
-            [fixture.layout.retired_development_directory()]
-        );
-        assert!(!fixture.layout.retired_development_marker().exists());
-        drop(held);
-
-        // The next install finishes the removal.
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(outcome.left_behind.is_empty());
-        assert!(!fixture.layout.retired_development_directory().exists());
-    }
-
-    #[test]
-    fn a_legacy_layout_moves_its_state_into_the_home() {
-        let mut fixture = Fixture::new();
-        let policy = fixture.scratch.path().join("old-policy");
-        fs::create_dir_all(&policy).unwrap();
-        fs::write(policy.join(USER_POLICY_FILE_NAME), "user policy").unwrap();
-        fixture.legacy_policy = Some(policy.clone());
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(!outcome.plan.migration.is_empty());
-        assert_eq!(
-            fixture.read(fixture.layout.policy().join(USER_POLICY_FILE_NAME)),
-            "user policy"
-        );
-        assert!(!policy.join(USER_POLICY_FILE_NAME).exists());
-        assert!(fixture.layout.service_executable().is_file());
-    }
-
-    #[test]
-    fn the_flatpak_route_of_a_1x_install_is_removed_and_reported_once() {
-        let fixture = Fixture::new();
-        let route = FlatpakLeftovers::below(&fixture.scratch.path().join("profile"));
-        fs::create_dir_all(route.manifest.parent().unwrap()).unwrap();
-        fs::write(
-            &route.manifest,
-            serde_json::json!({
-                "name": super::super::native_host::HOST_NAME,
-                "description": "Ghostlight browser connector",
-                "path": "/home/user/.ghostlight/bin/ghostlight",
-                "type": "stdio",
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(!outcome.plan.migration.is_empty());
-        assert_eq!(outcome.flatpak.len(), 1);
-        assert_eq!(outcome.flatpak[0].part, FlatpakPart::Manifest);
-        assert_eq!(outcome.flatpak[0].result, FlatpakResult::Removed);
-        assert!(!route.manifest.exists());
-        let again = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(again.plan.unchanged);
-        assert!(again.flatpak.is_empty());
-    }
-
-    #[test]
-    fn registrations_name_bin_before_any_old_program_is_stopped() {
-        let mut fixture = Fixture::new();
-        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
-        let control = fixture.watching_control();
-        fixture.run(Mode::Release, VERSION, &control).unwrap();
-        let calls = control.calls();
-        let sightings = control.sightings();
-        assert_eq!(calls.len(), sightings.len());
-        let stops: Vec<usize> = (0..calls.len())
-            .filter(|&index| matches!(calls[index], Call::Stop(_) | Call::Quit))
+        let mut entries: Vec<PathBuf> = NOT_VERSION_NAMES
+            .iter()
+            .map(|name| bin.join(name).join("keep"))
             .collect();
-        assert!(!stops.is_empty(), "{calls:?}");
-        for index in stops {
-            assert!(sightings[index].registered, "{calls:?} at {index}");
-        }
-        assert!(fixture.manifest_names_bin_edge());
-    }
-
-    #[test]
-    fn a_client_the_user_located_is_reconciled_to_bin() {
-        let mut fixture = Fixture::new();
-        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
-        let located = fixture
-            .scratch
-            .path()
-            .join("portable")
-            .join("claude_desktop_config.json");
-        let old_connector = fixture
-            .scratch
-            .path()
-            .join("old-1x")
-            .join(&retired_connector_names()[0]);
-        fs::create_dir_all(located.parent().unwrap()).unwrap();
-        fs::write(
-            &located,
-            serde_json::json!({"mcpServers": {"ghostlight": {"command": old_connector}}})
-                .to_string(),
-        )
-        .unwrap();
-        // The 1.x file the user's located paths were kept in, where the 1.x layout had it.
-        let locations = LegacyRoots::within(&fixture.scratch.path().join("profile"))
-            .harness_locations_directory()
-            .join(HARNESS_LOCATIONS_NAME);
-        fs::create_dir_all(locations.parent().unwrap()).unwrap();
-        fs::write(
-            &locations,
-            serde_json::json!({"claude-desktop": {"config": located}}).to_string(),
-        )
-        .unwrap();
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        let written: serde_json::Value =
-            serde_json::from_str(&fixture.read(located.clone())).unwrap();
-        let command = PathBuf::from(
-            written["mcpServers"]["ghostlight"]["command"]
-                .as_str()
-                .unwrap(),
-        );
-        assert_eq!(
-            fs::canonicalize(command).unwrap(),
-            fs::canonicalize(fixture.layout.edge()).unwrap()
-        );
-        assert_eq!(
-            written["mcpServers"]["ghostlight"]["args"],
-            serde_json::json!(["mcp"])
-        );
-        assert!(!locations.exists());
-        let kept: serde_json::Value = serde_json::from_str(
-            &fixture.read(fixture.layout.state().join(HARNESS_LOCATIONS_NAME)),
-        )
-        .unwrap();
-        assert_eq!(
-            PathBuf::from(kept["claude-desktop"]["config"].as_str().unwrap()),
-            located
-        );
+        entries.push(bin.join("v1.3.7"));
+        entries
     }
 
     /// A 1.x installation that served from `old-1x` and kept its policy in `old-policy`, and the
@@ -2891,75 +1772,6 @@ mod tests {
         fs::write(policy.join(USER_POLICY_FILE_NAME), "user policy").unwrap();
         fixture.legacy_policy = Some(policy.clone());
         policy.join(USER_POLICY_FILE_NAME)
-    }
-
-    #[test]
-    fn the_1x_user_policy_stays_where_the_1x_service_reads_it_until_the_last_stop() {
-        let mut fixture = Fixture::new();
-        let original = plant_legacy_policy(&mut fixture);
-        let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
-        let mut control = fixture.watching_control();
-        control.policy_witness = Some((original.clone(), copy.clone()));
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        let calls = control.calls();
-        let sightings = control.sightings();
-        let start = calls.iter().position(|call| *call == Call::Start).unwrap();
-        assert!(start > 0, "{calls:?}");
-        // Through the swaps, the reconcile and every stop, the 1.x service has its policy and
-        // a 2.0 service would find the copy.
-        for (call, sighting) in calls.iter().zip(&sightings).take(start) {
-            assert!(sighting.policy_original_present, "{call:?}");
-            assert!(sighting.policy_copy_present, "{call:?}");
-        }
-        assert!(!sightings[start].policy_original_present);
-        assert_eq!(fixture.read(copy), "user policy");
-        assert!(!original.exists());
-    }
-
-    #[test]
-    fn a_policy_saved_by_the_1x_service_while_it_stops_is_not_lost() {
-        let mut fixture = Fixture::new();
-        let original = plant_legacy_policy(&mut fixture);
-        let mut control = FakeControl::new();
-        control.writes_on_stop = vec![(original.clone(), "saved while stopping".to_owned())];
-        fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert!(!original.exists());
-        assert_eq!(
-            fixture.read(fixture.layout.policy().join(USER_POLICY_FILE_NAME)),
-            "saved while stopping"
-        );
-    }
-
-    #[test]
-    fn a_policy_that_diverged_is_reported_and_the_next_install_is_not_blocked() {
-        let mut fixture = Fixture::new();
-        let original = plant_legacy_policy(&mut fixture);
-        let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
-        let mut control = FakeControl::new();
-        control.writes_on_stop = vec![
-            (original.clone(), "saved by the 1.x service".to_owned()),
-            (copy.clone(), "saved by a 2.0 service".to_owned()),
-        ];
-        let error = fixture.run(Mode::Release, VERSION, &control).unwrap_err();
-        assert!(
-            matches!(
-                error.downcast_ref::<MigrationError>(),
-                Some(MigrationError::Conflict { .. })
-            ),
-            "{error}"
-        );
-        assert_eq!(fixture.record(), None);
-        let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
-        assert_eq!(fixture.read(aside), "saved by the 1.x service");
-        assert!(!original.exists());
-
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(fixture.read(copy), "saved by a 2.0 service");
-        assert!(!fixture.legacy_record().exists());
     }
 
     /// Run an install that fails to stop the 1.x service after the copies were made, and return
@@ -2974,353 +1786,6 @@ mod tests {
         assert_eq!(fixture.read(original.clone()), "user policy");
         assert_eq!(fixture.read(copy.clone()), "user policy");
         (original, copy)
-    }
-
-    #[test]
-    fn a_run_that_failed_to_stop_the_1x_service_is_finished_by_the_next_install() {
-        let mut fixture = Fixture::new();
-        let (original, copy) = failed_run_after_the_copy(&mut fixture);
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert!(!original.exists());
-        assert_eq!(fixture.read(copy), "user policy");
-    }
-
-    #[test]
-    fn a_1x_save_after_a_failed_run_wins_on_the_next_install() {
-        let mut fixture = Fixture::new();
-        let (original, copy) = failed_run_after_the_copy(&mut fixture);
-        fs::write(&original, "saved by the 1.x service").unwrap();
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert!(!original.exists());
-        assert_eq!(fixture.read(copy), "saved by the 1.x service");
-    }
-
-    #[test]
-    fn a_2_0_rewrite_of_the_copy_after_a_failed_run_is_kept_on_the_next_install() {
-        let mut fixture = Fixture::new();
-        let (original, copy) = failed_run_after_the_copy(&mut fixture);
-        fs::write(&copy, "written by a 2.0 service").unwrap();
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert!(!original.exists());
-        assert_eq!(fixture.read(copy), "written by a 2.0 service");
-    }
-
-    #[test]
-    fn both_sides_changing_after_a_failed_run_is_reported_once_and_the_third_install_succeeds() {
-        let mut fixture = Fixture::new();
-        let (original, copy) = failed_run_after_the_copy(&mut fixture);
-        fs::write(&original, "saved by the 1.x service").unwrap();
-        fs::write(&copy, "written by a 2.0 service").unwrap();
-        let error = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap_err();
-        assert!(
-            matches!(
-                error.downcast_ref::<MigrationError>(),
-                Some(MigrationError::Conflict { .. })
-            ),
-            "{error}"
-        );
-        let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
-        assert_eq!(fixture.read(aside), "saved by the 1.x service");
-        assert_eq!(fixture.read(copy.clone()), "written by a 2.0 service");
-
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert_eq!(fixture.read(copy), "written by a 2.0 service");
-        assert!(!fixture.legacy_record().exists());
-    }
-
-    #[test]
-    fn a_destination_that_was_never_copied_still_refuses_the_install() {
-        let mut fixture = Fixture::new();
-        let original = plant_legacy_policy(&mut fixture);
-        let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
-        fs::create_dir_all(fixture.layout.policy()).unwrap();
-        fs::write(&copy, "somebody else's file").unwrap();
-        let error = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap_err();
-        assert!(
-            matches!(
-                error.downcast_ref::<MigrationError>(),
-                Some(MigrationError::Conflict { .. })
-            ),
-            "{error}"
-        );
-        assert_eq!(fixture.read(original), "user policy");
-        assert_eq!(fixture.read(copy), "somebody else's file");
-    }
-
-    #[test]
-    fn every_migrating_run_restarts_archives_the_audit_log_and_removes_the_lifecycle_files() {
-        let mut fixture = Fixture::new();
-        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
-        let home = fixture.layout.home().to_owned();
-        fs::write(home.join(AUDIT_FILE_NAME), "old audit").unwrap();
-        fs::write(home.join(LEGACY_STARTUP_NAME), "").unwrap();
-        fs::write(home.join(LEGACY_DEPLOY_LOCK_NAME), "").unwrap();
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(outcome.plan.restart);
-        let archive = fixture.layout.state().join("audit-pre-2.0.jsonl");
-        assert_eq!(fixture.read(archive), "old audit");
-        for gone in [
-            AUDIT_FILE_NAME,
-            LEGACY_STARTUP_NAME,
-            LEGACY_DEPLOY_LOCK_NAME,
-        ] {
-            assert!(!home.join(gone).exists(), "{gone}");
-        }
-
-        // The same version is already installed, and a 1.x leftover still forces the full run.
-        fs::write(home.join(LEGACY_STARTUP_NAME), "").unwrap();
-        let control = FakeControl::new();
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert!(!outcome.plan.unchanged);
-        assert!(outcome.plan.restart);
-        assert!(!home.join(LEGACY_STARTUP_NAME).exists());
-        assert!(control.calls().contains(&Call::Start));
-    }
-
-    #[test]
-    fn a_respawned_legacy_program_is_stopped_again() {
-        let mut fixture = Fixture::new();
-        let serving = fixture.scratch.path().join("old-1x");
-        fixture.plant_legacy_installation(&serving);
-        let control = FakeControl::new();
-        control.respawns.set(1);
-        fixture.run(Mode::Release, VERSION, &control).unwrap();
-        let images: Vec<PathBuf> = legacy_image_names()
-            .iter()
-            .map(|name| serving.join(name))
-            .collect();
-        let mut expected = vec![Call::Stop(images.clone())];
-        expected.extend([
-            Call::Running,
-            Call::Stop(images),
-            Call::Running,
-            Call::Running,
-        ]);
-        expected.extend([Call::Quit, Call::Start, Call::Wait]);
-        assert_eq!(control.calls(), expected);
-    }
-
-    #[test]
-    fn the_legacy_record_is_gone_after_the_last_stop() {
-        let mut fixture = Fixture::new();
-        fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
-        let control = fixture.watching_control();
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(true));
-        assert!(!fixture.legacy_record().exists());
-        let calls = control.calls();
-        let sightings = control.sightings();
-        let start = calls.iter().position(|call| *call == Call::Start).unwrap();
-        for (call, sighting) in calls.iter().zip(&sightings).take(start) {
-            assert!(sighting.record_present, "{call:?}");
-        }
-        assert!(!sightings[start].record_present);
-    }
-
-    #[test]
-    fn a_legacy_service_that_served_from_bin_is_stopped_by_its_moved_image() {
-        let mut fixture = Fixture::new();
-        fixture.plant_legacy_installation(&fixture.layout.bin());
-        let control = FakeControl::new();
-        fixture.run(Mode::Release, VERSION, &control).unwrap();
-        let calls = control.calls();
-        let Call::Stop(images) = &calls[0] else {
-            panic!("{calls:?}");
-        };
-        // The 1.x service sat under the name the edge now has, so the install moved it aside.
-        let moved = fixture
-            .layout
-            .bin()
-            .join(format!("{EDGE_EXECUTABLE_NAME}.old-1"));
-        assert!(images.contains(&moved), "{images:?}");
-        // The connectors were never replaced, so they are stopped where they are, and removed.
-        for name in retired_connector_names() {
-            let connector = fixture.layout.bin().join(name);
-            assert!(images.contains(&connector), "{images:?}");
-            assert!(!connector.exists());
-        }
-        for installed in [fixture.layout.service_executable(), fixture.layout.edge()] {
-            assert!(!images.contains(&installed), "{images:?}");
-        }
-    }
-
-    #[test]
-    fn a_failed_migration_swaps_nothing() {
-        let mut fixture = Fixture::new();
-        let policy = fixture.scratch.path().join("old-policy");
-        fs::create_dir_all(&policy).unwrap();
-        fs::write(policy.join(USER_POLICY_FILE_NAME), "old policy").unwrap();
-        fs::create_dir_all(fixture.layout.policy()).unwrap();
-        fs::write(
-            fixture.layout.policy().join(USER_POLICY_FILE_NAME),
-            "new policy",
-        )
-        .unwrap();
-        fixture.legacy_policy = Some(policy);
-        let control = FakeControl::new();
-        assert!(fixture.run(Mode::Release, VERSION, &control).is_err());
-        assert!(!fixture.layout.bin().exists());
-        assert!(control.calls().is_empty());
-    }
-
-    #[test]
-    fn a_service_that_never_answers_leaves_the_record_unwritten() {
-        let fixture = Fixture::new();
-        let mut control = FakeControl::new();
-        control.answers = false;
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(outcome.service_started, Some(false));
-        assert_eq!(outcome.start_failure, Some(StartFailure::Silent));
-        assert!(fixture.layout.service_executable().is_file());
-        assert_eq!(fixture.record(), None);
-        let failure = ServiceDidNotStart::of(&outcome, &fixture.layout).unwrap();
-        assert!(failure.to_string().contains("did not start within 30 s"));
-    }
-
-    #[test]
-    fn a_service_that_stops_while_starting_is_reported_with_the_reason_it_recorded() {
-        let fixture = Fixture::new();
-        let mut control = FakeControl::new();
-        control.answers = false;
-        control.stops_recording = Some(Some("bind the relay endpoint: no room".to_owned()));
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(
-            outcome.start_failure,
-            Some(StartFailure::Stopped(Some(
-                "bind the relay endpoint: no room".to_owned()
-            )))
-        );
-        let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
-            .unwrap()
-            .to_string();
-        assert!(sentence.contains("stopped while starting: bind the relay endpoint: no room"));
-        assert!(!sentence.contains("30 s"), "a stop is not a timeout");
-        assert_eq!(fixture.record(), None);
-    }
-
-    #[test]
-    fn a_reason_left_by_an_earlier_start_is_not_read_as_this_ones() {
-        let fixture = Fixture::new();
-        fs::create_dir_all(fixture.layout.run()).unwrap();
-        fs::write(fixture.layout.start_failure(), "an earlier reason\n").unwrap();
-        let mut control = FakeControl::new();
-        control.answers = false;
-        control.stops_recording = Some(None);
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(outcome.start_failure, Some(StartFailure::Stopped(None)));
-        let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
-            .unwrap()
-            .to_string();
-        assert!(sentence.contains("stopped while starting."), "{sentence}");
-    }
-
-    #[test]
-    fn a_service_that_cannot_be_spawned_is_reported_with_the_systems_reason_at_once() {
-        let fixture = Fixture::new();
-        let mut control = FakeControl::new();
-        control.spawn_error = Some("Permission denied (os error 13)".to_owned());
-        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(
-            outcome.start_failure,
-            Some(StartFailure::Spawn(
-                "Permission denied (os error 13)".to_owned()
-            ))
-        );
-        assert!(
-            !control.calls().contains(&Call::Wait),
-            "nothing is waited for when nothing was started"
-        );
-        let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
-            .unwrap()
-            .to_string();
-        assert!(sentence.contains("could not be started: Permission denied (os error 13)"));
-    }
-
-    #[test]
-    fn a_plan_changes_nothing() {
-        let mut fixture = Fixture::new();
-        let policy = fixture.scratch.path().join("old-policy");
-        fs::create_dir_all(&policy).unwrap();
-        fs::write(policy.join(USER_POLICY_FILE_NAME), "user policy").unwrap();
-        fixture.legacy_policy = Some(policy);
-        let before = fixture.snapshot();
-        let control = FakeControl::new();
-        let outcome = install(
-            &fixture.context(fixture.build(VERSION), &control),
-            &Request {
-                payload: None,
-                mode: Mode::Development,
-                plan_only: true,
-            },
-        )
-        .unwrap();
-        assert!(!outcome.plan.migration.is_empty());
-        assert_eq!(outcome.plan.swaps.len(), 2);
-        assert!(serde_json::to_value(&outcome.plan).is_ok());
-        assert!(control.calls().is_empty());
-        assert_eq!(fixture.snapshot(), before);
-    }
-
-    #[test]
-    fn a_payload_missing_an_executable_is_refused() {
-        let fixture = Fixture::new();
-        fs::remove_file(fixture.payload.join(EDGE_EXECUTABLE_NAME)).unwrap();
-        let error = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap_err();
-        assert!(matches!(
-            error.downcast_ref::<PayloadError>(),
-            Some(PayloadError::Missing(_))
-        ));
-    }
-
-    #[test]
-    fn a_held_install_lock_is_waited_for() {
-        let scratch = Scratch::new();
-        let lock = scratch.path().join("install.lock");
-        let held = hold_install_lock(&lock).unwrap();
-        let waiter = {
-            let lock = lock.clone();
-            std::thread::spawn(move || hold_install_lock(&lock).map(drop))
-        };
-        std::thread::sleep(Duration::from_millis(100));
-        drop(held);
-        waiter.join().unwrap().unwrap();
-    }
-
-    #[test]
-    fn the_new_service_is_waited_for_by_the_instance_it_replaces() {
-        let fixture = Fixture::new();
-        let mut control = FakeControl::new();
-        control.instance = Some("instance_old".to_owned());
-        fixture.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(
-            control.waited_for.borrow().as_slice(),
-            [Some("instance_old".to_owned())]
-        );
-
-        let fresh = Fixture::new();
-        let control = FakeControl::new();
-        fresh.run(Mode::Release, VERSION, &control).unwrap();
-        assert_eq!(control.waited_for.borrow().as_slice(), [None]);
     }
 
     /// A stand-in for the running service: it answers `answers` control openings on the home of
@@ -3356,104 +1821,6 @@ mod tests {
         })
     }
 
-    #[test]
-    fn the_installer_asks_the_service_to_quit_for_replacement_and_waits_for_its_lock() {
-        let fixture = Fixture::new();
-        let layout = &fixture.layout;
-        let lock = ServiceLock::try_acquire(&layout.service_lock())
-            .unwrap()
-            .expect("the service lock");
-        let held = std::sync::Mutex::new(Some(lock));
-        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let record = std::sync::Arc::clone(&asked);
-        let delay = Duration::from_millis(300);
-        let service = fake_service(layout, 1, move |opening| {
-            record.lock().unwrap().push((opening.role, opening.control));
-            // The service exits a moment after it hears the quit: its lock goes with it.
-            let lock = held.lock().unwrap().take();
-            let _ = std::thread::spawn(move || {
-                std::thread::sleep(delay);
-                drop(lock);
-            });
-        });
-        let started = Instant::now();
-        assert!(SystemProcessControl.quit(layout));
-        assert!(
-            started.elapsed() >= delay,
-            "the installer waited for the lock, not for the answer"
-        );
-        service.join().unwrap();
-        assert_eq!(
-            asked.lock().unwrap().as_slice(),
-            [(
-                Role::Control,
-                Some(Control::Quit {
-                    reason: QuitReason::Replace
-                })
-            )]
-        );
-    }
-
-    #[test]
-    fn a_home_with_no_running_service_has_nothing_to_wait_for() {
-        let fixture = Fixture::new();
-        assert!(SystemProcessControl.quit(&fixture.layout));
-    }
-
-    #[test]
-    fn an_earlier_development_build_cannot_be_asked_to_quit() {
-        let fixture = Fixture::new();
-        let record = |relay: &str| InstallRecord {
-            service_version: VERSION.to_owned(),
-            relay_revision: relay.to_owned(),
-            service_sha256: "0".repeat(64),
-            edge_sha256: None,
-            channel: Channel::Release,
-        };
-        record(EARLIER_DEVELOPMENT_RELAY)
-            .write(&fixture.layout.install_record())
-            .unwrap();
-        assert!(
-            !SystemProcessControl.quit(&fixture.layout),
-            "the caller is told to stop the image"
-        );
-        record(RELAY)
-            .write(&fixture.layout.install_record())
-            .unwrap();
-        assert!(SystemProcessControl.quit(&fixture.layout));
-    }
-
-    #[test]
-    fn the_new_service_is_ready_when_an_instance_other_than_the_old_one_answers() {
-        let fixture = Fixture::new();
-        let layout = &fixture.layout;
-        let service = fake_service(layout, 2, |opening| {
-            assert_eq!(opening.control, Some(Control::Status));
-        });
-        assert_eq!(
-            SystemProcessControl.instance(layout).as_deref(),
-            Some("instance_new")
-        );
-        assert_eq!(
-            SystemProcessControl.wait_ready(layout, Some("instance_old")),
-            Readiness::Answered
-        );
-        service.join().unwrap();
-    }
-
-    #[test]
-    fn a_wait_for_a_service_that_no_process_runs_ends_after_the_grace_not_the_ready_wait() {
-        let fixture = Fixture::new();
-        let started = Instant::now();
-        assert_eq!(
-            SystemProcessControl.wait_ready(&fixture.layout, None),
-            Readiness::Stopped
-        );
-        let waited = started.elapsed();
-        assert!(waited >= STOPPED_GRACE, "{waited:?}");
-        assert!(waited < READY_WAIT / 2, "{waited:?}");
-    }
-
     /// What the plan places, as file name and directory in order.
     fn placed(plan: &InstallPlan) -> Vec<(String, PathBuf)> {
         plan.swaps
@@ -3465,129 +1832,6 @@ mod tests {
     /// Put a shell in the fixture's payload.
     fn add_shell(fixture: &Fixture, text: &str) {
         fs::write(fixture.payload.join(DESKTOP_EXECUTABLE_NAME), text).unwrap();
-    }
-
-    #[test]
-    fn a_development_payload_with_a_shell_places_it_in_bin_when_bin_holds_another() {
-        let fixture = Fixture::new();
-        add_shell(&fixture, "shell");
-        let layout = &fixture.layout;
-        let named = |name: &str| (name.to_owned(), layout.bin());
-
-        let control = FakeControl::new();
-        let planned = plan(
-            &fixture.context(fixture.build(VERSION), &control),
-            Mode::Development,
-        )
-        .unwrap();
-        assert_eq!(
-            placed(&planned),
-            [
-                named(SERVICE_EXECUTABLE_NAME),
-                named(DESKTOP_EXECUTABLE_NAME),
-                named(EDGE_EXECUTABLE_NAME),
-            ]
-        );
-        assert!(!layout.retired_development_directory().exists());
-
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(
-            fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
-            "shell"
-        );
-
-        // A different shell is swapped; the intact edge stays.
-        add_shell(&fixture, "next shell");
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(
-            placed(&outcome.plan),
-            [
-                named(SERVICE_EXECUTABLE_NAME),
-                named(DESKTOP_EXECUTABLE_NAME)
-            ]
-        );
-        assert_eq!(
-            fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
-            "next shell"
-        );
-
-        // The same shell is left in place.
-        let outcome = fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(placed(&outcome.plan), [named(SERVICE_EXECUTABLE_NAME)]);
-    }
-
-    #[test]
-    fn the_new_shell_is_in_bin_when_the_running_service_is_asked_to_quit() {
-        // A shell that is told to hand over compares its own image with the one in `bin`, so the
-        // swap must come before the quit.
-        let fixture = Fixture::new();
-        add_shell(&fixture, "shell");
-        fixture
-            .run(Mode::Development, VERSION, &FakeControl::new())
-            .unwrap();
-
-        add_shell(&fixture, "next shell");
-        let mut control = FakeControl::new();
-        control.quit_sees = Some(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME));
-        fixture.run(Mode::Development, VERSION, &control).unwrap();
-
-        assert_eq!(control.calls().first(), Some(&Call::Quit));
-        assert_eq!(
-            control.seen_at_quit.borrow().as_deref(),
-            Some("next shell"),
-            "the quit finds the new shell already in bin"
-        );
-    }
-
-    #[test]
-    fn a_release_payload_with_a_shell_places_it_in_bin_beside_the_service() {
-        let fixture = Fixture::new();
-        add_shell(&fixture, "shell");
-        let control = FakeControl::new();
-        let planned = plan(
-            &fixture.context(fixture.build(VERSION), &control),
-            Mode::Release,
-        )
-        .unwrap();
-        let bin = fixture.layout.bin();
-        assert_eq!(
-            placed(&planned),
-            [
-                (SERVICE_EXECUTABLE_NAME.to_owned(), bin.clone()),
-                (DESKTOP_EXECUTABLE_NAME.to_owned(), bin.clone()),
-                (EDGE_EXECUTABLE_NAME.to_owned(), bin.clone()),
-            ]
-        );
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert_eq!(fixture.read(bin.join(DESKTOP_EXECUTABLE_NAME)), "shell");
-    }
-
-    #[test]
-    fn a_payload_without_a_shell_installs_as_before_and_still_validates() {
-        let fixture = Fixture::new();
-        for mode in [Mode::Release, Mode::Development] {
-            let control = FakeControl::new();
-            let planned = plan(&fixture.context(fixture.build(VERSION), &control), mode).unwrap();
-            assert!(
-                planned
-                    .swaps
-                    .iter()
-                    .all(|swap| swap.name != DESKTOP_EXECUTABLE_NAME),
-                "{mode:?}"
-            );
-        }
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(!fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME).exists());
     }
 
     /// Install the release with a shell, `damage` the shell in `bin`, and install the same
@@ -3619,41 +1863,6 @@ mod tests {
         assert!(outcome.plan.unchanged);
     }
 
-    #[test]
-    fn a_same_version_install_restores_a_missing_shell() {
-        assert_a_same_version_install_restores_the_shell(|shell| fs::remove_file(shell).unwrap());
-    }
-
-    #[test]
-    fn a_same_version_install_restores_a_changed_shell() {
-        assert_a_same_version_install_restores_the_shell(|shell| {
-            fs::write(shell, "another shell").unwrap();
-        });
-    }
-
-    #[test]
-    fn a_same_version_install_with_a_missing_shell_and_a_migration_restores_the_shell() {
-        // The second `Same` arm: the set is the same version, but what earlier builds left
-        // still goes, so the install does not take the unchanged shortcut.
-        let fixture = Fixture::new();
-        add_shell(&fixture, "shell");
-        fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        fs::remove_file(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME)).unwrap();
-        fs::create_dir_all(fixture.layout.retired_development_directory()).unwrap();
-
-        let outcome = fixture
-            .run(Mode::Release, VERSION, &FakeControl::new())
-            .unwrap();
-        assert!(placed_names(&outcome.plan).contains(&DESKTOP_EXECUTABLE_NAME));
-        assert_eq!(
-            fixture.read(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
-            "shell"
-        );
-        assert!(!fixture.layout.retired_development_directory().exists());
-    }
-
     /// A temporary home with its `bin` and retired development directories.
     fn stray_home() -> (Scratch, Layout) {
         let scratch = Scratch::new();
@@ -3674,218 +1883,22 @@ mod tests {
         classify(image, pid, layout, service_pid, std::process::id())
     }
 
-    #[test]
-    fn a_retired_connector_under_the_home_is_a_stray_whether_or_not_its_file_exists() {
-        let (_scratch, layout) = stray_home();
-        for name in retired_connector_names() {
-            let present = layout.bin().join(&name);
-            fs::write(&present, "connector").unwrap();
-            let moved = layout.bin().join(format!("{name}.old-2"));
-            let gone = layout.bin().join(format!("{name}.old-9"));
-            for image in [&present, &moved, &gone] {
-                assert_eq!(
-                    kind_of(&layout, image, 7001, None),
-                    Some(StrayKind::RetiredConnector),
-                    "{}",
-                    image.display()
-                );
-            }
-        }
+    /// The system program the real-process test copies under a retired connector's name, with the
+    /// arguments that keep it waiting, without a console, for about a minute if the test never
+    /// stops it.
+    #[cfg(windows)]
+    fn sleeper() -> (PathBuf, &'static [&'static str]) {
+        let windows = env::var_os("SystemRoot").expect("Windows sets SystemRoot");
+        let image = Path::new(&windows).join("System32").join("PING.EXE");
+        (image, &["-n", "60", "127.0.0.1"])
     }
 
-    #[test]
-    fn a_process_whose_file_was_removed_is_still_named_by_its_image() {
-        let (_scratch, layout) = stray_home();
-        let [connector, _] = retired_connector_names();
-        let removed_connector = layout.bin().join(format!("{connector} (deleted)"));
-        let removed_service = layout
-            .bin()
-            .join(format!("{SERVICE_EXECUTABLE_NAME}.old-1 (deleted)"));
-        let connector_image = running_image(&removed_connector);
-        let service_image = running_image(&removed_service);
-        assert_eq!(connector_image, layout.bin().join(&connector));
-        assert_eq!(
-            kind_of(&layout, &connector_image, 7010, None),
-            Some(StrayKind::RetiredConnector)
-        );
-        assert_eq!(
-            kind_of(&layout, &service_image, 7011, Some(7012)),
-            Some(StrayKind::ReplacedService)
-        );
-        let present = layout.bin().join(&connector);
-        assert_eq!(running_image(&present), present);
+    /// The system program the real-process test copies under a retired connector's name, with the
+    /// arguments that keep it waiting for about a minute if the test never stops it.
+    #[cfg(not(windows))]
+    fn sleeper() -> (PathBuf, &'static [&'static str]) {
+        (PathBuf::from("/bin/sleep"), &["60"])
     }
-
-    #[test]
-    fn a_moved_aside_service_is_a_stray_unless_it_is_the_service_that_answers() {
-        let (_scratch, layout) = stray_home();
-        let old = layout
-            .bin()
-            .join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"));
-        assert_eq!(
-            kind_of(&layout, &old, 7002, Some(7003)),
-            Some(StrayKind::ReplacedService)
-        );
-        assert_eq!(
-            kind_of(&layout, &old, 7002, None),
-            Some(StrayKind::ReplacedService)
-        );
-        assert_eq!(kind_of(&layout, &old, 7002, Some(7002)), None);
-    }
-
-    #[test]
-    fn the_current_programs_and_programs_elsewhere_are_never_strays() {
-        let (scratch, layout) = stray_home();
-        let mut current = Vec::new();
-        let directory = layout.bin();
-        for name in [
-            EDGE_EXECUTABLE_NAME,
-            SERVICE_EXECUTABLE_NAME,
-            DESKTOP_EXECUTABLE_NAME,
-        ] {
-            current.push(directory.join(name));
-        }
-        current.push(directory.join(format!("{EDGE_EXECUTABLE_NAME}.old-1")));
-        current.push(directory.join(format!("{DESKTOP_EXECUTABLE_NAME}.old-1")));
-        for image in &current {
-            assert_eq!(
-                kind_of(&layout, image, 7004, None),
-                None,
-                "{}",
-                image.display()
-            );
-        }
-        let elsewhere = fs::canonicalize(scratch.path()).unwrap().join("elsewhere");
-        fs::create_dir_all(&elsewhere).unwrap();
-        for name in retired_connector_names() {
-            let image = elsewhere.join(&name);
-            assert_eq!(kind_of(&layout, &image, 7005, None), None);
-        }
-        let image = elsewhere.join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"));
-        assert_eq!(kind_of(&layout, &image, 7005, None), None);
-    }
-
-    #[test]
-    fn anything_running_from_the_retired_development_directory_is_a_stray_of_its_own_kind() {
-        let (scratch, layout) = stray_home();
-        let directory = layout.retired_development_directory();
-        for name in [
-            EDGE_EXECUTABLE_NAME.to_owned(),
-            SERVICE_EXECUTABLE_NAME.to_owned(),
-            DESKTOP_EXECUTABLE_NAME.to_owned(),
-            format!("{SERVICE_EXECUTABLE_NAME}.old-1"),
-            format!("{EDGE_EXECUTABLE_NAME}.old-3"),
-            retired_connector_names()[0].clone(),
-            "helper".to_owned(),
-        ] {
-            let image = directory.join(&name);
-            assert_eq!(
-                kind_of(&layout, &image, 7020, Some(7021)),
-                Some(StrayKind::RetiredDevelopment),
-                "{name}"
-            );
-        }
-        let answering = directory.join(SERVICE_EXECUTABLE_NAME);
-        assert_eq!(
-            kind_of(&layout, &answering, 7024, Some(7024)),
-            Some(StrayKind::RetiredDevelopment),
-            "the answering service is not spared when it runs from the retired directory"
-        );
-        let beside = directory.with_file_name("development-notes").join("helper");
-        assert_eq!(kind_of(&layout, &beside, 7022, None), None);
-        let elsewhere = fs::canonicalize(scratch.path())
-            .unwrap()
-            .join("dev")
-            .join(EDGE_EXECUTABLE_NAME);
-        assert_eq!(kind_of(&layout, &elsewhere, 7023, None), None);
-        assert_eq!(
-            serde_json::to_value(StrayKind::RetiredDevelopment).unwrap(),
-            serde_json::json!("retired_development")
-        );
-    }
-
-    #[test]
-    fn anything_running_from_a_1x_version_directory_is_a_stray_of_its_own_kind() {
-        let (_scratch, layout) = stray_home();
-        let directory = layout.bin().join("v1.3.6");
-        fs::create_dir_all(&directory).unwrap();
-        fs::create_dir_all(layout.bin().join("vnext")).unwrap();
-        for name in [
-            EDGE_EXECUTABLE_NAME.to_owned(),
-            SERVICE_EXECUTABLE_NAME.to_owned(),
-            retired_connector_names()[1].clone(),
-            "helper".to_owned(),
-        ] {
-            let image = directory.join(&name);
-            assert_eq!(
-                kind_of(&layout, &image, 7030, Some(7031)),
-                Some(StrayKind::RetiredVersionDirectory),
-                "{name}"
-            );
-        }
-        let answering = directory.join(SERVICE_EXECUTABLE_NAME);
-        assert_eq!(
-            kind_of(&layout, &answering, 7032, Some(7032)),
-            Some(StrayKind::RetiredVersionDirectory),
-            "the answering service is not spared when it runs from a version directory"
-        );
-        let beside = layout.bin().join("vnext").join(SERVICE_EXECUTABLE_NAME);
-        assert_eq!(kind_of(&layout, &beside, 7033, None), None);
-        assert_eq!(
-            serde_json::to_value(StrayKind::RetiredVersionDirectory).unwrap(),
-            "retired_version_directory"
-        );
-    }
-
-    #[test]
-    fn the_calling_process_is_never_a_stray() {
-        let (_scratch, layout) = stray_home();
-        let image = layout.bin().join(&retired_connector_names()[0]);
-        assert_eq!(
-            classify(&image, 7006, &layout, None, 7006),
-            None,
-            "the caller"
-        );
-        assert_eq!(
-            classify(&image, 7006, &layout, None, 7007),
-            Some(StrayKind::RetiredConnector)
-        );
-    }
-
-    #[test]
-    fn stopping_nothing_and_stopping_the_caller_leave_everything_running() {
-        assert!(stop_strays(&[]).is_empty());
-        let caller = StrayProcess {
-            pid: std::process::id(),
-            image: PathBuf::from("caller"),
-            kind: StrayKind::ReplacedService,
-        };
-        assert_eq!(stop_strays(std::slice::from_ref(&caller)), [caller]);
-    }
-
-    #[test]
-    fn a_stray_is_described_for_doctor_json() {
-        let stray = StrayProcess {
-            pid: 12,
-            image: PathBuf::from("a/b"),
-            kind: StrayKind::RetiredConnector,
-        };
-        assert_eq!(
-            serde_json::to_value(&stray).unwrap(),
-            serde_json::json!({"pid": 12, "image": "a/b", "kind": "retired_connector"})
-        );
-        assert_eq!(
-            serde_json::to_value(StrayKind::ReplacedService).unwrap(),
-            serde_json::json!("replaced_service")
-        );
-    }
-
-    /// Set on the child the real-process tests start, so that [`a_stray_stand_in_waits_when_asked`]
-    /// waits in it.
-    const STAND_IN_VARIABLE: &str = "GHOSTLIGHT_TEST_STRAY_STAND_IN";
-
-    /// The longest a stand-in waits if the test that started it never stops it.
-    const STAND_IN_LIFETIME: Duration = Duration::from_secs(60);
 
     /// How long a test waits for the stand-in to show in the process table.
     const STAND_IN_APPEARS_WITHIN: Duration = Duration::from_secs(20);
@@ -3895,20 +1908,6 @@ mod tests {
 
     /// Pause between those tries.
     const STAND_IN_START_PAUSE: Duration = Duration::from_millis(50);
-
-    /// The name of [`a_stray_stand_in_waits_when_asked`] as the test binary lists it.
-    const STAND_IN_TEST: &str = "install::deployment::tests::a_stray_stand_in_waits_when_asked";
-
-    /// The program the real-process tests start under a retired connector's name: this test
-    /// binary, told to run only this test. A normal run skips it. It does nothing unless
-    /// [`STAND_IN_VARIABLE`] is set, and then exits by itself after [`STAND_IN_LIFETIME`].
-    #[test]
-    #[ignore = "a stand-in process for the real-process tests, started by them"]
-    fn a_stray_stand_in_waits_when_asked() {
-        if env::var_os(STAND_IN_VARIABLE).is_some() {
-            std::thread::sleep(STAND_IN_LIFETIME);
-        }
-    }
 
     /// A started stand-in, killed and reaped when the test ends however it ends.
     struct StandIn(std::process::Child);
@@ -3920,18 +1919,18 @@ mod tests {
         }
     }
 
-    /// Copy this test binary to `image` and start the copy waiting.
+    /// Copy the system [`sleeper`] to `image` and start the copy waiting.
     ///
     /// Another test thread may fork between the copy and the start and hand the copy's open
     /// descriptor to its child for a moment, and then the kernel refuses to execute the file as
     /// busy. That passes, so the start is tried again a bounded number of times.
     fn start_stand_in(image: &Path) -> StandIn {
-        fs::copy(env::current_exe().unwrap(), image).unwrap();
+        let (sleeper, arguments) = sleeper();
+        fs::copy(sleeper, image).unwrap();
         let mut attempts = 1;
         loop {
             let started = std::process::Command::new(image)
-                .args(["--ignored", "--exact", "--test-threads=1", STAND_IN_TEST])
-                .env(STAND_IN_VARIABLE, "1")
+                .args(arguments)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -3968,36 +1967,1892 @@ mod tests {
         }
     }
 
+    /// Protects ACCEPTANCE 14 and promise 1 (ADR-0197 Decision 14): an install acts on what `bin`
+    /// holds. A fresh install places the set and records it once the service answers; the same version
+    /// is left alone unless its edge or shell is missing or changed, which an install puts back; a
+    /// damaged service image is repaired; an older payload, or one missing an executable, is refused
+    /// and changes nothing; and a payload's shell lands in `bin` beside the service.
     #[test]
-    fn a_running_retired_connector_is_found_and_stopped_by_its_exact_pid() {
-        let (_scratch, layout) = stray_home();
-        let image = layout.bin().join(&retired_connector_names()[0]);
-        let mut stand_in = start_stand_in(&image);
-        let pid = stand_in.0.id();
-
-        let stray = wait_for_stray(&layout, pid);
-        assert_eq!(stray.kind, StrayKind::RetiredConnector);
-        assert!(same_path(&stray.image, &image), "{}", stray.image.display());
-
-        // The pid now belongs to another program than the one the scan saw: leave it alone.
-        let other = StrayProcess {
-            image: layout.bin().join(&retired_connector_names()[1]),
-            ..stray.clone()
-        };
-        assert!(stop_strays(&[other]).is_empty());
-        assert!(
-            stand_in.0.try_wait().unwrap().is_none(),
-            "a pid running another image was stopped"
-        );
-
-        assert!(stop_strays(&[stray]).is_empty());
-        let deadline = Instant::now() + STRAY_STOP_WAIT;
-        while stand_in.0.try_wait().unwrap().is_none() {
-            assert!(Instant::now() < deadline, "the stray is still running");
-            std::thread::sleep(POLL);
+    fn an_install_places_repairs_or_refuses_by_what_bin_holds() {
+        {
+            let fixture = Fixture::new();
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+            assert_eq!(
+                fixture.record(),
+                Some(InstallRecord {
+                    service_version: VERSION.to_owned(),
+                    relay_revision: RELAY.to_owned(),
+                    service_sha256: fixture.build(VERSION).image_sha256,
+                    edge_sha256: Some(record::sha256_file(&fixture.layout.edge()).unwrap()),
+                    channel: Channel::Release,
+                })
+            );
+            assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+            assert!(outcome.registrations.is_some());
         }
-        assert!(stray_processes(&layout, None)
-            .iter()
-            .all(|found| found.pid != pid));
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            let before = fixture.snapshot();
+            let mut control = FakeControl::new();
+            control.strays = vec![StrayProcess {
+                pid: 4242,
+                image: fixture
+                    .layout
+                    .bin()
+                    .join(retired_connector_names()[0].as_str()),
+                kind: StrayKind::RetiredConnector,
+            }];
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert!(outcome.plan.unchanged);
+            assert!(control.calls().is_empty());
+            assert_eq!(fixture.snapshot(), before);
+        }
+        {
+            for damage in [None, Some("another edge")] {
+                let fixture = Fixture::new();
+                fixture
+                    .run(Mode::Release, VERSION, &FakeControl::new())
+                    .unwrap();
+                match damage {
+                    None => fs::remove_file(fixture.layout.edge()).unwrap(),
+                    Some(text) => fs::write(fixture.layout.edge(), text).unwrap(),
+                }
+                let control = FakeControl::new();
+                let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+                assert!(!outcome.plan.unchanged, "{damage:?}");
+                assert!(
+                    placed_names(&outcome.plan).contains(&EDGE_EXECUTABLE_NAME),
+                    "{damage:?}"
+                );
+                assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+                assert_eq!(outcome.service_started, Some(true));
+                let recorded = fixture.record().unwrap().edge_sha256;
+                assert_eq!(
+                    recorded,
+                    Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+                );
+                // Repaired, so the next identical install is a no-op again.
+                let outcome = fixture
+                    .run(Mode::Release, VERSION, &FakeControl::new())
+                    .unwrap();
+                assert!(outcome.plan.unchanged, "{damage:?}");
+            }
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            let before = fixture.snapshot();
+            let control = FakeControl::new();
+            let error = fixture.run(Mode::Release, "2.0.0", &control).unwrap_err();
+            assert!(error.is::<PayloadRefused>(), "{error}");
+            assert!(control.calls().is_empty());
+            assert_eq!(fixture.snapshot(), before);
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            fs::write(fixture.layout.service_executable(), "damaged").unwrap();
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(!outcome.plan.unchanged);
+            assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+        }
+        {
+            let fixture = Fixture::new();
+            fs::remove_file(fixture.payload.join(EDGE_EXECUTABLE_NAME)).unwrap();
+            let error = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<PayloadError>(),
+                Some(PayloadError::Missing(_))
+            ));
+        }
+        {
+            let fixture = Fixture::new();
+            add_shell(&fixture, "shell");
+            let layout = &fixture.layout;
+            let named = |name: &str| (name.to_owned(), layout.bin());
+
+            let control = FakeControl::new();
+            let planned = plan(
+                &fixture.context(fixture.build(VERSION), &control),
+                Mode::Development,
+            )
+            .unwrap();
+            assert_eq!(
+                placed(&planned),
+                [
+                    named(SERVICE_EXECUTABLE_NAME),
+                    named(DESKTOP_EXECUTABLE_NAME),
+                    named(EDGE_EXECUTABLE_NAME),
+                ]
+            );
+            assert!(!layout.retired_development_directory().exists());
+
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(
+                fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
+                "shell"
+            );
+
+            // A different shell is swapped; the intact edge stays.
+            add_shell(&fixture, "next shell");
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(
+                placed(&outcome.plan),
+                [
+                    named(SERVICE_EXECUTABLE_NAME),
+                    named(DESKTOP_EXECUTABLE_NAME)
+                ]
+            );
+            assert_eq!(
+                fixture.read(layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
+                "next shell"
+            );
+
+            // The same shell is left in place.
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(placed(&outcome.plan), [named(SERVICE_EXECUTABLE_NAME)]);
+        }
+        {
+            let fixture = Fixture::new();
+            add_shell(&fixture, "shell");
+            let control = FakeControl::new();
+            let planned = plan(
+                &fixture.context(fixture.build(VERSION), &control),
+                Mode::Release,
+            )
+            .unwrap();
+            let bin = fixture.layout.bin();
+            assert_eq!(
+                placed(&planned),
+                [
+                    (SERVICE_EXECUTABLE_NAME.to_owned(), bin.clone()),
+                    (DESKTOP_EXECUTABLE_NAME.to_owned(), bin.clone()),
+                    (EDGE_EXECUTABLE_NAME.to_owned(), bin.clone()),
+                ]
+            );
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(fixture.read(bin.join(DESKTOP_EXECUTABLE_NAME)), "shell");
+        }
+        {
+            let fixture = Fixture::new();
+            for mode in [Mode::Release, Mode::Development] {
+                let control = FakeControl::new();
+                let planned =
+                    plan(&fixture.context(fixture.build(VERSION), &control), mode).unwrap();
+                assert!(
+                    planned
+                        .swaps
+                        .iter()
+                        .all(|swap| swap.name != DESKTOP_EXECUTABLE_NAME),
+                    "{mode:?}"
+                );
+            }
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(!fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME).exists());
+        }
+        {
+            assert_a_same_version_install_restores_the_shell(|shell| {
+                fs::remove_file(shell).unwrap()
+            });
+        }
+        {
+            assert_a_same_version_install_restores_the_shell(|shell| {
+                fs::write(shell, "another shell").unwrap();
+            });
+        }
+        {
+            // The second `Same` arm: the set is the same version, but what earlier builds left
+            // still goes, so the install does not take the unchanged shortcut.
+            let fixture = Fixture::new();
+            add_shell(&fixture, "shell");
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            fs::remove_file(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME)).unwrap();
+            fs::create_dir_all(fixture.layout.retired_development_directory()).unwrap();
+
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(placed_names(&outcome.plan).contains(&DESKTOP_EXECUTABLE_NAME));
+            assert_eq!(
+                fixture.read(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME)),
+                "shell"
+            );
+            assert!(!fixture.layout.retired_development_directory().exists());
+        }
+    }
+
+    /// Protects ADR-0197 Decision 14 and defect e3e861b7: the edge, which clients and browsers hold
+    /// open, is replaced only when it must be. A release keeps it while the relay revision matches and
+    /// replaces it when the revision changes or `bin` holds the pre-edge layout, whose connectors go
+    /// after an exact image stop; a development install replaces it only when its build changed it or
+    /// no record vouches for it; a restore brings back the release's edge; and on Windows a running
+    /// edge is moved aside without failing the deploy.
+    #[test]
+    fn the_edge_is_replaced_only_when_its_relay_record_or_development_build_says() {
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            let recorded = fixture.record().unwrap().edge_sha256;
+            Fixture::write_payload(&fixture.payload, "next service");
+            fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+            let outcome = fixture
+                .run(Mode::Release, "2.2.0", &FakeControl::new())
+                .unwrap();
+            assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+            assert_eq!(outcome.plan.edge_replaced, None);
+            assert_eq!(
+                fixture.read(fixture.layout.service_executable()),
+                "next service"
+            );
+            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+            let record = fixture.record().unwrap();
+            assert_eq!(record.service_version, "2.2.0");
+            assert_eq!(record.edge_sha256, recorded);
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            Fixture::write_payload(&fixture.payload, "next service");
+            fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "next edge").unwrap();
+            let control = FakeControl::new();
+            let build = Build {
+                relay_revision: "5".to_owned(),
+                ..fixture.build("2.2.0")
+            };
+            let outcome = install(
+                &fixture.context(build, &control),
+                &Request {
+                    payload: None,
+                    mode: Mode::Release,
+                    plan_only: false,
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                outcome.plan.edge_replaced,
+                Some(EdgeReplacement::RelayRevision)
+            );
+            assert_eq!(fixture.read(fixture.layout.edge()), "next edge");
+            let record = fixture.record().unwrap();
+            assert_eq!(record.relay_revision, "5");
+            assert_eq!(
+                record.edge_sha256,
+                Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+            );
+        }
+        {
+            let fixture = Fixture::new();
+            let bin = fixture.layout.bin();
+            fs::create_dir_all(&bin).unwrap();
+            // An earlier development build: the service under the edge's name, both connectors, and
+            // a record that names no edge.
+            fs::write(fixture.layout.edge(), "pre-edge service").unwrap();
+            for name in retired_connector_names() {
+                fs::write(bin.join(name), "retired connector").unwrap();
+            }
+            InstallRecord {
+                service_version: VERSION.to_owned(),
+                relay_revision: RELAY.to_owned(),
+                service_sha256: "0".repeat(64),
+                edge_sha256: None,
+                channel: Channel::Release,
+            }
+            .write(&fixture.layout.install_record())
+            .unwrap();
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            let calls = control.calls();
+            let Call::Stop(images) = &calls[0] else {
+                panic!("{calls:?}");
+            };
+            let mut expected = vec![bin.join(format!("{EDGE_EXECUTABLE_NAME}.old-1"))];
+            expected.extend(retired_connector_names().map(|name| bin.join(name)));
+            assert_eq!(images, &expected);
+            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+            assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+            for name in retired_connector_names() {
+                assert!(!bin.join(&name).exists(), "{name}");
+            }
+            assert_eq!(
+                fixture.record().unwrap().edge_sha256,
+                Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+            );
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            let recorded = fixture.record().unwrap();
+            assert_eq!(recorded.channel, Channel::Release);
+            Fixture::write_payload(&fixture.payload, "development service");
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+            assert_eq!(outcome.plan.edge_replaced, None);
+            let printed = serde_json::to_value(&outcome.plan).unwrap();
+            assert!(printed.get("edge_replaced").is_none(), "{printed}");
+            assert_eq!(
+                fixture.read(fixture.layout.service_executable()),
+                "development service"
+            );
+            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+            let record = fixture.record().unwrap();
+            assert_eq!(record.channel, Channel::Development);
+            assert_eq!(record.edge_sha256, recorded.edge_sha256);
+            assert_eq!(
+                record.service_sha256,
+                record::sha256_file(&fixture.layout.service_executable()).unwrap()
+            );
+            assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+            assert!(!fixture.layout.retired_development_directory().exists());
+            assert!(!fixture.layout.retired_development_marker().exists());
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            let first = fixture.record().unwrap().edge_sha256;
+            fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(
+                placed_names(&outcome.plan),
+                [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
+            );
+            assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Rebuilt));
+            let printed = serde_json::to_value(&outcome.plan).unwrap();
+            assert_eq!(
+                printed["edge_replaced"],
+                words::edge_replaced(EdgeReplacement::Rebuilt)
+            );
+            // The same swap and restart a relay revision change gets, and nothing more.
+            assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+            assert_eq!(fixture.read(fixture.layout.edge()), "rebuilt edge");
+            let record = fixture.record().unwrap();
+            assert_eq!(record.channel, Channel::Development);
+            assert_eq!(
+                record.edge_sha256,
+                Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+            );
+            assert_ne!(record.edge_sha256, first);
+
+            // A deploy right after it, whose build did not change the edge, replaces no edge.
+            Fixture::write_payload(&fixture.payload, "next service");
+            fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+            assert_eq!(outcome.plan.edge_replaced, None);
+            assert_eq!(fixture.record().unwrap().edge_sha256, record.edge_sha256);
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "release edge").unwrap();
+            let outcome = fixture
+                .run(Mode::Restore, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(
+                outcome.plan.edge_replaced,
+                Some(EdgeReplacement::LeavingDevelopment)
+            );
+            assert_eq!(fixture.read(fixture.layout.edge()), "release edge");
+            assert_eq!(fixture.record().unwrap().channel, Channel::Release);
+
+            // Once back on the release, a restore of the same release keeps its intact edge.
+            let again = fixture
+                .run(Mode::Restore, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(placed_names(&again.plan), [SERVICE_EXECUTABLE_NAME]);
+            assert_eq!(again.plan.edge_replaced, None);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+
+            /// The sharing Windows gives a running image: it may be read and renamed, not written.
+            const RUNNING_IMAGE_SHARING: u32 = 0x1 | 0x4;
+
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            let running = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(RUNNING_IMAGE_SHARING)
+                .open(fixture.layout.edge())
+                .unwrap();
+            fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Rebuilt));
+            assert_eq!(fixture.read(fixture.layout.edge()), "rebuilt edge");
+            let moved_aside = fixture
+                .layout
+                .bin()
+                .join(format!("{EDGE_EXECUTABLE_NAME}.old-1"));
+            assert_eq!(fixture.read(moved_aside), edge_text(RELAY));
+            drop(running);
+        }
+        {
+            let fixture = Fixture::new();
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(
+                placed_names(&outcome.plan),
+                [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
+            );
+            assert_eq!(
+                outcome.plan.edge_replaced,
+                Some(EdgeReplacement::Unrecorded)
+            );
+            assert!(outcome
+                .plan
+                .swaps
+                .iter()
+                .all(|placed| placed.directory == fixture.layout.bin()));
+            assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+            let record = fixture.record().unwrap();
+            assert_eq!(record.channel, Channel::Development);
+            assert_eq!(
+                record.edge_sha256,
+                Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+            );
+            assert!(!fixture.layout.retired_development_directory().exists());
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            let recorded = fixture.record().unwrap().edge_sha256;
+            fs::write(fixture.layout.edge(), "changed edge").unwrap();
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(
+                placed_names(&outcome.plan),
+                [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
+            );
+            assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Altered));
+            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+            assert_eq!(fixture.record().unwrap().edge_sha256, recorded);
+
+            fs::remove_file(fixture.layout.edge()).unwrap();
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(placed_names(&outcome.plan).contains(&EDGE_EXECUTABLE_NAME));
+            assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Missing));
+            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            Fixture::write_payload(&fixture.payload, "release service");
+            fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "release edge").unwrap();
+            let build = Build {
+                relay_revision: "5".to_owned(),
+                ..fixture.build("2.0.0")
+            };
+            install(
+                &fixture.context(build, &FakeControl::new()),
+                &Request {
+                    payload: None,
+                    mode: Mode::Restore,
+                    plan_only: false,
+                },
+            )
+            .unwrap();
+            assert_eq!(fixture.read(fixture.layout.edge()), "release edge");
+            let record = fixture.record().unwrap();
+            assert_eq!(record.relay_revision, "5");
+            assert_eq!(record.channel, Channel::Release);
+        }
+    }
+
+    /// Protects the ADR-0199 amendment that brings the development channel into 2.0: a development
+    /// install takes any version and swaps and restarts every time, a release package refuses to
+    /// install over it and changes nothing, an in-place run reports its own payload, and only
+    /// `--restore` leaves it, installing a release even from an older payload or into an empty home.
+    #[test]
+    fn the_development_channel_installs_every_build_and_only_restore_leaves_it() {
+        {
+            let fixture = Fixture::new();
+            for round in 0..3 {
+                Fixture::write_payload(&fixture.payload, &format!("build {round}"));
+                let control = FakeControl::new();
+                let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+                assert!(!outcome.plan.unchanged, "round {round}");
+                assert_eq!(outcome.service_started, Some(true), "round {round}");
+                assert_eq!(
+                    fixture.read(fixture.layout.service_executable()),
+                    format!("build {round}")
+                );
+                assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+            }
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Development, "2.5.0", &FakeControl::new())
+                .unwrap();
+            for version in ["2.0.0", "3.0.0"] {
+                Fixture::write_payload(&fixture.payload, version);
+                fixture
+                    .run(Mode::Development, version, &FakeControl::new())
+                    .unwrap();
+                assert_eq!(fixture.record().unwrap().service_version, version);
+                assert_eq!(fixture.read(fixture.layout.service_executable()), version);
+            }
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            let before = fixture.snapshot();
+            for version in ["2.0.0", VERSION, "9.9.9"] {
+                let control = FakeControl::new();
+                let error = fixture.run(Mode::Release, version, &control).unwrap_err();
+                assert!(error.is::<DevelopmentInstalled>(), "{error}");
+                let message = error.to_string();
+                assert!(
+                    message.contains("npx ghostlight deployment install --restore"),
+                    "{message}"
+                );
+                assert!(message.contains("get.ps1"), "{message}");
+                assert!(message.contains("get.sh"), "{message}");
+                assert!(
+                    !message.contains(&fixture.payload.display().to_string()),
+                    "a staged payload is gone once its carrier exits: {message}"
+                );
+                assert!(error.to_string().contains("development build"), "{error}");
+                assert!(control.calls().is_empty());
+                assert_eq!(fixture.snapshot(), before, "{version}");
+            }
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            let before = fixture.snapshot();
+            // The installed edge hands `ghostlight deployment install` to bin/ghostlight-service,
+            // so the payload is bin itself.
+            let control = FakeControl::new();
+            let in_place = Context {
+                payload: fixture.layout.bin(),
+                ..fixture.context(fixture.build(VERSION), &control)
+            };
+            let error = plan(&in_place, Mode::Release).unwrap_err();
+            assert!(
+                matches!(
+                    error.downcast_ref::<PayloadError>(),
+                    Some(PayloadError::InPlace(_))
+                ),
+                "{error}"
+            );
+            assert!(!error.to_string().contains("--restore"), "{error}");
+            assert_eq!(fixture.snapshot(), before);
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Development, "2.5.0", &FakeControl::new())
+                .unwrap();
+            Fixture::write_payload(&fixture.payload, "release service");
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Restore, "2.0.0", &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert!(!outcome.plan.unchanged);
+            assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+            assert_eq!(
+                fixture.read(fixture.layout.service_executable()),
+                "release service"
+            );
+            let record = fixture.record().unwrap();
+            assert_eq!(record.service_version, "2.0.0");
+            assert_eq!(record.channel, Channel::Release);
+            assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+
+            // The installation is a release again: the same package is nothing to do.
+            let outcome = fixture
+                .run(Mode::Release, "2.0.0", &FakeControl::new())
+                .unwrap();
+            assert!(outcome.plan.unchanged);
+        }
+        {
+            let fixture = Fixture::new();
+            let outcome = fixture
+                .run(Mode::Restore, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+            assert_eq!(fixture.record().unwrap().channel, Channel::Release);
+        }
+    }
+
+    /// Protects defects 26d6edba, 64164332, 83aa61f0 and 80810b08: a 1.x installation is replaced
+    /// without losing anything the person had. Registrations name `bin` before any old program stops,
+    /// a client the person located is reconciled, the state moves into the home, and every legacy
+    /// program, respawned or served from `bin`, is stopped by its image before its record goes. The
+    /// 1.x policy stays where the 1.x service reads it until the last stop, a save made while it stops
+    /// or after a failed run wins, a diverged policy is reported without blocking the next install, a
+    /// failed migration swaps nothing, and the next install finishes a failed run by the same rule.
+    #[test]
+    fn a_1x_installation_is_replaced_with_registrations_first_and_its_state_and_policy_kept() {
+        {
+            let mut fixture = Fixture::new();
+            let policy = fixture.scratch.path().join("old-policy");
+            fs::create_dir_all(&policy).unwrap();
+            fs::write(policy.join(USER_POLICY_FILE_NAME), "user policy").unwrap();
+            fixture.legacy_policy = Some(policy.clone());
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(!outcome.plan.migration.is_empty());
+            assert_eq!(
+                fixture.read(fixture.layout.policy().join(USER_POLICY_FILE_NAME)),
+                "user policy"
+            );
+            assert!(!policy.join(USER_POLICY_FILE_NAME).exists());
+            assert!(fixture.layout.service_executable().is_file());
+        }
+        {
+            let mut fixture = Fixture::new();
+            fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+            let control = fixture.watching_control();
+            fixture.run(Mode::Release, VERSION, &control).unwrap();
+            let calls = control.calls();
+            let sightings = control.sightings();
+            assert_eq!(calls.len(), sightings.len());
+            let stops: Vec<usize> = (0..calls.len())
+                .filter(|&index| matches!(calls[index], Call::Stop(_) | Call::Quit))
+                .collect();
+            assert!(!stops.is_empty(), "{calls:?}");
+            for index in stops {
+                assert!(sightings[index].registered, "{calls:?} at {index}");
+            }
+            assert!(fixture.manifest_names_bin_edge());
+        }
+        {
+            let mut fixture = Fixture::new();
+            fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+            let located = fixture
+                .scratch
+                .path()
+                .join("portable")
+                .join("claude_desktop_config.json");
+            let old_connector = fixture
+                .scratch
+                .path()
+                .join("old-1x")
+                .join(&retired_connector_names()[0]);
+            fs::create_dir_all(located.parent().unwrap()).unwrap();
+            fs::write(
+                &located,
+                serde_json::json!({"mcpServers": {"ghostlight": {"command": old_connector}}})
+                    .to_string(),
+            )
+            .unwrap();
+            // The 1.x file the user's located paths were kept in, where the 1.x layout had it.
+            let locations = LegacyRoots::within(&fixture.scratch.path().join("profile"))
+                .harness_locations_directory()
+                .join(HARNESS_LOCATIONS_NAME);
+            fs::create_dir_all(locations.parent().unwrap()).unwrap();
+            fs::write(
+                &locations,
+                serde_json::json!({"claude-desktop": {"config": located}}).to_string(),
+            )
+            .unwrap();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            let written: serde_json::Value =
+                serde_json::from_str(&fixture.read(located.clone())).unwrap();
+            let command = PathBuf::from(
+                written["mcpServers"]["ghostlight"]["command"]
+                    .as_str()
+                    .unwrap(),
+            );
+            assert_eq!(
+                fs::canonicalize(command).unwrap(),
+                fs::canonicalize(fixture.layout.edge()).unwrap()
+            );
+            assert_eq!(
+                written["mcpServers"]["ghostlight"]["args"],
+                serde_json::json!(["mcp"])
+            );
+            assert!(!locations.exists());
+            let kept: serde_json::Value = serde_json::from_str(
+                &fixture.read(fixture.layout.state().join(HARNESS_LOCATIONS_NAME)),
+            )
+            .unwrap();
+            assert_eq!(
+                PathBuf::from(kept["claude-desktop"]["config"].as_str().unwrap()),
+                located
+            );
+        }
+        {
+            let mut fixture = Fixture::new();
+            let original = plant_legacy_policy(&mut fixture);
+            let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
+            let mut control = fixture.watching_control();
+            control.policy_witness = Some((original.clone(), copy.clone()));
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            let calls = control.calls();
+            let sightings = control.sightings();
+            let start = calls.iter().position(|call| *call == Call::Start).unwrap();
+            assert!(start > 0, "{calls:?}");
+            // Through the swaps, the reconcile and every stop, the 1.x service has its policy and
+            // a 2.0 service would find the copy.
+            for (call, sighting) in calls.iter().zip(&sightings).take(start) {
+                assert!(sighting.policy_original_present, "{call:?}");
+                assert!(sighting.policy_copy_present, "{call:?}");
+            }
+            assert!(!sightings[start].policy_original_present);
+            assert_eq!(fixture.read(copy), "user policy");
+            assert!(!original.exists());
+        }
+        {
+            let mut fixture = Fixture::new();
+            let original = plant_legacy_policy(&mut fixture);
+            let mut control = FakeControl::new();
+            control.writes_on_stop = vec![(original.clone(), "saved while stopping".to_owned())];
+            fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert!(!original.exists());
+            assert_eq!(
+                fixture.read(fixture.layout.policy().join(USER_POLICY_FILE_NAME)),
+                "saved while stopping"
+            );
+        }
+        {
+            let mut fixture = Fixture::new();
+            let original = plant_legacy_policy(&mut fixture);
+            let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
+            let mut control = FakeControl::new();
+            control.writes_on_stop = vec![
+                (original.clone(), "saved by the 1.x service".to_owned()),
+                (copy.clone(), "saved by a 2.0 service".to_owned()),
+            ];
+            let error = fixture.run(Mode::Release, VERSION, &control).unwrap_err();
+            assert!(
+                matches!(
+                    error.downcast_ref::<MigrationError>(),
+                    Some(MigrationError::Conflict { .. })
+                ),
+                "{error}"
+            );
+            assert_eq!(fixture.record(), None);
+            let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
+            assert_eq!(fixture.read(aside), "saved by the 1.x service");
+            assert!(!original.exists());
+
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(fixture.read(copy), "saved by a 2.0 service");
+            assert!(!fixture.legacy_record().exists());
+        }
+        {
+            let mut fixture = Fixture::new();
+            let (original, copy) = failed_run_after_the_copy(&mut fixture);
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert!(!original.exists());
+            assert_eq!(fixture.read(copy), "user policy");
+        }
+        {
+            let mut fixture = Fixture::new();
+            let (original, copy) = failed_run_after_the_copy(&mut fixture);
+            fs::write(&original, "saved by the 1.x service").unwrap();
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert!(!original.exists());
+            assert_eq!(fixture.read(copy), "saved by the 1.x service");
+        }
+        {
+            let mut fixture = Fixture::new();
+            let (original, copy) = failed_run_after_the_copy(&mut fixture);
+            fs::write(&copy, "written by a 2.0 service").unwrap();
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert!(!original.exists());
+            assert_eq!(fixture.read(copy), "written by a 2.0 service");
+        }
+        {
+            let mut fixture = Fixture::new();
+            let (original, copy) = failed_run_after_the_copy(&mut fixture);
+            fs::write(&original, "saved by the 1.x service").unwrap();
+            fs::write(&copy, "written by a 2.0 service").unwrap();
+            let error = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error.downcast_ref::<MigrationError>(),
+                    Some(MigrationError::Conflict { .. })
+                ),
+                "{error}"
+            );
+            let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
+            assert_eq!(fixture.read(aside), "saved by the 1.x service");
+            assert_eq!(fixture.read(copy.clone()), "written by a 2.0 service");
+
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(fixture.read(copy), "written by a 2.0 service");
+            assert!(!fixture.legacy_record().exists());
+        }
+        {
+            let mut fixture = Fixture::new();
+            let original = plant_legacy_policy(&mut fixture);
+            let copy = fixture.layout.policy().join(USER_POLICY_FILE_NAME);
+            fs::create_dir_all(fixture.layout.policy()).unwrap();
+            fs::write(&copy, "somebody else's file").unwrap();
+            let error = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error.downcast_ref::<MigrationError>(),
+                    Some(MigrationError::Conflict { .. })
+                ),
+                "{error}"
+            );
+            assert_eq!(fixture.read(original), "user policy");
+            assert_eq!(fixture.read(copy), "somebody else's file");
+        }
+        {
+            let mut fixture = Fixture::new();
+            fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+            let home = fixture.layout.home().to_owned();
+            fs::write(home.join(AUDIT_FILE_NAME), "old audit").unwrap();
+            fs::write(home.join(LEGACY_STARTUP_NAME), "").unwrap();
+            fs::write(home.join(LEGACY_DEPLOY_LOCK_NAME), "").unwrap();
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(outcome.plan.restart);
+            let archive = fixture.layout.state().join("audit-pre-2.0.jsonl");
+            assert_eq!(fixture.read(archive), "old audit");
+            for gone in [
+                AUDIT_FILE_NAME,
+                LEGACY_STARTUP_NAME,
+                LEGACY_DEPLOY_LOCK_NAME,
+            ] {
+                assert!(!home.join(gone).exists(), "{gone}");
+            }
+
+            // The same version is already installed, and a 1.x leftover still forces the full run.
+            fs::write(home.join(LEGACY_STARTUP_NAME), "").unwrap();
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert!(!outcome.plan.unchanged);
+            assert!(outcome.plan.restart);
+            assert!(!home.join(LEGACY_STARTUP_NAME).exists());
+            assert!(control.calls().contains(&Call::Start));
+        }
+        {
+            let mut fixture = Fixture::new();
+            let serving = fixture.scratch.path().join("old-1x");
+            fixture.plant_legacy_installation(&serving);
+            let control = FakeControl::new();
+            control.respawns.set(1);
+            fixture.run(Mode::Release, VERSION, &control).unwrap();
+            let images: Vec<PathBuf> = legacy_image_names()
+                .iter()
+                .map(|name| serving.join(name))
+                .collect();
+            let mut expected = vec![Call::Stop(images.clone())];
+            expected.extend([
+                Call::Running,
+                Call::Stop(images),
+                Call::Running,
+                Call::Running,
+            ]);
+            expected.extend([Call::Quit, Call::Start, Call::Wait]);
+            assert_eq!(control.calls(), expected);
+        }
+        {
+            let mut fixture = Fixture::new();
+            fixture.plant_legacy_installation(&fixture.scratch.path().join("old-1x"));
+            let control = fixture.watching_control();
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert!(!fixture.legacy_record().exists());
+            let calls = control.calls();
+            let sightings = control.sightings();
+            let start = calls.iter().position(|call| *call == Call::Start).unwrap();
+            for (call, sighting) in calls.iter().zip(&sightings).take(start) {
+                assert!(sighting.record_present, "{call:?}");
+            }
+            assert!(!sightings[start].record_present);
+        }
+        {
+            let mut fixture = Fixture::new();
+            fixture.plant_legacy_installation(&fixture.layout.bin());
+            let control = FakeControl::new();
+            fixture.run(Mode::Release, VERSION, &control).unwrap();
+            let calls = control.calls();
+            let Call::Stop(images) = &calls[0] else {
+                panic!("{calls:?}");
+            };
+            // The 1.x service sat under the name the edge now has, so the install moved it aside.
+            let moved = fixture
+                .layout
+                .bin()
+                .join(format!("{EDGE_EXECUTABLE_NAME}.old-1"));
+            assert!(images.contains(&moved), "{images:?}");
+            // The connectors were never replaced, so they are stopped where they are, and removed.
+            for name in retired_connector_names() {
+                let connector = fixture.layout.bin().join(name);
+                assert!(images.contains(&connector), "{images:?}");
+                assert!(!connector.exists());
+            }
+            for installed in [fixture.layout.service_executable(), fixture.layout.edge()] {
+                assert!(!images.contains(&installed), "{images:?}");
+            }
+        }
+        {
+            let mut fixture = Fixture::new();
+            let policy = fixture.scratch.path().join("old-policy");
+            fs::create_dir_all(&policy).unwrap();
+            fs::write(policy.join(USER_POLICY_FILE_NAME), "old policy").unwrap();
+            fs::create_dir_all(fixture.layout.policy()).unwrap();
+            fs::write(
+                fixture.layout.policy().join(USER_POLICY_FILE_NAME),
+                "new policy",
+            )
+            .unwrap();
+            fixture.legacy_policy = Some(policy);
+            let control = FakeControl::new();
+            assert!(fixture.run(Mode::Release, VERSION, &control).is_err());
+            assert!(!fixture.layout.bin().exists());
+            assert!(control.calls().is_empty());
+        }
+    }
+
+    /// Protects ACCEPTANCE 14 and defects 31f2c835 and bd29366c: a replace runs in one order. The
+    /// service is asked to quit, and stopped by its exact image if it does not; what an older
+    /// installation left running is stopped next, once and by pid, and one that will not stop is
+    /// reported without blocking; the new service starts after that, with the new shell already in
+    /// `bin`. The install is recorded only when an instance other than the replaced one answers, and a
+    /// service that never answers, stops while starting or cannot be spawned is named with its own
+    /// reason, never one an earlier start left.
+    #[test]
+    fn a_replace_quits_the_service_stops_leftovers_and_records_only_a_new_instance_that_answers() {
+        {
+            let fixture = Fixture::new();
+            let mut control = FakeControl::new();
+            control.strays = vec![StrayProcess {
+                pid: 4242,
+                image: fixture
+                    .layout
+                    .bin()
+                    .join(retired_connector_names()[0].as_str()),
+                kind: StrayKind::RetiredConnector,
+            }];
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(
+                control.calls(),
+                [
+                    Call::Quit,
+                    Call::StopStrays(vec![4242]),
+                    Call::Start,
+                    Call::Wait
+                ]
+            );
+        }
+        {
+            let fixture = Fixture::new();
+            let mut control = FakeControl::new();
+            let stray = StrayProcess {
+                pid: 4242,
+                image: fixture.layout.bin().join(&retired_connector_names()[1]),
+                kind: StrayKind::RetiredConnector,
+            };
+            control.strays = vec![stray.clone()];
+            control.strays_stay = true;
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(outcome.strays_left, [stray]);
+            assert_eq!(
+                control.calls(),
+                [
+                    Call::Quit,
+                    Call::StopStrays(vec![4242]),
+                    Call::Start,
+                    Call::Wait
+                ]
+            );
+        }
+        {
+            let layout = Layout::new("home");
+            let stray = |pid: u32, name: &str| StrayProcess {
+                pid,
+                image: layout.bin().join(name),
+                kind: StrayKind::RetiredConnector,
+            };
+            let mut control = FakeControl::new();
+            assert_eq!(
+                stop_found_strays(&control, &layout, Some(9)),
+                StrayStop::default()
+            );
+            assert!(control.calls().is_empty());
+
+            control.strays = vec![stray(1, "one"), stray(2, "two")];
+            let stop = stop_found_strays(&control, &layout, Some(9));
+            assert_eq!(stop.stopped, control.strays);
+            assert!(stop.stuck.is_empty());
+
+            control.strays_stay = true;
+            let stop = stop_found_strays(&control, &layout, None);
+            assert!(stop.stopped.is_empty());
+            assert_eq!(stop.stuck, control.strays);
+        }
+        {
+            let fixture = Fixture::new();
+            let control = FakeControl::new();
+            fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert!(!control
+                .calls()
+                .iter()
+                .any(|call| matches!(call, Call::StopStrays(_))));
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            Fixture::write_payload(&fixture.payload, "next service");
+            let mut control = FakeControl::new();
+            control.quits = false;
+            fixture.run(Mode::Release, "2.2.0", &control).unwrap();
+            let calls = control.calls();
+            let Call::Stop(images) = &calls[1] else {
+                panic!("{calls:?}");
+            };
+            assert!(images.contains(
+                &fixture
+                    .layout
+                    .bin()
+                    .join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"))
+            ));
+            assert_eq!(calls[2..], [Call::Start, Call::Wait]);
+        }
+        {
+            let fixture = Fixture::new();
+            let images = plant_retired_development(&fixture);
+            let mut control = FakeControl::new();
+            control.strays = vec![StrayProcess {
+                pid: 41,
+                image: images[1].clone(),
+                kind: StrayKind::RetiredDevelopment,
+            }];
+            let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+            assert!(outcome.strays_left.is_empty());
+            assert!(outcome.left_behind.is_empty());
+            assert_eq!(
+                control.calls(),
+                [
+                    Call::Quit,
+                    Call::StopStrays(vec![41]),
+                    Call::Start,
+                    Call::Wait
+                ]
+            );
+        }
+        {
+            let fixture = Fixture::new();
+            let images = plant_retired_development(&fixture);
+            let stuck = StrayProcess {
+                pid: 41,
+                image: images[1].clone(),
+                kind: StrayKind::RetiredDevelopment,
+            };
+            let mut control = FakeControl::new();
+            control.strays = vec![stuck.clone()];
+            control.strays_stay = true;
+            let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(outcome.strays_left, [stuck]);
+            assert!(!fixture.layout.retired_development_directory().exists());
+        }
+        {
+            let fixture = Fixture::new();
+            let images = plant_retired_development(&fixture);
+            let mut control = FakeControl::new();
+            control.quits = false;
+            fixture.run(Mode::Release, VERSION, &control).unwrap();
+            let calls = control.calls();
+            let Call::Stop(first) = &calls[1] else {
+                panic!("{calls:?}");
+            };
+            assert!(first.contains(&images[0]), "{first:?}");
+            assert!(!fixture.layout.retired_development_directory().exists());
+        }
+        {
+            let fixture = Fixture::new();
+            let mut control = FakeControl::new();
+            control.answers = false;
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(false));
+            assert_eq!(outcome.start_failure, Some(StartFailure::Silent));
+            assert!(fixture.layout.service_executable().is_file());
+            assert_eq!(fixture.record(), None);
+            let failure = ServiceDidNotStart::of(&outcome, &fixture.layout).unwrap();
+            assert!(failure.to_string().contains("did not start within 30 s"));
+        }
+        {
+            let fixture = Fixture::new();
+            let mut control = FakeControl::new();
+            control.answers = false;
+            control.stops_recording = Some(Some("bind the relay endpoint: no room".to_owned()));
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(
+                outcome.start_failure,
+                Some(StartFailure::Stopped(Some(
+                    "bind the relay endpoint: no room".to_owned()
+                )))
+            );
+            let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
+                .unwrap()
+                .to_string();
+            assert!(sentence.contains("stopped while starting: bind the relay endpoint: no room"));
+            assert!(!sentence.contains("30 s"), "a stop is not a timeout");
+            assert_eq!(fixture.record(), None);
+        }
+        {
+            let fixture = Fixture::new();
+            fs::create_dir_all(fixture.layout.run()).unwrap();
+            fs::write(fixture.layout.start_failure(), "an earlier reason\n").unwrap();
+            let mut control = FakeControl::new();
+            control.answers = false;
+            control.stops_recording = Some(None);
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(outcome.start_failure, Some(StartFailure::Stopped(None)));
+            let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
+                .unwrap()
+                .to_string();
+            assert!(sentence.contains("stopped while starting."), "{sentence}");
+        }
+        {
+            let fixture = Fixture::new();
+            let mut control = FakeControl::new();
+            control.spawn_error = Some("Permission denied (os error 13)".to_owned());
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(
+                outcome.start_failure,
+                Some(StartFailure::Spawn(
+                    "Permission denied (os error 13)".to_owned()
+                ))
+            );
+            assert!(
+                !control.calls().contains(&Call::Wait),
+                "nothing is waited for when nothing was started"
+            );
+            let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
+                .unwrap()
+                .to_string();
+            assert!(sentence.contains("could not be started: Permission denied (os error 13)"));
+        }
+        {
+            let fixture = Fixture::new();
+            let mut control = FakeControl::new();
+            control.instance = Some("instance_old".to_owned());
+            fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(
+                control.waited_for.borrow().as_slice(),
+                [Some("instance_old".to_owned())]
+            );
+
+            let fresh = Fixture::new();
+            let control = FakeControl::new();
+            fresh.run(Mode::Release, VERSION, &control).unwrap();
+            assert_eq!(control.waited_for.borrow().as_slice(), [None]);
+        }
+        {
+            // A shell that is told to hand over compares its own image with the one in `bin`, so the
+            // swap must come before the quit.
+            let fixture = Fixture::new();
+            add_shell(&fixture, "shell");
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+
+            add_shell(&fixture, "next shell");
+            let mut control = FakeControl::new();
+            control.quit_sees = Some(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME));
+            fixture.run(Mode::Development, VERSION, &control).unwrap();
+
+            assert_eq!(control.calls().first(), Some(&Call::Quit));
+            assert_eq!(
+                control.seen_at_quit.borrow().as_deref(),
+                Some("next shell"),
+                "the quit finds the new shell already in bin"
+            );
+        }
+    }
+
+    /// Protects defect 5b818ffc: the retired development layout and the 1.x version directories are
+    /// listed by `--plan`, which changes nothing, and removed after the `bin` swap by every channel,
+    /// the same release included, after any program running from them stops. Each directory's log is
+    /// archived once under a name that says where it came from, a log that cannot be archived keeps its
+    /// directory and is reported, an entry that cannot be removed is reported without failing the
+    /// install, and a second install has nothing left to do.
+    #[test]
+    fn older_layouts_are_listed_by_the_plan_and_retired_after_the_swap() {
+        {
+            let fixture = Fixture::new();
+            let images = plant_retired_development(&fixture);
+            let directory = fixture.layout.retired_development_directory();
+            let marker = fixture.layout.retired_development_marker();
+            let before = fixture.snapshot();
+
+            let planned = plan(
+                &fixture.context(fixture.build(VERSION), &FakeControl::new()),
+                Mode::Development,
+            )
+            .unwrap();
+            assert_eq!(planned.deletions, [directory.clone(), marker.clone()]);
+            for image in &images {
+                assert!(planned.processes_to_stop.contains(image), "{image:?}");
+            }
+            assert_eq!(fixture.snapshot(), before, "a plan changes nothing");
+
+            let control = fixture.watching_control();
+            let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert!(outcome.left_behind.is_empty());
+            assert!(!directory.exists());
+            assert!(!marker.exists());
+            assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+
+            // The scan stops what runs from the directory, so no second stop by image follows.
+            assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+            for sighting in control.sightings() {
+                assert!(
+                    sighting.registered,
+                    "registrations name bin before any stop"
+                );
+            }
+            assert!(fixture.manifest_names_bin_edge());
+        }
+        {
+            let fixture = Fixture::new();
+            fs::create_dir_all(fixture.layout.home()).unwrap();
+            fs::write(fixture.layout.retired_development_marker(), "{}").unwrap();
+            let control = FakeControl::new();
+            fixture.run(Mode::Development, VERSION, &control).unwrap();
+            assert!(!fixture.layout.retired_development_marker().exists());
+            assert!(!control
+                .calls()
+                .iter()
+                .any(|call| matches!(call, Call::Stop(_))));
+
+            fs::create_dir_all(fixture.layout.retired_development_directory()).unwrap();
+            fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(!fixture.layout.retired_development_directory().exists());
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            plant_retired_development(&fixture);
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert!(!outcome.plan.unchanged);
+            assert!(outcome.plan.swaps.is_empty());
+            assert!(!fixture.layout.retired_development_directory().exists());
+            assert!(!fixture.layout.retired_development_marker().exists());
+            assert_eq!(control.calls()[0], Call::Quit);
+        }
+        {
+            let fixture = Fixture::new();
+            let (first, second) = plant_version_directories(&fixture);
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert!(outcome.left_behind.is_empty());
+            assert_eq!(outcome.plan.deletions, [first.clone(), second.clone()]);
+            assert!(!first.exists());
+            assert!(!second.exists());
+            assert_eq!(
+                fs::read(fixture.layout.state().join("audit-v1.3.5.jsonl")).unwrap(),
+                VERSION_AUDIT
+            );
+            assert_eq!(
+                outcome.archived_version_audits,
+                [Move {
+                    from: first.join(AUDIT_FILE_NAME),
+                    to: fixture.layout.state().join("audit-v1.3.5.jsonl"),
+                }]
+            );
+            for kept in untouched_entries(&fixture) {
+                assert!(kept.is_file(), "{}", kept.display());
+            }
+            assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+        }
+        {
+            for mode in [Mode::Release, Mode::Restore] {
+                let fixture = Fixture::new();
+                let (first, second) = plant_version_directories(&fixture);
+                let outcome = fixture.run(mode, VERSION, &FakeControl::new()).unwrap();
+                assert!(outcome.left_behind.is_empty(), "{mode:?}");
+                assert!(!first.exists() && !second.exists(), "{mode:?}");
+                assert!(fixture.layout.state().join("audit-v1.3.5.jsonl").is_file());
+
+                let again = fixture.run(mode, VERSION, &FakeControl::new()).unwrap();
+                assert!(again.plan.deletions.is_empty(), "{mode:?}");
+                assert!(again.plan.version_audit_archives.is_empty(), "{mode:?}");
+            }
+        }
+        {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            let (first, second) = plant_version_directories(&fixture);
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(!outcome.plan.unchanged);
+            assert!(outcome.plan.swaps.is_empty());
+            assert!(!first.exists() && !second.exists());
+        }
+        {
+            let fixture = Fixture::new();
+            let (first, second) = plant_version_directories(&fixture);
+            let before = fixture.snapshot();
+            let control = FakeControl::new();
+            let outcome = install(
+                &fixture.context(fixture.build(VERSION), &control),
+                &Request {
+                    payload: None,
+                    mode: Mode::Development,
+                    plan_only: true,
+                },
+            )
+            .unwrap();
+            assert_eq!(outcome.plan.deletions, [first.clone(), second]);
+            assert_eq!(
+                outcome.plan.version_audit_archives,
+                [Move {
+                    from: first.join(AUDIT_FILE_NAME),
+                    to: fixture.layout.state().join("audit-v1.3.5.jsonl"),
+                }]
+            );
+            assert_eq!(fixture.snapshot(), before);
+            assert!(control.calls().is_empty());
+        }
+        {
+            let fixture = Fixture::new();
+            let (first, second) = plant_version_directories(&fixture);
+            let mut control = FakeControl::new();
+            control.watched_directory = Some(second.clone());
+            control.strays = vec![StrayProcess {
+                pid: 52,
+                image: second.join(EDGE_EXECUTABLE_NAME),
+                kind: StrayKind::RetiredVersionDirectory,
+            }];
+            let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+            assert!(outcome.strays_left.is_empty());
+            assert_eq!(
+                control.calls(),
+                [
+                    Call::Quit,
+                    Call::StopStrays(vec![52]),
+                    Call::Start,
+                    Call::Wait
+                ]
+            );
+            assert_eq!(*control.watched_present.borrow(), [true]);
+            assert!(!first.exists() && !second.exists());
+        }
+        {
+            let mut fixture = Fixture::new();
+            let (first, second) = plant_version_directories(&fixture);
+            fixture.legacy_state = Some(first.clone());
+            fs::create_dir_all(fixture.layout.home()).unwrap();
+            fs::write(fixture.legacy_record(), "{}").unwrap();
+            let log = first.join(AUDIT_FILE_NAME);
+            let migration_archive = Move {
+                from: log.clone(),
+                to: fixture.layout.state().join("audit-pre-2.0.jsonl"),
+            };
+
+            let planned = install(
+                &fixture.context(fixture.build(VERSION), &FakeControl::new()),
+                &Request {
+                    payload: None,
+                    mode: Mode::Development,
+                    plan_only: true,
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                planned.plan.migration.audit_archive,
+                Some(migration_archive)
+            );
+            assert!(planned.plan.version_audit_archives.is_empty());
+
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(outcome.left_behind.is_empty());
+            assert!(outcome.archived_version_audits.is_empty());
+            assert_eq!(
+                fs::read(fixture.layout.state().join("audit-pre-2.0.jsonl")).unwrap(),
+                VERSION_AUDIT
+            );
+            assert!(!fixture.layout.state().join("audit-v1.3.5.jsonl").exists());
+            assert!(!first.exists() && !second.exists());
+        }
+        {
+            let fixture = Fixture::new();
+            let (first, second) = plant_version_directories(&fixture);
+            fs::create_dir_all(fixture.layout.state()).unwrap();
+            let archive = fixture.layout.state().join("audit-v1.3.5.jsonl");
+            fs::write(&archive, "an earlier archive").unwrap();
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(outcome.left_behind, std::slice::from_ref(&first));
+            assert!(outcome.archived_version_audits.is_empty());
+            assert_eq!(
+                fs::read(first.join(AUDIT_FILE_NAME)).unwrap(),
+                VERSION_AUDIT
+            );
+            assert_eq!(fixture.read(archive), "an earlier archive");
+            assert!(!second.exists());
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+
+            let fixture = Fixture::new();
+            let images = plant_retired_development(&fixture);
+            // A program running from an image holds it open without sharing delete.
+            let held = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&images[0])
+                .unwrap();
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert_eq!(outcome.service_started, Some(true));
+            assert_eq!(
+                outcome.left_behind,
+                [fixture.layout.retired_development_directory()]
+            );
+            assert!(!fixture.layout.retired_development_marker().exists());
+            drop(held);
+
+            // The next install finishes the removal.
+            let outcome = fixture
+                .run(Mode::Development, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(outcome.left_behind.is_empty());
+            assert!(!fixture.layout.retired_development_directory().exists());
+        }
+        {
+            let mut fixture = Fixture::new();
+            let policy = fixture.scratch.path().join("old-policy");
+            fs::create_dir_all(&policy).unwrap();
+            fs::write(policy.join(USER_POLICY_FILE_NAME), "user policy").unwrap();
+            fixture.legacy_policy = Some(policy);
+            let before = fixture.snapshot();
+            let control = FakeControl::new();
+            let outcome = install(
+                &fixture.context(fixture.build(VERSION), &control),
+                &Request {
+                    payload: None,
+                    mode: Mode::Development,
+                    plan_only: true,
+                },
+            )
+            .unwrap();
+            assert!(!outcome.plan.migration.is_empty());
+            assert_eq!(outcome.plan.swaps.len(), 2);
+            assert!(serde_json::to_value(&outcome.plan).is_ok());
+            assert!(control.calls().is_empty());
+            assert_eq!(fixture.snapshot(), before);
+        }
+    }
+
+    /// Protects the quit-for-replacement wire contract and defect bd29366c: the installer asks the
+    /// running service to quit for replacement and waits for its lock, a home with no service has
+    /// nothing to wait for, an earlier development build that cannot be asked is not, the new service
+    /// is ready only when an instance other than the old one answers, and a wait for a service no
+    /// process runs ends after the grace, not the ready wait.
+    #[test]
+    fn the_installer_quits_the_service_for_replacement_and_waits_for_a_new_instance() {
+        {
+            let fixture = Fixture::new();
+            let layout = &fixture.layout;
+            let lock = ServiceLock::try_acquire(&layout.service_lock())
+                .unwrap()
+                .expect("the service lock");
+            let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let record = std::sync::Arc::clone(&asked);
+            let service = fake_service(layout, 1, move |opening| {
+                record.lock().unwrap().push((opening.role, opening.control));
+            });
+            // The service exits once it has answered the quit, and its lock goes with it.
+            let released = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let exits = {
+                let released = std::sync::Arc::clone(&released);
+                std::thread::spawn(move || {
+                    service.join().unwrap();
+                    released.store(true, std::sync::atomic::Ordering::SeqCst);
+                    drop(lock);
+                })
+            };
+            assert!(SystemProcessControl.quit(layout));
+            assert!(
+                released.load(std::sync::atomic::Ordering::SeqCst),
+                "the installer waited for the answer, not for the lock"
+            );
+            exits.join().unwrap();
+            assert_eq!(
+                asked.lock().unwrap().as_slice(),
+                [(
+                    Role::Control,
+                    Some(Control::Quit {
+                        reason: QuitReason::Replace
+                    })
+                )]
+            );
+        }
+        {
+            let fixture = Fixture::new();
+            assert!(SystemProcessControl.quit(&fixture.layout));
+        }
+        {
+            let fixture = Fixture::new();
+            let record = |relay: &str| InstallRecord {
+                service_version: VERSION.to_owned(),
+                relay_revision: relay.to_owned(),
+                service_sha256: "0".repeat(64),
+                edge_sha256: None,
+                channel: Channel::Release,
+            };
+            record(EARLIER_DEVELOPMENT_RELAY)
+                .write(&fixture.layout.install_record())
+                .unwrap();
+            assert!(
+                !SystemProcessControl.quit(&fixture.layout),
+                "the caller is told to stop the image"
+            );
+            record(RELAY)
+                .write(&fixture.layout.install_record())
+                .unwrap();
+            assert!(SystemProcessControl.quit(&fixture.layout));
+        }
+        {
+            let fixture = Fixture::new();
+            let layout = &fixture.layout;
+            let service = fake_service(layout, 2, |opening| {
+                assert_eq!(opening.control, Some(Control::Status));
+            });
+            assert_eq!(
+                SystemProcessControl.instance(layout).as_deref(),
+                Some("instance_new")
+            );
+            assert_eq!(
+                SystemProcessControl.wait_ready(layout, Some("instance_old")),
+                Readiness::Answered
+            );
+            service.join().unwrap();
+        }
+        {
+            let fixture = Fixture::new();
+            let started = Instant::now();
+            assert_eq!(
+                SystemProcessControl.wait_ready(&fixture.layout, None),
+                Readiness::Stopped
+            );
+            let waited = started.elapsed();
+            assert!(waited >= STOPPED_GRACE, "{waited:?}");
+            assert!(waited < READY_WAIT / 2, "{waited:?}");
+        }
+    }
+
+    /// Protects defects 31f2c835 and a663e83d: a stray is a program an older installation of this home
+    /// left running, named by its image even when its file is gone, and of its own kind when it runs
+    /// from the retired development directory or a 1.x version directory. The current programs, the
+    /// service that answers, programs elsewhere and the caller never are. A real retired connector is
+    /// found and stopped by its exact pid, and a pid that now runs another image is left alone.
+    #[test]
+    fn only_this_homes_leftover_programs_are_strays_and_only_their_exact_image_is_stopped() {
+        {
+            let (_scratch, layout) = stray_home();
+            for name in retired_connector_names() {
+                let present = layout.bin().join(&name);
+                fs::write(&present, "connector").unwrap();
+                let moved = layout.bin().join(format!("{name}.old-2"));
+                let gone = layout.bin().join(format!("{name}.old-9"));
+                for image in [&present, &moved, &gone] {
+                    assert_eq!(
+                        kind_of(&layout, image, 7001, None),
+                        Some(StrayKind::RetiredConnector),
+                        "{}",
+                        image.display()
+                    );
+                }
+            }
+        }
+        {
+            let (_scratch, layout) = stray_home();
+            let [connector, _] = retired_connector_names();
+            let removed_connector = layout.bin().join(format!("{connector} (deleted)"));
+            let removed_service = layout
+                .bin()
+                .join(format!("{SERVICE_EXECUTABLE_NAME}.old-1 (deleted)"));
+            let connector_image = running_image(&removed_connector);
+            let service_image = running_image(&removed_service);
+            assert_eq!(connector_image, layout.bin().join(&connector));
+            assert_eq!(
+                kind_of(&layout, &connector_image, 7010, None),
+                Some(StrayKind::RetiredConnector)
+            );
+            assert_eq!(
+                kind_of(&layout, &service_image, 7011, Some(7012)),
+                Some(StrayKind::ReplacedService)
+            );
+            let present = layout.bin().join(&connector);
+            assert_eq!(running_image(&present), present);
+        }
+        {
+            let (_scratch, layout) = stray_home();
+            let old = layout
+                .bin()
+                .join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"));
+            assert_eq!(
+                kind_of(&layout, &old, 7002, Some(7003)),
+                Some(StrayKind::ReplacedService)
+            );
+            assert_eq!(
+                kind_of(&layout, &old, 7002, None),
+                Some(StrayKind::ReplacedService)
+            );
+            assert_eq!(kind_of(&layout, &old, 7002, Some(7002)), None);
+        }
+        {
+            let (scratch, layout) = stray_home();
+            let mut current = Vec::new();
+            let directory = layout.bin();
+            for name in [
+                EDGE_EXECUTABLE_NAME,
+                SERVICE_EXECUTABLE_NAME,
+                DESKTOP_EXECUTABLE_NAME,
+            ] {
+                current.push(directory.join(name));
+            }
+            current.push(directory.join(format!("{EDGE_EXECUTABLE_NAME}.old-1")));
+            current.push(directory.join(format!("{DESKTOP_EXECUTABLE_NAME}.old-1")));
+            for image in &current {
+                assert_eq!(
+                    kind_of(&layout, image, 7004, None),
+                    None,
+                    "{}",
+                    image.display()
+                );
+            }
+            let elsewhere = fs::canonicalize(scratch.path()).unwrap().join("elsewhere");
+            fs::create_dir_all(&elsewhere).unwrap();
+            for name in retired_connector_names() {
+                let image = elsewhere.join(&name);
+                assert_eq!(kind_of(&layout, &image, 7005, None), None);
+            }
+            let image = elsewhere.join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"));
+            assert_eq!(kind_of(&layout, &image, 7005, None), None);
+        }
+        {
+            let (scratch, layout) = stray_home();
+            let directory = layout.retired_development_directory();
+            for name in [
+                EDGE_EXECUTABLE_NAME.to_owned(),
+                SERVICE_EXECUTABLE_NAME.to_owned(),
+                DESKTOP_EXECUTABLE_NAME.to_owned(),
+                format!("{SERVICE_EXECUTABLE_NAME}.old-1"),
+                format!("{EDGE_EXECUTABLE_NAME}.old-3"),
+                retired_connector_names()[0].clone(),
+                "helper".to_owned(),
+            ] {
+                let image = directory.join(&name);
+                assert_eq!(
+                    kind_of(&layout, &image, 7020, Some(7021)),
+                    Some(StrayKind::RetiredDevelopment),
+                    "{name}"
+                );
+            }
+            let answering = directory.join(SERVICE_EXECUTABLE_NAME);
+            assert_eq!(
+                kind_of(&layout, &answering, 7024, Some(7024)),
+                Some(StrayKind::RetiredDevelopment),
+                "the answering service is not spared when it runs from the retired directory"
+            );
+            let beside = directory.with_file_name("development-notes").join("helper");
+            assert_eq!(kind_of(&layout, &beside, 7022, None), None);
+            let elsewhere = fs::canonicalize(scratch.path())
+                .unwrap()
+                .join("dev")
+                .join(EDGE_EXECUTABLE_NAME);
+            assert_eq!(kind_of(&layout, &elsewhere, 7023, None), None);
+            assert_eq!(
+                serde_json::to_value(StrayKind::RetiredDevelopment).unwrap(),
+                serde_json::json!("retired_development")
+            );
+        }
+        {
+            let (_scratch, layout) = stray_home();
+            let directory = layout.bin().join("v1.3.6");
+            fs::create_dir_all(&directory).unwrap();
+            fs::create_dir_all(layout.bin().join("vnext")).unwrap();
+            for name in [
+                EDGE_EXECUTABLE_NAME.to_owned(),
+                SERVICE_EXECUTABLE_NAME.to_owned(),
+                retired_connector_names()[1].clone(),
+                "helper".to_owned(),
+            ] {
+                let image = directory.join(&name);
+                assert_eq!(
+                    kind_of(&layout, &image, 7030, Some(7031)),
+                    Some(StrayKind::RetiredVersionDirectory),
+                    "{name}"
+                );
+            }
+            let answering = directory.join(SERVICE_EXECUTABLE_NAME);
+            assert_eq!(
+                kind_of(&layout, &answering, 7032, Some(7032)),
+                Some(StrayKind::RetiredVersionDirectory),
+                "the answering service is not spared when it runs from a version directory"
+            );
+            let beside = layout.bin().join("vnext").join(SERVICE_EXECUTABLE_NAME);
+            assert_eq!(kind_of(&layout, &beside, 7033, None), None);
+            assert_eq!(
+                serde_json::to_value(StrayKind::RetiredVersionDirectory).unwrap(),
+                "retired_version_directory"
+            );
+        }
+        {
+            let (_scratch, layout) = stray_home();
+            let image = layout.bin().join(&retired_connector_names()[0]);
+            assert_eq!(
+                classify(&image, 7006, &layout, None, 7006),
+                None,
+                "the caller"
+            );
+            assert_eq!(
+                classify(&image, 7006, &layout, None, 7007),
+                Some(StrayKind::RetiredConnector)
+            );
+        }
+        {
+            assert!(stop_strays(&[]).is_empty());
+            let caller = StrayProcess {
+                pid: std::process::id(),
+                image: PathBuf::from("caller"),
+                kind: StrayKind::ReplacedService,
+            };
+            assert_eq!(stop_strays(std::slice::from_ref(&caller)), [caller]);
+        }
+        {
+            let (_scratch, layout) = stray_home();
+            let image = layout.bin().join(&retired_connector_names()[0]);
+            let mut stand_in = start_stand_in(&image);
+            let pid = stand_in.0.id();
+
+            let stray = wait_for_stray(&layout, pid);
+            assert_eq!(stray.kind, StrayKind::RetiredConnector);
+            assert!(same_path(&stray.image, &image), "{}", stray.image.display());
+
+            // The pid now belongs to another program than the one the scan saw: leave it alone.
+            let other = StrayProcess {
+                image: layout.bin().join(&retired_connector_names()[1]),
+                ..stray.clone()
+            };
+            assert!(stop_strays(&[other]).is_empty());
+            assert!(
+                stand_in.0.try_wait().unwrap().is_none(),
+                "a pid running another image was stopped"
+            );
+
+            assert!(stop_strays(&[stray]).is_empty());
+            let deadline = Instant::now() + STRAY_STOP_WAIT;
+            while stand_in.0.try_wait().unwrap().is_none() {
+                assert!(Instant::now() < deadline, "the stray is still running");
+                std::thread::sleep(POLL);
+            }
+            assert!(stray_processes(&layout, None)
+                .iter()
+                .all(|found| found.pid != pid));
+        }
     }
 }
