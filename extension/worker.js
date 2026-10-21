@@ -1,40 +1,29 @@
 // Ghostlight -- the service worker of adapter protocol 4.
 //
-// The worker is the extension's whole bootstrap and router. It opens the native port and sends the
-// hello as the first frame, answers each service frame (a request gets exactly one receipt), keeps the
-// set of tabs Ghostlight controls, forwards browser events for those tabs only, and feeds Chrome's
-// events to the modules in lib/. It makes no policy decision: whether a tab may be touched, what a
+// The worker is the extension's bootstrap and router. lib/link.js holds the native port, the hello
+// and the retries; the worker answers each service frame (a request gets exactly one receipt), keeps
+// the set of tabs Ghostlight controls, forwards browser events for those tabs only, and feeds
+// Chrome's events to the modules in lib/. It makes no policy decision: whether a tab may be touched, what a
 // page message means and what an effect was are the service's business.
-importScripts("lib/protocol.js", "lib/messages.js", "lib/shared.js", "lib/state.js", "lib/connection-log.js", "lib/chunks.js",
+importScripts("lib/protocol.js", "lib/messages.js", "lib/shared.js", "lib/state.js", "lib/connection-log.js", "lib/link.js", "lib/chunks.js",
   "lib/sessions.js", "lib/arguments.js", "lib/inventory.js", "lib/world.js", "lib/input.js", "lib/tabs.js",
   "lib/capture.js", "lib/presentation-queue.js", "lib/notice.js", "lib/diagnostics.js", "lib/recording.js",
   "lib/buffers.js", "vendor/acorn.js", "lib/evaluate.js", "lib/primitives.js");
 
 const protocol = globalThis.GhostlightProtocol;
 const shared = globalThis.GhostlightShared;
+const errorText = globalThis.GhostlightLink.errorText;
 const stateApi = globalThis.GhostlightState;
 const manifest = chrome.runtime.getManifest();
 
-const WELCOME_PAGE = "setup.html";
 const SERVICE_UNAVAILABLE = "The local Ghostlight service is unavailable.";
 const ASSETS_REJECTED = "The service sent page code that failed its checksum.";
-const NATIVE_ENDED = "Native connection ended.";
 const OPTIONS_ONLY = "Open extension options to export developer diagnostics.";
+const SERVICE_DISCONNECTED = "Ghostlight service is disconnected.";
 const UNKNOWN_MESSAGE = "Unknown extension message.";
-const RECONNECT_ALARM = "ghostlight-reconnect";
-const RECONNECT_DELAY_MS = 3_000;
-const RECONNECT_ALARM_MINUTES = 0.05;
-const ERROR_CHARS = 500;
-const ENGINE_VERSION = /^[0-9.]{1,32}$/;
-const ENGINE_USER_AGENT = /Chrome\/([0-9.]{1,32})/;
-const PLACEHOLDER_BRAND = /not.*a.*brand/i;
-const ENGINE_BRAND = "Chromium";
 const CONTROLLED_KEY = "ghostlight.controlled";
 // The epoch of the service that granted the custody in CONTROLLED_KEY, kept beside it.
 const SERVICE_EPOCH_KEY = "ghostlight.service_epoch";
-
-// How the first connection of this worker ended, as far as the welcome page cares.
-const FIRST_CONNECTION = Object.freeze({ ACCEPTED: "accepted", HOST_ABSENT: "host_absent", OTHER: "other" });
 
 const CONTROL = Object.freeze({ MANAGED: "managed", RELEASED: "released" });
 const RUNTIME = protocol.RUNTIME_STATE;
@@ -80,18 +69,11 @@ connectionLog.record(connectionEvents.WORKER_STARTED);
 
 // ---- connection state ---------------------------------------------------------------------------
 
-let nativePort = null;
-let nativeConnectionAttempt = null;
-let connectionAttemptNumber = 0;
 let browserId = null;
 let life = null;
 let preferences = { ...stateApi.DEFAULT_PREFERENCES };
 let serviceEpoch = null;
 let negotiation = Promise.resolve();
-let helloTimer = null;
-let helloUnanswered = false;
-let retryTimer = null;
-let backendLost = false;
 let persistChain = Promise.resolve();
 // `adapter_outdated` is set when the service refuses this extension as outdated and cleared only
 // by an accepted hello; `adapter_refusal` is the sentence the service sent with that refusal.
@@ -109,15 +91,7 @@ let liveState = {
 const controlled = new Map();
 
 function send(frame) {
-  if (!nativePort) return false;
-  const fitted = protocol.fitted(shared.wellFormed(frame));
-  if (!fitted) return false;
-  try {
-    nativePort.postMessage(fitted);
-    return true;
-  } catch (_error) {
-    return false;
-  }
+  return link.send(frame);
 }
 
 function sendEvent(event) {
@@ -130,7 +104,7 @@ function sendControlledEvent(event) {
 }
 
 function recordError(error) {
-  setConnection({ last_error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
+  setConnection({ last_error: errorText(error) });
 }
 
 function controlStateOf(value) {
@@ -181,7 +155,7 @@ function uiSnapshot() {
 function updateBadge() {
   const unseen = presentationQueue.size();
   const badge = unseen > 0
-    ? { text: "!", color: "#ef4444" }
+    ? { text: "!", color: stateApi.BADGE_RECORDING }
     : stateApi.badge({ ...liveState, recording_tabs: recording.count() });
   chrome.action.setBadgeBackgroundColor({ color: badge.color });
   chrome.action.setBadgeTextColor?.({ color: stateApi.BADGE_TEXT_COLOR });
@@ -338,196 +312,32 @@ async function resumeControlledTabs() {
   await Promise.allSettled(managedIds().map((tabId) => lifecycle.retain(tabId)));
 }
 
-// ---- welcome ------------------------------------------------------------------------------------
+// ---- native link --------------------------------------------------------------------------------
 
-// The setup page opens once, for an install whose first connection finds the service absent. Only a
-// definite outcome settles it: a port that is open and unanswered is not one, because Chrome reports a
-// missing host through the disconnect a moment after connectNative returns. A worker restart forgets
-// the pending welcome and opens nothing.
-let firstConnection = null;
-let welcomePending = false;
-
-function settleWelcome(outcome) {
-  firstConnection ??= outcome;
-  if (!welcomePending) return;
-  welcomePending = false;
-  if (outcome === FIRST_CONNECTION.HOST_ABSENT) chrome.tabs.create({ url: chrome.runtime.getURL(WELCOME_PAGE) }).catch(() => {});
-}
-
-function failedConnection(reason) {
-  const absent = shared.linkState({ connected: false, compatible: false, lastError: reason }) === shared.LINK_HOST_ABSENT;
-  settleWelcome(absent ? FIRST_CONNECTION.HOST_ABSENT : FIRST_CONNECTION.OTHER);
-}
-
-// ---- native connection --------------------------------------------------------------------------
-
-function connectNative(trigger = "worker") {
-  connectionLog.record(connectionEvents.CONNECT_REQUESTED, {
-    trigger: typeof trigger === "string" ? trigger : "event",
-    has_port: Boolean(nativePort),
-    pending: Boolean(nativeConnectionAttempt)
-  });
-  if (nativePort) return Promise.resolve();
-  if (nativeConnectionAttempt) return nativeConnectionAttempt;
-  nativeConnectionAttempt = establishNativeConnection().finally(() => { nativeConnectionAttempt = null; });
-  return nativeConnectionAttempt;
-}
-
-// Whether this browser currently holds a focused window. Reported in the hello so a browser that is
-// already in front is routable at once. Connecting is not attention on its own.
-async function holdsFocusedWindow() {
-  try {
-    const window = await chrome.windows.getLastFocused();
-    return Boolean(window?.focused);
-  } catch (_error) {
-    return false;
+// The local state the hello names is made once, before the first hello.
+async function readyForHello() {
+  if (!browserId) {
+    await initializeLocalState();
+    resumeControlledTabs().catch(recordError);
   }
+  return { browserId, life };
 }
 
-// The browser engine's full version: informational for the service, never a routing key.
-async function engineVersion() {
-  try {
-    const high = await navigator.userAgentData?.getHighEntropyValues?.(["fullVersionList"]);
-    const entries = Array.isArray(high?.fullVersionList) ? high.fullVersionList : [];
-    const named = entries.find((entry) => entry?.brand === ENGINE_BRAND)
-      ?? entries.find((entry) => typeof entry?.brand === "string" && !PLACEHOLDER_BRAND.test(entry.brand));
-    if (ENGINE_VERSION.test(named?.version)) return named.version;
-  } catch (_error) { /* the user-agent string answers instead */ }
-  return ENGINE_USER_AGENT.exec(navigator.userAgent ?? "")?.[1];
-}
-
-// Everything asynchronous happens before the port opens, so the hello is the first frame on it.
-async function establishNativeConnection() {
-  const attempt = ++connectionAttemptNumber;
-  let stage = "initialize";
-  try {
-    if (!browserId) {
-      await initializeLocalState();
-      resumeControlledTabs().catch(recordError);
-    }
-    if (nativePort) return;
-    stage = "attention";
-    const attended = await holdsFocusedWindow();
-    const engine = await engineVersion();
-    if (nativePort) return;
-    stage = "connect_native";
-    const port = chrome.runtime.connectNative(protocol.NATIVE_HOST_NAME);
-    connectionLog.record(connectionEvents.NATIVE_PORT_OPENED, { attempt });
-    nativePort = port;
-    backendLost = false;
-    port.onMessage.addListener((frame) => {
-      onNativeMessage(frame, port).catch(recordError);
-    });
-    port.onDisconnect.addListener(() => onPortClosed(port, attempt));
-    stage = "hello";
-    send({
-      kind: FRAME.HELLO,
-      protocol: protocol.PROTOCOL,
-      browser_id: browserId,
-      life: life ?? undefined,
-      browser_name: shared.browserName(navigator.userAgentData?.brands) ?? undefined,
-      platform: protocol.PLATFORM,
-      engine_version: engine,
-      adapter_version: manifest.version,
-      attended
-    });
-    connectionLog.record(connectionEvents.NATIVE_HELLO_SENT, { attempt, browser_id: browserId });
-    clearRetryTimer();
-    chrome.alarms.clear(RECONNECT_ALARM).catch(() => {});
-    awaitHelloAnswer();
-  } catch (error) {
-    nativePort = null;
-    setConnection({ connected: false, last_error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
-    connectionLog.record(connectionEvents.CONNECT_FAILED, { attempt, stage, error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
-    failedConnection(error?.message);
-    scheduleRetry(attempt);
-  }
-}
-
-// The wait for the service to answer a hello starts with the first hello and ends when a hello_accepted
-// arrives, or when the browser relay says no service is there at all (a backend_unavailable whose
-// service is absent), which reads as not connected. Nothing else ends it: the service closing the
-// socket, a bare backend_unavailable and the port being replaced do not, because a 1.3.x service answers
-// a protocol 4 hello that way, again and again, and never accepts it.
-function awaitHelloAnswer() {
-  if (helloUnanswered) return;
-  helloUnanswered = true;
-  helloTimer = setTimeout(onHelloTimeout, protocol.HELLO_TIMEOUT_MS);
-}
-
-function endHelloWait() {
-  helloUnanswered = false;
-  if (helloTimer) clearTimeout(helloTimer);
-  helloTimer = null;
-}
-
-// A service that has not accepted the hello in time is one this extension cannot work with.
-function onHelloTimeout() {
-  helloTimer = null;
-  settleWelcome(FIRST_CONNECTION.OTHER);
-  setConnection({ connected: false, compatible: false, service_outdated: true });
-}
-
-// The service refused this extension's hello because it does not speak the service's protocol. The
-// link says to update Ghostlight in Browser until a later hello is accepted, and the reconnect after
-// the browser relay exits waits for the delayed retry instead of restarting the native host at once.
-function adapterRefused(message) {
-  connectionLog.record(connectionEvents.ADAPTER_REFUSED);
-  endHelloWait();
-  settleWelcome(FIRST_CONNECTION.OTHER);
-  const refusal = shared.bounded(message, ERROR_CHARS);
-  setConnection({
-    connected: false,
-    compatible: false,
-    service_outdated: false,
-    adapter_outdated: true,
-    adapter_refusal: refusal === "" ? null : refusal
-  });
-}
-
-function clearRetryTimer() {
-  if (retryTimer) clearTimeout(retryTimer);
-  retryTimer = null;
-}
-
-function scheduleRetry(attempt) {
-  if (!retryTimer) {
-    retryTimer = setTimeout(() => {
-      retryTimer = null;
-      if (!nativePort) connectNative("retry_timer");
-    }, RECONNECT_DELAY_MS);
-  }
-  Promise.resolve().then(() => chrome.alarms.create(RECONNECT_ALARM, { delayInMinutes: RECONNECT_ALARM_MINUTES }))
-    .then(() => chrome.alarms.get(RECONNECT_ALARM))
-    .then((alarm) => connectionLog.record(connectionEvents.RETRY_SCHEDULED, { attempt, scheduled_time: alarm?.scheduledTime ?? 0 }))
-    .catch((error) => connectionLog.record(connectionEvents.RETRY_FAILED, { attempt, error: shared.bounded(error?.message ?? error, ERROR_CHARS) }));
-}
-
-// The port is gone. In-flight primitives are cancelled and their receipts dropped, pages are told the
-// service is away, and the connection comes back at once when the connector left on purpose after it
-// said the service was unavailable, else after a short delay. A service that refused this extension
-// as outdated would refuse it again, so that case always takes the delay.
-function onPortClosed(port, attempt, reason = chrome.runtime.lastError?.message || NATIVE_ENDED) {
-  if (nativePort !== port) return;
-  nativePort = null;
-  const orderly = backendLost;
-  backendLost = false;
-  connectionLog.record(connectionEvents.NATIVE_DISCONNECTED, { attempt, error: reason });
-  failedConnection(reason);
-  setConnection({ connected: false, last_error: reason });
-  settleServiceBoundaryState().catch(recordError);
-  broadcastAmbient();
-  if (orderly && !liveState.adapter_outdated) connectNative("service_returned");
-  else scheduleRetry(attempt);
-}
-
-// The port is closed from this side, which Chrome does not report back as a disconnect.
-function closePort(port, reason) {
-  try {
-    port.disconnect();
-  } catch (_error) { /* a port that is already gone needs no closing */ }
-  onPortClosed(port, connectionAttemptNumber, reason);
-}
+const link = globalThis.GhostlightLink.create({
+  chromeApi: chrome,
+  navigatorApi: navigator,
+  manifest,
+  log: connectionLog,
+  events: connectionEvents,
+  ready: readyForHello,
+  onFrame: onNativeMessage,
+  onClosed: () => {
+    settleServiceBoundaryState().catch(recordError);
+    broadcastAmbient();
+  },
+  setConnection,
+  adapterOutdated: () => liveState.adapter_outdated
+});
 
 // What must not outlive the service it belonged to: work in flight, partial transfers, focus
 // emulation, recordings and diagnostics.
@@ -549,9 +359,7 @@ async function releaseManagedTabs() {
 }
 
 async function serviceLost(message, absent = false) {
-  connectionLog.record(connectionEvents.BACKEND_UNAVAILABLE);
-  backendLost = true;
-  if (absent) endHelloWait();
+  link.serviceLost(absent);
   setConnection({
     connected: false,
     last_error: message,
@@ -564,7 +372,7 @@ async function serviceLost(message, absent = false) {
 // ---- frame router -------------------------------------------------------------------------------
 
 async function onNativeMessage(frame, port) {
-  if (port !== nativePort) return;
+  if (!link.isCurrent(port)) return;
   switch (frame?.kind) {
     case FRAME.HEARTBEAT: {
       const acknowledgement = shared.heartbeatAcknowledgement(frame);
@@ -575,7 +383,7 @@ async function onNativeMessage(frame, port) {
       return accept(frame, port);
     case FRAME.COMMAND_CHUNK:
       await negotiation;
-      if (port !== nativePort) return;
+      if (!link.isCurrent(port)) return;
       commandChunks.accept(
         frame,
         (request) => { onNativeMessage(request, port).catch(recordError); },
@@ -595,14 +403,14 @@ async function onNativeMessage(frame, port) {
     case FRAME.CONTROL_STATE: {
       await negotiation;
       const state = controlStateOf(frame.state);
-      if (port === nativePort && state) await applyRuntimeState(state);
+      if (link.isCurrent(port) && state) await applyRuntimeState(state);
       return;
     }
     case FRAME.BACKEND_UNAVAILABLE:
       return serviceLost(SERVICE_UNAVAILABLE, frame[BACKEND_SERVICE_FIELD] === BACKEND_SERVICE_ABSENT);
     case FRAME.ERROR:
-      if (frame.code === shared.ADAPTER_INCOMPATIBLE) return adapterRefused(frame.message);
-      setConnection({ last_error: shared.bounded(frame.message, ERROR_CHARS) });
+      if (frame.code === shared.ADAPTER_INCOMPATIBLE) return link.refused(frame.message);
+      setConnection({ last_error: errorText(frame.message) });
       return;
     default:
       return;
@@ -613,33 +421,32 @@ async function onNativeMessage(frame, port) {
 // page code. It gets exactly one receipt, from the dispatcher.
 async function runRequest(frame, port) {
   await negotiation;
-  if (port !== nativePort || typeof frame.correlation !== "string") return;
+  if (!link.isCurrent(port) || typeof frame.correlation !== "string") return;
   await primitives.run(frame.correlation, frame.primitive);
 }
 
 function accept(frame, port) {
-  endHelloWait();
-  settleWelcome(FIRST_CONNECTION.ACCEPTED);
+  link.accepted();
   negotiation = negotiation.then(() => negotiate(frame, port)).catch(recordError);
   return negotiation;
 }
 
 async function negotiate(frame, port) {
-  if (port !== nativePort) return;
+  if (!link.isCurrent(port)) return;
   if (!(await world.setAssets(frame.assets))) {
     setConnection({ compatible: false });
-    closePort(port, ASSETS_REJECTED);
+    link.close(port, ASSETS_REJECTED);
     return;
   }
-  if (port !== nativePort) return;
+  if (!link.isCurrent(port)) return;
   if (frame.service_epoch !== serviceEpoch) {
     await settleServiceBoundaryState();
     await releaseManagedTabs();
     serviceEpoch = frame.service_epoch;
     await chrome.storage.session.set({ [SERVICE_EPOCH_KEY]: serviceEpoch }).catch(() => {});
-    if (port !== nativePort) return;
+    if (!link.isCurrent(port)) return;
   }
-  backendLost = false;
+  link.serviceBack();
   connectionLog.record(connectionEvents.HELLO_ACCEPTED, { service_version: frame.service_version });
   setConnection({
     connected: true,
@@ -673,7 +480,7 @@ async function applyRuntimeState(state) {
 }
 
 function requestRuntimeControl(intent) {
-  if (!nativePort) throw new Error("Ghostlight service is disconnected.");
+  if (!link.open()) throw new Error(SERVICE_DISCONNECTED);
   if (!protocol.isKnown("runtime_control_intents", intent)) throw new Error("Unknown runtime control intent.");
   sendEvent({ event: EVENT.RUNTIME_CONTROL_REQUESTED, intent });
 }
@@ -681,7 +488,7 @@ function requestRuntimeControl(intent) {
 // Asks the service to bring Ghostlight forward for a person in an extension page. Best effort: the
 // service may have nothing to show, and that is never an error.
 function requestShow() {
-  if (!nativePort || !liveState.connected || !liveState.compatible) throw new Error("Ghostlight service is disconnected.");
+  if (!link.open() || !liveState.connected || !liveState.compatible) throw new Error(SERVICE_DISCONNECTED);
   sendEvent({ event: EVENT.SHOW_REQUESTED });
 }
 
@@ -696,23 +503,17 @@ async function releaseDebuggerSessions() {
 
 chrome.runtime.onInstalled.addListener((details) => {
   connectionLog.record(connectionEvents.EXTENSION_INSTALLED, { trigger: details?.reason });
-  connectNative("installed");
+  link.connect("installed");
   if (details?.reason !== "install") return;
-  welcomePending = true;
-  if (firstConnection) settleWelcome(firstConnection);
+  link.expectWelcome();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   connectionLog.record(connectionEvents.BROWSER_STARTED);
-  connectNative("browser_startup");
+  link.connect("browser_startup");
 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== RECONNECT_ALARM) return;
-  clearRetryTimer();
-  connectionLog.record(connectionEvents.ALARM_FIRED, { scheduled_time: alarm.scheduledTime });
-  connectNative("alarm");
-});
+chrome.alarms.onAlarm.addListener((alarm) => link.alarmed(alarm));
 
 chrome.commands.onCommand.addListener((command) => {
   if (command !== globalThis.GhostlightMessages.COMMAND.TOGGLE_HOLD) return;
@@ -849,8 +650,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.target === globalThis.GhostlightMessages.OFFSCREEN.TARGET) return false;
   handleUiMessage(message, sender)
     .then((value) => sendResponse({ ok: true, value }))
-    .catch((error) => sendResponse({ ok: false, error: shared.bounded(error?.message ?? error, ERROR_CHARS) }));
+    .catch((error) => sendResponse({ ok: false, error: errorText(error) }));
   return true;
 });
 
-connectNative();
+link.connect();

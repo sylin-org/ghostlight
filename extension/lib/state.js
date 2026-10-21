@@ -81,6 +81,7 @@
     DEBUG_KEY,
     PRESERVE_TABS_KEY,
     DEFAULT_PREFERENCES,
+    BADGE_RECORDING,
     BADGE_TEXT_COLOR,
     newBrowserId,
     newLife,

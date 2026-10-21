@@ -107,7 +107,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | landed (this commit) |
 | EXT-13 | refactor(extension): `script-evaluator.js` folds into `evaluate.js` | - | EXT-13 | landed (this commit) |
 | EXT-14 | refactor(extension): `withLease` and `withHidden` | - | EXT-14 | landed (this commit) |
-| EXT-12 | refactor(extension): the native link moves into `lib/link.js` | EXT-5, EXT-7, EXT-10 | EXT-12 | todo |
+| EXT-12 | refactor(extension): the native link moves into `lib/link.js` | EXT-5, EXT-7, EXT-10 | EXT-12 | landed (this commit) |
 | EXT-15 | docs(extension): module docs, and the README lists every file | - | EXT-15; the README is not packaged | landed (this commit) |
 | P-D3 | feat(extension): a group's title is the ghost and the agent's name, and a 2.0.0 group is retitled | - | the owner's request of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `language/provenance.rs` | landed (this commit) |
 | P-D4 | fix(extension): a text limit counts characters, as the service does | - | found while doing P-D3 (Notes); the coordinator | landed (this commit) |
@@ -398,3 +398,16 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   dialog and accessibility handlers stay in `primitives.js`, as the verdict found no module that
   owns their CDP calls. No receipt changes; the freeze record is regenerated (a test-02 package
   line).
+- EXT-12: `lib/link.js` holds the native link's state machine in one state object: the port, the
+  connection attempt, the hello and the wait for its answer, the retry timer and the reconnect
+  alarm, the backend-lost flag, the welcome page an install opens once, and the hello's engine and
+  brand reading. Nine of the worker's top-level bindings go with it. The worker keeps the wiring:
+  its local state (browser id, life, preferences, service epoch), the frame router, the
+  negotiation and runtime control, and the Chrome listeners, and it calls the link (`connect`,
+  `send`, `accepted`, `refused`, `serviceLost`, `serviceBack`, `close`, `isCurrent`, `open`,
+  `alarmed`, `expectWelcome`). The router stays in the worker, the router the worker's header
+  names, since it reaches a dozen modules the link need not know. Also gone: the five copies of the
+  error bound (`link.errorText`), the two copies of "Ghostlight service is disconnected.", and
+  the badge red, now `lib/state.js`'s `BADGE_RECORDING`. `worker.js` goes from 856 to 657 lines.
+  The worker tests drive it through the port, the listeners and the message channel, and all 553
+  extension tests pass unchanged; the freeze record is regenerated, with `lib/link.js` in it.
