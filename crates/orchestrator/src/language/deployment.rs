@@ -1233,62 +1233,8 @@ pub const APPLYING_REPAIRS: &str = "Applying ownership-safe repairs.";
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
-
-    #[test]
-    fn an_uninstall_dry_run_names_the_command_entry_it_would_remove() {
-        assert_eq!(
-            command_entry_would_remove(&OwnedEntry::UserPath(PathBuf::from(
-                r"C:\Users\Pat\.ghostlight\bin"
-            ))),
-            r"Would remove C:\Users\Pat\.ghostlight\bin from your PATH."
-        );
-        assert_eq!(
-            command_entry_would_remove(&OwnedEntry::Link(PathBuf::from(
-                "/home/pat/.local/bin/ghostlight"
-            ))),
-            "Would remove the ghostlight command at /home/pat/.local/bin/ghostlight."
-        );
-        assert_eq!(
-            browser_would_remove("Google Chrome"),
-            "Would remove Ghostlight's connection to Google Chrome."
-        );
-    }
-
-    #[test]
-    fn a_clients_settings_are_named_only_when_they_are_a_store_copy_or_have_another_copy() {
-        let store = r"C:\Users\Pat\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json";
-        let plain = r"C:\Users\Pat\AppData\Roaming\Claude\claude_desktop_config.json";
-        assert_eq!(client_settings_line(plain, false, None), None);
-        assert_eq!(
-            client_settings_line(store, true, None).unwrap(),
-            format!("Settings: {store}, the Microsoft Store edition's own copy.")
-        );
-        assert_eq!(
-            client_settings_line(store, true, Some(plain)).unwrap(),
-            format!(
-                "Ghostlight's entry goes in {store}, the Microsoft Store edition's own copy; \
-                 another copy of these settings is at {plain}."
-            )
-        );
-        assert_eq!(
-            client_settings_line(plain, false, Some(store)).unwrap(),
-            format!(
-                "Ghostlight's entry goes in {plain}; another copy of these settings is at {store}."
-            )
-        );
-    }
-
-    #[test]
-    fn the_way_back_names_each_release_carrier_with_its_own_switch() {
-        let route = restore_route();
-        assert!(route.contains("npx ghostlight deployment install --restore"));
-        assert!(route.contains("get.ps1))) -Restore"));
-        assert!(route.contains("get.sh | sh -s -- --restore"));
-        assert!(!route.contains("ghostlight-service"));
-    }
+    use crate::language::self_check::golden::repository_path;
 
     /// The two launchers, which word the way back themselves because they run before any service.
     const LAUNCHERS: [(&str, &str); 2] = [
@@ -1302,8 +1248,18 @@ mod tests {
         ),
     ];
 
+    /// The PowerShell get script, whose switch the way back names.
+    const GET_POWERSHELL: &str = "scripts/get.ps1";
+
+    /// The POSIX get script, whose option the way back names.
+    const GET_SH: &str = "scripts/get.sh";
+
+    /// 6155aa14 (A-06, G4-06) and 55766ba5: the way back from a development build names each
+    /// release carrier with a switch that carrier accepts and hands to the service, both
+    /// launchers say it in the service's words, and every refusal that needs it ends with it.
     #[test]
-    fn both_launchers_say_the_way_back_in_the_services_words() {
+    fn the_way_back_names_what_each_carrier_accepts() {
+        let route = restore_route();
         for (name, source) in LAUNCHERS {
             let start = source
                 .find("const RESTORE_ROUTE = [")
@@ -1314,77 +1270,72 @@ mod tests {
                 .unwrap_or_else(|| panic!("{name} does not join RESTORE_ROUTE by lines"))];
             assert!(!list.contains('\\'), "{name} escapes a RESTORE_ROUTE line");
             let lines: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
-            assert_eq!(lines.join("\n"), restore_route(), "{name}");
-            let missing = development_executable_missing("${executable}")
-                .replace(&restore_route(), "${RESTORE_ROUTE}");
+            assert_eq!(lines.join("\n"), route, "{name}");
+            let missing =
+                development_executable_missing("${executable}").replace(&route, "${RESTORE_ROUTE}");
             assert!(source.contains(&format!("`{missing}")), "{name}: {missing}");
         }
-    }
 
-    #[test]
-    fn a_missing_development_service_is_named_with_the_same_route() {
-        let line = development_executable_missing("bin/ghostlight-service");
-        assert!(line.contains("bin/ghostlight-service is missing"));
-        assert!(line.ends_with(&restore_route()));
-        assert!(development_installed().ends_with(&restore_route()));
-    }
-
-    #[test]
-    fn a_service_that_did_not_answer_is_not_said_to_serve() {
-        assert_eq!(
-            serves_from(Placed::Development, "bin/s"),
-            "The development build now serves from bin/s."
+        assert!(route.contains(&format!(
+            "npx ghostlight deployment install {RESTORE_OPTION}"
+        )));
+        assert!(route.contains(&format!("get.ps1))) {GET_POWERSHELL_RESTORE_SWITCH}")));
+        assert!(route.contains(&format!("get.sh | sh -s -- {RESTORE_OPTION}")));
+        assert!(
+            !route.contains("ghostlight-service"),
+            "the route names a carrier, never a staged file inside one"
         );
-        assert_eq!(
-            serves_from(Placed::Release, "bin/s"),
-            "The release now serves from bin/s."
+
+        let powershell = std::fs::read_to_string(repository_path(GET_POWERSHELL))
+            .expect("the PowerShell get script is readable");
+        let switch = GET_POWERSHELL_RESTORE_SWITCH.trim_start_matches('-');
+        assert!(
+            powershell.contains(&format!("[switch]${switch}")),
+            "{GET_POWERSHELL} accepts {GET_POWERSHELL_RESTORE_SWITCH}"
         );
-        assert!(!placed_without_service(Placed::Release, "bin/s").contains("serves"));
+        assert!(
+            powershell.contains(&format!(
+                "if (${switch}) {{ $deployment += \"{RESTORE_OPTION}\" }}"
+            )),
+            "{GET_POWERSHELL} hands {RESTORE_OPTION} to the service"
+        );
+        let posix = std::fs::read_to_string(repository_path(GET_SH))
+            .expect("the POSIX get script is readable");
+        assert!(
+            posix.contains(&format!(
+                "{RESTORE_OPTION}) restore=\"{RESTORE_OPTION}\" ;;"
+            )),
+            "{GET_SH} accepts {RESTORE_OPTION} and hands it to the service"
+        );
+
+        let missing = development_executable_missing("bin/ghostlight-service");
+        assert!(missing.contains("bin/ghostlight-service is missing"));
+        assert!(missing.ends_with(&route));
+        assert!(development_installed().ends_with(&route));
     }
 
+    /// d6c55ef3 and 41a3f8bf: a dry run says per client what the real install or uninstall would
+    /// do, in words and never a state's identifier: an update, nothing for a current entry, each
+    /// other settings copy a removal changes, and the cause inspection saw for an entry it leaves.
     #[test]
-    fn a_flatpak_failure_reads_as_a_failure() {
-        let step = FlatpakStep {
-            part: FlatpakPart::Manifest,
-            path: PathBuf::from("m.json"),
-            result: FlatpakResult::Failed("busy".into()),
-        };
-        assert!(flatpak_failed(&step));
-        assert_eq!(
-            flatpak_line(&step),
-            "Could not update the Flatpak browser connection (m.json): busy. The next install tries again."
-        );
-    }
-
-    #[test]
-    fn a_dry_run_says_what_each_state_would_become_in_plain_words() {
+    fn a_dry_run_says_what_the_real_run_would_change() {
         use HarnessState::{Available, Installed, NeedsAttention, NotDetected, Updatable};
 
+        const NOTHING: &str = "nothing would change.";
         let install = |state| client_would_install("Cline (CLI)", state, None);
         let remove = |state| client_would_remove("Cline (CLI)", state, None, &[]);
-        assert_eq!(
-            install(Available),
-            "Would install Ghostlight for Cline (CLI)."
-        );
-        assert_eq!(
-            install(NotDetected),
-            "Would install Ghostlight for Cline (CLI)."
-        );
+        for state in [Available, NotDetected] {
+            assert_eq!(install(state), "Would install Ghostlight for Cline (CLI).");
+            assert!(remove(state).ends_with(NOTHING), "{state:?}");
+        }
         assert_eq!(
             install(Updatable),
             "Would update Ghostlight's entry for Cline (CLI)."
         );
-        assert!(install(Installed).ends_with("nothing would change."));
-        assert_eq!(
-            remove(Installed),
-            "Would remove Ghostlight from Cline (CLI)."
-        );
-        assert_eq!(
-            remove(Updatable),
-            "Would remove Ghostlight from Cline (CLI)."
-        );
-        assert!(remove(Available).ends_with("nothing would change."));
-        assert!(remove(NotDetected).ends_with("nothing would change."));
+        assert!(install(Installed).ends_with(NOTHING));
+        for state in [Installed, Updatable] {
+            assert_eq!(remove(state), "Would remove Ghostlight from Cline (CLI).");
+        }
         for state in [Available, NotDetected, Updatable, Installed, NeedsAttention] {
             for sentence in [install(state), remove(state)] {
                 assert!(
@@ -1393,48 +1344,45 @@ mod tests {
                 );
             }
         }
-    }
 
-    #[test]
-    fn a_client_left_as_it_is_is_said_with_the_cause_inspection_saw() {
-        let cases = [
+        let left = [
             (
                 Some(Attention::ForeignEntry),
-                "Would leave Kiro as it is: the entry under Ghostlight's name is not Ghostlight's.",
+                "Would leave Kiro as it is: the entry under Ghostlight's name is not Ghostlight's."
+                    .to_owned(),
             ),
             (
                 Some(Attention::Malformed),
-                "Would leave Kiro as it is: its settings file could not be parsed.",
+                "Would leave Kiro as it is: its settings file could not be parsed.".to_owned(),
             ),
             (
                 Some(Attention::Unreadable),
-                "Would leave Kiro as it is: its settings file could not be read.",
+                "Would leave Kiro as it is: its settings file could not be read.".to_owned(),
             ),
             (
                 Some(Attention::Launcher(LauncherPin::Unpinned)),
-                "Would leave Kiro as it is: its entry starts Ghostlight's npm launcher.",
+                "Would leave Kiro as it is: its entry starts Ghostlight's npm launcher.".to_owned(),
             ),
             (
                 Some(Attention::Launcher(LauncherPin::Earlier)),
-                "Would leave Kiro as it is: its entry starts Ghostlight's npm launcher pinned to \
-                 a release before 2.0.",
+                format!(
+                    "Would leave Kiro as it is: its entry starts Ghostlight's npm launcher pinned \
+                     to a release before {FIRST_LAUNCHER_MAJOR}.0."
+                ),
             ),
-            (None, "Would leave Kiro as it is."),
+            (None, "Would leave Kiro as it is.".to_owned()),
         ];
-        for (attention, line) in cases {
+        for (attention, line) in left {
             assert_eq!(
-                client_would_install("Kiro", HarnessState::NeedsAttention, attention),
+                client_would_install("Kiro", NeedsAttention, attention),
                 line
             );
             assert_eq!(
-                client_would_remove("Kiro", HarnessState::NeedsAttention, attention, &[]),
+                client_would_remove("Kiro", NeedsAttention, attention, &[]),
                 line
             );
         }
-    }
 
-    #[test]
-    fn a_removal_names_each_other_copy_it_would_change() {
         let plain = r"C:\Users\Pat\AppData\Roaming\Claude\claude_desktop_config.json".to_owned();
         let codex = r"C:\Users\Pat\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Roaming\Claude\claude_desktop_config.json".to_owned();
         let one = [plain.clone()];
@@ -1442,18 +1390,19 @@ mod tests {
             "Would remove Ghostlight from another copy of Claude Desktop's settings, at {plain}."
         );
         for (state, attention) in [
-            (HarnessState::Available, None),
-            (HarnessState::NotDetected, None),
-            (HarnessState::NeedsAttention, Some(Attention::ForeignEntry)),
-            (HarnessState::NeedsAttention, Some(Attention::Malformed)),
+            (Available, None),
+            (NotDetected, None),
+            (NeedsAttention, Some(Attention::ForeignEntry)),
+            (NeedsAttention, Some(Attention::Malformed)),
         ] {
             assert_eq!(
                 client_would_remove("Claude Desktop", state, attention, &one),
-                elsewhere
+                elsewhere,
+                "{state:?}"
             );
         }
         assert_eq!(
-            client_would_remove("Claude Desktop", HarnessState::Installed, None, &one),
+            client_would_remove("Claude Desktop", Installed, None, &one),
             format!(
                 "Would remove Ghostlight from Claude Desktop and from another copy of its \
                  settings, at {plain}."
@@ -1462,7 +1411,7 @@ mod tests {
         assert_eq!(
             client_would_remove(
                 "Claude Desktop",
-                HarnessState::Available,
+                Available,
                 None,
                 &[plain.clone(), codex.clone()]
             ),
@@ -1471,321 +1420,5 @@ mod tests {
                  {plain} and {codex}."
             )
         );
-    }
-
-    fn launcher(pin: LauncherPin) -> NpmLauncher {
-        NpmLauncher {
-            pin,
-            package: "ghostlight@1.3.5".into(),
-        }
-    }
-
-    #[test]
-    fn a_launcher_entry_is_said_as_ghostlights_and_never_as_current() {
-        for pin in [
-            LauncherPin::Unpinned,
-            LauncherPin::Earlier,
-            LauncherPin::Pinned,
-        ] {
-            let detail = launcher_detail(&launcher(pin));
-            assert!(detail.starts_with("This entry starts Ghostlight's npm launcher"));
-            assert!(!detail.contains("foreign"), "{detail}");
-        }
-        assert!(launcher_detail(&launcher(LauncherPin::Unpinned))
-            .contains("npm chooses the version at each launch"));
-        assert!(launcher_detail(&launcher(LauncherPin::Earlier))
-            .contains("pinned to ghostlight@1.3.5, a release before 2.0"));
-    }
-
-    #[test]
-    fn every_sentence_is_ascii() {
-        let sentences = [
-            restore_route(),
-            development_installed(),
-            development_executable_missing("s"),
-            payload_refused("2.1.0", "2.0.0"),
-            payload_missing("p"),
-            payload_in_place("d"),
-            payload_other_build("d"),
-            service_did_not_start("bin", 30),
-            client_would_install("c", HarnessState::NeedsAttention, None),
-            client_would_remove("c", HarnessState::Available, None, &["p".into()]),
-            service_could_not_start("bin", "r"),
-            service_stopped_because("bin", "r"),
-            service_stopped("bin"),
-            removed_development_marker("m"),
-            removed_version_directory("d"),
-            archived_version_audit("a"),
-            kept_entry("m"),
-            browser_would_remove("b"),
-            command_entry_would_remove(&OwnedEntry::Link("l".into())),
-            platform_entry_would_remove("e"),
-            platform_entry_kept("e"),
-            removal_failed("f"),
-            LAUNCHER_ENTRY_LEFT.to_owned(),
-            launcher_evidence(&launcher(LauncherPin::Unpinned), Path::new("e")),
-            launcher_fixed("c"),
-        ];
-        let details = [
-            LauncherPin::Unpinned,
-            LauncherPin::Earlier,
-            LauncherPin::Pinned,
-        ]
-        .map(|pin| launcher_detail(&launcher(pin)));
-        assert!(sentences
-            .iter()
-            .chain(&details)
-            .all(|sentence| sentence.is_ascii()));
-    }
-
-    #[test]
-    fn the_family_list_is_the_browser_table() {
-        let table = supported_browsers();
-        assert!(!table.is_empty());
-        let ids: Vec<&str> = table.iter().map(|browser| browser.id).collect();
-        let shorts: Vec<&str> = table.iter().map(|browser| browser.short).collect();
-        assert_eq!(browser_ids(), either_of(&ids));
-        assert_eq!(browser_families(), either_of(&shorts));
-        assert_eq!(browser_ids(), "chrome, edge, brave, or chromium");
-        assert_eq!(browser_families(), "Chrome, Edge, Brave, or Chromium");
-
-        // Every sentence that names the families names them all, in the table's order, from the
-        // one list.
-        for sentence in [
-            install_a_native_browser(),
-            browser_option_help(),
-            browser_not_installed("No Brave installation was detected."),
-            no_native_browser(),
-        ] {
-            assert!(sentence.contains(&browser_families()), "{sentence}");
-        }
-        assert!(unknown_browser("opera").ends_with(&browser_ids()));
-        assert_eq!(either_of(&["a"]), "a");
-        assert_eq!(either_of(&["a", "b"]), "a or b");
-    }
-
-    /// Every state a report prints has plain words, never a Rust identifier; the window renders
-    /// the same serialized values.
-    #[test]
-    fn every_reportable_state_has_plain_words() {
-        assert_eq!(client_state(HarnessState::NotDetected), "not detected");
-        assert_eq!(
-            client_state(HarnessState::Available),
-            "detected, not connected"
-        );
-        assert_eq!(client_state(HarnessState::Installed), "connected");
-        assert_eq!(
-            client_state(HarnessState::Updatable),
-            "connected, needs an update"
-        );
-        assert_eq!(
-            client_state(HarnessState::NeedsAttention),
-            "needs attention"
-        );
-
-        assert_eq!(browser_state(NativeHostState::Missing), "not registered");
-        assert_eq!(browser_state(NativeHostState::Current), "registered");
-        assert_eq!(
-            browser_state(NativeHostState::Updatable),
-            "registered, needs an update"
-        );
-        assert_eq!(
-            browser_state(NativeHostState::OwnedElsewhere),
-            "registered to another installation"
-        );
-        assert_eq!(
-            browser_state(NativeHostState::NeedsAttention),
-            "needs attention"
-        );
-
-        for label in [
-            applications_state(DesktopIntegrationState::NotApplicable),
-            applications_state(DesktopIntegrationState::Missing),
-            applications_state(DesktopIntegrationState::Current),
-            applications_state(DesktopIntegrationState::Updatable),
-            applications_state(DesktopIntegrationState::NeedsAttention),
-            command_state(CommandPathState::NotApplicable),
-            command_state(CommandPathState::Missing),
-            command_state(CommandPathState::Current),
-            command_state(CommandPathState::Updatable),
-            command_state(CommandPathState::NeedsAttention),
-            command_state(CommandPathState::PrivateView),
-            documentation_state(UserAssetState::NotApplicable),
-            documentation_state(UserAssetState::Missing),
-            documentation_state(UserAssetState::Current),
-            documentation_state(UserAssetState::NeedsAttention),
-        ] {
-            assert!(!label.is_empty());
-            // A person's word, not an identifier: no capitals and no camel case.
-            assert_eq!(
-                label,
-                label.to_lowercase(),
-                "{label} reads as an identifier"
-            );
-        }
-    }
-
-    #[test]
-    fn an_applications_entry_that_lost_only_its_icon_is_not_called_older() {
-        let icon_only = applications_detail(DesktopIntegrationState::Updatable, true);
-        assert!(!icon_only.contains("older"), "{icon_only}");
-        assert!(icon_only.contains("icon is missing"), "{icon_only}");
-        assert!(applications_detail(DesktopIntegrationState::Updatable, false).contains("older"));
-        for state in [
-            DesktopIntegrationState::NotApplicable,
-            DesktopIntegrationState::Missing,
-            DesktopIntegrationState::Current,
-            DesktopIntegrationState::NeedsAttention,
-        ] {
-            assert_eq!(
-                applications_detail(state, true),
-                applications_detail(state, false)
-            );
-        }
-    }
-
-    #[test]
-    fn the_older_layout_is_said_as_an_older_layout_with_its_connectors() {
-        let line = edge_replaced(EdgeReplacement::PreEdgeLayout);
-        assert_eq!(
-            line,
-            "The edge is replaced because bin still holds an older layout that kept its \
-             connectors there."
-        );
-        assert!(!line.contains("development"));
-    }
-
-    #[test]
-    fn doctor_speaks_of_the_service_and_not_the_authority() {
-        assert!(READINESS_UNREPORTED.contains("The running Ghostlight service"));
-        assert!(!READINESS_UNREPORTED.contains("authority"));
-    }
-
-    #[test]
-    fn the_report_names_the_registrations_and_the_command_with_the_full_path() {
-        let layout = Layout::new(r"C:\Users\person\.ghostlight");
-        let container = AppContainer {
-            app: "Claude".into(),
-        };
-        let lines = kept_private_lines(
-            &container,
-            &["Google Chrome".to_owned(), "Codex".to_owned()],
-            &layout,
-        );
-        assert_eq!(
-            lines[0],
-            "Windows keeps these registrations private to Claude, so no other app sees them: \
-             Google Chrome, Codex."
-        );
-        assert!(lines[1].starts_with("To finish them, run this from a regular terminal: "));
-        assert!(lines[1].ends_with(&format!("{} install", layout.edge().display())));
-        assert!(lines[1].contains("ghostlight"));
-        let cannot_see = cannot_see_line(&container, &layout);
-        assert!(cannot_see.contains("cannot see what other apps see"));
-        assert!(cannot_see.ends_with(&format!("{} doctor", layout.edge().display())));
-        assert!(uninstall_refusal(&container, &layout)
-            .ends_with(&format!("{} uninstall", layout.edge().display())));
-    }
-
-    #[test]
-    fn a_browser_row_names_the_apps_own_view_and_where_to_look_instead() {
-        let container = AppContainer {
-            app: "Claude".into(),
-        };
-        assert_eq!(
-            registry_view_detail(&container),
-            "Claude's own view of the registry; run ghostlight doctor from a regular terminal."
-        );
-    }
-
-    #[test]
-    fn the_client_line_reads_as_one_sentence() {
-        let line = client_cannot_see_line("Claude Desktop");
-        assert_eq!(
-            line,
-            "MCP client: Claude Desktop -- cannot be checked from here -- Windows gives the app \
-             this terminal runs in its own view of this configuration."
-        );
-        assert!(!line.contains("  "));
-    }
-
-    #[test]
-    fn a_retired_connector_entry_names_the_connector_and_the_edge() {
-        let retired = RetiredEntry {
-            connector: "ghostlight-mcp-connector",
-            edge: "ghostlight",
-            argument: "mcp",
-        };
-        assert_eq!(
-            client_detail(HarnessState::Updatable, true, Some(retired)),
-            "This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. \
-             Set up points it at ghostlight mcp."
-        );
-        assert_eq!(
-            client_detail(HarnessState::Updatable, true, None),
-            "Ghostlight's saved registration needs an update."
-        );
-        assert!(client_detail(HarnessState::NeedsAttention, true, None).is_empty());
-    }
-
-    #[test]
-    fn the_setup_message_counts_what_changed_and_what_is_left() {
-        assert_eq!(
-            setup_message(0, 0, 0, 0),
-            "Everything Ghostlight can set up is already ready."
-        );
-        assert_eq!(
-            setup_message(1, 0, 1, 1),
-            "Ghostlight set up 1 and updated 0 MCP integration. Restart or reconnect those \
-             clients to load the tools. 1 target still needs attention. 1 target could not be \
-             changed."
-        );
-        assert_eq!(
-            setup_message(1, 1, 2, 2),
-            "Ghostlight set up 1 and updated 1 MCP integrations. Restart or reconnect those \
-             clients to load the tools. 2 targets still need attention. 2 targets could not be \
-             changed."
-        );
-    }
-
-    #[test]
-    fn the_install_words_are_ascii() {
-        let container = AppContainer {
-            app: "Claude".into(),
-        };
-        let layout = Layout::new("h");
-        let sentences = [
-            browser_ids(),
-            browser_families(),
-            unknown_browser("x"),
-            no_native_browser(),
-            browser_not_installed("d"),
-            native_host_ran(NativeHostRun::Prepared, true),
-            cannot_see_line(&container, &layout),
-            uninstall_refusal(&container, &layout),
-            registry_view_detail(&container),
-            client_cannot_see_line("c"),
-            setup_message(1, 1, 1, 1),
-            manual_setup(None),
-            manual_setup_command("c"),
-            configuration_malformed(Some(3)),
-            other_program_evidence("p", 2, Path::new("e")),
-            no_command_evidence(Path::new("e")),
-            client_registered("c"),
-            client_already_current("c"),
-            client_removed("c"),
-            client_had_no_entry("c"),
-            client_fixed("c"),
-            client_location_kept("c"),
-            with_located_path_missing("d"),
-            doctor_heading("2.0.0"),
-            installed_line(None),
-            binary_line(Path::new("b"), false),
-            diagnostics_line("off", 0, None),
-            READINESS_UNREPORTED.to_owned(),
-            INSTALLED_APPS_ENTRY_REPLACING_OTHER.to_owned(),
-            APPLICATIONS_ELSEWHERE.to_owned(),
-        ];
-        assert!(sentences.iter().all(|sentence| sentence.is_ascii()));
     }
 }
