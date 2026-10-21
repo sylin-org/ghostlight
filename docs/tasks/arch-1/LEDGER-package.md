@@ -113,7 +113,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | P-D4 | fix(extension): a text limit counts characters, as the service does | - | found while doing P-D3 (Notes); the coordinator | landed (this commit) |
 | P-D5 | fix(browser): half an emoji in page text no longer drops the browser connection | - | the coordinator's live check of P-D4's note (Notes) | landed (this commit) |
 | P-D6 | fix(extension): no frame over the relay bound leaves the extension, and an oversized answer says so | P-D5; core-service S-D8 | test-02's answer to the coordinator's question, 2026-10-21 (Notes); cross-lane into the adapter's receipt words and `language/` | landed (this commit) |
-| B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | todo |
+| B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | landed (this commit) |
 
 ### Notes (second sweep)
 
@@ -411,3 +411,11 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   the badge red, now `lib/state.js`'s `BADGE_RECORDING`. `worker.js` goes from 856 to 657 lines.
   The worker tests drive it through the port, the listeners and the message channel, and all 553
   extension tests pass unchanged; the freeze record is regenerated, with `lib/link.js` in it.
+- B-final: the freeze record now names the release workflow's candidate, run 39669867246 on dev
+  341c7c24 (every job green, the install-from-bundle checks on Alpine and both Ubuntus included).
+  Its `chrome-extension` artifact, `ghostlight-extension-v2.0.1.zip`, has SHA-256
+  aaa234b18dad02d4835cf6785492107771c95f1c2551e2088616835f57f1d5da, the zip line of the record.
+  Every packaged file's hash equals the tree's, so only that line changed: the candidate packages
+  exactly what dev holds, P-D6, EXT-6 and EXT-12 included. This is the artifact a 2.0.1
+  submission uploads. Stopped here: cancelling the staged review and submitting are the owner's
+  go.
