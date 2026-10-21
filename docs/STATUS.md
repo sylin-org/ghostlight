@@ -238,9 +238,9 @@ Now:
   retitles a group 2.0.0 named rather than opening a second one (ADR-0098 amendment of
   2026-10-21). P-D3 changes three packaged extension files, so the next candidate carries it.
   The owner checked the tab strip on Windows on 2026-10-21 ("it's working beautifully"), and the
-  color ghost renders on CachyOS (KDE Wayland) and on Alpine, both with Noto Color Emoji; Bluefin and
-  leo-desktop-02 check theirs as their lanes start. Both Linux browsers run the store 2.0.0
-  extension, so the old group's rename was seen on neither. dev
+  color ghost renders on CachyOS (KDE Wayland), on Alpine (both with Noto Color Emoji) and on
+  Bluefin (GNOME Wayland, its default fonts); leo-desktop-02 is owed. The Linux browsers run 2.0.0
+  extensions, so the old group's rename was seen on none of them. dev
   73d5cc46 is deployed on the owner's machine and was checked live on the local 2.0.1 extension:
   the desk with its prompt and a held dialog, the three forms, diagnose and wait, history, a
   script, a screenshot and a kept close, plus P-D4 and P-D5. The morning's extension check had run
@@ -265,7 +265,10 @@ Now:
   Publishing is the owner's go.
 - Owed before the new 2.0.1 candidate: the changelog and `release/notes-v2.0.1.md` take the
   second sweep's user-visible fixes. About twenty landed after the changelog's last entry
-  (7cecdda7), and of those only P-D3, P-D4 and P-D5 wrote theirs.
+  (7cecdda7), and of those only P-D3, P-D4 and P-D5 wrote theirs. The notes also tell people that an
+  old "Ghostlight - <agent>" entry in the saved tab groups bar can be removed by hand: Chromium
+  saves a group still open when the browser exits, no extension API can rename or delete a saved
+  group, and test-02 found one beside the ghost group after a power-off.
 - Second sweep state after that night. core-language and adapter are done, and so is the policy
   lane. package: EXT-6, EXT-12 and B-final are next. core-work: W-D4 is next: after a Quit, closing
   a handle the Quit released says "That tab was already closed." while the tab stays open.
