@@ -18,162 +18,6 @@ use crate::browser::adapter::PhysicalSemantic;
 use crate::browser::{BrowserPort, BrowserSummary};
 use crate::governance::CapabilitySet;
 
-#[test]
-fn a_flow_record_keeps_its_own_admission_check() {
-    let (executor, _, _, workspace, audit) = fixture();
-    let result = executor.execute(
-        &workspace,
-        "browser_flow",
-        json!({"steps":[{"id":"policy","tool":"policy_explain","arguments":{}}]}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    let records = audit.0.lock().unwrap();
-    let tools: Vec<_> = records.iter().map(|record| record.tool.as_str()).collect();
-    assert_eq!(tools, ["policy_explain", "browser_flow"]);
-    for record in records.iter() {
-        let checks = &record.permissions.checks;
-        assert_eq!(checks.len(), 1, "{}: {checks:?}", record.tool);
-        assert_eq!(checks[0].requirements, CapabilitySet::EMPTY);
-        assert_eq!(checks[0].host, None);
-        assert!(checks[0].allowed);
-    }
-}
-
-#[test]
-fn each_flow_step_record_holds_only_its_own_checks_and_coverage() {
-    let path = policy_file(false);
-    let (executor, browser, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
-    open(&executor, &browser, &workspace);
-    browser.set_documents(7, inventory(true));
-    browser.push(Ok(BrowserOutcome::Text {
-        tab_id: 7,
-        text: "Permitted Sylin fixture content".into(),
-        title: "Page".into(),
-        url: "https://example.com/".into(),
-        truncated: false,
-    }));
-    browser.push(Ok(BrowserOutcome::Tabs {
-        tabs: vec![tab(7, "https://example.com/")],
-    }));
-    let result = executor.execute(
-        &workspace,
-        "browser_flow",
-        json!({"steps":[
-            {"id":"read","tool":"browser_read","arguments":{}},
-            {"id":"tabs","tool":"browser_tabs","arguments":{"action":"list"}}
-        ]}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    assert_eq!(
-        result
-            .summary
-            .matches("Content excluded by policy.")
-            .count(),
-        1,
-        "the flow's summary is qualified once: {}",
-        result.summary
-    );
-    let records = audit.0.lock().unwrap();
-    let tools: Vec<_> = records.iter().map(|record| record.tool.as_str()).collect();
-    assert_eq!(
-        tools,
-        [
-            "browser_navigate",
-            "browser_read",
-            "browser_tabs",
-            "browser_flow"
-        ]
-    );
-    let (read, tabs, flow) = (&records[1], &records[2], &records[3]);
-    assert_eq!(
-        read.coverage
-            .as_ref()
-            .map(|coverage| coverage.excluded_documents),
-        Some(1)
-    );
-    assert!(read
-        .permissions
-        .checks
-        .iter()
-        .any(|check| check.host.as_deref() == Some("example.com")));
-    assert_eq!(tabs.coverage, None);
-    assert!(
-        tabs.permissions
-            .checks
-            .iter()
-            .all(|check| check.host.is_none()),
-        "the tabs step holds none of the read's checks: {:?}",
-        tabs.permissions.checks
-    );
-    assert_eq!(flow.coverage, None);
-    assert_eq!(flow.permissions.checks.len(), 1);
-    assert_eq!(
-        flow.permissions.checks[0].requirements,
-        CapabilitySet::EMPTY
-    );
-}
-
-#[test]
-fn a_flow_record_names_the_browser_its_last_step_reached() {
-    let (executor, browser, workspaces, workspace, audit) = fixture();
-    // The session holds a tab, so its list asks the browser.
-    workspaces
-        .acquire(&workspace)
-        .unwrap()
-        .add_tab(FAKE_BROWSER, &tab(7, "https://example.com/"))
-        .unwrap();
-    browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
-    let result = executor.execute(
-        &workspace,
-        "browser_flow",
-        json!({"on_error":"continue","steps":[
-            {"id":"before","tool":"policy_explain","arguments":{}},
-            {"id":"tabs","tool":"browser_tabs","arguments":{"action":"list"}},
-            {"id":"after","tool":"policy_explain","arguments":{}}
-        ]}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-    let named: Vec<_> = audit
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|record| (record.tool.clone(), record.browser.clone()))
-        .collect();
-    let fake = Some(summary(FAKE_BROWSER, true).display_name());
-    assert_eq!(
-        named,
-        [
-            ("policy_explain".to_owned(), None),
-            ("browser_tabs".to_owned(), fake.clone()),
-            ("policy_explain".to_owned(), None),
-            ("browser_flow".to_owned(), fake),
-        ]
-    );
-}
-
-#[test]
-fn an_invalid_request_records_no_capabilities() {
-    let (executor, browser, _, workspace, audit) = fixture();
-    let refused = executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"nonsense":true}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(refused.facts["reason"], "invalid_input");
-    assert!(browser.calls().is_empty());
-    let records = audit.0.lock().unwrap();
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].capabilities, CapabilitySet::EMPTY);
-    assert!(records[0].permissions.checks.is_empty());
-    assert_eq!(records[0].browser, None);
-}
-
 /// A fake browser that holds the first scoped read until the test lets it go, so a second call
 /// can run in the same workspace while the read is in flight.
 struct HeldRead {
@@ -205,8 +49,126 @@ impl BrowserPort for HeldRead {
     }
 }
 
+/// The result of the step at `index` of a flow's result.
+fn step_result(flow: &crate::work::result::InvocationResult, index: usize) -> &Value {
+    &flow.facts["steps"][index]["result"]
+}
+
+/// ADR-0202 Decisions 9-13 (77952a37, b0436754): each audit record holds only what its own frame
+/// reached.
+///
+/// - A flow's record keeps its own admission check, and each step's record holds only its own
+///   checks and coverage; the flow's summary is qualified once.
+/// - A flow's record names the browser its last browser step reached; a step that reached none
+///   names none.
+/// - An invalid request records no capability, no check and no browser.
+/// - Two calls running at once in one workspace keep their own coverage, browser and checks.
 #[test]
-fn two_calls_in_one_workspace_keep_their_own_findings() {
+fn each_record_holds_only_what_its_own_frame_reached() {
+    // A flow and each of its steps.
+    let path = policy_file(false);
+    let (executor, browser, _, workspace, audit) =
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
+    open(&executor, &browser, &workspace);
+    browser.set_documents(7, inventory(true));
+    browser.push(Ok(BrowserOutcome::Text {
+        tab_id: 7,
+        text: "Permitted Sylin fixture content".into(),
+        title: "Page".into(),
+        url: "https://example.com/".into(),
+        truncated: false,
+    }));
+    browser.push(Ok(BrowserOutcome::Tabs {
+        tabs: vec![tab(7, "https://example.com/")],
+    }));
+    let result = executor.execute(
+        &workspace,
+        "browser_flow",
+        json!({"steps":[
+            {"id":"read","tool":"browser_read","arguments":{}},
+            {"id":"tabs","tool":"browser_tabs","arguments":{"action":"list"}},
+            {"id":"policy","tool":"policy_explain","arguments":{}}
+        ]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    let read_alone = {
+        let coverage = audit.0.lock().unwrap()[1].coverage.clone().unwrap();
+        crate::language::coverage::qualify("", &coverage)
+    };
+    assert_eq!(
+        result.summary.matches(read_alone.trim()).count(),
+        1,
+        "the flow's summary is qualified once: {}",
+        result.summary
+    );
+    {
+        let records = audit.0.lock().unwrap();
+        let named: Vec<_> = records
+            .iter()
+            .map(|record| (record.tool.as_str(), record.browser.clone()))
+            .collect();
+        let fake = Some(summary(FAKE_BROWSER, true).display_name());
+        assert_eq!(
+            named,
+            [
+                ("browser_navigate", fake.clone()),
+                ("browser_read", fake.clone()),
+                ("browser_tabs", fake.clone()),
+                ("policy_explain", None),
+                ("browser_flow", fake),
+            ]
+        );
+        let (read, tabs, explain, flow) = (&records[1], &records[2], &records[3], &records[4]);
+        assert_eq!(
+            read.coverage
+                .as_ref()
+                .map(|coverage| coverage.excluded_documents),
+            Some(1)
+        );
+        assert!(read
+            .permissions
+            .checks
+            .iter()
+            .any(|check| check.host.as_deref() == Some("example.com")));
+        assert_eq!(tabs.coverage, None);
+        assert!(
+            tabs.permissions
+                .checks
+                .iter()
+                .all(|check| check.host.is_none()),
+            "the tabs step holds none of the read's checks: {:?}",
+            tabs.permissions.checks
+        );
+        for own in [explain, flow] {
+            assert_eq!(own.coverage, None, "{}", own.tool);
+            let checks = &own.permissions.checks;
+            assert_eq!(checks.len(), 1, "{}: {checks:?}", own.tool);
+            assert_eq!(checks[0].requirements, CapabilitySet::EMPTY);
+            assert_eq!(checks[0].host, None);
+            assert!(checks[0].allowed);
+        }
+    }
+
+    // An invalid request.
+    let (executor, browser, _, workspace, audit) = fixture();
+    let refused = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"nonsense":true}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(refused.facts["reason"], "invalid_input");
+    assert!(browser.calls().is_empty());
+    {
+        let records = audit.0.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].capabilities, CapabilitySet::EMPTY);
+        assert!(records[0].permissions.checks.is_empty());
+        assert_eq!(records[0].browser, None);
+    }
+
+    // Two calls at once in one workspace.
     let path = policy_file(false);
     let (mut executor, fake, _, workspace, audit) =
         fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
@@ -277,13 +239,18 @@ fn two_calls_in_one_workspace_keep_their_own_findings() {
     );
 }
 
-/// The result of the step at `index` of a flow's result.
-fn step_result(flow: &crate::work::result::InvocationResult, index: usize) -> &Value {
-    &flow.facts["steps"][index]["result"]
-}
-
+/// ADR-0202 Decisions 9-13 (b411e6ad, 0c9bb755): a flow step meets what the same call meets
+/// outside a flow, for its browser, its target and its tab.
+///
+/// - A step opens in the browser it names, and a later step naming another browser than the one
+///   the session now works in meets the same pinned refusal the call meets alone.
+/// - A step whose target the page removed is marked and offered its proven replacement, and the
+///   handle's next use refuses before any action reaches the page.
+/// - A step reading another session's tab meets the same ownership refusal, naming that session,
+///   and nothing reaches the browser.
 #[test]
-fn a_flow_step_opens_in_the_browser_it_names() {
+fn a_flow_step_meets_what_the_same_call_meets_outside_a_flow() {
+    // Its browser.
     let (executor, browser, workspaces, workspace, _) = fixture();
     browser.connect(vec![
         summary("browser_chrome", false),
@@ -293,14 +260,14 @@ fn a_flow_step_opens_in_the_browser_it_names() {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
+    let to_edge = json!({"url":"https://example.com","new_tab":true,"browser":"browser_edge"});
     let flow = executor.execute(
         &workspace,
         "browser_flow",
         json!({"on_error":"continue","steps":[
             {"id":"chrome","tool":"browser_navigate",
                 "arguments":{"url":"https://example.com","new_tab":true,"browser":"browser_chrome"}},
-            {"id":"edge","tool":"browser_navigate",
-                "arguments":{"url":"https://example.com","new_tab":true,"browser":"browser_edge"}}
+            {"id":"edge","tool":"browser_navigate","arguments":to_edge}
         ]}),
         &CancellationToken::default(),
     );
@@ -310,21 +277,23 @@ fn a_flow_step_opens_in_the_browser_it_names() {
         "{}",
         flow.facts
     );
-    assert_eq!(browser.routed(), vec!["browser_chrome"]);
     assert_eq!(
         workspaces.browser_of(workspace.as_str()).as_deref(),
         Some("browser_chrome")
     );
-    // The second step names another browser than the one the session now works in, and meets
-    // the refusal the same call meets outside a flow.
     let pinned = step_result(&flow, 1);
-    assert_eq!(pinned["status"], "failed", "{pinned}");
-    assert_eq!(pinned["facts"]["reason"], "browser_pinned");
+    assert_eq!(pinned["facts"]["reason"], "browser_pinned", "{pinned}");
+    let alone = executor.execute(
+        &workspace,
+        "browser_navigate",
+        to_edge,
+        &CancellationToken::default(),
+    );
+    assert_eq!(pinned["status"], json!(alone.status));
+    assert_eq!(pinned["summary"], alone.summary);
     assert_eq!(browser.routed(), vec!["browser_chrome"]);
-}
 
-#[test]
-fn a_flow_step_whose_target_the_page_removed_is_marked_and_offered_its_replacement() {
+    // Its target.
     let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
     browser.push(Err(removed(one_same())));
     let flow = executor.execute(
@@ -341,13 +310,12 @@ fn a_flow_step_whose_target_the_page_removed_is_marked_and_offered_its_replaceme
         .as_str()
         .expect("the step names the proven replacement");
     assert_ne!(replacement, target);
-    assert_eq!(
-        refused["next_steps"],
-        json!([format!("Repeat browser_click with target {replacement}.")])
+    assert!(
+        refused["next_steps"][0]
+            .as_str()
+            .is_some_and(|step| step.contains(replacement) && step.contains("browser_click")),
+        "{refused}"
     );
-
-    // The step marked the handle removed, so its next use refuses before any action reaches
-    // the page.
     let before = browser.calls().len();
     let again = executor.execute(
         &workspace,
@@ -360,10 +328,8 @@ fn a_flow_step_whose_target_the_page_removed_is_marked_and_offered_its_replaceme
     assert!(browser.calls()[before..]
         .iter()
         .all(|call| matches!(call, Work::QuerySemantic(PhysicalSemantic { .. }))));
-}
 
-#[test]
-fn a_flow_step_refused_for_another_sessions_tab_names_that_session() {
+    // Its tab.
     let (executor, browser, _, workspace_a, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     let workspace_b = executor
@@ -380,13 +346,12 @@ fn a_flow_step_refused_for_another_sessions_tab_names_that_session() {
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
-    let tab_b = opened.facts["tab"].as_str().unwrap().to_owned();
+    let read_b = json!({"tab":opened.facts["tab"]});
     let dispatched = browser.calls().len();
-
     let flow = executor.execute(
         &workspace_a,
         "browser_flow",
-        json!({"steps":[{"id":"read","tool":"browser_read","arguments":{"tab":tab_b}}]}),
+        json!({"steps":[{"id":"read","tool":"browser_read","arguments":read_b}]}),
         &CancellationToken::default(),
     );
     let refused = step_result(&flow, 0);
@@ -395,9 +360,13 @@ fn a_flow_step_refused_for_another_sessions_tab_names_that_session() {
         "{refused}"
     );
     assert_eq!(refused["facts"]["owner_workspace"], "Workspace B");
-    assert_eq!(
-        refused["summary"],
-        "That handle belongs to another Ghostlight session (Workspace B)."
+    let alone = executor.execute(
+        &workspace_a,
+        "browser_read",
+        read_b,
+        &CancellationToken::default(),
     );
+    assert_eq!(refused["summary"], alone.summary);
+    assert!(alone.summary.contains("Workspace B"), "{}", alone.summary);
     assert_eq!(browser.calls().len(), dispatched);
 }
