@@ -7,7 +7,7 @@ use std::ffi::OsString;
 
 use ghostlight_relay::protocol::StartReason;
 use ghostlight_relay::route::{BROWSER_ORIGIN_PREFIX, MCP_ARGUMENT};
-use ghostlight_relay::spawn::REASON_OPTION;
+use ghostlight_relay::spawn::{REASON_OPTION, SERVE_ARGUMENT};
 
 use super::{EXIT_BLOCKED, EXIT_CANCELLED, EXIT_FAILED, EXIT_SUCCEEDED, EXIT_UNKNOWN, EXIT_USAGE};
 use crate::install::deployment::{DEVELOPMENT_OPTION, PLAN_OPTION, RESTORE_OPTION};
@@ -290,7 +290,7 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
         Ok(LaunchMode::Open)
     } else if arguments
         .first()
-        .is_some_and(|argument| argument == "serve")
+        .is_some_and(|argument| argument == SERVE_ARGUMENT)
     {
         Ok(LaunchMode::Serve(serve_start(&arguments[1..])?))
     } else if arguments.first().is_some_and(|argument| argument == "call") {
@@ -495,86 +495,12 @@ mod tests {
     use std::path::PathBuf;
 
     use ghostlight_relay::protocol::StartReason;
+    use ghostlight_relay::spawn::SERVE_ARGUMENT;
 
     use super::{
         call_help_text, help_text, launch_mode, LaunchMode, NativeHostCommand, ServeStart,
         SetupOptions, RELAUNCHED_OPTION, SUBCOMMANDS,
     };
-
-    #[test]
-    fn the_flatpak_form_is_a_usage_error() {
-        for command in ["check", "install", "uninstall"] {
-            assert!(
-                launch_mode(["native-host", command, "--flatpak-chromium"].map(Into::into))
-                    .is_err()
-            );
-        }
-        assert!(launch_mode(
-            [
-                "native-host",
-                "install",
-                "--flatpak-chromium",
-                "--allow-flatpak-activation"
-            ]
-            .map(Into::into)
-        )
-        .is_err());
-        assert!(matches!(
-            launch_mode(["native-host", "install"].map(Into::into)).unwrap(),
-            LaunchMode::NativeHost(NativeHostCommand::Install)
-        ));
-    }
-
-    /// The shell completions offer exactly the subcommands the command line has.
-    ///
-    /// Each completion file declares its command list on one line with a fixed shape, so this reads
-    /// the real list rather than searching for words that might appear in a comment.
-    #[test]
-    fn completion_subcommands_match_the_parser() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../packaging/linux/completions")
-            .canonicalize()
-            .expect("completion directory exists");
-        let expected = SUBCOMMANDS.join(" ");
-        for (file, prefix, suffix) in [
-            ("ghostlight.bash", "local commands=\"", "\""),
-            ("_ghostlight", "local -a ghostlight_commands=(", ")"),
-            ("ghostlight.fish", "set -l ghostlight_commands ", "\n"),
-        ] {
-            let source = std::fs::read_to_string(root.join(file)).expect("completion is readable");
-            assert_eq!(
-                declared(file, &source, prefix, suffix),
-                expected,
-                "{file} offers a different command list than the command line has"
-            );
-        }
-    }
-
-    /// The shell completions offer exactly the policy subcommands the policy command has.
-    #[test]
-    fn completion_policy_subcommands_match_the_parser() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../packaging/linux/completions")
-            .canonicalize()
-            .expect("completion directory exists");
-        let expected = crate::governance::inspection::SUBCOMMANDS.join(" ");
-        for (file, prefix, suffix) in [
-            ("ghostlight.bash", "local policy_commands=\"", "\""),
-            ("_ghostlight", "local -a ghostlight_policy_commands=(", ")"),
-            (
-                "ghostlight.fish",
-                "set -l ghostlight_policy_commands ",
-                "\n",
-            ),
-        ] {
-            let source = std::fs::read_to_string(root.join(file)).expect("completion is readable");
-            assert_eq!(
-                declared(file, &source, prefix, suffix),
-                expected,
-                "{file} offers different policy commands than the policy command has"
-            );
-        }
-    }
 
     /// The text between the first `prefix` in `source` and the next `suffix`, trimmed.
     fn declared<'a>(file: &str, source: &'a str, prefix: &str, suffix: &str) -> &'a str {
@@ -589,363 +515,486 @@ mod tests {
         source[start..end].trim()
     }
 
-    /// The shell completions offer exactly the `--client` values the agent catalog has: every
-    /// agent id, then every host id.
+    /// Protects the command-line grammar: the Flatpak form and an unknown deployment option get the
+    /// one-line usage, serve requires one of the six start reasons, desktop and call launches stay
+    /// distinct intents, call help is asked for with --help or -h in any position and states the
+    /// forms, the exit codes and the guide, and setup keeps the options a package depends on.
     #[test]
-    fn completion_client_ids_match_the_catalog() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../packaging/linux/completions")
-            .canonicalize()
-            .expect("completion directory exists");
-        let expected = crate::install::client_ids()
-            .all()
-            .collect::<Vec<_>>()
-            .join(" ");
-        for (file, prefix, suffix) in [
-            ("ghostlight.bash", "local clients=\"", "\""),
-            ("_ghostlight", "local -a ghostlight_clients=(", ")"),
-            ("ghostlight.fish", "set -l ghostlight_clients ", "\n"),
-        ] {
-            let source = std::fs::read_to_string(root.join(file)).expect("completion is readable");
-            assert_eq!(
-                declared(file, &source, prefix, suffix),
-                expected,
-                "{file} offers different client ids than the agent catalog has"
-            );
-        }
-    }
-
-    /// The manual page lists the `--client` values the agent catalog has, and so does help.
-    #[test]
-    fn the_manual_and_help_list_the_catalogs_client_ids() {
-        let page = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../packaging/linux/man/ghostlight.1");
-        let source = std::fs::read_to_string(page).expect("the manual page is readable");
-        let ids = crate::install::client_ids();
-        for (prefix, expected) in [("\nAgent ids: ", &ids.agents), ("\nHost ids: ", &ids.hosts)] {
-            assert_eq!(
-                declared("ghostlight.1", &source, prefix, "\n").replace(r"\-", "-"),
-                expected.join(", "),
-                "the manual page lists different ids than the agent catalog has"
-            );
-        }
-        let help = help_text();
-        let listed: Vec<&str> = help
-            .split_once("Client ids")
-            .expect("help lists the client ids")
-            .1
-            .split_once("\n\n")
-            .expect("the client ids end in a blank line")
-            .0
-            .split([' ', ',', '\n'])
-            .filter(|word| !word.is_empty())
-            .skip_while(|word| *word != "Agents:")
-            .filter(|word| !word.ends_with(':'))
-            .collect();
-        assert_eq!(listed, ids.all().collect::<Vec<_>>());
-        assert!(help.lines().all(|line| line.len() <= 120));
-        assert!(help.is_ascii());
-    }
-
-    /// Every offered subcommand and policy subcommand is documented in help and in the manual
-    /// page, so the surfaces cannot drift.
-    #[test]
-    fn help_and_the_manual_document_every_subcommand() {
-        let help = help_text();
-        let page = std::fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../packaging/linux/man/ghostlight.1"),
-        )
-        .expect("the manual page is readable");
-        for subcommand in SUBCOMMANDS {
-            assert!(
-                help.contains(&format!("ghostlight {subcommand}")),
-                "help does not document {subcommand}"
-            );
-            if *subcommand != "policy" {
-                assert!(
-                    page.lines().any(|line| line.starts_with(".B")
-                        && line.split_whitespace().nth(1) == Some(subcommand)),
-                    "the manual page does not document {subcommand}"
-                );
+    fn the_command_line_takes_each_form_it_documents_and_refuses_the_rest() {
+        {
+            for command in ["check", "install", "uninstall"] {
+                assert!(launch_mode(
+                    ["native-host", command, "--flatpak-chromium"].map(Into::into)
+                )
+                .is_err());
             }
+            assert!(launch_mode(
+                [
+                    "native-host",
+                    "install",
+                    "--flatpak-chromium",
+                    "--allow-flatpak-activation"
+                ]
+                .map(Into::into)
+            )
+            .is_err());
+            assert!(matches!(
+                launch_mode(["native-host", "install"].map(Into::into)).unwrap(),
+                LaunchMode::NativeHost(NativeHostCommand::Install)
+            ));
         }
-        for subcommand in crate::governance::inspection::SUBCOMMANDS {
-            assert!(
-                help.contains(&format!("ghostlight policy {subcommand}")),
-                "help does not document policy {subcommand}"
-            );
-            assert!(
-                page.contains(&format!("policy {subcommand}")),
-                "the manual page does not document policy {subcommand}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_unknown_deployment_option_gets_the_one_line_usage() {
-        let error = launch_mode(["deployment", "install", "--bogus"].map(Into::into))
-            .unwrap_err()
-            .to_string();
-        assert_eq!(
+        {
+            let error = launch_mode(["deployment", "install", "--bogus"].map(Into::into))
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
             error,
             "usage: ghostlight deployment install [<payload directory>] [--development | --restore] [--plan]"
         );
-    }
-
-    #[test]
-    fn deployment_install_takes_one_payload_one_mode_and_a_plan() {
-        use crate::install::deployment::{Mode, Request};
-
-        let parse = |arguments: &[&str]| {
-            launch_mode(
-                ["deployment", "install"]
-                    .iter()
-                    .chain(arguments)
-                    .map(Into::into)
-                    .collect::<Vec<std::ffi::OsString>>(),
-            )
-        };
-        let request = |payload: Option<&str>, mode, plan_only| {
-            LaunchMode::DeploymentInstall(Request {
-                payload: payload.map(PathBuf::from),
-                mode,
-                plan_only,
-            })
-        };
-        assert_eq!(parse(&[]).unwrap(), request(None, Mode::Release, false));
-        assert_eq!(
-            parse(&["payload", "--plan"]).unwrap(),
-            request(Some("payload"), Mode::Release, true)
-        );
-        assert_eq!(
-            parse(&["--development"]).unwrap(),
-            request(None, Mode::Development, false)
-        );
-        assert_eq!(
-            parse(&["--restore", "--plan"]).unwrap(),
-            request(None, Mode::Restore, true)
-        );
-        assert_eq!(
-            parse(&["--restore", "payload"]).unwrap(),
-            request(Some("payload"), Mode::Restore, false)
-        );
-        assert_eq!(
-            parse(&["payload", "--restore"]).unwrap(),
-            request(Some("payload"), Mode::Restore, false)
-        );
-        for refused in [
-            &["--development", "--restore"][..],
-            &["--restore", "--development"],
-            &["--restore", "payload", "extra"],
-            &["one", "two"],
-            &["--plan", "--plan"],
-            &["--force"],
-        ] {
-            assert!(parse(refused).is_err(), "{refused:?}");
         }
-        assert!(launch_mode(["deployment".into()]).is_err());
-    }
-
-    #[test]
-    fn serve_requires_one_of_the_six_start_reasons() {
-        let serve = |rest: &[&str]| {
-            launch_mode(
-                std::iter::once("serve")
-                    .chain(rest.iter().copied())
-                    .map(OsString::from),
-            )
-        };
-        for (word, reason) in [
-            ("agent", StartReason::Agent),
-            ("browser", StartReason::Browser),
-            ("command", StartReason::Command),
-            ("person", StartReason::Person),
-            ("recover", StartReason::Recover),
-            ("update", StartReason::Update),
-        ] {
+        {
+            let serve = |rest: &[&str]| {
+                launch_mode(
+                    std::iter::once(SERVE_ARGUMENT)
+                        .chain(rest.iter().copied())
+                        .map(OsString::from),
+                )
+            };
+            for (word, reason) in [
+                ("agent", StartReason::Agent),
+                ("browser", StartReason::Browser),
+                ("command", StartReason::Command),
+                ("person", StartReason::Person),
+                ("recover", StartReason::Recover),
+                ("update", StartReason::Update),
+            ] {
+                assert_eq!(
+                    serve(&["--reason", word]).unwrap(),
+                    LaunchMode::Serve(ServeStart {
+                        reason,
+                        relaunched: false
+                    })
+                );
+                assert_eq!(
+                    serve(&["--reason", word, RELAUNCHED_OPTION]).unwrap(),
+                    LaunchMode::Serve(ServeStart {
+                        reason,
+                        relaunched: true
+                    })
+                );
+            }
+            for refused in [
+                &[][..],
+                &["--reason"],
+                &["--reason", "unknown"],
+                &["--reason", "Agent"],
+                &["agent"],
+                &["--reason", "agent", "--now"],
+                &["--now", "agent"],
+                &[RELAUNCHED_OPTION, "--reason", "agent"],
+                &["--reason", "agent", RELAUNCHED_OPTION, RELAUNCHED_OPTION],
+                &["--reason", "unknown", RELAUNCHED_OPTION],
+            ] {
+                let error = serve(refused).unwrap_err().to_string();
+                assert!(
+                    error.starts_with("usage: ghostlight serve --reason"),
+                    "{refused:?}"
+                );
+            }
+        }
+        {
+            assert_eq!(launch_mode(Vec::new()).unwrap(), LaunchMode::Desktop);
+            assert_eq!(launch_mode(["open".into()]).unwrap(), LaunchMode::Open);
+            assert!(help_text().contains("ghostlight serve"));
+            assert!(!SUBCOMMANDS.contains(&SERVE_ARGUMENT));
+            assert!(launch_mode(["--headless".into()]).is_err());
+            assert!(launch_mode(["service".into()]).is_err());
+            assert_eq!(launch_mode(["call".into()]).unwrap(), LaunchMode::Call);
             assert_eq!(
-                serve(&["--reason", word]).unwrap(),
-                LaunchMode::Serve(ServeStart {
-                    reason,
-                    relaunched: false
+                launch_mode(["policy".into(), "validate".into(), "policy.json".into()]).unwrap(),
+                LaunchMode::Policy(crate::governance::inspection::Command::Validate(
+                    "policy.json".into()
+                ))
+            );
+            assert_eq!(
+                launch_mode(["doctor".into()]).unwrap(),
+                LaunchMode::Doctor {
+                    fix: false,
+                    json: false
+                }
+            );
+            assert_eq!(
+                launch_mode(["doctor".into(), "--verbose".into(), "--fix".into()]).unwrap(),
+                LaunchMode::Doctor {
+                    fix: true,
+                    json: false
+                }
+            );
+            assert_eq!(
+                launch_mode(["doctor".into(), "--json".into()]).unwrap(),
+                LaunchMode::Doctor {
+                    fix: false,
+                    json: true
+                }
+            );
+            // --fix writes and --json reports; together they would describe a state the repair has
+            // already replaced.
+            assert!(launch_mode(["doctor".into(), "--json".into(), "--fix".into()]).is_err());
+            assert_eq!(
+                launch_mode(["status".into()]).unwrap(),
+                LaunchMode::Status { json: false }
+            );
+            assert_eq!(
+                launch_mode(["status".into(), "--json".into()]).unwrap(),
+                LaunchMode::Status { json: true }
+            );
+            assert_eq!(launch_mode(["--help".into()]).unwrap(), LaunchMode::Help);
+            assert_eq!(
+                launch_mode(["install".into(), "--help".into()]).unwrap(),
+                LaunchMode::Help
+            );
+            assert_eq!(
+                launch_mode(["--version".into()]).unwrap(),
+                LaunchMode::Version
+            );
+            assert_eq!(
+                launch_mode(["native-host".into(), "check".into()]).unwrap(),
+                LaunchMode::NativeHost(NativeHostCommand::Check)
+            );
+            assert!(launch_mode(["native-host".into(), "guess".into()]).is_err());
+            assert!(launch_mode(["nonsense".into()]).is_err());
+        }
+        {
+            for arguments in [
+                vec!["call", "--help"],
+                vec!["call", "-h"],
+                vec!["call", "browser_read", "--help"],
+                vec!["call", "--json", "-h"],
+            ] {
+                let arguments: Vec<OsString> = arguments.into_iter().map(Into::into).collect();
+                assert_eq!(launch_mode(arguments).unwrap(), LaunchMode::CallHelp);
+            }
+            assert_eq!(
+                launch_mode(["call".into(), "browser_tabs".into()]).unwrap(),
+                LaunchMode::Call
+            );
+        }
+        {
+            let help = call_help_text();
+            for expected in [
+                "ghostlight call <tool> [json]",
+                "--json",
+                "--stdin",
+                "--catalog",
+                "--output <file>",
+                "GHOSTLIGHT_SESSION",
+                "docs/guides/scripting.md",
+            ] {
+                assert!(help.contains(expected), "call help lacks {expected}");
+            }
+            for line in [
+                "0  Succeeded",
+                "1  The call could not be made",
+                "2  Blocked by authority",
+                "4  Failed",
+                "5  Cancelled",
+                "6  The effect cannot be determined",
+            ] {
+                assert!(help.contains(line), "call help lacks the line {line}");
+            }
+            assert!(help.is_ascii());
+        }
+        {
+            assert_eq!(
+                launch_mode([
+                    "install".into(),
+                    "--dry-run".into(),
+                    "--client".into(),
+                    "codex".into(),
+                    "--no-open".into(),
+                ])
+                .unwrap(),
+                LaunchMode::Install(SetupOptions {
+                    dry_run: true,
+                    all_browsers: false,
+                    browser_ids: Vec::new(),
+                    all_clients: false,
+                    no_clients: false,
+                    no_open: true,
+                    client_ids: vec!["codex".into()],
                 })
             );
             assert_eq!(
-                serve(&["--reason", word, RELAUNCHED_OPTION]).unwrap(),
-                LaunchMode::Serve(ServeStart {
-                    reason,
-                    relaunched: true
+                launch_mode([
+                    "uninstall".into(),
+                    "--browser=brave".into(),
+                    "--all-clients".into(),
+                ])
+                .unwrap(),
+                LaunchMode::Uninstall(SetupOptions {
+                    browser_ids: vec!["brave".into()],
+                    all_clients: true,
+                    ..SetupOptions::default()
                 })
             );
-        }
-        for refused in [
-            &[][..],
-            &["--reason"],
-            &["--reason", "unknown"],
-            &["--reason", "Agent"],
-            &["agent"],
-            &["--reason", "agent", "--now"],
-            &["--now", "agent"],
-            &[RELAUNCHED_OPTION, "--reason", "agent"],
-            &["--reason", "agent", RELAUNCHED_OPTION, RELAUNCHED_OPTION],
-            &["--reason", "unknown", RELAUNCHED_OPTION],
-        ] {
-            let error = serve(refused).unwrap_err().to_string();
-            assert!(
-                error.starts_with("usage: ghostlight serve --reason"),
-                "{refused:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn launch_modes_keep_desktop_and_call_intents_distinct() {
-        assert_eq!(launch_mode(Vec::new()).unwrap(), LaunchMode::Desktop);
-        assert_eq!(launch_mode(["open".into()]).unwrap(), LaunchMode::Open);
-        assert!(help_text().contains("ghostlight serve"));
-        assert!(!SUBCOMMANDS.contains(&"serve"));
-        assert!(launch_mode(["--headless".into()]).is_err());
-        assert!(launch_mode(["service".into()]).is_err());
-        assert_eq!(launch_mode(["call".into()]).unwrap(), LaunchMode::Call);
-        assert_eq!(
-            launch_mode(["policy".into(), "validate".into(), "policy.json".into()]).unwrap(),
-            LaunchMode::Policy(crate::governance::inspection::Command::Validate(
-                "policy.json".into()
-            ))
-        );
-        assert_eq!(
-            launch_mode(["doctor".into()]).unwrap(),
-            LaunchMode::Doctor {
-                fix: false,
-                json: false
-            }
-        );
-        assert_eq!(
-            launch_mode(["doctor".into(), "--verbose".into(), "--fix".into()]).unwrap(),
-            LaunchMode::Doctor {
-                fix: true,
-                json: false
-            }
-        );
-        assert_eq!(
-            launch_mode(["doctor".into(), "--json".into()]).unwrap(),
-            LaunchMode::Doctor {
-                fix: false,
-                json: true
-            }
-        );
-        // --fix writes and --json reports; together they would describe a state the repair has
-        // already replaced.
-        assert!(launch_mode(["doctor".into(), "--json".into(), "--fix".into()]).is_err());
-        assert_eq!(
-            launch_mode(["status".into()]).unwrap(),
-            LaunchMode::Status { json: false }
-        );
-        assert_eq!(
-            launch_mode(["status".into(), "--json".into()]).unwrap(),
-            LaunchMode::Status { json: true }
-        );
-        assert_eq!(launch_mode(["--help".into()]).unwrap(), LaunchMode::Help);
-        assert_eq!(
-            launch_mode(["install".into(), "--help".into()]).unwrap(),
-            LaunchMode::Help
-        );
-        assert_eq!(
-            launch_mode(["--version".into()]).unwrap(),
-            LaunchMode::Version
-        );
-        assert_eq!(
-            launch_mode(["native-host".into(), "check".into()]).unwrap(),
-            LaunchMode::NativeHost(NativeHostCommand::Check)
-        );
-        assert!(launch_mode(["native-host".into(), "guess".into()]).is_err());
-        assert!(launch_mode(["nonsense".into()]).is_err());
-    }
-
-    #[test]
-    fn call_help_is_asked_for_with_help_or_h_in_any_position() {
-        for arguments in [
-            vec!["call", "--help"],
-            vec!["call", "-h"],
-            vec!["call", "browser_read", "--help"],
-            vec!["call", "--json", "-h"],
-        ] {
-            let arguments: Vec<OsString> = arguments.into_iter().map(Into::into).collect();
-            assert_eq!(launch_mode(arguments).unwrap(), LaunchMode::CallHelp);
-        }
-        assert_eq!(
-            launch_mode(["call".into(), "browser_tabs".into()]).unwrap(),
-            LaunchMode::Call
-        );
-    }
-
-    #[test]
-    fn call_help_states_the_forms_the_exit_codes_and_the_guide() {
-        let help = call_help_text();
-        for expected in [
-            "ghostlight call <tool> [json]",
-            "--json",
-            "--stdin",
-            "--catalog",
-            "--output <file>",
-            "GHOSTLIGHT_SESSION",
-            "docs/guides/scripting.md",
-        ] {
-            assert!(help.contains(expected), "call help lacks {expected}");
-        }
-        for line in [
-            "0  Succeeded",
-            "1  The call could not be made",
-            "2  Blocked by authority",
-            "4  Failed",
-            "5  Cancelled",
-            "6  The effect cannot be determined",
-        ] {
-            assert!(help.contains(line), "call help lacks the line {line}");
-        }
-        assert!(help.is_ascii());
-    }
-
-    #[test]
-    fn setup_options_preserve_safe_package_compatibility() {
-        assert_eq!(
-            launch_mode([
+            assert!(launch_mode([
                 "install".into(),
-                "--dry-run".into(),
-                "--client".into(),
-                "codex".into(),
-                "--no-open".into(),
+                "--no-clients".into(),
+                "--client=codex".into(),
             ])
-            .unwrap(),
-            LaunchMode::Install(SetupOptions {
-                dry_run: true,
-                all_browsers: false,
-                browser_ids: Vec::new(),
-                all_clients: false,
-                no_clients: false,
-                no_open: true,
-                client_ids: vec!["codex".into()],
-            })
-        );
-        assert_eq!(
-            launch_mode([
-                "uninstall".into(),
-                "--browser=brave".into(),
-                "--all-clients".into(),
-            ])
-            .unwrap(),
-            LaunchMode::Uninstall(SetupOptions {
-                browser_ids: vec!["brave".into()],
-                all_clients: true,
-                ..SetupOptions::default()
-            })
-        );
-        assert!(launch_mode([
-            "install".into(),
-            "--no-clients".into(),
-            "--client=codex".into(),
-        ])
-        .is_err());
+            .is_err());
+        }
+    }
+
+    /// Protects the shell completions, help and the manual as one surface with the parser: every
+    /// subcommand and policy subcommand the parser takes completes and is documented, and the client
+    /// ids they list are the catalog's.
+    #[test]
+    fn completions_help_and_the_manual_match_the_parser_and_the_catalog() {
+        {
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packaging/linux/completions")
+                .canonicalize()
+                .expect("completion directory exists");
+            let expected = SUBCOMMANDS.join(" ");
+            for (file, prefix, suffix) in [
+                ("ghostlight.bash", "local commands=\"", "\""),
+                ("_ghostlight", "local -a ghostlight_commands=(", ")"),
+                ("ghostlight.fish", "set -l ghostlight_commands ", "\n"),
+            ] {
+                let source =
+                    std::fs::read_to_string(root.join(file)).expect("completion is readable");
+                assert_eq!(
+                    declared(file, &source, prefix, suffix),
+                    expected,
+                    "{file} offers a different command list than the command line has"
+                );
+            }
+        }
+        {
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packaging/linux/completions")
+                .canonicalize()
+                .expect("completion directory exists");
+            let expected = crate::governance::inspection::SUBCOMMANDS.join(" ");
+            for (file, prefix, suffix) in [
+                ("ghostlight.bash", "local policy_commands=\"", "\""),
+                ("_ghostlight", "local -a ghostlight_policy_commands=(", ")"),
+                (
+                    "ghostlight.fish",
+                    "set -l ghostlight_policy_commands ",
+                    "\n",
+                ),
+            ] {
+                let source =
+                    std::fs::read_to_string(root.join(file)).expect("completion is readable");
+                assert_eq!(
+                    declared(file, &source, prefix, suffix),
+                    expected,
+                    "{file} offers different policy commands than the policy command has"
+                );
+            }
+        }
+        {
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packaging/linux/completions")
+                .canonicalize()
+                .expect("completion directory exists");
+            let expected = crate::install::client_ids()
+                .all()
+                .collect::<Vec<_>>()
+                .join(" ");
+            for (file, prefix, suffix) in [
+                ("ghostlight.bash", "local clients=\"", "\""),
+                ("_ghostlight", "local -a ghostlight_clients=(", ")"),
+                ("ghostlight.fish", "set -l ghostlight_clients ", "\n"),
+            ] {
+                let source =
+                    std::fs::read_to_string(root.join(file)).expect("completion is readable");
+                assert_eq!(
+                    declared(file, &source, prefix, suffix),
+                    expected,
+                    "{file} offers different client ids than the agent catalog has"
+                );
+            }
+        }
+        {
+            let page = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packaging/linux/man/ghostlight.1");
+            let source = std::fs::read_to_string(page).expect("the manual page is readable");
+            let ids = crate::install::client_ids();
+            for (prefix, expected) in [("\nAgent ids: ", &ids.agents), ("\nHost ids: ", &ids.hosts)]
+            {
+                assert_eq!(
+                    declared("ghostlight.1", &source, prefix, "\n").replace(r"\-", "-"),
+                    expected.join(", "),
+                    "the manual page lists different ids than the agent catalog has"
+                );
+            }
+            let help = help_text();
+            let listed: Vec<&str> = help
+                .split_once("Client ids")
+                .expect("help lists the client ids")
+                .1
+                .split_once("\n\n")
+                .expect("the client ids end in a blank line")
+                .0
+                .split([' ', ',', '\n'])
+                .filter(|word| !word.is_empty())
+                .skip_while(|word| *word != "Agents:")
+                .filter(|word| !word.ends_with(':'))
+                .collect();
+            assert_eq!(listed, ids.all().collect::<Vec<_>>());
+            assert!(help.lines().all(|line| line.len() <= 120));
+            assert!(help.is_ascii());
+        }
+        {
+            let help = help_text();
+            let page = std::fs::read_to_string(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../packaging/linux/man/ghostlight.1"),
+            )
+            .expect("the manual page is readable");
+            for subcommand in SUBCOMMANDS {
+                assert!(
+                    help.contains(&format!("ghostlight {subcommand}")),
+                    "help does not document {subcommand}"
+                );
+                if *subcommand != "policy" {
+                    assert!(
+                        page.lines().any(|line| line.starts_with(".B")
+                            && line.split_whitespace().nth(1) == Some(subcommand)),
+                        "the manual page does not document {subcommand}"
+                    );
+                }
+            }
+            for subcommand in crate::governance::inspection::SUBCOMMANDS {
+                assert!(
+                    help.contains(&format!("ghostlight policy {subcommand}")),
+                    "help does not document policy {subcommand}"
+                );
+                assert!(
+                    page.contains(&format!("policy {subcommand}")),
+                    "the manual page does not document policy {subcommand}"
+                );
+            }
+        }
+    }
+
+    /// Protects the coordinator's reserve contract: `deployment install` takes one payload, one mode
+    /// and a plan, and refuses anything else, and every form get.ps1, get.sh, the development loop and
+    /// the npm and mcpb launchers run is still spelled in their sources and parses to the request
+    /// they mean.
+    #[test]
+    fn deployment_install_takes_the_forms_its_carriers_and_the_development_loop_run() {
+        {
+            use crate::install::deployment::{Mode, Request};
+
+            let parse = |arguments: &[&str]| {
+                launch_mode(
+                    ["deployment", "install"]
+                        .iter()
+                        .chain(arguments)
+                        .map(Into::into)
+                        .collect::<Vec<std::ffi::OsString>>(),
+                )
+            };
+            let request = |payload: Option<&str>, mode, plan_only| {
+                LaunchMode::DeploymentInstall(Request {
+                    payload: payload.map(PathBuf::from),
+                    mode,
+                    plan_only,
+                })
+            };
+            assert_eq!(parse(&[]).unwrap(), request(None, Mode::Release, false));
+            assert_eq!(
+                parse(&["payload", "--plan"]).unwrap(),
+                request(Some("payload"), Mode::Release, true)
+            );
+            assert_eq!(
+                parse(&["--development"]).unwrap(),
+                request(None, Mode::Development, false)
+            );
+            assert_eq!(
+                parse(&["--restore", "--plan"]).unwrap(),
+                request(None, Mode::Restore, true)
+            );
+            assert_eq!(
+                parse(&["--restore", "payload"]).unwrap(),
+                request(Some("payload"), Mode::Restore, false)
+            );
+            assert_eq!(
+                parse(&["payload", "--restore"]).unwrap(),
+                request(Some("payload"), Mode::Restore, false)
+            );
+            for refused in [
+                &["--development", "--restore"][..],
+                &["--restore", "--development"],
+                &["--restore", "payload", "extra"],
+                &["one", "two"],
+                &["--plan", "--plan"],
+                &["--force"],
+            ] {
+                assert!(parse(refused).is_err(), "{refused:?}");
+            }
+            assert!(launch_mode(["deployment".into()]).is_err());
+
+            // Each form a carrier or the development loop runs, as its source spells it.
+            let callers = [
+                (
+                    "scripts/get.ps1",
+                    include_str!("../../../../scripts/get.ps1"),
+                    [
+                        r#"@("deployment", "install")"#,
+                        r#"$deployment += "--restore""#,
+                    ],
+                ),
+                (
+                    "scripts/get.sh",
+                    include_str!("../../../../scripts/get.sh"),
+                    ["deployment install $restore", r#"restore="--restore""#],
+                ),
+                (
+                    "scripts/dev-loop.ps1",
+                    include_str!("../../../../scripts/dev-loop.ps1"),
+                    [
+                        r#"@("deployment", "install", "--development")"#,
+                        r#"$install += "--plan""#,
+                    ],
+                ),
+                (
+                    "packaging/npm/bin/ghostlight.js",
+                    include_str!("../../../../packaging/npm/bin/ghostlight.js"),
+                    [
+                        r#"["deployment", "install"]"#,
+                        "deployment install --restore",
+                    ],
+                ),
+                (
+                    "packaging/mcpb/server/launch.js",
+                    include_str!("../../../../packaging/mcpb/server/launch.js"),
+                    [
+                        r#"["deployment", "install"]"#,
+                        "deployment install --restore",
+                    ],
+                ),
+            ];
+            for (file, source, forms) in callers {
+                for form in forms {
+                    assert!(source.contains(form), "{file} no longer runs {form}");
+                }
+            }
+            for (form, expected) in [
+                (&[][..], request(None, Mode::Release, false)),
+                (&["--restore"], request(None, Mode::Restore, false)),
+                (&["--development"], request(None, Mode::Development, false)),
+                (
+                    &["--development", "--plan"],
+                    request(None, Mode::Development, true),
+                ),
+            ] {
+                assert_eq!(parse(form).unwrap(), expected, "{form:?}");
+            }
+        }
     }
 }
