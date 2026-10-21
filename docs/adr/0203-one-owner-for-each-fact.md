@@ -1800,3 +1800,26 @@ Follow-up (2026-10-21): SERV-12 extracts the builder of the edge's diagnostics l
 `crates/relay/src/log.rs` into `log::line`, so the bridge's typed record can pin it with a round
 trip. No byte or behavior changes, and it rides in the same unpublished revision 5, so the lock is
 lifted for that extraction too and for nothing else.
+
+## Amendment (2026-10-21): the test cut and two frame bounds
+
+ADR-0204's test cut reaches `crates/relay` and `crates/edge`. Decision 13's lock never covered
+their test files: the connectors guard compares everything else with the last published tag.
+Inside the same unpublished revision 5, the lock is lifted for four more changes, and for nothing
+else:
+
+1. Product code that only the deleted tests used. The browser relay's extension origin becomes a
+   plain string, test seams fold into what the product calls, re-exports that only tests named go,
+   and the checks that a crate's version names the relay revision become compile-time assertions.
+2. The desktop's two channel words, `window` and `tray`, become relay constants beside the MCP and
+   command-line channels, so the shell and the service spell them once.
+3. Core-service S-D8. A browser frame over the relay bound is skipped by its length header and ends
+   nothing. One oversized answer used to end the port that carries every session's browser.
+4. Core-service S-D9. A client line over the relay bound is answered from a new `too_large` failure
+   template, in the service's words (the ADR-0197 amendment of the same day). The edge used to skip
+   the line and never answer it, so the agent waited forever.
+
+No revision 4 byte changes, and the service still admits revisions 4 and 5. The owner set the
+standing rule against rules that constrain what users get (the second sweep's amendment above)
+and against artificial freezes (ADR-0197, amendment of 2026-10-18); the coordinator reported each
+change to the owner the same day.
