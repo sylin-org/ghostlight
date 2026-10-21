@@ -163,7 +163,8 @@ already did; before, it waited on the browser and gave a no-browser refusal. Mod
 docs lines. The journey's no-browser language checks (`browser_startup_manual`,
 `native_host_unavailable`, `browser_absent` on the real machine's inventory) rode on that call. They
 need a call that asks a browser without starting one (for example a navigate under a `manual`
-startup policy in the journey home), which is the coordinator's lane to choose.
+startup policy in the journey home), which is the coordinator's lane to choose. Done on 2026-10-21: the
+journey home carries a `manual` startup policy, and a navigate to sylin.org carries the checks.
 - W-D5, found on the owner's machine on 2026-10-21: two Ghostlight extensions were installed in one
   Chrome, the store 2.0.0 one and the local build, each with its own browser identity. The
   coordinator's MCP session worked in the store one's. When the owner removed it, the session could

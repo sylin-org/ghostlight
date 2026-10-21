@@ -42,7 +42,18 @@ function machineRegistration() {
 }
 const registrationBefore = machineRegistration();
 
-const home = createHome({ label: "cli" });
+// A manual startup policy lets one call ask for a browser without starting one, so the journey can
+// read the no-browser language on the real machine's inventory.
+const home = createHome({
+  label: "cli",
+  policy: {
+    schema: 4,
+    name: "cli fixture",
+    version: "1",
+    grants: [{ id: "sylin", hosts: { allow: ["sylin.org"] }, allowed: ["read", "action", "write", "execute"] }],
+    config: [{ key: "browser.startup", value: "manual", level: "mandatory" }]
+  }
+});
 const version = buildVersion();
 const edge = (args, input) => home.run(home.edge, args, { input, timeout: 120_000 });
 const call = (args, input) => edge(["call", ...args], input);
@@ -144,6 +155,32 @@ try {
   const result = JSON.parse(refused.stdout.trim());
   assert.equal(result.status, "failed");
   assert.equal(result.facts.reason, "not_found");
+
+  // With no browser connected and startup manual, a navigate refuses instead of starting one.
+  // Which honest answer arrives depends on this machine's installed browsers, so the journey pins
+  // the closed language contract, not the inventory: plural evidence asks the person to open a
+  // named browser, unusable registrations name the choice-free remedy, and no refusal ever says
+  // Ghostlight declined to choose.
+  const NAVIGATE = '{"url":"https://sylin.org/","new_tab":true}';
+  const away = call(["browser_navigate", NAVIGATE]);
+  assert.equal(away.status, EXIT_FAILED, away.stderr);
+  const sentence = away.stdout.trim().split(/\r?\n/)[0];
+  const awayResult = JSON.parse(call(["browser_navigate", NAVIGATE, "--json"]).stdout.trim());
+  if (awayResult.facts.reason === "browser_startup_manual") {
+    assert.match(
+      sentence,
+      /^No browser is connected\. Ask the user to open .+ browser window with the Ghostlight extension installed, then repeat the call\.$/
+    );
+    assert.ok(awayResult.facts.browsers.length >= 1, away.stdout);
+    if (awayResult.facts.browsers.length === 1) assert.equal(awayResult.facts.browser, awayResult.facts.browsers[0]);
+  } else if (awayResult.facts.reason === "native_host_unavailable") {
+    assert.equal(sentence, "The browser cannot use Ghostlight's native messaging registration.");
+    assert.ok(awayResult.facts.details.length >= 1, away.stdout);
+  } else if (awayResult.facts.reason === "browser_absent") {
+    assert.equal(sentence, "No supported Chromium browser is installed.");
+  } else {
+    assert.fail(`unexpected no-browser reason: ${awayResult.facts.reason}`);
+  }
 
   // A refusal must not look like success to a shell.
   const rejected = call(["browser_navigate", "{}"]);
