@@ -91,10 +91,10 @@ test("the focus precondition runs right before key input and the guard is re-che
 });
 
 test("the input batch stops at a dialog and reports the completed steps", async () => {
-  const { chrome, world, input } = await ready();
+  const { chrome, lifecycle, input } = await ready();
   chrome.handlers["Input.dispatchMouseEvent"] = (target, params) => {
     if (params.type !== "mouseReleased") return {};
-    setTimeout(() => world.announceDialog(TAB, "alert"), 1);
+    setTimeout(() => lifecycle.openDialog(TAB, { type: "alert" }), 1);
     return new Promise(() => {});
   };
   const result = await input.run(inputArgs([...click, { step: "insert_text", text: "never" }]), effects(), "p4_5");

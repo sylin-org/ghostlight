@@ -230,7 +230,7 @@ const CASES = {
       // The third event blocks the renderer: a dialog opens and the command never answers.
       scriptMethod(parts.chrome, "Input.dispatchMouseEvent", (count) => {
         if (count < 3) return {};
-        parts.world.announceDialog(TAB, "alert");
+        parts.lifecycle.openDialog(TAB, { type: "alert" });
         return new Promise(() => {});
       });
     }

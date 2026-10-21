@@ -95,7 +95,7 @@
     // No document is read while a dialog is open: a JavaScript dialog blocks the renderer, so
     // Page.getFrameTree would not answer until the dialog is handled.
     function rootOf(tabId) {
-      if (lifecycle.currentDialog(tabId)) throw sessions.dialogOpen();
+      lifecycle.requireNoDialog(tabId);
       const session = lifecycle.rootSession(tabId);
       if (!session) throw sessions.failure(SESSION_LOST, "The debugger is not attached to this tab.");
       return session;
@@ -175,7 +175,7 @@
 
     /** Resolves the current loader id of a frame in a session, or null when the frame is gone. */
     async function currentLoader(target, frameId) {
-      if (lifecycle.currentDialog(target.tabId)) throw sessions.dialogOpen();
+      lifecycle.requireNoDialog(target.tabId);
       const tree = (await cdp(target, CDP.PAGE_GET_FRAME_TREE)).frameTree;
       return findFrame(tree, frameId)?.loaderId ?? null;
     }

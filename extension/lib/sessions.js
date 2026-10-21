@@ -184,6 +184,26 @@
         .finally(() => state.dialogWaiters.delete(wake));
     }
 
+    /**
+     * Starts watching a tab for a JavaScript dialog. `opened` resolves with the dialog's type as
+     * soon as one shows, or at once when one is already open; `forget()` ends the watch. A dialog
+     * blocks the renderer, so in-flight work learns of it here instead of waiting for a reply
+     * that cannot come.
+     */
+    function watchDialog(tabId) {
+      const state = tabState(tabId);
+      let wake;
+      const opened = state.dialog
+        ? Promise.resolve(state.dialog.type)
+        : new Promise((resolve) => { wake = resolve; state.dialogWaiters.add(wake); });
+      return Object.freeze({ opened, forget: () => state.dialogWaiters.delete(wake) });
+    }
+
+    /** Throws `dialog_open` when a JavaScript dialog blocks the tab's renderer. */
+    function requireNoDialog(tabId) {
+      if (tabs.get(tabId)?.dialog) throw dialogOpen();
+    }
+
     // Forgets everything that belonged to one debugger attachment. Registrations and child
     // sessions die with the attachment, so their records go with it.
     function clearAttachment(state) {
@@ -419,7 +439,7 @@
     function openDialog(tabId, { type, message = "", defaultPrompt = "", url = "", sessionId = null } = {}) {
       const state = tabState(tabId);
       state.dialog = { type: type || DIALOG_UNKNOWN, message, defaultPrompt, url, sessionId };
-      for (const wake of state.dialogWaiters) wake();
+      for (const wake of state.dialogWaiters) wake(state.dialog.type);
     }
 
     /**
@@ -590,6 +610,8 @@
       openDialog,
       closeDialog,
       currentDialog,
+      watchDialog,
+      requireNoDialog,
       enableDomain,
       disableDomain,
       detached,

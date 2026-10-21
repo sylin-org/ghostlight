@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9 and EXT-10 have landed; EXT-11 is next.
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10 and EXT-11 have landed; EXT-5 is next (after C18).
 
 ## Slices
 
@@ -85,7 +85,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9 and EXT-10 have landed; EXT-11 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10 and EXT-11 have landed; EXT-5 is next (after C18).
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -96,7 +96,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | landed (this commit) |
 | EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | landed (this commit) |
 | EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | landed (this commit) |
-| EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | todo |
+| EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | landed (this commit) |
 | EXT-13 | refactor(extension): `script-evaluator.js` folds into `evaluate.js` | - | EXT-13 | landed (this commit) |
 | EXT-14 | refactor(extension): `withLease` and `withHidden` | - | EXT-14 | landed (this commit) |
 | EXT-12 | refactor(extension): the native link moves into `lib/link.js` | EXT-5, EXT-7, EXT-10 | EXT-12 | todo |
@@ -216,3 +216,17 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   whose script reads GhostlightMessages loads messages.js before it" fails when a page drops the
   tag (checked against `popup.html`). The `toggle_hold` intent the worker sends the service is a
   protocol word, not one of these, so it waits for EXT-5's names in `protocol.js`.
+- EXT-11: `sessions.js`, which holds a tab's open dialog, offers the one watch,
+  `lifecycle.watchDialog(tabId)`, whose `opened` resolves with the dialog's type, and
+  `lifecycle.requireNoDialog(tabId)`. The world's own registry (`dialogWaiters`, `watchForDialog`,
+  `announceDialog`) goes, so the worker opens a dialog with one call where it made two in step;
+  the world's call race and `input.js` wait on the sessions watch, and the five copies of "read
+  `currentDialog`, then throw `dialogOpen()`" (`capture.js`, `evaluate.js`, `input.js` and twice
+  `inventory.js`) are `requireNoDialog`. The sessions waiters now carry the type, as the skeptic
+  said they would need to. One behavior is new and safer: a watch started while a dialog is
+  already open resolves at once, where the world's watch heard only announcements made after it
+  began and an announcement that came between a caller's check and its watch went unheard until
+  the deadline. Three tests that announced a dialog to the world alone now open it through
+  `lifecycle.openDialog`, as the worker does, and the golden receipts pass unchanged. Proof: "a
+  dialog watch wakes with the type when a dialog opens, and at once when one is already open" in
+  `sessions.test.js`.

@@ -237,7 +237,7 @@ test("the actual worker import list loads its packaged parser before the evaluat
       return value(4);
     },
     withLease: async (_tabId, work) => work(),
-    currentDialog: () => null
+    requireNoDialog: () => {}
   };
   const inventory = { snapshot: async () => ({}), checkGuard: () => {} };
   const { evaluateMain } = context.GhostlightEvaluate.create({ lifecycle, inventory });

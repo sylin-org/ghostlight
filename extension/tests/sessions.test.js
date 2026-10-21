@@ -934,3 +934,19 @@ test("no module names a CDP command but through the sessions table, and every ke
   assert.deepEqual(new Set(Object.values(sessions.CDP)).size, sessions.CDP_ALLOW.length, "one key per command");
 });
 
+test("a dialog watch wakes with the type when a dialog opens, and at once when one is already open", async () => {
+  const lifecycle = sessions.create(fakeDebugger(), { installer });
+  await lifecycle.retain(7);
+  const early = lifecycle.watchDialog(7);
+  assert.doesNotThrow(() => lifecycle.requireNoDialog(7));
+  lifecycle.openDialog(7, { type: "confirm" });
+  assert.equal(await early.opened, "confirm");
+  early.forget();
+  assert.throws(() => lifecycle.requireNoDialog(7), { code: "dialog_open" });
+  const late = lifecycle.watchDialog(7);
+  assert.equal(await late.opened, "confirm", "a watch started after the dialog opened still sees it");
+  late.forget();
+  await lifecycle.closeDialog(7);
+  assert.doesNotThrow(() => lifecycle.requireNoDialog(7));
+  await lifecycle.detachAll();
+});

@@ -159,7 +159,7 @@
         const target = { tabId };
         const expression = scriptExpression(request.script, request.max_result_chars);
         return lifecycle.withLease(tabId, async () => {
-          if (lifecycle.currentDialog(tabId)) throw sessions.dialogOpen();
+          lifecycle.requireNoDialog(tabId);
           inventory.checkGuard(request.guard, await inventory.snapshot(tabId));
           fx.watch(tabId);
           fx.dispatched = true;

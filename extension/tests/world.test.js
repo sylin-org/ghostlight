@@ -203,7 +203,7 @@ test("a dialog that opens during a call answers dialog_open, started; a known di
   const { chrome, lifecycle, world } = await ready();
   chrome.handlers["Runtime.callFunctionOn"] = (target, params) => {
     if (params.functionDeclaration === World.SHIMS.CALL) {
-      setTimeout(() => world.announceDialog(TAB, "confirm"), 5);
+      setTimeout(() => lifecycle.openDialog(TAB, { type: "confirm" }), 5);
       return new Promise(() => {});
     }
     return { result: { value: true } };

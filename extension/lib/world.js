@@ -56,7 +56,6 @@
   const ANSWER = Object.freeze({ RETURNED: "returned", FAILED: "failed", SKIPPED: "skipped" });
   const MODE = Object.freeze({ SEQUENCE: "sequence", PARALLEL: "parallel", RACE: "race" });
   const SKIPPED = Object.freeze({ status: ANSWER.SKIPPED });
-  const DIALOG_UNKNOWN = "unknown";
   const RUNTIME_DISCONNECTED = "disconnected";
 
   // The closed mapping from CDP error text to a call failure. `started` says whether the page may
@@ -152,7 +151,6 @@
     const inflight = new Map();
     const cancelledTokens = new Set();
     const hiddenHolds = new Map();
-    const dialogWaiters = new Map();
 
     const handleKey = (tabId, ref) => `${tabId}|${ref.frame_id}|${ref.loader_id}`;
     const tabPrefix = (tabId) => `${tabId}|`;
@@ -271,40 +269,11 @@
         { objectId: entry.global, functionDeclaration: SHIMS.CANCEL, arguments: [{ value: entry.token }] }).catch(() => {});
     }
 
-    /**
-     * Starts watching a tab for a JavaScript dialog. `opened` resolves with the dialog type when
-     * announceDialog reports one; `forget()` ends the watch. A dialog blocks the renderer, so an
-     * in-flight command learns of it here instead of waiting for a reply that cannot come.
-     */
-    function watchForDialog(tabId) {
-      let announce;
-      const opened = new Promise((resolve) => { announce = resolve; });
-      if (!dialogWaiters.has(tabId)) dialogWaiters.set(tabId, new Set());
-      dialogWaiters.get(tabId).add(announce);
-      return {
-        opened,
-        forget() {
-          const waiting = dialogWaiters.get(tabId);
-          if (!waiting) return;
-          waiting.delete(announce);
-          if (waiting.size === 0) dialogWaiters.delete(tabId);
-        }
-      };
-    }
-
-    /** Reports a dialog that opened on a tab to every watch of that tab. */
-    function announceDialog(tabId, type) {
-      const waiting = dialogWaiters.get(tabId);
-      if (!waiting) return;
-      dialogWaiters.delete(tabId);
-      for (const resolve of waiting) resolve(type || DIALOG_UNKNOWN);
-    }
-
     // Races a started CDP call with the tab's dialog watch and the deadline. On the deadline the
     // cancel thunk fires and the call answers timeout at once; both outcomes count as started.
     async function raceDialogAndDeadline(tabId, deadline, call, cancel) {
       call.catch(() => {});
-      const dialog = watchForDialog(tabId);
+      const dialog = lifecycle.watchDialog(tabId);
       let timer = null;
       const expired = new Promise((resolve) => {
         if (Number.isFinite(deadline)) timer = setTimeout(resolve, Math.max(0, deadline - now()));
@@ -634,8 +603,6 @@
       callPrimitive,
       inflight: inflightOf,
       cancelToken,
-      watchForDialog,
-      announceDialog,
       ambientAll,
       present,
       disposeTab,

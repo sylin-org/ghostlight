@@ -125,10 +125,6 @@
     const cdp = lifecycle.cdp;
     const rootTarget = (tabId) => ({ tabId });
 
-    function requireNoDialog(tabId) {
-      if (lifecycle.currentDialog(tabId)) throw sessions.dialogOpen();
-    }
-
     // Reads the layout metrics once and derives the view facts. The caller holds a lease.
     async function readView(tabId) {
       const metrics = await cdp(rootTarget(tabId), CDP.PAGE_GET_LAYOUT_METRICS);
@@ -172,7 +168,7 @@
       /** Resolves `ViewFacts` for the tab: visual viewport, content size, device scale and zoom. */
       async run(args) {
         return lifecycle.withLease(args.tab_id, async () => {
-          requireNoDialog(args.tab_id);
+          lifecycle.requireNoDialog(args.tab_id);
           return (await readView(args.tab_id)).view;
         });
       }
@@ -197,7 +193,7 @@
         const tabId = args.tab_id;
         const budget = args.budget;
         return lifecycle.withLease(tabId, async () => {
-          requireNoDialog(tabId);
+          lifecycle.requireNoDialog(tabId);
           return worldCalls.withHidden(tabId, async () => {
             const { visual, content, view: facts } = await readView(tabId);
             const clip = clipFor(args.clip, visual, content);

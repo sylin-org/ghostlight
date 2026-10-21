@@ -194,8 +194,8 @@
           snap = await inventory.snapshot(args.tab_id);
           inventory.checkGuard(args.guard, snap);
         }
-        if (lifecycle.currentDialog(args.tab_id)) throw sessions.dialogOpen();
-        const dialog = worldCalls.watchForDialog(args.tab_id);
+        lifecycle.requireNoDialog(args.tab_id);
+        const dialog = lifecycle.watchDialog(args.tab_id);
         try {
           for (const step of args.steps) {
             if (isCancelled(correlation)) return { ...outcome, stopped: { reason: STOP.CANCELLED } };
