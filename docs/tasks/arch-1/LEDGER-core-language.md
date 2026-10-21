@@ -10,8 +10,8 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 has landed. Next is L-D2. A slice's hash is filled in by the next slice's commit, since a
-rebase before the push changes it.
+L-D1 and L-D2 have landed. Next is L-D3. A slice's hash is filled in by the next slice's commit,
+since a rebase before the push changes it.
 
 ## Slices
 
@@ -19,8 +19,8 @@ In order. "After" names what a slice waits for.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| L-D1 | fix(language): a wheel scroll may leave out its direction, and its amount is checked | - | LANG-3's skeptic note | landed |
-| L-D2 | fix(language): a summary with its coverage note stays within its bound, to the character | - | LANG-6 and its note | todo |
+| L-D1 | fix(language): a wheel scroll may leave out its direction, and its amount is checked | - | LANG-3's skeptic note | landed (59c67621) |
+| L-D2 | fix(language): a summary with its coverage note stays within its bound, to the character | - | LANG-6 and its note | landed |
 | L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | todo |
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | todo |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | todo |
@@ -47,3 +47,10 @@ In order. "After" names what a slice waits for.
   refuses any other amount: ticks set how far a wheel scrolls. The wheel branch's required list
   drops `direction`; the union requires only what every branch requires, so the catalog golden
   is unchanged.
+- L-D2: `outcome::with_note` joins a summary and one closed note within `SUMMARY_MAX_CHARS`,
+  cutting the summary and never the note. The coverage qualifier and both storage notes use it,
+  so a qualified summary is at most 500 characters and a storage note reaches 500, not 499 (one
+  more character at the bound, model-visible). The storage notes are named constants
+  (`CHILDREN_UNSAVED`, `HISTORY_UNSAVED`). When storage fails on a summary already at the bound,
+  the storage note wins and can cut the coverage note's words; the result's `coverage` fact still
+  carries them. `workbench/mod.rs` still spells the children note (surface, LANG-6's refactor).

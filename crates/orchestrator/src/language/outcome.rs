@@ -14,6 +14,18 @@ use crate::workspace::{StaleReason, WorkspaceError};
 /// summary that lists many things measures itself against it.
 pub const SUMMARY_MAX_CHARS: usize = 500;
 
+/// A summary followed by one closed note, within `SUMMARY_MAX_CHARS`. The summary is cut, never
+/// the note, so the note survives a summary that already fills the bound.
+#[must_use]
+pub fn with_note(summary: &str, note: &str) -> String {
+    if note.is_empty() {
+        return summary.into();
+    }
+    let room = SUMMARY_MAX_CHARS.saturating_sub(note.chars().count() + 1);
+    let kept: String = summary.chars().take(room).collect();
+    format!("{kept} {note}")
+}
+
 /// What a controller is told when a person has paused Ghostlight (ADR-0126 Decision 4).
 ///
 /// A pause refuses the next browser effect rather than suspending the invocation, because a

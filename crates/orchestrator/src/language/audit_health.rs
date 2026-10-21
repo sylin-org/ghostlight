@@ -13,16 +13,19 @@ pub enum Storage {
     Unconfirmed,
 }
 
+/// The note on a saved parent receipt whose children have an explicit storage gap.
+pub const CHILDREN_UNSAVED: &str = "Some step history could not be saved.";
+
+/// The note on a receipt whose own storage was not confirmed.
+pub const HISTORY_UNSAVED: &str = "History could not be saved.";
+
 /// Qualify a saved parent receipt whose children have an explicit storage gap.
 #[must_use]
 pub fn qualify_children(summary: &str, count: u32) -> String {
     if count == 0 {
         summary.into()
     } else {
-        format!(
-            "{} Some step history could not be saved.",
-            summary.chars().take(461).collect::<String>()
-        )
+        super::outcome::with_note(summary, CHILDREN_UNSAVED)
     }
 }
 
@@ -33,10 +36,7 @@ impl Storage {
         if self == Self::Saved {
             summary.into()
         } else {
-            format!(
-                "{} History could not be saved.",
-                summary.chars().take(471).collect::<String>()
-            )
+            super::outcome::with_note(summary, HISTORY_UNSAVED)
         }
     }
 
@@ -128,5 +128,31 @@ impl AuditHealth {
             && self.unconfirmed_receipts == 0
             && self.unreadable_entries == 0
             && !self.history_unavailable
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{qualify_children, Storage, CHILDREN_UNSAVED, HISTORY_UNSAVED};
+    use crate::language::outcome::SUMMARY_MAX_CHARS;
+
+    #[test]
+    fn a_storage_note_fills_the_summary_bound_to_the_character() {
+        for length in [SUMMARY_MAX_CHARS, 600] {
+            let summary = "s".repeat(length);
+            for (qualified, note) in [
+                (Storage::Unconfirmed.qualify(&summary), HISTORY_UNSAVED),
+                (qualify_children(&summary, 2), CHILDREN_UNSAVED),
+            ] {
+                assert_eq!(qualified.chars().count(), SUMMARY_MAX_CHARS, "{note}");
+                assert!(qualified.ends_with(&format!(" {note}")), "{note}");
+            }
+        }
+        assert_eq!(Storage::Saved.qualify("Done."), "Done.");
+        assert_eq!(qualify_children("Done.", 0), "Done.");
+        assert_eq!(
+            Storage::Unconfirmed.qualify("Done."),
+            "Done. History could not be saved."
+        );
     }
 }

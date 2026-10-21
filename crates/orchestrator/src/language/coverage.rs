@@ -77,12 +77,7 @@ pub struct HumanCoverage {
 /// Author the completion qualification consistently for model results and retained history.
 #[must_use]
 pub fn qualify(summary: &str, coverage: &Coverage) -> String {
-    let qualification = coverage.qualification();
-    if qualification.is_empty() {
-        summary.into()
-    } else {
-        format!("{summary} {qualification}")
-    }
+    super::outcome::with_note(summary, &coverage.qualification())
 }
 
 /// Human-only disclosure explanation, separate from the completed operation sentence.
@@ -104,5 +99,42 @@ pub fn human_summary(coverage: &Coverage) -> String {
         )
     } else {
         coverage.qualification()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{qualify, Coverage};
+    use crate::language::outcome::SUMMARY_MAX_CHARS;
+
+    #[test]
+    fn a_qualified_summary_stays_within_its_bound_and_keeps_every_note() {
+        let coverage = Coverage {
+            excluded_documents: 1,
+            unavailable_documents: 1,
+            limited_by_size: true,
+            ..Coverage::default()
+        };
+        let note = coverage.qualification();
+        for length in [
+            0,
+            10,
+            SUMMARY_MAX_CHARS - note.len() - 1,
+            SUMMARY_MAX_CHARS,
+            600,
+        ] {
+            let summary = "s".repeat(length);
+            let qualified = qualify(&summary, &coverage);
+            assert!(qualified.chars().count() <= SUMMARY_MAX_CHARS, "{length}");
+            assert!(qualified.ends_with(&format!(" {note}")), "{length}");
+        }
+        let full = qualify(&"s".repeat(SUMMARY_MAX_CHARS), &coverage);
+        assert_eq!(full.chars().count(), SUMMARY_MAX_CHARS);
+        let short = qualify("Read the page.", &coverage);
+        assert_eq!(short, format!("Read the page. {note}"));
+        assert_eq!(
+            qualify("Read the page.", &Coverage::default()),
+            "Read the page."
+        );
     }
 }
