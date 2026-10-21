@@ -512,4 +512,10 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
   non-Ghostlight ancestor, a fresh `cmd.exe` or `bash.exe` per shell command. The caller becomes
   the nearest ancestor whose image is a catalog agent's app (the match `provenance::Source` already
   makes), with no folding of same-named agent ancestors, and the session is named for that agent
-  (`Agent::of` on the CLI channel). With no agent in the walk, the terminal rule stands.
+  (`Agent::of` on the CLI channel). With no agent in the walk, the terminal rule stands. Reuse stays
+  keyed on the command line (ADR-0203 Decision 9). Two facts from the coordinator's probe on
+  2026-10-21: a call from a `#!/usr/bin/env bash` script can lose its ancestry (the service then
+  records no source either), so such a script keeps the terminal rule unless it sets
+  `GHOSTLIGHT_SESSION`; and inside the Claude desktop app, Claude Code's own `claude.exe` matches no
+  catalog app before the desktop app's does, so the source reads `claude-desktop` and the name would
+  be Claude. The slice settles that name first.

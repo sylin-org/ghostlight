@@ -157,9 +157,11 @@ ghostlight call from Claude Code") and still keyed the session on the throwaway 
 
 The caller is now the nearest ancestor whose image is a catalog agent's app, when the walk finds
 one. Every call one agent session makes, through whatever shell its tool spawns, reaches one
-workspace. The session is named for that agent, so its tabs sit in that agent's group, and it
-reuses that agent's released tabs as the agent's MCP sessions do (ADR-0203 Decision 9). The nearest
-agent ancestor is taken as it is, with no folding of same-named agent ancestors, so each agent
+workspace. The session is named for that agent, so its tabs sit in that agent's group: a name is
+display, which ADR-0203 Decision 9 lets the observed agent shape. Released-tab reuse stays keyed on
+the command line, because the observed source decides nothing (ADR-0202 Decision 1). The walk that
+finds the caller is the command's own (`cli/session.rs`), as before. The nearest agent ancestor is
+taken as it is, with no folding of same-named agent ancestors, so each agent
 session that runs as its own process keeps its own workspace. With no agent's app in the walk, the
 amendment of 2026-10-14 stands, and a person's terminal is one session. `GHOSTLIGHT_SESSION` still
 wins over both, and Decision 2 (identity is pid plus start time) is unchanged. The work is slice
