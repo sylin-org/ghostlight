@@ -115,9 +115,6 @@ struct RegistryInner {
     summaries: Mutex<Vec<HarnessSummary>>,
     /// Held by every act and every scan, and always taken before `summaries`.
     action: Mutex<()>,
-    /// How many scans this registry has run, for the tests that count them.
-    #[cfg(test)]
-    scans: std::sync::atomic::AtomicUsize,
 }
 
 impl HarnessRegistry {
@@ -133,8 +130,6 @@ impl HarnessRegistry {
                 context,
                 summaries: Mutex::new(Vec::new()),
                 action: Mutex::new(()),
-                #[cfg(test)]
-                scans: std::sync::atomic::AtomicUsize::new(0),
             }),
         };
         let _ = registry.refresh();
@@ -197,22 +192,12 @@ impl HarnessRegistry {
 
     /// Inspect every supported harness and store the roster. The caller holds the action lock.
     fn scan(&self) -> Vec<HarnessSummary> {
-        #[cfg(test)]
-        self.inner
-            .scans
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let summaries: Vec<HarnessSummary> = definitions(&self.inner.context)
             .into_iter()
             .map(|definition| inspect(&self.inner.context, &definition))
             .collect();
         *lock(&self.inner.summaries) = summaries.clone();
         summaries
-    }
-
-    /// How many scans this registry has run.
-    #[cfg(test)]
-    pub(crate) fn scans(&self) -> usize {
-        self.inner.scans.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Apply one explicit check, install, fix, or uninstall action.

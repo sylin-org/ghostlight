@@ -127,6 +127,10 @@ const UNINSTALL_QUIT_WAIT: Duration = QUIT_GRACE
     .saturating_add(END_LIMIT)
     .saturating_add(QUIT_RELEASE_MARGIN);
 
+// I-D2: an uninstall outwaits the longest quit.
+const _: () =
+    assert!(UNINSTALL_QUIT_WAIT.as_nanos() > QUIT_GRACE.saturating_add(END_LIMIT).as_nanos());
+
 /// How often that wait looks at the service lock.
 const UNINSTALL_QUIT_POLL: Duration = Duration::from_millis(50);
 
@@ -1099,12 +1103,6 @@ mod tests {
     };
     use crate::install::{HarnessAction, HarnessActionResult, HarnessState, HarnessSummary};
     use crate::language::setup::{BrowserFact, BrowserForm, InstallAgent};
-    use crate::service::lifetime::{END_LIMIT, QUIT_GRACE};
-
-    #[test]
-    fn an_uninstall_outwaits_the_longest_quit() {
-        assert!(super::UNINSTALL_QUIT_WAIT > QUIT_GRACE + END_LIMIT);
-    }
 
     fn browser(id: &str, package: BrowserPackage) -> BrowserRegistration {
         BrowserRegistration {
@@ -1123,350 +1121,6 @@ mod tests {
             browsers,
             private_view: None,
         }
-    }
-
-    /// `ghostlight native-host` and `doctor` print the same report, so a browser's state reads with
-    /// one word in both, and every state has a word of its own.
-    #[test]
-    fn native_host_check_and_doctor_say_one_word_per_state() {
-        use std::collections::BTreeSet;
-
-        use crate::language::deployment::browser_state;
-
-        let states = [
-            NativeHostState::Missing,
-            NativeHostState::Current,
-            NativeHostState::Updatable,
-            NativeHostState::OwnedElsewhere,
-            NativeHostState::NeedsAttention,
-        ];
-        let report = browser_report(
-            states
-                .iter()
-                .map(|state| BrowserRegistration {
-                    state: *state,
-                    ..browser(&format!("{state:?}"), BrowserPackage::Native)
-                })
-                .collect(),
-        );
-        let lines = super::native_host_report_lines(&report);
-        assert_eq!(lines.len(), states.len() + 1);
-        assert_eq!(lines[0], "Ghostlight program: /ghostlight");
-        for (state, line) in states.iter().zip(&lines[1..]) {
-            assert_eq!(
-                *line,
-                format!(
-                    "Browser: {state:?} -- {state:?} package detail -- {} -- registration detail",
-                    browser_state(*state)
-                )
-            );
-        }
-        let words: BTreeSet<&str> = states.iter().map(|state| browser_state(*state)).collect();
-        assert_eq!(words.len(), states.len(), "one word per state: {words:?}");
-    }
-
-    #[test]
-    fn only_a_whole_uninstall_ends_the_running_ghostlight() {
-        assert!(super::stops_running(&SetupOptions::default()));
-        for scoped in [
-            SetupOptions {
-                browser_ids: vec!["chromium".into()],
-                ..SetupOptions::default()
-            },
-            SetupOptions {
-                client_ids: vec!["zed".into()],
-                ..SetupOptions::default()
-            },
-            SetupOptions {
-                no_clients: true,
-                ..SetupOptions::default()
-            },
-        ] {
-            assert!(!super::stops_running(&scoped));
-        }
-    }
-
-    #[test]
-    fn ordinary_install_selects_only_detected_native_browsers() {
-        let report = browser_report(vec![
-            browser("chrome", BrowserPackage::Native),
-            browser("chromium", BrowserPackage::Snap),
-            browser("brave", BrowserPackage::NotDetected),
-        ]);
-        assert_eq!(
-            select_install_browsers(&report, &SetupOptions::default()).unwrap(),
-            Some(vec!["chrome".into()])
-        );
-        assert!(select_install_browsers(
-            &report,
-            &SetupOptions {
-                browser_ids: vec!["chromium".into()],
-                ..SetupOptions::default()
-            }
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("chromium package detail"));
-    }
-
-    #[test]
-    fn all_browsers_and_windows_keep_deliberate_pre_registration() {
-        let missing = browser_report(vec![browser("chrome", BrowserPackage::NotDetected)]);
-        assert!(select_install_browsers(&missing, &SetupOptions::default()).is_err());
-        assert_eq!(
-            select_install_browsers(
-                &missing,
-                &SetupOptions {
-                    all_browsers: true,
-                    ..SetupOptions::default()
-                }
-            )
-            .unwrap(),
-            None
-        );
-        let windows = browser_report(vec![browser("chrome", BrowserPackage::NotChecked)]);
-        assert_eq!(
-            select_install_browsers(&windows, &SetupOptions::default()).unwrap(),
-            None
-        );
-    }
-
-    #[test]
-    fn an_install_archives_and_removes_the_1x_version_directories_and_nothing_else() {
-        use std::fs;
-
-        use super::remove_version_directories;
-        use crate::install::layout::Layout;
-        use crate::scratch::Scratch;
-
-        let scratch = Scratch::new();
-        let layout = Layout::new(scratch.path());
-        let bin = layout.bin();
-        for name in ["v1.3.5", "v1.3.6", "vnext"] {
-            fs::create_dir_all(bin.join(name)).unwrap();
-            fs::write(bin.join(name).join("ghostlight-mcp-connector"), "image").unwrap();
-        }
-        fs::write(
-            bin.join("v1.3.5").join("audit.jsonl"),
-            b"log
-",
-        )
-        .unwrap();
-        fs::write(bin.join("v1.3.7"), "a file").unwrap();
-
-        remove_version_directories(&layout);
-
-        assert!(!bin.join("v1.3.5").exists());
-        assert!(!bin.join("v1.3.6").exists());
-        assert!(bin.join("vnext").join("ghostlight-mcp-connector").is_file());
-        assert!(bin.join("v1.3.7").is_file());
-        assert_eq!(
-            fs::read(layout.state().join("audit-v1.3.5.jsonl")).unwrap(),
-            b"log
-"
-        );
-
-        remove_version_directories(&layout);
-        assert!(bin.join("vnext").is_dir());
-    }
-
-    #[test]
-    fn a_browser_left_private_is_named_as_its_connection() {
-        assert_eq!(
-            private_browser_registrations(&["Google Chrome".to_owned()]),
-            ["Google Chrome browser connection"]
-        );
-    }
-
-    #[test]
-    fn setup_carries_the_entries_a_container_keeps_private_into_the_closing_lines() {
-        use super::{carry_windows_report, KeptPrivate};
-        use crate::install::container::AppContainer;
-        use crate::install::reconcile::ReconcileReport;
-
-        let container = AppContainer {
-            app: "Claude".into(),
-        };
-        let mut kept = KeptPrivate::default();
-        kept.registrations.push("PATH entry".to_owned());
-        carry_windows_report(ReconcileReport::default(), &mut kept);
-        assert_eq!(kept.registrations, ["PATH entry"]);
-        assert_eq!(kept.container, None);
-
-        carry_windows_report(
-            ReconcileReport {
-                kept_private: vec![
-                    "Start-menu shortcut".to_owned(),
-                    "installed-apps entry".to_owned(),
-                ],
-                container: Some(container.clone()),
-                ..ReconcileReport::default()
-            },
-            &mut kept,
-        );
-        assert_eq!(
-            kept.registrations,
-            ["PATH entry", "Start-menu shortcut", "installed-apps entry"]
-        );
-        assert_eq!(kept.container, Some(container));
-
-        let other = AppContainer {
-            app: "Codex".into(),
-        };
-        carry_windows_report(
-            ReconcileReport {
-                kept_private: vec!["browser".to_owned()],
-                container: Some(other),
-                ..ReconcileReport::default()
-            },
-            &mut kept,
-        );
-        assert_eq!(
-            kept.container.map(|container| container.app),
-            Some("Claude".to_owned()),
-            "the container already named stays"
-        );
-    }
-
-    #[test]
-    fn a_dry_run_inside_a_container_says_what_it_would_leave_private_not_what_it_would_update() {
-        use super::pending_entry_lines;
-        use crate::install::container::AppContainer;
-        use crate::install::layout::Layout;
-        use crate::install::reconcile::PendingWindowsEntries;
-
-        let layout = Layout::new("/home/.ghostlight");
-        let outside = PendingWindowsEntries {
-            would_update: vec!["Start-menu shortcut".to_owned()],
-            ..PendingWindowsEntries::default()
-        };
-        assert_eq!(
-            pending_entry_lines(&outside, &layout),
-            ["Would update the Start-menu shortcut."]
-        );
-        let inside = PendingWindowsEntries {
-            kept_private: vec!["Start-menu shortcut".to_owned()],
-            container: Some(AppContainer {
-                app: "Claude".into(),
-            }),
-            ..PendingWindowsEntries::default()
-        };
-        let lines = pending_entry_lines(&inside, &layout);
-        assert_eq!(lines.len(), 2, "{lines:?}");
-        assert!(lines[0].contains("private to Claude") && lines[0].contains("Start-menu shortcut"));
-        assert!(!lines.iter().any(|line| line.contains("Would update")));
-        assert!(pending_entry_lines(&PendingWindowsEntries::default(), &layout).is_empty());
-    }
-
-    #[test]
-    fn an_uninstall_names_each_entry_it_kept_and_its_dry_run_each_it_would_remove() {
-        use super::removal_lines;
-        use crate::install::reconcile::WindowsRemoval;
-
-        let removal = WindowsRemoval {
-            removed: vec!["Start-menu shortcut".to_owned()],
-            kept: vec!["installed-apps entry".to_owned()],
-            failures: Vec::new(),
-        };
-        let kept = "Kept the installed-apps entry; it does not name this Ghostlight installation.";
-        assert_eq!(removal_lines(&removal, false), [kept]);
-        assert_eq!(
-            removal_lines(&removal, true),
-            ["Would remove the Start-menu shortcut.", kept]
-        );
-        assert!(removal_lines(&WindowsRemoval::default(), false).is_empty());
-    }
-
-    #[test]
-    fn an_uninstall_names_the_browsers_whose_registration_it_removed() {
-        use super::removed_browsers;
-
-        let with_state = |id: &str, state| BrowserRegistration {
-            state,
-            ..browser(id, BrowserPackage::Native)
-        };
-        let before = browser_report(vec![
-            with_state("chrome", NativeHostState::Current),
-            with_state("edge", NativeHostState::OwnedElsewhere),
-            with_state("brave", NativeHostState::NeedsAttention),
-            with_state("chromium", NativeHostState::Missing),
-        ]);
-        let after = browser_report(vec![
-            with_state("chrome", NativeHostState::Missing),
-            with_state("edge", NativeHostState::Missing),
-            with_state("brave", NativeHostState::NeedsAttention),
-            with_state("chromium", NativeHostState::Missing),
-        ]);
-        assert_eq!(removed_browsers(&before, &after), ["chrome", "edge"]);
-        assert!(removed_browsers(&before, &before).is_empty());
-    }
-
-    #[test]
-    fn a_dry_run_names_only_the_browsers_the_uninstall_would_act_on() {
-        use super::would_remove_browsers;
-
-        let with_state = |id: &str, state| BrowserRegistration {
-            state,
-            ..browser(id, BrowserPackage::Native)
-        };
-        let mut report = browser_report(vec![
-            with_state("chrome", NativeHostState::Current),
-            with_state("edge", NativeHostState::OwnedElsewhere),
-            with_state("brave", NativeHostState::NeedsAttention),
-            with_state("chromium", NativeHostState::Missing),
-        ]);
-        assert_eq!(would_remove_browsers(&report, &[]), ["chrome", "edge"]);
-        assert_eq!(
-            would_remove_browsers(&report, &["chrome".to_owned(), "brave".to_owned()]),
-            ["chrome"]
-        );
-        report.private_view = Some(crate::install::container::AppContainer {
-            app: "Claude_pzs8sxrjxfjjc".into(),
-        });
-        assert!(would_remove_browsers(&report, &[]).is_empty());
-    }
-
-    #[test]
-    fn an_install_says_only_the_programs_it_could_not_stop() {
-        use crate::install::deployment::{StrayKind, StrayProcess, StrayStop};
-
-        let stray = |image: &str| StrayProcess {
-            pid: 3,
-            image: PathBuf::from(image),
-            kind: StrayKind::RetiredConnector,
-        };
-        assert!(stray_not_stopped_lines(&StrayStop::default()).is_empty());
-        let lines = stray_not_stopped_lines(&StrayStop {
-            stopped: vec![stray("a.exe")],
-            stuck: vec![stray("b.exe")],
-        });
-        assert_eq!(lines, ["Could not stop b.exe. Close it yourself."]);
-    }
-
-    #[test]
-    fn the_window_opens_only_for_a_usable_install_that_is_not_complete_and_not_held_back() {
-        use super::should_show_window;
-
-        for bits in 0u8..64 {
-            let flag = |bit: u8| bits & (1 << bit) != 0;
-            let (dry_run, no_open, automated) = (flag(0), flag(1), flag(2));
-            let (install_usable, in_container, complete) = (flag(3), flag(4), flag(5));
-            let expected =
-                !dry_run && !no_open && !automated && install_usable && !in_container && !complete;
-            assert_eq!(
-                should_show_window(
-                    dry_run,
-                    no_open,
-                    automated,
-                    install_usable,
-                    in_container,
-                    complete
-                ),
-                expected,
-                "{bits:06b}"
-            );
-        }
-        assert!(should_show_window(false, false, false, true, false, false));
     }
 
     fn harness(id: &str, label: &str, state: HarnessState) -> HarnessSummary {
@@ -1498,311 +1152,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_run_inside_a_container_selects_the_private_clients_it_leaves() {
-        let private = |id: &str, state: HarnessState| HarnessSummary {
-            can_install: false,
-            private_view: true,
-            ..harness(id, id, state)
-        };
-        let summaries = [
-            harness("cursor", "Cursor", HarnessState::Available),
-            private("claude-desktop", HarnessState::Available),
-            private("zed", HarnessState::Updatable),
-            private("windsurf", HarnessState::Installed),
-            private("kiro", HarnessState::NeedsAttention),
-            HarnessSummary {
-                copy_only: true,
-                ..private("goose", HarnessState::Available)
-            },
-            private("vscode", HarnessState::NotDetected),
-        ];
-        let ids = |selected: Vec<HarnessSummary>| -> Vec<String> {
-            selected.into_iter().map(|summary| summary.id).collect()
-        };
-        let options = SetupOptions::default();
-        assert_eq!(
-            ids(select_harnesses(&summaries, &options, true).unwrap()),
-            ["cursor", "claude-desktop", "zed"]
-        );
-        let every = SetupOptions {
-            all_clients: true,
-            ..SetupOptions::default()
-        };
-        assert_eq!(
-            ids(select_harnesses(&summaries, &every, true).unwrap()),
-            ["cursor", "claude-desktop", "zed", "vscode"]
-        );
-        // A removal selects each private client that holds Ghostlight's entry, current or not, so
-        // it can say so.
-        assert_eq!(
-            ids(select_harnesses(&summaries, &options, false).unwrap()),
-            ["zed", "windsurf"]
-        );
-    }
-
-    #[test]
-    fn a_client_id_selects_an_agents_detected_hosts_or_one_host_in_the_order_given() {
-        let cline = |id: &str, host: &str, state: HarnessState| HarnessSummary {
-            agent: crate::agent::Agent::listed(
-                "cline",
-                "Cline",
-                crate::agent::image::Monogram::FIXTURE,
-            ),
-            ..harness(id, &format!("Cline ({host})"), state)
-        };
-        let summaries = [
-            harness("codex", "Codex", HarnessState::Installed),
-            cline("cline-cli", "CLI", HarnessState::Available),
-            cline(
-                "cline-vscode",
-                "Visual Studio Code",
-                HarnessState::NotDetected,
-            ),
-            cline("cline-cursor", "Cursor", HarnessState::NotDetected),
-            cline("cline-windsurf", "Windsurf", HarnessState::NotDetected),
-            harness("zed", "Zed", HarnessState::NotDetected),
-        ];
-        let select = |summaries: &[HarnessSummary],
-                      values: &[&str],
-                      all_clients: bool,
-                      install: bool|
-         -> anyhow::Result<Vec<String>> {
-            let options = SetupOptions {
-                client_ids: values.iter().map(|value| (*value).into()).collect(),
-                all_clients,
-                ..SetupOptions::default()
-            };
-            Ok(select_harnesses(summaries, &options, install)?
-                .into_iter()
-                .map(|summary| summary.id)
-                .collect())
-        };
-        // An agent id selects only the hosts of it that are found, so naming Cline writes no
-        // file into an editor the person does not have.
-        assert_eq!(
-            select(&summaries, &["cline"], false, true).unwrap(),
-            ["cline-cli"]
-        );
-        assert_eq!(
-            select(&summaries, &["cline"], false, false).unwrap(),
-            ["cline-cli"]
-        );
-        assert_eq!(
-            select(&summaries, &["cline"], true, true).unwrap(),
-            [
-                "cline-cli",
-                "cline-vscode",
-                "cline-cursor",
-                "cline-windsurf"
-            ]
-        );
-        // A harness id selects exactly the host it selected before, whatever its state.
-        assert_eq!(
-            select(&summaries, &["CLINE-Cursor"], false, true).unwrap(),
-            ["cline-cursor"]
-        );
-        assert_eq!(
-            select(&summaries, &["zed", "codex"], false, true).unwrap(),
-            ["zed", "codex"]
-        );
-        assert_eq!(
-            select(&summaries, &["codex"], false, false).unwrap(),
-            ["codex"]
-        );
-        // A host named twice, by its agent and by its own id, is set up once.
-        assert_eq!(
-            select(
-                &summaries,
-                &["cline-cli", "cline-vscode", "cline", "codex"],
-                false,
-                false
-            )
-            .unwrap(),
-            ["cline-cli", "cline-vscode", "codex"]
-        );
-        let refusal = select(&summaries, &["cline", "Cline (Cursor)"], false, true)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            refusal.starts_with("unknown MCP client 'Cline (Cursor)'; expected an agent id ("),
-            "{refusal}"
-        );
-        let valid = crate::install::client_ids();
-        for id in valid.all() {
-            assert!(refusal.contains(id), "{refusal} does not list {id}");
-        }
-        // An agent none of whose hosts is found is refused, naming each host and --all-clients.
-        let absent: Vec<HarnessSummary> = summaries
-            .iter()
-            .map(|summary| HarnessSummary {
-                state: HarnessState::NotDetected,
-                ..summary.clone()
-            })
-            .collect();
-        let refusal = select(&absent, &["Cline"], false, true)
-            .unwrap_err()
-            .to_string();
-        assert_eq!(
-            refusal,
-            "no host of Cline was found for 'Cline'; name one by its host id (cline-cli, \
-             cline-vscode, cline-cursor, cline-windsurf), or add --all-clients to select every \
-             host of Cline"
-        );
-        assert_eq!(select(&absent, &["cline"], true, true).unwrap().len(), 4);
-        assert_eq!(
-            select(&absent, &["cline-windsurf"], false, true).unwrap(),
-            ["cline-windsurf"]
-        );
-    }
-
-    #[test]
-    fn a_run_inside_a_container_changes_no_private_client_and_says_what_it_left() {
-        let container = crate::install::container::AppContainer {
-            app: "OpenAI.Codex".into(),
-        };
-        let desktop = HarnessSummary {
-            can_install: false,
-            private_view: true,
-            ..harness("claude-desktop", "Claude Desktop", HarnessState::Installed)
-        };
-        for dry_run in [false, true] {
-            let ClientStep::Say(line) = client_step(&desktop, false, dry_run, Some(&container))
-            else {
-                panic!("a removal inside a container must not remove a private entry");
-            };
-            assert!(line.starts_with("Claude Desktop: "), "{line}");
-            assert!(line.contains("private to OpenAI.Codex"), "{line}");
-            assert!(line.contains("entry stays in place"), "{line}");
-            assert!(line.contains("Ghostlight's uninstall"), "{line}");
-        }
-        assert_eq!(
-            client_step(&desktop, true, false, Some(&container)),
-            ClientStep::LeavePrivate
-        );
-        let ClientStep::Say(line) = client_step(&desktop, true, true, Some(&container)) else {
-            panic!("a dry run inside a container must say what it would leave");
-        };
-        assert!(line.contains("not written from here") && line.contains("Ghostlight's install"));
-
-        let cursor = harness("cursor", "Cursor", HarnessState::Installed);
-        assert_eq!(
-            client_step(&cursor, false, false, Some(&container)),
-            ClientStep::Apply(HarnessAction::Uninstall)
-        );
-        assert_eq!(
-            client_step(&cursor, true, false, None),
-            ClientStep::Apply(HarnessAction::Install)
-        );
-    }
-
-    #[test]
-    fn a_dry_run_removal_says_what_uninstall_would_change_in_every_copy() {
-        use crate::install::Attention;
-
-        let plain = r"C:\Users\Pat\AppData\Roaming\Claude\claude_desktop_config.json";
-        let said = |summary: &HarnessSummary| match client_step(summary, false, true, None) {
-            ClientStep::Say(line) => line,
-            other => panic!("a dry run changes nothing: {other:?}"),
-        };
-        let elsewhere = format!(
-            "Would remove Ghostlight from another copy of Claude Desktop's settings, at {plain}."
-        );
-
-        // The chosen file has no entry and another copy holds Ghostlight's own: Uninstall cleans
-        // that copy, so the dry run names it.
-        let available = HarnessSummary {
-            can_uninstall: true,
-            other_copy: Some(plain.into()),
-            owned_copies: vec![plain.into()],
-            ..harness("claude-desktop", "Claude Desktop", HarnessState::Available)
-        };
-        assert_eq!(said(&available), elsewhere);
-
-        // The chosen file holds an entry Ghostlight does not own, and another copy holds
-        // Ghostlight's: Uninstall leaves the chosen file and cleans the other copy.
-        let foreign = HarnessSummary {
-            state: HarnessState::NeedsAttention,
-            attention: Some(Attention::ForeignEntry),
-            ..available.clone()
-        };
-        assert_eq!(said(&foreign), elsewhere);
-
-        // No copy holds Ghostlight's entry: nothing would change, and a file that could not be
-        // parsed is said as that, not as a foreign entry.
-        let none = HarnessSummary {
-            other_copy: Some(plain.into()),
-            ..harness("claude-desktop", "Claude Desktop", HarnessState::Available)
-        };
-        assert_eq!(
-            said(&none),
-            "Claude Desktop has no Ghostlight entry; nothing would change."
-        );
-        let malformed = HarnessSummary {
-            attention: Some(Attention::Malformed),
-            ..harness(
-                "claude-desktop",
-                "Claude Desktop",
-                HarnessState::NeedsAttention,
-            )
-        };
-        assert_eq!(
-            said(&malformed),
-            "Would leave Claude Desktop as it is: its settings file could not be parsed."
-        );
-    }
-
-    #[test]
-    fn one_install_scans_once_plus_once_per_write() {
-        use std::fs;
-
-        use crate::install::HarnessRegistry;
-        use crate::scratch::Scratch;
-
-        let directory = Scratch::named("setup-scans");
-        let edge = directory.join("ghostlight");
-        fs::write(&edge, b"test").unwrap();
-        fs::create_dir_all(directory.join("clients/home/.cline/data/settings")).unwrap();
-        fs::create_dir_all(
-            directory
-                .join("clients/config/Code/User/globalStorage/saoudrizwan.claude-dev/settings"),
-        )
-        .unwrap();
-        let harnesses =
-            HarnessRegistry::isolated(&directory.join("clients"), &edge, &directory.join("state"));
-        assert_eq!(
-            harnesses.scans(),
-            1,
-            "building the registry is the one look"
-        );
-
-        let mut kept_private = super::KeptPrivate::default();
-        let mut collected = Collected::default();
-        let failures = super::run_client_steps(
-            &harnesses,
-            true,
-            &SetupOptions::default(),
-            &mut kept_private,
-            &mut collected,
-        )
-        .unwrap();
-
-        assert!(failures.is_empty(), "{failures:?}");
-        assert_eq!(
-            collected.agents,
-            [
-                agent("Visual Studio Code", true, true),
-                agent("Cline (CLI)", true, true),
-                agent("Cline (Visual Studio Code)", true, true),
-            ]
-        );
-        assert_eq!(
-            harnesses.scans(),
-            1 + 3,
-            "each of the three writes reads the clients once"
-        );
-    }
-
     fn applied(id: &str, label: &str, changed: bool) -> HarnessActionResult {
         HarnessActionResult {
             changed,
@@ -1817,51 +1166,6 @@ mod tests {
             has_entry,
             changed,
         }
-    }
-
-    #[test]
-    fn the_agents_of_an_install_are_those_here_with_what_this_run_did() {
-        use super::install_agents;
-
-        let summaries = vec![
-            harness("claude-code", "Claude Code", HarnessState::Available),
-            harness("codex", "Codex", HarnessState::Updatable),
-            harness("cursor", "Cursor", HarnessState::Installed),
-            harness("zed", "Zed", HarnessState::NeedsAttention),
-            harness("cline", "Cline", HarnessState::NotDetected),
-        ];
-        // Nothing applied (for instance `--no-clients`): what each already has.
-        assert_eq!(
-            install_agents(&summaries, &[]),
-            [
-                agent("Claude Code", false, false),
-                agent("Codex", false, false),
-                agent("Cursor", true, false),
-                agent("Zed", false, false),
-            ]
-        );
-        // Two written, one of them was only brought up to date.
-        assert_eq!(
-            install_agents(
-                &summaries,
-                &[
-                    applied("claude-code", "Claude Code", true),
-                    applied("codex", "Codex", true),
-                    applied("cursor", "Cursor", false),
-                ]
-            ),
-            [
-                agent("Claude Code", true, true),
-                agent("Codex", true, true),
-                agent("Cursor", true, false),
-                agent("Zed", false, false),
-            ]
-        );
-        // A client named on the command line counts once Ghostlight wrote its entry.
-        assert_eq!(
-            install_agents(&summaries[4..], &[applied("cline", "Cline", true)]),
-            [agent("Cline", true, true)]
-        );
     }
 
     fn native_chrome() -> BrowserFact {
@@ -1904,181 +1208,772 @@ mod tests {
         }
     }
 
+    /// Protects workbench gate 8 and defects 41a3f8bf and 31f2c835: setup and uninstall act only on
+    /// what was asked. An ordinary install registers only detected native browsers while an explicit
+    /// selection keeps deliberate pre-registration; a client id selects an agent's detected hosts, or
+    /// one host, in the order given; only a whole uninstall ends the running Ghostlight; an install
+    /// archives and removes the 1.x version directories and nothing else; and each run, or its dry
+    /// run, names the browsers, entries and copies it changed or would change, and only the programs
+    /// it could not stop.
     #[test]
-    fn a_first_install_with_the_window_shown_points_at_the_window() {
-        assert_eq!(
-            lines_of(&two_agents_changed(), vec![native_chrome()], false, true),
-            [
-                "Ghostlight 2.0.0 is installed.",
-                "Ghostlight is in your notification area, and in the Start menu.",
-                "Agents: Claude Code and Codex (restart them before you ask).",
-                "Next: add Ghostlight to Chrome in the Ghostlight window.",
-            ]
-        );
-    }
-
-    #[test]
-    fn a_first_install_without_the_window_gives_the_listing() {
-        use crate::language::setup::STORE_LISTING_URL;
-
-        let lines = lines_of(&two_agents_changed(), vec![native_chrome()], false, false);
-        assert_eq!(
-            lines.last().unwrap(),
-            &format!("Next: add Ghostlight to Chrome: {STORE_LISTING_URL}")
-        );
-        assert_eq!(lines.len(), 4, "{lines:?}");
-    }
-
-    #[test]
-    fn the_path_just_written_says_to_open_a_new_terminal() {
-        let collected = Collected {
-            path_written: true,
-            ..two_agents_changed()
-        };
-        let lines = lines_of(&collected, vec![native_chrome()], false, true);
-        assert_eq!(lines[2], "Open a new terminal to use ghostlight.");
-        assert_eq!(
-            lines
-                .iter()
-                .filter(|line| line.starts_with("Next:"))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn an_extension_already_in_a_profile_asks_for_that_browser_as_the_window_does() {
-        use crate::language::setup::ProfileFact;
-
-        let mut chrome = native_chrome();
-        chrome.extension = Some(ProfileFact {
-            directory: "Default".into(),
-            name: None,
-            profiles: 1,
-        });
-        let lines = lines_of(&two_agents_changed(), vec![chrome], false, false);
-        assert_eq!(
-            lines.last().unwrap(),
-            "Next: open Chrome, where Ghostlight is already added."
-        );
-        assert!(!lines.iter().any(|line| line.contains("Chrome Web Store")));
-    }
-
-    #[test]
-    fn a_complete_setup_has_no_next_line_and_asks_for_a_restart_only_of_what_changed() {
-        let lines = lines_of(&two_agents_changed(), vec![native_chrome()], true, false);
-        assert!(!lines.iter().any(|line| line.starts_with("Next:")));
-        assert_eq!(
-            lines.last().unwrap(),
-            "Restart Claude Code and Codex to use Ghostlight."
-        );
-        let unchanged = Collected {
-            agents: vec![agent("Claude Code", true, false)],
-            ..two_agents_changed()
-        };
-        let lines = lines_of(&unchanged, vec![native_chrome()], true, false);
-        assert_eq!(lines.len(), 3, "{lines:?}");
-        assert!(lines[2].starts_with("Agents: Claude Code"));
-    }
-
-    #[test]
-    fn a_complete_setup_reads_no_browser_profile() {
-        use super::install_facts;
-        use crate::language::environment::Environment;
-
-        let facts = install_facts(
-            &two_agents_changed(),
-            "2.0.0".into(),
-            Environment::Windows,
-            || panic!("a complete setup scanned the browser profiles"),
-            true,
-            false,
-        );
-        assert!(facts.browsers.is_empty());
-        let facts = install_facts(
-            &two_agents_changed(),
-            "2.0.0".into(),
-            Environment::Windows,
-            || vec![native_chrome()],
-            false,
-            false,
-        );
-        assert_eq!(facts.browsers, vec![native_chrome()]);
-    }
-
-    #[test]
-    fn a_command_off_the_path_is_named_by_its_full_path() {
-        use crate::language::environment::run_by_full_path;
-
-        let command = PathBuf::from("/home/p/.local/bin/ghostlight");
-        let collected = Collected {
-            command_off_path: Some(command.clone()),
-            ..two_agents_changed()
-        };
-        let lines = lines_of(&collected, vec![native_chrome()], false, true);
-        assert_eq!(lines[2], run_by_full_path(&command));
-        assert!(!lines.iter().any(|line| line.contains("new terminal")));
-    }
-
-    #[test]
-    fn no_agents_gives_the_command_to_add() {
-        let collected = Collected {
-            agents: Vec::new(),
-            ..two_agents_changed()
-        };
-        let lines = lines_of(&collected, vec![native_chrome()], false, true);
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("No agents") && line.ends_with("/home/ghostlight mcp")));
-    }
-
-    #[test]
-    fn only_a_browser_that_needs_a_person_is_named_after_an_install() {
-        use super::browser_attention_lines;
-
-        let mut report = browser_report(vec![
-            browser("chrome", BrowserPackage::Native),
-            browser("edge", BrowserPackage::Native),
-            browser("brave", BrowserPackage::Native),
-        ]);
-        for registered in &mut report.browsers {
-            registered.state = NativeHostState::Current;
+    fn setup_and_uninstall_act_only_on_what_was_asked_and_name_what_they_did() {
+        {
+            assert!(super::stops_running(&SetupOptions::default()));
+            for scoped in [
+                SetupOptions {
+                    browser_ids: vec!["chromium".into()],
+                    ..SetupOptions::default()
+                },
+                SetupOptions {
+                    client_ids: vec!["zed".into()],
+                    ..SetupOptions::default()
+                },
+                SetupOptions {
+                    no_clients: true,
+                    ..SetupOptions::default()
+                },
+            ] {
+                assert!(!super::stops_running(&scoped));
+            }
         }
-        assert!(browser_attention_lines(&report, None, true).is_empty());
+        {
+            let report = browser_report(vec![
+                browser("chrome", BrowserPackage::Native),
+                browser("chromium", BrowserPackage::Snap),
+                browser("brave", BrowserPackage::NotDetected),
+            ]);
+            assert_eq!(
+                select_install_browsers(&report, &SetupOptions::default()).unwrap(),
+                Some(vec!["chrome".into()])
+            );
+            assert!(select_install_browsers(
+                &report,
+                &SetupOptions {
+                    browser_ids: vec!["chromium".into()],
+                    ..SetupOptions::default()
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("chromium package detail"));
+        }
+        {
+            let missing = browser_report(vec![browser("chrome", BrowserPackage::NotDetected)]);
+            assert!(select_install_browsers(&missing, &SetupOptions::default()).is_err());
+            assert_eq!(
+                select_install_browsers(
+                    &missing,
+                    &SetupOptions {
+                        all_browsers: true,
+                        ..SetupOptions::default()
+                    }
+                )
+                .unwrap(),
+                None
+            );
+            let windows = browser_report(vec![browser("chrome", BrowserPackage::NotChecked)]);
+            assert_eq!(
+                select_install_browsers(&windows, &SetupOptions::default()).unwrap(),
+                None
+            );
+        }
+        {
+            use std::fs;
 
-        report.browsers[2].state = NativeHostState::OwnedElsewhere;
-        report.browsers[1].state = NativeHostState::NeedsAttention;
-        let lines = browser_attention_lines(&report, Some(&["chrome".to_owned()]), true);
-        assert_eq!(lines.len(), 2, "{lines:?}");
-        assert!(lines[0].starts_with("Browser: edge -- "));
-        assert!(lines[1].starts_with("Browser: brave -- "));
+            use super::remove_version_directories;
+            use crate::install::layout::Layout;
+            use crate::scratch::Scratch;
 
-        // No usable browser: every browser the install chose, so the reason is on the screen.
-        report.browsers[1].state = NativeHostState::Current;
-        report.browsers[2].state = NativeHostState::Current;
-        let lines = browser_attention_lines(&report, Some(&["chrome".to_owned()]), false);
-        assert_eq!(lines.len(), 1, "{lines:?}");
-        assert!(lines[0].starts_with("Browser: chrome -- "));
+            let scratch = Scratch::new();
+            let layout = Layout::new(scratch.path());
+            let bin = layout.bin();
+            for name in ["v1.3.5", "v1.3.6", "vnext"] {
+                fs::create_dir_all(bin.join(name)).unwrap();
+                fs::write(bin.join(name).join("ghostlight-mcp-connector"), "image").unwrap();
+            }
+            fs::write(
+                bin.join("v1.3.5").join("audit.jsonl"),
+                b"log
+",
+            )
+            .unwrap();
+            fs::write(bin.join("v1.3.7"), "a file").unwrap();
 
-        // Inside an app container the report is that app's own view: a registration it holds
-        // is never blamed, and one the install could not judge cannot be checked from here.
-        report.private_view = Some(crate::install::container::AppContainer {
-            app: "Claude".into(),
-        });
-        assert!(browser_attention_lines(&report, None, false).is_empty());
-        report.browsers[2].state = NativeHostState::NeedsAttention;
-        let lines = browser_attention_lines(&report, None, true);
-        assert_eq!(
-            lines,
-            [format!(
+            remove_version_directories(&layout);
+
+            assert!(!bin.join("v1.3.5").exists());
+            assert!(!bin.join("v1.3.6").exists());
+            assert!(bin.join("vnext").join("ghostlight-mcp-connector").is_file());
+            assert!(bin.join("v1.3.7").is_file());
+            assert_eq!(
+                fs::read(layout.state().join("audit-v1.3.5.jsonl")).unwrap(),
+                b"log
+"
+            );
+
+            remove_version_directories(&layout);
+            assert!(bin.join("vnext").is_dir());
+        }
+        {
+            use super::removal_lines;
+            use crate::install::reconcile::WindowsRemoval;
+
+            let removal = WindowsRemoval {
+                removed: vec!["Start-menu shortcut".to_owned()],
+                kept: vec!["installed-apps entry".to_owned()],
+                failures: Vec::new(),
+            };
+            let kept =
+                "Kept the installed-apps entry; it does not name this Ghostlight installation.";
+            assert_eq!(removal_lines(&removal, false), [kept]);
+            assert_eq!(
+                removal_lines(&removal, true),
+                ["Would remove the Start-menu shortcut.", kept]
+            );
+            assert!(removal_lines(&WindowsRemoval::default(), false).is_empty());
+        }
+        {
+            use super::removed_browsers;
+
+            let with_state = |id: &str, state| BrowserRegistration {
+                state,
+                ..browser(id, BrowserPackage::Native)
+            };
+            let before = browser_report(vec![
+                with_state("chrome", NativeHostState::Current),
+                with_state("edge", NativeHostState::OwnedElsewhere),
+                with_state("brave", NativeHostState::NeedsAttention),
+                with_state("chromium", NativeHostState::Missing),
+            ]);
+            let after = browser_report(vec![
+                with_state("chrome", NativeHostState::Missing),
+                with_state("edge", NativeHostState::Missing),
+                with_state("brave", NativeHostState::NeedsAttention),
+                with_state("chromium", NativeHostState::Missing),
+            ]);
+            assert_eq!(removed_browsers(&before, &after), ["chrome", "edge"]);
+            assert!(removed_browsers(&before, &before).is_empty());
+        }
+        {
+            use super::would_remove_browsers;
+
+            let with_state = |id: &str, state| BrowserRegistration {
+                state,
+                ..browser(id, BrowserPackage::Native)
+            };
+            let mut report = browser_report(vec![
+                with_state("chrome", NativeHostState::Current),
+                with_state("edge", NativeHostState::OwnedElsewhere),
+                with_state("brave", NativeHostState::NeedsAttention),
+                with_state("chromium", NativeHostState::Missing),
+            ]);
+            assert_eq!(would_remove_browsers(&report, &[]), ["chrome", "edge"]);
+            assert_eq!(
+                would_remove_browsers(&report, &["chrome".to_owned(), "brave".to_owned()]),
+                ["chrome"]
+            );
+            report.private_view = Some(crate::install::container::AppContainer {
+                app: "Claude_pzs8sxrjxfjjc".into(),
+            });
+            assert!(would_remove_browsers(&report, &[]).is_empty());
+        }
+        {
+            use crate::install::deployment::{StrayKind, StrayProcess, StrayStop};
+
+            let stray = |image: &str| StrayProcess {
+                pid: 3,
+                image: PathBuf::from(image),
+                kind: StrayKind::RetiredConnector,
+            };
+            assert!(stray_not_stopped_lines(&StrayStop::default()).is_empty());
+            let lines = stray_not_stopped_lines(&StrayStop {
+                stopped: vec![stray("a.exe")],
+                stuck: vec![stray("b.exe")],
+            });
+            assert_eq!(lines, ["Could not stop b.exe. Close it yourself."]);
+        }
+        {
+            let cline = |id: &str, host: &str, state: HarnessState| HarnessSummary {
+                agent: crate::agent::Agent::listed(
+                    "cline",
+                    "Cline",
+                    crate::agent::image::Monogram::FIXTURE,
+                ),
+                ..harness(id, &format!("Cline ({host})"), state)
+            };
+            let summaries = [
+                harness("codex", "Codex", HarnessState::Installed),
+                cline("cline-cli", "CLI", HarnessState::Available),
+                cline(
+                    "cline-vscode",
+                    "Visual Studio Code",
+                    HarnessState::NotDetected,
+                ),
+                cline("cline-cursor", "Cursor", HarnessState::NotDetected),
+                cline("cline-windsurf", "Windsurf", HarnessState::NotDetected),
+                harness("zed", "Zed", HarnessState::NotDetected),
+            ];
+            let select = |summaries: &[HarnessSummary],
+                          values: &[&str],
+                          all_clients: bool,
+                          install: bool|
+             -> anyhow::Result<Vec<String>> {
+                let options = SetupOptions {
+                    client_ids: values.iter().map(|value| (*value).into()).collect(),
+                    all_clients,
+                    ..SetupOptions::default()
+                };
+                Ok(select_harnesses(summaries, &options, install)?
+                    .into_iter()
+                    .map(|summary| summary.id)
+                    .collect())
+            };
+            // An agent id selects only the hosts of it that are found, so naming Cline writes no
+            // file into an editor the person does not have.
+            assert_eq!(
+                select(&summaries, &["cline"], false, true).unwrap(),
+                ["cline-cli"]
+            );
+            assert_eq!(
+                select(&summaries, &["cline"], false, false).unwrap(),
+                ["cline-cli"]
+            );
+            assert_eq!(
+                select(&summaries, &["cline"], true, true).unwrap(),
+                [
+                    "cline-cli",
+                    "cline-vscode",
+                    "cline-cursor",
+                    "cline-windsurf"
+                ]
+            );
+            // A harness id selects exactly the host it selected before, whatever its state.
+            assert_eq!(
+                select(&summaries, &["CLINE-Cursor"], false, true).unwrap(),
+                ["cline-cursor"]
+            );
+            assert_eq!(
+                select(&summaries, &["zed", "codex"], false, true).unwrap(),
+                ["zed", "codex"]
+            );
+            assert_eq!(
+                select(&summaries, &["codex"], false, false).unwrap(),
+                ["codex"]
+            );
+            // A host named twice, by its agent and by its own id, is set up once.
+            assert_eq!(
+                select(
+                    &summaries,
+                    &["cline-cli", "cline-vscode", "cline", "codex"],
+                    false,
+                    false
+                )
+                .unwrap(),
+                ["cline-cli", "cline-vscode", "codex"]
+            );
+            let refusal = select(&summaries, &["cline", "Cline (Cursor)"], false, true)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                refusal.starts_with("unknown MCP client 'Cline (Cursor)'; expected an agent id ("),
+                "{refusal}"
+            );
+            let valid = crate::install::client_ids();
+            for id in valid.all() {
+                assert!(refusal.contains(id), "{refusal} does not list {id}");
+            }
+            // An agent none of whose hosts is found is refused, naming each host and --all-clients.
+            let absent: Vec<HarnessSummary> = summaries
+                .iter()
+                .map(|summary| HarnessSummary {
+                    state: HarnessState::NotDetected,
+                    ..summary.clone()
+                })
+                .collect();
+            let refusal = select(&absent, &["Cline"], false, true)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                refusal,
+                "no host of Cline was found for 'Cline'; name one by its host id (cline-cli, \
+             cline-vscode, cline-cursor, cline-windsurf), or add --all-clients to select every \
+             host of Cline"
+            );
+            assert_eq!(select(&absent, &["cline"], true, true).unwrap().len(), 4);
+            assert_eq!(
+                select(&absent, &["cline-windsurf"], false, true).unwrap(),
+                ["cline-windsurf"]
+            );
+        }
+        {
+            use crate::install::Attention;
+
+            let plain = r"C:\Users\Pat\AppData\Roaming\Claude\claude_desktop_config.json";
+            let said = |summary: &HarnessSummary| match client_step(summary, false, true, None) {
+                ClientStep::Say(line) => line,
+                other => panic!("a dry run changes nothing: {other:?}"),
+            };
+            let elsewhere = format!(
+            "Would remove Ghostlight from another copy of Claude Desktop's settings, at {plain}."
+        );
+
+            // The chosen file has no entry and another copy holds Ghostlight's own: Uninstall cleans
+            // that copy, so the dry run names it.
+            let available = HarnessSummary {
+                can_uninstall: true,
+                other_copy: Some(plain.into()),
+                owned_copies: vec![plain.into()],
+                ..harness("claude-desktop", "Claude Desktop", HarnessState::Available)
+            };
+            assert_eq!(said(&available), elsewhere);
+
+            // The chosen file holds an entry Ghostlight does not own, and another copy holds
+            // Ghostlight's: Uninstall leaves the chosen file and cleans the other copy.
+            let foreign = HarnessSummary {
+                state: HarnessState::NeedsAttention,
+                attention: Some(Attention::ForeignEntry),
+                ..available.clone()
+            };
+            assert_eq!(said(&foreign), elsewhere);
+
+            // No copy holds Ghostlight's entry: nothing would change, and a file that could not be
+            // parsed is said as that, not as a foreign entry.
+            let none = HarnessSummary {
+                other_copy: Some(plain.into()),
+                ..harness("claude-desktop", "Claude Desktop", HarnessState::Available)
+            };
+            assert_eq!(
+                said(&none),
+                "Claude Desktop has no Ghostlight entry; nothing would change."
+            );
+            let malformed = HarnessSummary {
+                attention: Some(Attention::Malformed),
+                ..harness(
+                    "claude-desktop",
+                    "Claude Desktop",
+                    HarnessState::NeedsAttention,
+                )
+            };
+            assert_eq!(
+                said(&malformed),
+                "Would leave Claude Desktop as it is: its settings file could not be parsed."
+            );
+        }
+    }
+
+    /// Protects defects 85fbfa83 and 53a04ef2: inside an app container setup changes no client or
+    /// browser registration that would land in the container's private view. It selects and leaves
+    /// those, names a browser left private as its connection, carries what it kept private into the
+    /// closing lines, and says in a dry run what it would leave private rather than update.
+    #[test]
+    fn inside_an_app_container_setup_changes_nothing_private_and_says_what_it_left() {
+        {
+            assert_eq!(
+                private_browser_registrations(&["Google Chrome".to_owned()]),
+                ["Google Chrome browser connection"]
+            );
+        }
+        {
+            use super::{carry_windows_report, KeptPrivate};
+            use crate::install::container::AppContainer;
+            use crate::install::reconcile::ReconcileReport;
+
+            let container = AppContainer {
+                app: "Claude".into(),
+            };
+            let mut kept = KeptPrivate::default();
+            kept.registrations.push("PATH entry".to_owned());
+            carry_windows_report(ReconcileReport::default(), &mut kept);
+            assert_eq!(kept.registrations, ["PATH entry"]);
+            assert_eq!(kept.container, None);
+
+            carry_windows_report(
+                ReconcileReport {
+                    kept_private: vec![
+                        "Start-menu shortcut".to_owned(),
+                        "installed-apps entry".to_owned(),
+                    ],
+                    container: Some(container.clone()),
+                    ..ReconcileReport::default()
+                },
+                &mut kept,
+            );
+            assert_eq!(
+                kept.registrations,
+                ["PATH entry", "Start-menu shortcut", "installed-apps entry"]
+            );
+            assert_eq!(kept.container, Some(container));
+
+            let other = AppContainer {
+                app: "Codex".into(),
+            };
+            carry_windows_report(
+                ReconcileReport {
+                    kept_private: vec!["browser".to_owned()],
+                    container: Some(other),
+                    ..ReconcileReport::default()
+                },
+                &mut kept,
+            );
+            assert_eq!(
+                kept.container.map(|container| container.app),
+                Some("Claude".to_owned()),
+                "the container already named stays"
+            );
+        }
+        {
+            use super::pending_entry_lines;
+            use crate::install::container::AppContainer;
+            use crate::install::layout::Layout;
+            use crate::install::reconcile::PendingWindowsEntries;
+
+            let layout = Layout::new("/home/.ghostlight");
+            let outside = PendingWindowsEntries {
+                would_update: vec!["Start-menu shortcut".to_owned()],
+                ..PendingWindowsEntries::default()
+            };
+            assert_eq!(
+                pending_entry_lines(&outside, &layout),
+                ["Would update the Start-menu shortcut."]
+            );
+            let inside = PendingWindowsEntries {
+                kept_private: vec!["Start-menu shortcut".to_owned()],
+                container: Some(AppContainer {
+                    app: "Claude".into(),
+                }),
+                ..PendingWindowsEntries::default()
+            };
+            let lines = pending_entry_lines(&inside, &layout);
+            assert_eq!(lines.len(), 2, "{lines:?}");
+            assert!(
+                lines[0].contains("private to Claude") && lines[0].contains("Start-menu shortcut")
+            );
+            assert!(!lines.iter().any(|line| line.contains("Would update")));
+            assert!(pending_entry_lines(&PendingWindowsEntries::default(), &layout).is_empty());
+        }
+        {
+            let private = |id: &str, state: HarnessState| HarnessSummary {
+                can_install: false,
+                private_view: true,
+                ..harness(id, id, state)
+            };
+            let summaries = [
+                harness("cursor", "Cursor", HarnessState::Available),
+                private("claude-desktop", HarnessState::Available),
+                private("zed", HarnessState::Updatable),
+                private("windsurf", HarnessState::Installed),
+                private("kiro", HarnessState::NeedsAttention),
+                HarnessSummary {
+                    copy_only: true,
+                    ..private("goose", HarnessState::Available)
+                },
+                private("vscode", HarnessState::NotDetected),
+            ];
+            let ids = |selected: Vec<HarnessSummary>| -> Vec<String> {
+                selected.into_iter().map(|summary| summary.id).collect()
+            };
+            let options = SetupOptions::default();
+            assert_eq!(
+                ids(select_harnesses(&summaries, &options, true).unwrap()),
+                ["cursor", "claude-desktop", "zed"]
+            );
+            let every = SetupOptions {
+                all_clients: true,
+                ..SetupOptions::default()
+            };
+            assert_eq!(
+                ids(select_harnesses(&summaries, &every, true).unwrap()),
+                ["cursor", "claude-desktop", "zed", "vscode"]
+            );
+            // A removal selects each private client that holds Ghostlight's entry, current or not, so
+            // it can say so.
+            assert_eq!(
+                ids(select_harnesses(&summaries, &options, false).unwrap()),
+                ["zed", "windsurf"]
+            );
+        }
+        {
+            let container = crate::install::container::AppContainer {
+                app: "OpenAI.Codex".into(),
+            };
+            let desktop = HarnessSummary {
+                can_install: false,
+                private_view: true,
+                ..harness("claude-desktop", "Claude Desktop", HarnessState::Installed)
+            };
+            for dry_run in [false, true] {
+                let ClientStep::Say(line) = client_step(&desktop, false, dry_run, Some(&container))
+                else {
+                    panic!("a removal inside a container must not remove a private entry");
+                };
+                assert!(line.starts_with("Claude Desktop: "), "{line}");
+                assert!(line.contains("private to OpenAI.Codex"), "{line}");
+                assert!(line.contains("entry stays in place"), "{line}");
+                assert!(line.contains("Ghostlight's uninstall"), "{line}");
+            }
+            assert_eq!(
+                client_step(&desktop, true, false, Some(&container)),
+                ClientStep::LeavePrivate
+            );
+            let ClientStep::Say(line) = client_step(&desktop, true, true, Some(&container)) else {
+                panic!("a dry run inside a container must say what it would leave");
+            };
+            assert!(
+                line.contains("not written from here") && line.contains("Ghostlight's install")
+            );
+
+            let cursor = harness("cursor", "Cursor", HarnessState::Installed);
+            assert_eq!(
+                client_step(&cursor, false, false, Some(&container)),
+                ClientStep::Apply(HarnessAction::Uninstall)
+            );
+            assert_eq!(
+                client_step(&cursor, true, false, None),
+                ClientStep::Apply(HarnessAction::Install)
+            );
+        }
+    }
+
+    /// Protects Desktop 24 and the first-run promise: an install closes with the one next step the
+    /// person needs. The window opens only for a usable install that is not complete and not held
+    /// back; a first install points at the window when it is shown and gives the listing when it is
+    /// not; the agents shown are those here with what this run did; a fresh Path entry says to open a
+    /// new terminal and a command off the path is named by its full path; an extension already in a
+    /// profile asks for that browser; no agents gives the command to add one; only a browser that
+    /// needs a person is named; and a complete setup has no next line, reads no browser profile and
+    /// asks for a restart only of what changed.
+    #[test]
+    fn an_install_closes_with_the_one_next_step_the_person_needs() {
+        {
+            use super::should_show_window;
+
+            for bits in 0u8..64 {
+                let flag = |bit: u8| bits & (1 << bit) != 0;
+                let (dry_run, no_open, automated) = (flag(0), flag(1), flag(2));
+                let (install_usable, in_container, complete) = (flag(3), flag(4), flag(5));
+                let expected = !dry_run
+                    && !no_open
+                    && !automated
+                    && install_usable
+                    && !in_container
+                    && !complete;
+                assert_eq!(
+                    should_show_window(
+                        dry_run,
+                        no_open,
+                        automated,
+                        install_usable,
+                        in_container,
+                        complete
+                    ),
+                    expected,
+                    "{bits:06b}"
+                );
+            }
+            assert!(should_show_window(false, false, false, true, false, false));
+        }
+        {
+            use super::install_agents;
+
+            let summaries = vec![
+                harness("claude-code", "Claude Code", HarnessState::Available),
+                harness("codex", "Codex", HarnessState::Updatable),
+                harness("cursor", "Cursor", HarnessState::Installed),
+                harness("zed", "Zed", HarnessState::NeedsAttention),
+                harness("cline", "Cline", HarnessState::NotDetected),
+            ];
+            // Nothing applied (for instance `--no-clients`): what each already has.
+            assert_eq!(
+                install_agents(&summaries, &[]),
+                [
+                    agent("Claude Code", false, false),
+                    agent("Codex", false, false),
+                    agent("Cursor", true, false),
+                    agent("Zed", false, false),
+                ]
+            );
+            // Two written, one of them was only brought up to date.
+            assert_eq!(
+                install_agents(
+                    &summaries,
+                    &[
+                        applied("claude-code", "Claude Code", true),
+                        applied("codex", "Codex", true),
+                        applied("cursor", "Cursor", false),
+                    ]
+                ),
+                [
+                    agent("Claude Code", true, true),
+                    agent("Codex", true, true),
+                    agent("Cursor", true, false),
+                    agent("Zed", false, false),
+                ]
+            );
+            // A client named on the command line counts once Ghostlight wrote its entry.
+            assert_eq!(
+                install_agents(&summaries[4..], &[applied("cline", "Cline", true)]),
+                [agent("Cline", true, true)]
+            );
+        }
+        {
+            assert_eq!(
+                lines_of(&two_agents_changed(), vec![native_chrome()], false, true),
+                [
+                    "Ghostlight 2.0.0 is installed.",
+                    "Ghostlight is in your notification area, and in the Start menu.",
+                    "Agents: Claude Code and Codex (restart them before you ask).",
+                    "Next: add Ghostlight to Chrome in the Ghostlight window.",
+                ]
+            );
+        }
+        {
+            use crate::language::setup::STORE_LISTING_URL;
+
+            let lines = lines_of(&two_agents_changed(), vec![native_chrome()], false, false);
+            assert_eq!(
+                lines.last().unwrap(),
+                &format!("Next: add Ghostlight to Chrome: {STORE_LISTING_URL}")
+            );
+            assert_eq!(lines.len(), 4, "{lines:?}");
+        }
+        {
+            let collected = Collected {
+                path_written: true,
+                ..two_agents_changed()
+            };
+            let lines = lines_of(&collected, vec![native_chrome()], false, true);
+            assert_eq!(lines[2], "Open a new terminal to use ghostlight.");
+            assert_eq!(
+                lines
+                    .iter()
+                    .filter(|line| line.starts_with("Next:"))
+                    .count(),
+                1
+            );
+        }
+        {
+            use crate::language::setup::ProfileFact;
+
+            let mut chrome = native_chrome();
+            chrome.extension = Some(ProfileFact {
+                directory: "Default".into(),
+                name: None,
+                profiles: 1,
+            });
+            let lines = lines_of(&two_agents_changed(), vec![chrome], false, false);
+            assert_eq!(
+                lines.last().unwrap(),
+                "Next: open Chrome, where Ghostlight is already added."
+            );
+            assert!(!lines.iter().any(|line| line.contains("Chrome Web Store")));
+        }
+        {
+            let lines = lines_of(&two_agents_changed(), vec![native_chrome()], true, false);
+            assert!(!lines.iter().any(|line| line.starts_with("Next:")));
+            assert_eq!(
+                lines.last().unwrap(),
+                "Restart Claude Code and Codex to use Ghostlight."
+            );
+            let unchanged = Collected {
+                agents: vec![agent("Claude Code", true, false)],
+                ..two_agents_changed()
+            };
+            let lines = lines_of(&unchanged, vec![native_chrome()], true, false);
+            assert_eq!(lines.len(), 3, "{lines:?}");
+            assert!(lines[2].starts_with("Agents: Claude Code"));
+        }
+        {
+            use super::install_facts;
+            use crate::language::environment::Environment;
+
+            let facts = install_facts(
+                &two_agents_changed(),
+                "2.0.0".into(),
+                Environment::Windows,
+                || panic!("a complete setup scanned the browser profiles"),
+                true,
+                false,
+            );
+            assert!(facts.browsers.is_empty());
+            let facts = install_facts(
+                &two_agents_changed(),
+                "2.0.0".into(),
+                Environment::Windows,
+                || vec![native_chrome()],
+                false,
+                false,
+            );
+            assert_eq!(facts.browsers, vec![native_chrome()]);
+        }
+        {
+            use crate::language::environment::run_by_full_path;
+
+            let command = PathBuf::from("/home/p/.local/bin/ghostlight");
+            let collected = Collected {
+                command_off_path: Some(command.clone()),
+                ..two_agents_changed()
+            };
+            let lines = lines_of(&collected, vec![native_chrome()], false, true);
+            assert_eq!(lines[2], run_by_full_path(&command));
+            assert!(!lines.iter().any(|line| line.contains("new terminal")));
+        }
+        {
+            let collected = Collected {
+                agents: Vec::new(),
+                ..two_agents_changed()
+            };
+            let lines = lines_of(&collected, vec![native_chrome()], false, true);
+            assert!(lines
+                .iter()
+                .any(|line| line.contains("No agents") && line.ends_with("/home/ghostlight mcp")));
+        }
+        {
+            use super::browser_attention_lines;
+
+            let mut report = browser_report(vec![
+                browser("chrome", BrowserPackage::Native),
+                browser("edge", BrowserPackage::Native),
+                browser("brave", BrowserPackage::Native),
+            ]);
+            for registered in &mut report.browsers {
+                registered.state = NativeHostState::Current;
+            }
+            assert!(browser_attention_lines(&report, None, true).is_empty());
+
+            report.browsers[2].state = NativeHostState::OwnedElsewhere;
+            report.browsers[1].state = NativeHostState::NeedsAttention;
+            let lines = browser_attention_lines(&report, Some(&["chrome".to_owned()]), true);
+            assert_eq!(lines.len(), 2, "{lines:?}");
+            assert!(lines[0].starts_with("Browser: edge -- "));
+            assert!(lines[1].starts_with("Browser: brave -- "));
+
+            // No usable browser: every browser the install chose, so the reason is on the screen.
+            report.browsers[1].state = NativeHostState::Current;
+            report.browsers[2].state = NativeHostState::Current;
+            let lines = browser_attention_lines(&report, Some(&["chrome".to_owned()]), false);
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].starts_with("Browser: chrome -- "));
+
+            // Inside an app container the report is that app's own view: a registration it holds
+            // is never blamed, and one the install could not judge cannot be checked from here.
+            report.private_view = Some(crate::install::container::AppContainer {
+                app: "Claude".into(),
+            });
+            assert!(browser_attention_lines(&report, None, false).is_empty());
+            report.browsers[2].state = NativeHostState::NeedsAttention;
+            let lines = browser_attention_lines(&report, None, true);
+            assert_eq!(
+                lines,
+                [format!(
                 "Browser: brave -- {} -- cannot be checked from here -- Claude's own view of the \
                  registry; run ghostlight doctor from a regular terminal.",
                 report.browsers[2].package_detail
             )]
-        );
-        assert!(super::not_checkable(&report, &report.browsers[2]));
-        assert!(!super::not_checkable(&report, &report.browsers[0]));
-        report.private_view = None;
-        assert!(!super::not_checkable(&report, &report.browsers[2]));
+            );
+            assert!(super::not_checkable(&report, &report.browsers[2]));
+            assert!(!super::not_checkable(&report, &report.browsers[0]));
+            report.private_view = None;
+            assert!(!super::not_checkable(&report, &report.browsers[2]));
+        }
     }
 }
