@@ -18,7 +18,7 @@ added there in the commit that deletes it. `governance/` moved to the language l
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 373 | 55 | 227 |
+| `work/` and `workspace/` | 373 | 55 | 219 |
 | `governance/` | 136 | 40 | moved to the language lane (2026-10-21) |
 
 ## Slices
@@ -42,7 +42,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | W11 | `tests/replacement.rs`: sixteen tests are one, every sentence and step now read from `WorkspaceReason::StaleTarget` instead of literals | 306 | 291 | promise 1 (Exec 6, LANGUAGE stale handles; 43eff032) | landed (84ce58df) |
 | W12 | `tests/restarts.rs`: fourteen tests are one; `reconnect_soon`'s fixed 150 ms sleep is gone: a `Restarting` port brings the browser back the first time a call looks for it, and the rows assert the call met it away; the inert-binding rows come with `workspace/tests.rs` | 291 | 278 | promise 1 (Contract 19, ADR-0203 D1; 1d10bf74, 8a16343f, c4e382aa) | landed (890ef2c3) |
 | W13 | `tests/availability.rs`: 31 tests are four (waited for or started again; no browser waits only while one returns; the store only while it helps, with S-D7; binding and W-D5); `attach_later`'s sleeps are gone: an `ArrivesWhenAwaited` port runs the arrival when the call starts waiting; the written-record row moves to findings; the other record tests were findings' rows already | 278 | 251 | promise 4 (Contract 17, 19, 20; ADR-0196 D12; S-D7; W-D5) | landed (b87b6d05, ecc7b349) |
-| W14 | `tests/protocol4.rs`: 28 tests are four (a failure's true effect; dialogs; a fill's answer, holding the language lane's two K13 rows; what the service asks the page), each old test a scoped block with its assertions unchanged | 251 | 227 | contract 1, promise 3 (ADR-0158 5; c2df20e2, 925d573c, 3e80fb91, 8256f32d) | landed |
+| W14 | `tests/protocol4.rs`: 28 tests are four (a failure's true effect; dialogs; a fill's answer, holding the language lane's two K13 rows; what the service asks the page), each old test a scoped block with its assertions unchanged | 251 | 227 | contract 1, promise 3 (ADR-0158 5; c2df20e2, 925d573c, 3e80fb91, 8256f32d) | landed (0cf15f1e) |
+| W15 | `tests/rebound.rs`: nine tests are one, each a scoped block | 227 | 219 | promise 1 (ADR-0198 D17; 3466718c, 259241ad) | landed |
 
 ## Notes
 

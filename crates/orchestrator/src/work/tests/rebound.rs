@@ -122,58 +122,190 @@ fn after_describing(
     (followed, plain, audit)
 }
 
+/// ADR-0198 Decision 17 (3466718c, 259241ad): every action that followed its handle says rebound.
+///
+/// A followed handle adds one fact and keeps the usual sentence, for a click, typing, an upload, a
+/// fill (also when it followed while preparing) and a recording saved to a target; the audit keeps
+/// a bool and no handle, context or link, and the history sentence holds none. A save the page did
+/// not take keeps the recording and names a file input.
 #[test]
-fn a_followed_handle_adds_one_fact_and_keeps_the_usual_sentence() {
-    let (followed, _, _) = click_with(true);
-    let (plain, _, _) = click_with(false);
+fn every_action_that_followed_its_handle_says_rebound() {
+    // a followed handle adds one fact and keeps the usual sentence.
+    {
+        let (followed, _, _) = click_with(true);
+        let (plain, _, _) = click_with(false);
 
-    assert_eq!(followed.status, Status::Succeeded);
-    assert_eq!(followed.facts["rebound"], true);
-    assert_eq!(
-        followed.summary, plain.summary,
-        "the sentence is the action's usual one"
-    );
-    assert_eq!(followed.next_steps, plain.next_steps);
-    assert!(
-        plain.facts.get("rebound").is_none(),
-        "an ordinary click says nothing"
-    );
-}
-
-#[test]
-fn a_followed_handle_audits_a_bool_and_no_handle_context_or_link() {
-    let (followed, audit, target) = click_with(true);
-    let (_, plain_audit, _) = click_with(false);
-
-    assert_eq!(followed.facts["rebound"], true);
-    let records = audit.0.lock().unwrap();
-    let record = records.last().unwrap();
-    assert!(record.observed.rebound);
-    let encoded = serde_json::to_string(&*records).unwrap();
-    assert!(encoded.contains("\"rebound\":true"));
-    for private in [target.as_str(), "more-options", "Neon Rain"] {
+        assert_eq!(followed.status, Status::Succeeded);
+        assert_eq!(followed.facts["rebound"], true);
+        assert_eq!(
+            followed.summary, plain.summary,
+            "the sentence is the action's usual one"
+        );
+        assert_eq!(followed.next_steps, plain.next_steps);
         assert!(
-            !encoded.contains(private),
-            "{private} stays out of the audit"
+            plain.facts.get("rebound").is_none(),
+            "an ordinary click says nothing"
         );
     }
-    let plain = plain_audit.0.lock().unwrap();
-    assert!(!plain.last().unwrap().observed.rebound);
-    assert!(
-        !serde_json::to_string(&*plain).unwrap().contains("rebound"),
-        "an ordinary action leaves the audit line as it was"
-    );
-}
 
-#[test]
-fn the_history_sentence_holds_no_handle_or_context() {
-    let (followed, audit, target) = click_with(true);
+    // a followed handle audits a bool and no handle context or link.
+    {
+        let (followed, audit, target) = click_with(true);
+        let (_, plain_audit, _) = click_with(false);
 
-    let records = audit.0.lock().unwrap();
-    let summary = &records.last().unwrap().summary;
-    assert_eq!(summary, &followed.summary);
-    assert!(!summary.contains(&target));
-    assert!(!summary.contains("Neon Rain"));
+        assert_eq!(followed.facts["rebound"], true);
+        let records = audit.0.lock().unwrap();
+        let record = records.last().unwrap();
+        assert!(record.observed.rebound);
+        let encoded = serde_json::to_string(&*records).unwrap();
+        assert!(encoded.contains("\"rebound\":true"));
+        for private in [target.as_str(), "more-options", "Neon Rain"] {
+            assert!(
+                !encoded.contains(private),
+                "{private} stays out of the audit"
+            );
+        }
+        let plain = plain_audit.0.lock().unwrap();
+        assert!(!plain.last().unwrap().observed.rebound);
+        assert!(
+            !serde_json::to_string(&*plain).unwrap().contains("rebound"),
+            "an ordinary action leaves the audit line as it was"
+        );
+    }
+
+    // the history sentence holds no handle or context.
+    {
+        let (followed, audit, target) = click_with(true);
+
+        let records = audit.0.lock().unwrap();
+        let summary = &records.last().unwrap().summary;
+        assert_eq!(summary, &followed.summary);
+        assert!(!summary.contains(&target));
+        assert!(!summary.contains("Neon Rain"));
+    }
+
+    // typing after a followed describe reports rebound with its usual sentence.
+    {
+        let (followed, plain, audit) = after_describing(
+            "browser_type_text",
+            |tab, target| json!({"tab":tab,"target":target,"text":"hi"}),
+            typed,
+        );
+
+        assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
+        assert_eq!(followed.facts["rebound"], true);
+        assert_eq!(followed.summary, plain.summary);
+        assert!(plain.facts.get("rebound").is_none());
+        let records = audit.0.lock().unwrap();
+        assert!(records.last().unwrap().observed.rebound);
+    }
+
+    // uploading after a followed describe reports rebound with its usual sentence.
+    {
+        let (followed, plain, audit) = after_describing(
+            "browser_upload",
+            |tab, target| json!({"tab":tab,"target":target,"files":[{"name":"a.txt","data_base64":"eA=="}]}),
+            || {
+                vec![BrowserOutcome::FilesUploaded {
+                    tab_id: 7,
+                    uploaded_count: 1,
+                    uploaded_bytes: 1,
+                    subject: Some(PhysicalActionSubject {
+                        role: "button".into(),
+                        name: "More options".into(),
+                        rebound: false,
+                    }),
+                }]
+            },
+        );
+
+        assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
+        assert_eq!(followed.facts["rebound"], true);
+        assert_eq!(followed.summary, plain.summary);
+        assert!(plain.facts.get("rebound").is_none());
+        assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
+    }
+
+    // filling after a followed describe reports rebound with its usual sentence.
+    {
+        let (followed, plain, audit) = after_describing(
+            "browser_fill_form",
+            |tab, target| json!({"tab":tab,"fields":[{"target":target,"value":"x"}]}),
+            || filled(false),
+        );
+
+        assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
+        assert_eq!(followed.facts["rebound"], true);
+        assert_eq!(followed.summary, plain.summary);
+        assert!(plain.facts.get("rebound").is_none());
+        assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
+    }
+
+    // a fill that followed a handle while preparing reports rebound.
+    {
+        let (executor, browser, workspace, audit, tab_handle, target) = found_target();
+        browser.push(Ok(described(false)));
+        for answer in filled(true) {
+            browser.push(Ok(answer));
+        }
+
+        let result = executor.execute(
+            &workspace,
+            "browser_fill_form",
+            json!({"tab":tab_handle,"fields":[{"target":target,"value":"x"}]}),
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(result.facts["rebound"], true);
+        assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
+    }
+
+    // saving a recording to a target after a followed describe reports rebound.
+    {
+        let (followed, plain, audit) = after_saving_to_a_target();
+
+        assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
+        assert_eq!(followed.facts["rebound"], true);
+        assert_eq!(followed.summary, plain.summary);
+        assert_eq!(
+            followed.summary,
+            "Attached a replay of 1 second of page changes to the page."
+        );
+        assert!(plain.facts.get("rebound").is_none());
+        assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
+    }
+
+    // a save the page did not take keeps the recording and names a file input.
+    {
+        let (executor, browser, workspace, _audit, _, target) = found_target();
+        holding_recording(&executor, &workspace);
+        browser.push(Ok(BrowserOutcome::RecordingStopped {
+            summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
+            changed: false,
+        }));
+        browser.push(Ok(described(false)));
+        browser.push(Ok(BrowserOutcome::RecordingExportFailed {
+            reason: "the page did not accept the replay".into(),
+            page_refused: true,
+        }));
+
+        let result = executor.execute(
+            &workspace,
+            "browser_record",
+            json!({"action":"save","target":target}),
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(result.status, Status::Failed, "{result:?}");
+        assert_eq!(
+            result.summary,
+            "The page did not take the replay at that target, so nothing was attached; the recording is kept."
+        );
+        assert!(result.next_steps[0].contains("file input"), "{result:?}");
+        // The closed code is the reason; the page's own words stay in the detail.
+        assert_eq!(result.facts["reason"], "recording_not_attached");
+        assert_eq!(result.facts["detail"], "the page did not accept the replay");
+    }
 }
 
 fn typed() -> Vec<BrowserOutcome> {
@@ -189,48 +321,6 @@ fn typed() -> Vec<BrowserOutcome> {
     }]
 }
 
-#[test]
-fn typing_after_a_followed_describe_reports_rebound_with_its_usual_sentence() {
-    let (followed, plain, audit) = after_describing(
-        "browser_type_text",
-        |tab, target| json!({"tab":tab,"target":target,"text":"hi"}),
-        typed,
-    );
-
-    assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
-    assert_eq!(followed.facts["rebound"], true);
-    assert_eq!(followed.summary, plain.summary);
-    assert!(plain.facts.get("rebound").is_none());
-    let records = audit.0.lock().unwrap();
-    assert!(records.last().unwrap().observed.rebound);
-}
-
-#[test]
-fn uploading_after_a_followed_describe_reports_rebound_with_its_usual_sentence() {
-    let (followed, plain, audit) = after_describing(
-        "browser_upload",
-        |tab, target| json!({"tab":tab,"target":target,"files":[{"name":"a.txt","data_base64":"eA=="}]}),
-        || {
-            vec![BrowserOutcome::FilesUploaded {
-                tab_id: 7,
-                uploaded_count: 1,
-                uploaded_bytes: 1,
-                subject: Some(PhysicalActionSubject {
-                    role: "button".into(),
-                    name: "More options".into(),
-                    rebound: false,
-                }),
-            }]
-        },
-    );
-
-    assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
-    assert_eq!(followed.facts["rebound"], true);
-    assert_eq!(followed.summary, plain.summary);
-    assert!(plain.facts.get("rebound").is_none());
-    assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
-}
-
 fn filled(rebound: bool) -> Vec<BrowserOutcome> {
     vec![BrowserOutcome::Filled {
         tab: tab(7, "https://example.com/"),
@@ -240,87 +330,6 @@ fn filled(rebound: bool) -> Vec<BrowserOutcome> {
         rebound,
         committed_urls: vec![],
     }]
-}
-
-#[test]
-fn filling_after_a_followed_describe_reports_rebound_with_its_usual_sentence() {
-    let (followed, plain, audit) = after_describing(
-        "browser_fill_form",
-        |tab, target| json!({"tab":tab,"fields":[{"target":target,"value":"x"}]}),
-        || filled(false),
-    );
-
-    assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
-    assert_eq!(followed.facts["rebound"], true);
-    assert_eq!(followed.summary, plain.summary);
-    assert!(plain.facts.get("rebound").is_none());
-    assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
-}
-
-#[test]
-fn a_fill_that_followed_a_handle_while_preparing_reports_rebound() {
-    let (executor, browser, workspace, audit, tab_handle, target) = found_target();
-    browser.push(Ok(described(false)));
-    for answer in filled(true) {
-        browser.push(Ok(answer));
-    }
-
-    let result = executor.execute(
-        &workspace,
-        "browser_fill_form",
-        json!({"tab":tab_handle,"fields":[{"target":target,"value":"x"}]}),
-        &CancellationToken::default(),
-    );
-
-    assert_eq!(result.facts["rebound"], true);
-    assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
-}
-
-#[test]
-fn saving_a_recording_to_a_target_after_a_followed_describe_reports_rebound() {
-    let (followed, plain, audit) = after_saving_to_a_target();
-
-    assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
-    assert_eq!(followed.facts["rebound"], true);
-    assert_eq!(followed.summary, plain.summary);
-    assert_eq!(
-        followed.summary,
-        "Attached a replay of 1 second of page changes to the page."
-    );
-    assert!(plain.facts.get("rebound").is_none());
-    assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
-}
-
-#[test]
-fn a_save_the_page_did_not_take_keeps_the_recording_and_names_a_file_input() {
-    let (executor, browser, workspace, _audit, _, target) = found_target();
-    holding_recording(&executor, &workspace);
-    browser.push(Ok(BrowserOutcome::RecordingStopped {
-        summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
-        changed: false,
-    }));
-    browser.push(Ok(described(false)));
-    browser.push(Ok(BrowserOutcome::RecordingExportFailed {
-        reason: "the page did not accept the replay".into(),
-        page_refused: true,
-    }));
-
-    let result = executor.execute(
-        &workspace,
-        "browser_record",
-        json!({"action":"save","target":target}),
-        &CancellationToken::default(),
-    );
-
-    assert_eq!(result.status, Status::Failed, "{result:?}");
-    assert_eq!(
-        result.summary,
-        "The page did not take the replay at that target, so nothing was attached; the recording is kept."
-    );
-    assert!(result.next_steps[0].contains("file input"), "{result:?}");
-    // The closed code is the reason; the page's own words stay in the detail.
-    assert_eq!(result.facts["reason"], "recording_not_attached");
-    assert_eq!(result.facts["detail"], "the page did not accept the replay");
 }
 
 /// A page-target save run twice: once when describing the target followed its handle and once
