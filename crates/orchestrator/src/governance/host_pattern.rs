@@ -111,11 +111,13 @@ fn is_below(host: &str, suffix: &str) -> bool {
         && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.')
 }
 
-/// The host of `url`, lowercase, which is how every host pattern compares it, or none when the
-/// address has no host.
+/// The host of `url` as every host pattern compares it: lowercase and without the trailing dot of
+/// a fully qualified name, since a browser loads `bank.example.` as `bank.example` (G-D1). None
+/// when the address has no host, or a host of dots alone.
 #[must_use]
 pub fn url_host(url: &Url) -> Option<String> {
-    url.host_str().map(str::to_ascii_lowercase)
+    let host = url.host_str()?.trim_end_matches('.');
+    (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
 /// A grant's host rules, parsed.

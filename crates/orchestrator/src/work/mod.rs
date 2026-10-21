@@ -3110,12 +3110,9 @@ fn landed(tab: &PhysicalTab) -> Observed {
     }
 }
 
-/// The host of a landed URL, and never anything after it.
+/// The host of a landed URL, as policy matches it, and never anything after it.
 fn observed_host(url: &str) -> Option<String> {
-    Url::parse(url)
-        .ok()?
-        .host_str()
-        .map(str::to_ascii_lowercase)
+    crate::governance::host_pattern::url_host(&Url::parse(url).ok()?)
 }
 
 /// The scheme, host and port of a URL as the caller wrote them, and never anything after.

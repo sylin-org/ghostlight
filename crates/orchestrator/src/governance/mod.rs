@@ -21,7 +21,7 @@ use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
@@ -434,12 +434,14 @@ impl OwnOrigin {
 fn is_loopback_host(host: &Host<&str>) -> bool {
     match host {
         Host::Domain(name) => {
-            let name = name.to_ascii_lowercase();
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
             name == "localhost" || name.ends_with(".localhost")
         }
         Host::Ipv4(address) => is_loopback_v4(*address),
         Host::Ipv6(address) => {
-            *address == Ipv6Addr::LOCALHOST || address.to_ipv4_mapped().is_some_and(is_loopback_v4)
+            address.is_loopback()
+                || address.is_unspecified()
+                || address.to_ipv4_mapped().is_some_and(is_loopback_v4)
         }
     }
 }
@@ -718,11 +720,13 @@ impl AuthoritySnapshot {
         if !matches!(parsed.scheme(), "http" | "https") {
             return (Decision::deny(ReasonCode::ProtectedHost), vec![]);
         }
-        if let Some(author) = self.never_touch_author(&parsed) {
-            return (self.never_touch_refusal(author), vec![]);
-        }
+        // The workbench address is Ghostlight's own ceiling, credited to no policy layer, even
+        // when a never-touch list also names its host (docs/trust/security-overview.md).
         if self.own_origin.covers(&parsed) {
             return (Decision::deny(ReasonCode::OwnWorkbench), vec![]);
+        }
+        if let Some(author) = self.never_touch_author(&parsed) {
+            return (self.never_touch_refusal(author), vec![]);
         }
         let Some(host) = url_host(&parsed) else {
             return (Decision::deny(ReasonCode::HostDenied), vec![]);

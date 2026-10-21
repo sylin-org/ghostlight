@@ -190,6 +190,7 @@ rows are done.
 | WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | landed (ddd76f9c, 86013a28, cacb1062) |
 | WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | landed (ed389024, 5dcd3eaf, b82ff05d and the re-export) |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (d00a7ede) |
+| G-D1 | fix(governance): a trailing-dot host is the same host to policy | - | found by test-01's tests-1 classification of `governance/`, 2026-10-21 (Notes below); the policy lane is closed, so test-01 lands it, cross-lane into core-work's three host copies | landed (this commit) |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
 host), parsed once and lowercased. `PolicyLayer::new` parses its never-touch list and each grant's
@@ -203,6 +204,20 @@ WORK-15, `url_host`: `host_pattern::url_host(&Url)` is the lowercase host every 
 The never-touch match, host admission and the decision evidence read it. Three more copies are in
 core-work's files and adopt it there: `observed_host` (`work/mod.rs`), `TabHold::host`
 (`workspace/mod.rs`) and `reusable_site` (`workspace/released.rs`).
+
+G-D1, found on 2026-10-21 by test-01 classifying `governance/`'s tests, security-relevant and
+riding 2.0.1. `url_host` kept the trailing dot of a fully qualified name, which a WHATWG URL
+keeps and the pattern grammar refuses, so under a grant allowing `*`, `https://bank.example./`
+matched no never-touch entry and no deny pattern and was admitted, while a browser loads it as
+`bank.example`. Allow-list policies were not affected. `url_host` now trims trailing dots, and an
+address whose host is dots alone has no host. The three host copies WORK-15 left in core-work's
+files (`observed_host`, `TabHold::host`, `reusable_site`) read `url_host`, so the evidence, the
+held tab and default reuse see the same host as the decision. The loopback check that guards the
+workbench address also reads `localhost.` and `[::]`. The workbench address is now checked before
+any never-touch list, so a list that names `localhost` no longer takes the credit for refusing it:
+it stays Ghostlight's own ceiling, credited to no policy layer, as docs/trust/security-overview.md
+says. The proof is rows in kept tests (never-touch, a grant's deny under `*`, the workbench
+origin), which fail with the fix reverted.
 
 WORK-15, `layer_denial`: the six policy refusals (a grant's, the screenshot, channel, never-touch,
 tab-close and audit-availability settings) go through `AuthoritySnapshot::layer_denial`, the one

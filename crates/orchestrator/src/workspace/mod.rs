@@ -437,13 +437,10 @@ pub struct TabHold {
 }
 
 impl TabHold {
-    /// The host of the refused page, lowercase, when its address has one.
+    /// The host of the refused page, as policy matches it, when its address has one.
     #[must_use]
     pub fn host(&self) -> Option<String> {
-        Url::parse(&self.url)
-            .ok()?
-            .host_str()
-            .map(str::to_ascii_lowercase)
+        crate::governance::host_pattern::url_host(&Url::parse(&self.url).ok()?)
     }
 }
 

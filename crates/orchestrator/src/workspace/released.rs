@@ -198,5 +198,8 @@ fn reusable_site(url: &str) -> Option<(String, Option<u16>)> {
     if !matches!(parsed.scheme(), "http" | "https") {
         return None;
     }
-    Some((parsed.host_str()?.to_ascii_lowercase(), parsed.port()))
+    Some((
+        crate::governance::host_pattern::url_host(&parsed)?,
+        parsed.port(),
+    ))
 }

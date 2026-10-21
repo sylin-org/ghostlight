@@ -320,6 +320,9 @@ fn the_workbench_origin_is_denied_to_agents_under_all_open() {
         "http://[::ffff:127.0.0.1]:41234/",
         "http://2130706433:41234/",
         "http://0.0.0.0:41234/",
+        // G-D1: a fully qualified name and the unspecified IPv6 address reach it too.
+        "http://localhost.:41234/",
+        "http://[::]:41234/",
     ] {
         for capability in [Capability::Read, Capability::Action] {
             assert_eq!(
@@ -363,6 +366,32 @@ fn a_policy_grant_cannot_open_the_workbench_origin() {
             .authorize_landing(Capability::Read, "http://127.0.0.1:41234/")
             .reason,
         ReasonCode::OwnWorkbench
+    );
+
+    // G-D1: a never-touch list that names the loopback hosts does not take the credit: the
+    // workbench address stays Ghostlight's own ceiling, credited to no policy layer.
+    let listed = temporary("own-origin-never-touch");
+    fs::write(
+        &listed,
+        policy(
+            "listed",
+            all_open_grant(),
+            r#"[{"key":"content.security.sacred_domains","value":["localhost","127.0.0.1"],"level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    let facade = GovernanceFacade::new(Some(listed.to_path_buf()));
+    facade.protect_workbench_port(WORKBENCH_PORT);
+    let snapshot = facade.snapshot();
+    let own = snapshot.authorize_landing(Capability::Read, "http://localhost:41234/");
+    assert_eq!(own.reason, ReasonCode::OwnWorkbench);
+    assert_eq!(snapshot.attribution(own), None);
+    assert_eq!(
+        snapshot
+            .authorize_landing(Capability::Read, "http://localhost:3000/")
+            .reason,
+        ReasonCode::ProtectedHost,
+        "the list still protects every other loopback address"
     );
 }
 
@@ -427,6 +456,14 @@ fn never_touch_layers(
 #[test]
 fn an_organization_never_touch_refusal_carries_tier_rule_and_denial_id() {
     let snapshot = never_touch_layers("never-touch-org", &["bank.example"], &["mail.example"]);
+    // G-D1: the fully qualified name a browser loads as the same site is the same host.
+    for url in ["https://bank.example./", "https://BANK.Example../x"] {
+        assert_eq!(
+            snapshot.authorize_landing(Capability::Read, url).reason,
+            ReasonCode::ProtectedHost,
+            "{url}"
+        );
+    }
     let refused = snapshot.authorize_landing(Capability::Read, "https://bank.example/accounts");
     assert!(!refused.allowed);
     assert_eq!(refused.reason, ReasonCode::ProtectedHost);
@@ -747,6 +784,28 @@ fn a_grant_deny_only_shrinks_that_grant_and_search_continues_for_an_admission() 
     assert!(
         snapshot
             .authorize_landing(Capability::Read, "https://admin.example.com")
+            .allowed
+    );
+
+    // G-D1: a grant's deny names the fully qualified name too, so under a universal allow the
+    // trailing dot does not step around it.
+    let universal = snapshot_for(
+        "grant-deny-fqdn",
+        policy(
+            "universal with a deny",
+            r#"[{"id":"all","hosts":{"allow":["*"],"deny":["bank.example","*.bank.example"]},"allowed":["read"]}]"#,
+            "[]",
+        ),
+    );
+    for url in ["https://bank.example./", "https://www.bank.example./"] {
+        assert!(
+            !universal.authorize_landing(Capability::Read, url).allowed,
+            "{url}"
+        );
+    }
+    assert!(
+        universal
+            .authorize_landing(Capability::Read, "https://example.com./")
             .allowed
     );
 
