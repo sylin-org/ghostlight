@@ -144,3 +144,23 @@ its outermost member: a Git Bash or Cygwin per-command stub and its shell are on
 walk ends at a parent that started after its child, because a recycled pid cannot be a real parent;
 the caller is then the last trustworthy member reached, or none. `GHOSTLIGHT_SESSION` still wins
 over all of this. Decision 2 (identity is pid plus start time) is unchanged.
+
+## Amendment (2026-10-21): an agent's app is the caller
+
+The owner found that every `ghostlight call` an agent makes is a session of its own: "To me this
+makes little sense. Why not determine who called the CLI version, and use that as the source?"
+Claude Code runs each shell command in a fresh shell, so the nearest ancestor that is not a
+Ghostlight executable is a new `cmd.exe` or `bash.exe` on every call, and so is the session. A call
+from Claude Code on Windows climbs `pwsh.exe`, `cmd.exe`, `claude.exe` (the Code session) and
+`claude.exe` (the desktop app). Ghostlight already walked this ancestry to name the source ("A
+ghostlight call from Claude Code") and still keyed the session on the throwaway shell.
+
+The caller is now the nearest ancestor whose image is a catalog agent's app, when the walk finds
+one. Every call one agent session makes, through whatever shell its tool spawns, reaches one
+workspace. The session is named for that agent, so its tabs sit in that agent's group, and it
+reuses that agent's released tabs as the agent's MCP sessions do (ADR-0203 Decision 9). The nearest
+agent ancestor is taken as it is, with no folding of same-named agent ancestors, so each agent
+session that runs as its own process keeps its own workspace. With no agent's app in the walk, the
+amendment of 2026-10-14 stands, and a person's terminal is one session. `GHOSTLIGHT_SESSION` still
+wins over both, and Decision 2 (identity is pid plus start time) is unchanged. The work is slice
+I-D4 in arch-1's install ledger.

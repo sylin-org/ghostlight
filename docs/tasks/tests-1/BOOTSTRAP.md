@@ -63,7 +63,8 @@ coordinator names.
 - A golden both sides read stays, and so do its pin tests. A golden is regenerated only when a kept
   test's fixture set changes on purpose, and its diff is read.
 - Journeys and guards under `tests/` are not cut in this batch.
-- arch-1: a lane finishes its open arch-1 defect slice first (core-work's W-D4). arch-1's refactor
+- arch-1: a lane finishes its open arch-1 defect slices first (core-work's W-D4 and W-D5; the
+  coordinator builds install's I-D4). arch-1's refactor
   slices (package EXT-6, EXT-12 and B-final, install INST-5, core-service C19c-s and the cli
   journey's checks) wait until this batch closes.
 - No lane deploys or releases. The cut changes no product behavior; the coordinator deploys `dev`

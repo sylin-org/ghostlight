@@ -432,6 +432,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | I-D1 | fix(install): an empty `XDG_CONFIG_HOME`, `APPDATA` or `CODEX_HOME` counts as unset | - | INST-4's defect | landed (this commit); see Notes, second sweep |
 | I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | landed (this commit); see Notes, second sweep |
 | I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | landed (this commit); see Notes, second sweep |
+| I-D4 | fix(cli): an agent's `ghostlight call` joins one session named for that agent | - | the owner's question of 2026-10-21; the ADR-0106 amendment of 2026-10-21; the coordinator builds it | todo |
 | INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | landed (this commit); see Notes, second sweep |
 | INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | landed (this commit); see Notes, second sweep |
 | INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | todo |
@@ -506,3 +507,9 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
   rule. `LegacyRoots` keeps its 1.x-only rule, and `workbench/parts.rs` (surface) still reads
   `USERPROFILE` itself. The writer goldens build their context by hand and are unchanged.
   Linux-only paths compile only in CI from this machine.
+- I-D4, the owner's question of 2026-10-21: each `ghostlight call` from Claude Code was a session
+  of its own, named "Command line", because `cli/session.rs` keys the session on the nearest
+  non-Ghostlight ancestor, a fresh `cmd.exe` or `bash.exe` per shell command. The caller becomes
+  the nearest ancestor whose image is a catalog agent's app (the match `provenance::Source` already
+  makes), with no folding of same-named agent ancestors, and the session is named for that agent
+  (`Agent::of` on the CLI channel). With no agent in the walk, the terminal rule stands.

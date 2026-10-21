@@ -42,6 +42,7 @@ In order. "After" names what a slice waits for.
 | WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | workspace half landed (ec6ae3fd); `work/mod.rs`'s stage locks ride with C10c |
 | D52(c) | fix(work): `routing_refusal` passes the browser's cause through, and `capture_too_large` reaches `Refusal::CaptureTooLarge` | C12b-2, D52 | Decision 5.2's third part | taken by test-02 (109e30c3) |
 | W-D4 | fix(work): closing a handle this service does not hold says it no longer holds the tab, not that the tab is gone | C16 | Found 2026-10-21 by test-02, confirmed by leo-desktop-02 with UI Automation; goes with WORK-3's already-closed tab | todo |
+| W-D5 | fix(work): a session whose browser left for good moves to the browser the agent names | - | Found 2026-10-21 on the owner's machine (Notes) | todo |
 
 ## Notes
 
@@ -163,3 +164,11 @@ docs lines. The journey's no-browser language checks (`browser_startup_manual`,
 `native_host_unavailable`, `browser_absent` on the real machine's inventory) rode on that call. They
 need a call that asks a browser without starting one (for example a navigate under a `manual`
 startup policy in the journey home), which is the coordinator's lane to choose.
+- W-D5, found on the owner's machine on 2026-10-21: two Ghostlight extensions were installed in one
+  Chrome, the store 2.0.0 one and the local build, each with its own browser identity. The
+  coordinator's MCP session worked in the store one's. When the owner removed it, the session could
+  open nothing: `browser_navigate` without `browser` said to reopen the browser profile the session
+  started in, which will never come back, and with the local build's `browser` it said the session
+  already works in a different browser. A session whose browser is not connected should move to the
+  browser the agent names, or the only one connected, and its tabs in the gone browser read as no
+  longer open.
