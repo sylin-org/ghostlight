@@ -138,9 +138,8 @@
   } = {}) {
     if (!lifecycle?.cdp || !inventory?.snapshot) throw new TypeError("evaluation requires debugger sessions and an inventory");
 
-    const evaluateMain = Object.freeze({
-      addresses: () => true,
-      tabOf: (request) => request.tab_id,
+    const evaluateMain = check.handler({
+      addresses: true,
       validate(request) {
         check.requireArgs(request);
         check.requireTabId(request.tab_id);

@@ -50,7 +50,6 @@
   const AX_TEXT_CHARS = 500;
   const AX_PROPERTIES = Object.freeze(new Set(["checked", "disabled", "expanded", "focused", "required", "selected", "level"]));
   const DIALOG_OP = Object.freeze({ STATUS: "status", HANDLE: "handle" });
-  const STEP = Object.freeze({ MOUSE: "mouse", KEY: "key", INSERT_TEXT: "insert_text", DRAG: "drag", PAUSE: "pause" });
 
   // How a thrown error becomes a receipt failure when it does not carry a protocol code itself. The
   // patterns are closed and ordered; a CDP error (Chrome reports it as JSON with a numeric code)
@@ -105,62 +104,9 @@
     });
   }
 
-  function handler({ validate, run, addresses }) {
-    return Object.freeze({ validate, run, addresses: () => addresses, tabOf: (request) => request.tab_id });
-  }
-
   function validateTab(request) {
     check.requireArgs(request);
     check.requireTabId(request.tab_id);
-  }
-
-  function validateCall(request) {
-    validateTab(request);
-    if (!protocol.isKnown("call_modes", request.mode)) throw check.invalid("mode must name a call mode.");
-    if (!Array.isArray(request.calls) || request.calls.length < 1 || request.calls.length > protocol.MAX_WORLD_CALLS) {
-      throw check.invalid(`calls must list from 1 to ${protocol.MAX_WORLD_CALLS} calls.`);
-    }
-    request.calls.forEach((call, index) => check.requireWorldCall(call, `calls[${index}]`));
-    check.optionalGuard(request.guard);
-    check.requireInteger(request.settle_ms, "settle_ms");
-    check.requireInteger(request.timeout_ms, "timeout_ms", { minimum: 1 });
-  }
-
-  function validatePoint(point, name) {
-    if (!check.isObject(point)) throw check.invalid(`${name} must be a point.`);
-    check.requireFinite(point.x, `${name}.x`);
-    check.requireFinite(point.y, `${name}.y`);
-  }
-
-  function validateStep(step, name) {
-    if (!check.isObject(step) || !protocol.isKnown("input_steps", step.step)) throw check.invalid(`${name} must name an input step.`);
-    if (step.step === STEP.MOUSE) {
-      if (!protocol.isKnown("mouse_actions", step.action)) throw check.invalid(`${name}.action must name a mouse action.`);
-      validatePoint(step, name);
-      if (!check.absent(step.button) && !protocol.isKnown("mouse_buttons", step.button)) throw check.invalid(`${name}.button must name a mouse button.`);
-    } else if (step.step === STEP.KEY) {
-      if (!protocol.isKnown("key_actions", step.action)) throw check.invalid(`${name}.action must name a key action.`);
-      check.requireText(step.key, `${name}.key`, 64);
-    } else if (step.step === STEP.INSERT_TEXT) {
-      if (typeof step.text !== "string") throw check.invalid(`${name}.text must be text.`);
-    } else if (step.step === STEP.DRAG) {
-      if (!Array.isArray(step.path) || step.path.length < 2) throw check.invalid(`${name}.path must list at least two points.`);
-      step.path.forEach((point, index) => validatePoint(point, `${name}.path[${index}]`));
-    } else {
-      check.requireInteger(step.ms, `${name}.ms`, { maximum: protocol.MAX_PAUSE_MS });
-    }
-  }
-
-  function validateInput(request) {
-    validateTab(request);
-    if (!Array.isArray(request.steps) || request.steps.length < 1 || request.steps.length > protocol.MAX_INPUT_STEPS) {
-      throw check.invalid(`steps must list from 1 to ${protocol.MAX_INPUT_STEPS} steps.`);
-    }
-    request.steps.forEach((step, index) => validateStep(step, `steps[${index}]`));
-    if (!check.absent(request.precondition)) check.requireWorldCall(request.precondition, "precondition");
-    check.optionalGuard(request.guard);
-    check.requireInteger(request.settle_ms, "settle_ms");
-    check.requireInteger(request.timeout_ms, "timeout_ms", { minimum: 1 });
   }
 
   // The url fact of a dialog: the bounded url of the frame that raised it, and nothing when the
@@ -237,7 +183,7 @@
     if (typeof send !== "function" || !controlled?.manage || !cancellations?.isCancelled) {
       throw new TypeError("the dispatcher requires a sender, the controlled-tab hook and the cancel registry");
     }
-    if (!lifecycle?.cdp || !inventory?.snapshot || !world?.callPrimitive) {
+    if (!lifecycle?.cdp || !inventory?.snapshot || !world?.callSpec) {
       throw new TypeError("the dispatcher requires debugger sessions, an inventory and the world");
     }
     if (!chromeApi?.tabs?.get) throw new TypeError("the dispatcher requires chrome.tabs");
@@ -336,7 +282,7 @@
       });
     }
 
-    const dialogPrimitive = handler({
+    const dialogPrimitive = check.handler({
       addresses: true,
       validate: validateDialog,
       /**
@@ -349,7 +295,7 @@
       }
     });
 
-    const accessibilityPrimitive = handler({
+    const accessibilityPrimitive = check.handler({
       addresses: true,
       validate: validateAccessibility,
       /**
@@ -395,11 +341,11 @@
       close_tab: tabs.closeTab,
       set_zoom: tabs.setZoom,
       resize_window: tabs.resizeWindow,
-      frames: handler({ addresses: true, validate: validateTab, run: (request, fx, correlation) => inventory.framesPrimitive(request, fx, correlation) }),
-      call: handler({ addresses: true, validate: validateCall, run: (request, fx, correlation) => world.callPrimitive(request, fx, correlation) }),
+      frames: inventory.framesSpec,
+      call: world.callSpec,
       evaluate_main: evaluate.evaluateMain,
       view: capture.view,
-      input: handler({ addresses: true, validate: validateInput, run: (request, fx, correlation) => input.run(request, fx, correlation) }),
+      input: input.inputSpec,
       capture: capture.capture,
       dialog: dialogPrimitive,
       diagnostics: buffers.diagnostics,

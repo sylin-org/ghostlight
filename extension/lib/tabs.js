@@ -292,13 +292,9 @@
       return stored[state.PRESERVE_TABS_KEY] !== false;
     }
 
-    function handler({ validate, run, addresses }) {
-      return Object.freeze({ validate, run, addresses: () => addresses, tabOf: (args) => args.tab_id });
-    }
-
     // ---- primitives ---------------------------------------------------------------------------
 
-    const listTabs = handler({
+    const listTabs = check.handler({
       addresses: false,
       validate(args) {
         requireArgs(args);
@@ -318,7 +314,7 @@
       }
     });
 
-    const openTab = handler({
+    const openTab = check.handler({
       addresses: false,
       validate(args) {
         requireArgs(args);
@@ -373,7 +369,7 @@
       });
     }
 
-    const navigate = handler({
+    const navigate = check.handler({
       addresses: true,
       validate(args) {
         requireArgs(args);
@@ -421,7 +417,7 @@
       }
     });
 
-    const focusTab = handler({
+    const focusTab = check.handler({
       addresses: true,
       validate(args) {
         requireArgs(args);
@@ -438,7 +434,7 @@
       }
     });
 
-    const closeTab = handler({
+    const closeTab = check.handler({
       addresses: false,
       validate(args) {
         requireArgs(args);
@@ -465,7 +461,7 @@
       }
     });
 
-    const setZoom = handler({
+    const setZoom = check.handler({
       addresses: true,
       validate(args) {
         requireArgs(args);
@@ -486,7 +482,7 @@
       }
     });
 
-    const resizeWindow = handler({
+    const resizeWindow = check.handler({
       addresses: true,
       validate(args) {
         requireArgs(args);

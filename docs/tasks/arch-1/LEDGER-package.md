@@ -99,7 +99,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | - | ADR-0203 C18, moved from core-service; SURF-4's label half; EXT-5's pins | landed (this commit) |
 | P-D2 | fix(extension): a command the service cancelled while it waited never runs late | - | the coordinator, from leo-desktop-02's 2.0.0 stall | landed (this commit) |
 | EXT-5 | refactor(extension): `protocol.js` names its words and owns `failure`, and the vocabulary gains the missing words under new keys | C18 | EXT-5 as corrected | landed (this commit) |
-| EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | todo |
+| EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | landed (this commit) |
 | EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | landed (this commit) |
 | EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | landed (this commit) |
 | EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | landed (this commit) |
@@ -389,3 +389,12 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   so a context without it still loads `protocol.js`. No catalog or result golden names the
   refusal. The freeze record is regenerated (a test-02 package line); the store resubmission stays
   the owner's call.
+- EXT-6: one `handler()` in `arguments.js` builds every primitive's spec (an `addresses` flag or
+  function, and a `tabOf` that defaults to the tab id); the copies in `primitives.js` and `tabs.js`
+  go, and `capture`, `evaluate` and `buffers` build theirs through it. The `call`, `input` and
+  `frames` validators move beside their runners, as `world.callSpec`, `input.inputSpec` and
+  `inventory.framesSpec`, and the dispatcher's table reads them; the runners stay exported for
+  their unit tests. `primitives.js`'s copy of the input steps goes with its step validator. The
+  dialog and accessibility handlers stay in `primitives.js`, as the verdict found no module that
+  owns their CDP calls. No receipt changes; the freeze record is regenerated (a test-02 package
+  line).

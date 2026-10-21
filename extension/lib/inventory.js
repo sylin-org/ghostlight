@@ -2,14 +2,14 @@
 (function installGhostlightInventory(root, factory) {
   const node = typeof module !== "undefined" && module.exports;
   const api = factory(node
-    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), shared: require("./shared.js") }
-    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, shared: root.GhostlightShared });
+    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), shared: require("./shared.js"), args: require("./arguments.js") }
+    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, shared: root.GhostlightShared, args: root.GhostlightArguments });
   root.GhostlightInventory = api;
   if (node) module.exports = api;
 })(globalThis, function createGhostlightInventoryApi(deps) {
   "use strict";
 
-  const { protocol, sessions, shared } = deps;
+  const { protocol, sessions, shared, args: check } = deps;
   const { CDP } = sessions;
 
   // Every document of a tab, read from CDP across the root session and every child (out-of-process
@@ -187,7 +187,17 @@
       });
     }
 
-    return Object.freeze({ snapshot, topSnapshot, checkGuard, currentLoader, framesPrimitive });
+    // The `frames` primitive's spec: a tab, and its frame inventory.
+    const framesSpec = check.handler({
+      addresses: true,
+      validate(request) {
+        check.requireArgs(request);
+        check.requireTabId(request.tab_id);
+      },
+      run: framesPrimitive
+    });
+
+    return Object.freeze({ snapshot, topSnapshot, checkGuard, currentLoader, framesPrimitive, framesSpec });
   }
 
   return Object.freeze({ create, checkGuard });

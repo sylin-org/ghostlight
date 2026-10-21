@@ -2,14 +2,14 @@
 (function installGhostlightInput(root, factory) {
   const node = typeof module !== "undefined" && module.exports;
   const api = factory(node
-    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), world: require("./world.js") }
-    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, world: root.GhostlightWorld });
+    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), world: require("./world.js"), args: require("./arguments.js") }
+    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, world: root.GhostlightWorld, args: root.GhostlightArguments });
   root.GhostlightInput = api;
   if (node) module.exports = api;
 })(globalThis, function createGhostlightInputApi(deps) {
   "use strict";
 
-  const { protocol, sessions, world } = deps;
+  const { protocol, sessions, world, args: check } = deps;
   const { CDP } = sessions;
 
   // Trusted input for one tab: an optional world-call precondition (for example the focus check that
@@ -217,7 +217,48 @@
       });
     }
 
-    return Object.freeze({ run, dragIntercepted, cancelDragInterception });
+    // The `input` primitive's spec: its steps checked here, beside the code that sends them.
+    function validatePoint(point, name) {
+      if (!check.isObject(point)) throw check.invalid(`${name} must be a point.`);
+      check.requireFinite(point.x, `${name}.x`);
+      check.requireFinite(point.y, `${name}.y`);
+    }
+
+    function validateStep(step, name) {
+      if (!check.isObject(step) || !protocol.isKnown("input_steps", step.step)) throw check.invalid(`${name} must name an input step.`);
+      if (step.step === STEP.MOUSE) {
+        if (!protocol.isKnown("mouse_actions", step.action)) throw check.invalid(`${name}.action must name a mouse action.`);
+        validatePoint(step, name);
+        if (!check.absent(step.button) && !protocol.isKnown("mouse_buttons", step.button)) throw check.invalid(`${name}.button must name a mouse button.`);
+      } else if (step.step === STEP.KEY) {
+        if (!protocol.isKnown("key_actions", step.action)) throw check.invalid(`${name}.action must name a key action.`);
+        check.requireText(step.key, `${name}.key`, 64);
+      } else if (step.step === STEP.INSERT_TEXT) {
+        if (typeof step.text !== "string") throw check.invalid(`${name}.text must be text.`);
+      } else if (step.step === STEP.DRAG) {
+        if (!Array.isArray(step.path) || step.path.length < 2) throw check.invalid(`${name}.path must list at least two points.`);
+        step.path.forEach((point, index) => validatePoint(point, `${name}.path[${index}]`));
+      } else {
+        check.requireInteger(step.ms, `${name}.ms`, { maximum: protocol.MAX_PAUSE_MS });
+      }
+    }
+
+    function validateInput(request) {
+      check.requireArgs(request);
+      check.requireTabId(request.tab_id);
+      if (!Array.isArray(request.steps) || request.steps.length < 1 || request.steps.length > protocol.MAX_INPUT_STEPS) {
+        throw check.invalid(`steps must list from 1 to ${protocol.MAX_INPUT_STEPS} steps.`);
+      }
+      request.steps.forEach((step, index) => validateStep(step, `steps[${index}]`));
+      if (!check.absent(request.precondition)) check.requireWorldCall(request.precondition, "precondition");
+      check.optionalGuard(request.guard);
+      check.requireInteger(request.settle_ms, "settle_ms");
+      check.requireInteger(request.timeout_ms, "timeout_ms", { minimum: 1 });
+    }
+
+    const inputSpec = check.handler({ addresses: true, validate: validateInput, run });
+
+    return Object.freeze({ inputSpec, run, dragIntercepted, cancelDragInterception });
   }
 
   return Object.freeze({ create });

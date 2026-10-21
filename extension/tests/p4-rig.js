@@ -123,11 +123,11 @@ function rig({
     capture: { view: via("view", real.capture.view), capture: via("capture", real.capture.capture) },
     evaluate: { evaluateMain: via("evaluate_main", real.evaluate.evaluateMain) },
     buffers: { diagnostics: via("diagnostics", real.buffers.diagnostics), recording: via("recording", real.buffers.recording) },
-    input: { run: stubs.get("input") ?? parts.input.run },
-    inventory: { ...parts.inventory, framesPrimitive: stubs.get("frames") ?? parts.inventory.framesPrimitive },
+    input: { inputSpec: via("input", parts.input.inputSpec) },
+    inventory: { ...parts.inventory, framesSpec: via("frames", parts.inventory.framesSpec) },
     world: {
       ...parts.world,
-      callPrimitive: stubs.get("call") ?? parts.world.callPrimitive,
+      callSpec: via("call", parts.world.callSpec),
       inflight: (correlation) => worldLog.inflight.get(correlation) ?? [],
       cancelToken: (entry) => worldLog.cancelled.push(entry)
     }

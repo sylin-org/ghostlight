@@ -155,9 +155,8 @@
       }
     }
 
-    const view = Object.freeze({
-      addresses: () => true,
-      tabOf: (args) => args.tab_id,
+    const view = check.handler({
+      addresses: true,
       validate(args) {
         if (!isObject(args)) throw invalid("The request arguments must be an object.");
         requireTabId(args.tab_id);
@@ -171,9 +170,8 @@
       }
     });
 
-    const capture = Object.freeze({
-      addresses: () => true,
-      tabOf: (args) => args.tab_id,
+    const capture = check.handler({
+      addresses: true,
       validate(args) {
         if (!isObject(args)) throw invalid("The request arguments must be an object.");
         requireTabId(args.tab_id);

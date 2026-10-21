@@ -2,14 +2,14 @@
 (function installGhostlightWorld(root, factory) {
   const node = typeof module !== "undefined" && module.exports;
   const api = factory(node
-    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), shared: require("./shared.js") }
-    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, shared: root.GhostlightShared });
+    ? { protocol: require("./protocol.js"), sessions: require("./sessions.js"), shared: require("./shared.js"), args: require("./arguments.js") }
+    : { protocol: root.GhostlightProtocol, sessions: root.GhostlightSessions, shared: root.GhostlightShared, args: root.GhostlightArguments });
   root.GhostlightWorld = api;
   if (node) module.exports = api;
 })(globalThis, function createGhostlightWorldApi(deps) {
   "use strict";
 
-  const { protocol, sessions, shared } = deps;
+  const { protocol, sessions, shared, args: check } = deps;
   const { CDP } = sessions;
 
   // The service's page assets run in the `ghostlight` isolated world of every document the
@@ -583,7 +583,24 @@
       return reply?.result?.objectId;
     }
 
+    // The `call` primitive's spec: its arguments checked here, beside the code that runs it.
+    function validateCall(request) {
+      check.requireArgs(request);
+      check.requireTabId(request.tab_id);
+      if (!protocol.isKnown("call_modes", request.mode)) throw check.invalid("mode must name a call mode.");
+      if (!Array.isArray(request.calls) || request.calls.length < 1 || request.calls.length > protocol.MAX_WORLD_CALLS) {
+        throw check.invalid(`calls must list from 1 to ${protocol.MAX_WORLD_CALLS} calls.`);
+      }
+      request.calls.forEach((call, index) => check.requireWorldCall(call, `calls[${index}]`));
+      check.optionalGuard(request.guard);
+      check.requireInteger(request.settle_ms, "settle_ms");
+      check.requireInteger(request.timeout_ms, "timeout_ms", { minimum: 1 });
+    }
+
+    const callSpec = check.handler({ addresses: true, validate: validateCall, run: callPrimitive });
+
     return Object.freeze({
+      callSpec,
       setAssets,
       assetsId,
       register,

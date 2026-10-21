@@ -170,7 +170,7 @@
       return clearedFacts(cleared);
     }
 
-    const diagnosticsPrimitive = Object.freeze({
+    const diagnosticsPrimitive = check.handler({
       addresses: (request) => request.op === DIAGNOSTICS_OP.READ,
       tabOf: (request) => request.tab_id,
       validate(request) {
@@ -463,7 +463,7 @@
       }
     }
 
-    const recordingPrimitive = Object.freeze({
+    const recordingPrimitive = check.handler({
       addresses: (request) => request.op === RECORDING_OP.START
         || (request.op === RECORDING_OP.EXPORT && request.destination?.destination === DESTINATION.PAGE),
       tabOf: (request) => (request.op === RECORDING_OP.EXPORT ? request.destination.tab_id : request.tab_id),

@@ -142,7 +142,18 @@
     }
   }
 
+  /**
+   * A primitive's handler spec, the one shape the dispatcher reads: `validate` and `run` as given,
+   * `addresses(args)` from a flag or a function of the arguments (whether the primitive acts on a
+   * tab the dispatcher must take custody of), and `tabOf(args)`, the tab's id, `args.tab_id`
+   * unless given.
+   */
+  function handler({ validate, run, addresses, tabOf = (args) => args.tab_id }) {
+    return Object.freeze({ validate, run, addresses: typeof addresses === "function" ? addresses : () => addresses, tabOf });
+  }
+
   return Object.freeze({
+    handler,
     invalid,
     isObject,
     absent,
