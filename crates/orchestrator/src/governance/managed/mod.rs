@@ -120,17 +120,15 @@ struct ActivePolicy {
     sequence: u64,
     /// The organization this publication names, resolved once when it was verified.
     organization: Option<OrganizationIdentity>,
-    envelope_hash: [u8; 32],
+    /// [`bundle::VerifiedBundle::claims_digest`]: a later bundle of the same sequence is the same
+    /// publication only when its signed claims are.
+    claims_digest: [u8; 32],
 }
 
 impl ActivePolicy {
     /// A verified publication, its organization resolved from the signed presentation over the
     /// manifest's own block.
-    fn verified(
-        manifest: manifest::Manifest,
-        verified: bundle::VerifiedBundle,
-        envelope_hash: [u8; 32],
-    ) -> Self {
+    fn verified(manifest: manifest::Manifest, verified: bundle::VerifiedBundle) -> Self {
         let signed = verified
             .presentation
             .map(|presentation| OrganizationIdentity {
@@ -152,7 +150,7 @@ impl ActivePolicy {
             manifest,
             sequence: verified.sequence,
             organization,
-            envelope_hash,
+            claims_digest: verified.claims_digest,
         }
     }
 }
@@ -450,7 +448,6 @@ impl ManagedAuthority {
                 return;
             }
         };
-        let envelope_hash = digest(bytes);
         if let Some(active) = &self.active {
             if verified.sequence < active.sequence {
                 self.reject(
@@ -462,7 +459,9 @@ impl ManagedAuthority {
                 );
                 return;
             }
-            if verified.sequence == active.sequence && envelope_hash != active.envelope_hash {
+            if verified.sequence == active.sequence
+                && verified.claims_digest != active.claims_digest
+            {
                 self.reject(
                     format!(
                         "managed policy sequence {} was reused for different signed content",
@@ -473,7 +472,7 @@ impl ManagedAuthority {
                 return;
             }
         }
-        self.active = Some(ActivePolicy::verified(manifest, verified, envelope_hash));
+        self.active = Some(ActivePolicy::verified(manifest, verified));
         if let Some(path) = &self.paths.cache {
             if let Err(error) = atomic_replace(path, bytes) {
                 self.last_error = Some(format!(
@@ -528,7 +527,6 @@ impl ManagedAuthority {
         Some(ActivePolicy::verified(
             manifest::parse(&text, "verified managed policy cache").ok()?,
             verified,
-            digest(&bytes),
         ))
     }
 
@@ -1158,6 +1156,30 @@ mod tests {
                 replaced.authorize_capability(Capability::Action).allowed,
                 "{row}"
             );
+            assert_eq!(
+                facade.diagnostics().managed_policy.freshness,
+                ManagedPolicyFreshness::Fresh,
+                "{row}"
+            );
+        }
+
+        // G-D4: a publication is its signed claims, however its file is encoded. The same
+        // publication armored, or armored with CRLF line endings, stays fresh at its sequence.
+        let publication = signed(CURRENT, manifest("current", "read"));
+        let armored = bundle::armor(&publication);
+        for (row, encoded) in [
+            ("armored", armored.clone()),
+            ("armored with CRLF", armored.replace('\n', "\r\n")),
+        ] {
+            let root = directory("same-publication");
+            let paths = ManagedPaths::under(&root);
+            let source = root.join(SOURCE);
+            fs::write(&source, &publication).unwrap();
+            write_json(&paths.bootstrap, &bootstrap(SOURCE));
+            let facade = GovernanceFacade::with_managed_paths(None, paths.clone());
+            replace(&source, encoded);
+            facade.refresh_tick();
+            assert_eq!(facade.snapshot().managed_sequence, Some(CURRENT), "{row}");
             assert_eq!(
                 facade.diagnostics().managed_policy.freshness,
                 ManagedPolicyFreshness::Fresh,

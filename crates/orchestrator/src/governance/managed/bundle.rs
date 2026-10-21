@@ -4,6 +4,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::Digest as _;
 use thiserror::Error;
 
 use super::crypto::{self, VerificationKey};
@@ -56,6 +57,9 @@ struct Envelope {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct VerifiedBundle {
     pub(super) sequence: u64,
+    /// The SHA-256 of the claims the signature covers: one publication's identity, the same
+    /// however its file is encoded (armored, plain, either line ending) (G-D4).
+    pub(super) claims_digest: [u8; 32],
     pub(super) manifest: Value,
     pub(super) presentation: Option<Presentation>,
 }
@@ -129,6 +133,7 @@ pub(super) fn verify(bytes: &[u8], key: &VerificationKey) -> Result<VerifiedBund
     validate_presentation(claims.presentation.as_ref())?;
     Ok(VerifiedBundle {
         sequence: claims.seq,
+        claims_digest: sha2::Sha256::digest(&claims_bytes).into(),
         manifest: claims.manifest,
         presentation: claims.presentation,
     })

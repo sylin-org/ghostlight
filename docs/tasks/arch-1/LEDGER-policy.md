@@ -192,7 +192,8 @@ rows are done.
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (d00a7ede) |
 | G-D1 | fix(governance): a trailing-dot host is the same host to policy | - | found by test-01's tests-1 classification of `governance/`, 2026-10-21 (Notes below); the policy lane is closed, so test-01 lands it, cross-lane into core-work's three host copies | landed (e0e90fa2) |
 | G-D2 | fix(governance): publish refuses a bad source before it writes the bundle | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (375cb549) |
-| G-D3 | fix(governance): an organization's facts have one bound in bytes on both delivery paths | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (this commit) |
+| G-D3 | fix(governance): an organization's facts have one bound in bytes on both delivery paths | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (4086aed9) |
+| G-D4 | fix(governance): the same publication re-encoded is not a reused sequence | - | found by tests-1's managed-policy row, 2026-10-21 (Notes); test-01 | landed (this commit) |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
 host), parsed once and lowercased. `PolicyLayer::new` parses its never-touch list and each grant's
@@ -234,6 +235,14 @@ and that machine failed closed. The bounds now live once, in bytes, in
 `manifest::organization_bounds`, which both read; the manifest refuses such a name when it is
 validated, with "must be at most 100 bytes". The proof is a row in the kept organization test:
 both paths give the same answer at the bound and past it.
+
+G-D4, found the same day: the reused-sequence check hashed the bundle file's raw bytes, so the same
+signed publication served armored, or armored with CRLF line endings, read as "sequence 8 was
+reused for different signed content" and the policy showed as last-known-good until the next
+sequence. Enforcement was unaffected. A verified bundle now carries the SHA-256 of the claims its
+signature covers, and the check compares that. The proof is a row in the kept replacement test: the
+same publication re-encoded stays fresh at its sequence, while different claims under the same
+sequence are still refused.
 
 WORK-15, `layer_denial`: the six policy refusals (a grant's, the screenshot, channel, never-touch,
 tab-close and audit-availability settings) go through `AuthoritySnapshot::layer_denial`, the one
