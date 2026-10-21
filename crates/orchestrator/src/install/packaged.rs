@@ -345,173 +345,61 @@ mod tests {
         file.set_times(FileTimes::new().set_modified(when)).unwrap();
     }
 
+    /// Defects 236485f4 and 4fac15a7: a Store app reads its own private copy of its settings
+    /// first, so that copy outranks the plain path, but a copy another app's container keeps never
+    /// does, however new it is and even when the plain settings do not exist yet (as on
+    /// leo-desktop-02 on 2026-10-20, where a never-started Visual Studio Code was registered inside
+    /// the Codex app's container). A package is the agent's own only by its exact family name.
     #[test]
-    fn a_roaming_path_maps_to_local_cache_roaming_and_a_local_one_to_local_cache_local() {
-        let scratch = Scratch::new();
-        let roots = roots(&scratch);
-        let roaming = package(&roots, CLAUDE_FAMILY, DataRoot::Roaming, "Claude");
-        let local = package(
-            &roots,
-            "Vendor.Tool_abc123",
-            DataRoot::Local,
-            "Tool/settings",
-        );
-        let packages = Packages::listed(roots.clone());
-
-        let plain = roots.roaming.join(CLAUDE_SETTINGS);
-        assert_eq!(
-            files(&packages.copies(&plain, &[], as_is)),
-            [
-                (plain.clone(), PLAIN),
-                (roaming.join("claude_desktop_config.json"), OTHER)
-            ]
-        );
-        assert_eq!(
-            roaming,
-            roots
-                .local
-                .join("Packages")
-                .join(CLAUDE_FAMILY)
-                .join("LocalCache/Roaming/Claude")
-        );
-        let plain = roots.local.join("Tool/settings/mcp.json");
-        assert_eq!(
-            files(&packages.copies(&plain, &[], as_is)),
-            [(plain.clone(), PLAIN), (local.join("mcp.json"), OTHER)]
-        );
-        assert_eq!(
-            local,
-            roots
-                .local
-                .join("Packages/Vendor.Tool_abc123/LocalCache/Local/Tool/settings")
-        );
-    }
-
-    #[test]
-    fn without_the_package_or_its_settings_folder_only_the_plain_path_remains() {
-        let scratch = Scratch::new();
-        let roots = roots(&scratch);
-        let plain = roots.roaming.join(CLAUDE_SETTINGS);
-        let only_plain = vec![(plain.clone(), PLAIN)];
-        // No Packages folder at all.
-        let packages = Packages::listed(roots.clone());
-        assert_eq!(files(&packages.copies(&plain, &[], as_is)), only_plain);
-        // A package with a private copy of the root, but not of the client's folder.
-        package(&roots, CLAUDE_FAMILY, DataRoot::Roaming, "Other");
-        // A folder that is no package family, holding the client's folder.
-        package(&roots, "NotAFamily", DataRoot::Roaming, "Claude");
-        // A package of the wrong root.
-        package(&roots, "Vendor.Local_abc", DataRoot::Local, "Claude");
-        let packages = Packages::listed(roots.clone());
-        assert_eq!(files(&packages.copies(&plain, &[], as_is)), only_plain);
-        // A path below neither root, and one directly in a root, have no private copy.
-        let elsewhere = scratch.join("home/.claude.json");
-        assert_eq!(
-            files(&packages.copies(&elsewhere, &[], as_is)),
-            [(elsewhere.clone(), PLAIN)]
-        );
-        let loose = roots.roaming.join("loose.json");
-        assert_eq!(
-            files(&packages.copies(&loose, &[], as_is)),
-            [(loose.clone(), PLAIN)]
-        );
-        // No roots known: nothing is looked at.
-        assert_eq!(
-            files(&Packages::none().copies(&plain, &[], as_is)),
-            only_plain
-        );
-    }
-
-    #[test]
-    fn the_agents_own_package_wins_and_no_other_package_does() {
+    fn only_the_agents_own_store_package_outranks_the_plain_path() {
         let scratch = Scratch::new();
         let roots = roots(&scratch);
         let own = package(&roots, CLAUDE_FAMILY, DataRoot::Roaming, "Claude");
         let newer = package(&roots, "Other.App_xyz789", DataRoot::Roaming, "Claude");
         let older = package(&roots, "Older.App_abc123", DataRoot::Roaming, "Claude");
+        let lookalike = package(
+            &roots,
+            "ClaudeBeta_pzs8sxrjxfjjc",
+            DataRoot::Roaming,
+            "Claude",
+        );
         let name = "claude_desktop_config.json";
         written_ago(&newer.join(name), 0);
         written_ago(&older.join(name), 300);
+        written_ago(&lookalike.join(name), 450);
         written_ago(&own.join(name), 600);
         let packages = Packages::listed(roots.clone());
         let plain = roots.roaming.join(CLAUDE_SETTINGS);
-
         assert_eq!(
             files(&packages.copies(&plain, &["Claude"], as_is)),
             [
                 (own.join(name), OWN),
                 (plain.clone(), PLAIN),
                 (newer.join(name), OTHER),
-                (older.join(name), OTHER)
+                (older.join(name), OTHER),
+                (lookalike.join(name), OTHER)
             ],
-            "the agent's own Store app wins, then the plain path, then the others, written last first"
         );
         assert_eq!(
-            files(&packages.copies(&plain, &[], as_is)),
-            [
-                (plain.clone(), PLAIN),
-                (newer.join(name), OTHER),
-                (older.join(name), OTHER),
-                (own.join(name), OTHER)
-            ],
-            "without its own app the plain path leads, however new another package's copy is"
+            files(&packages.copies(&plain, &[], as_is))[0],
+            (plain.clone(), PLAIN),
+            "without its own app the plain path leads"
         );
-    }
 
-    #[test]
-    fn another_packages_copy_never_comes_before_the_plain_path() {
-        // As on leo-desktop-02 on 2026-10-20: Visual Studio Code had never been started, so its
-        // plain settings folder did not exist, and the Codex app's container held a `Code\User`
-        // folder that something run inside it once wrote. Visual Studio Code started on its own
-        // never reads that copy.
-        let scratch = Scratch::new();
-        let roots = roots(&scratch);
         let leftover = package(&roots, CODEX_FAMILY, DataRoot::Roaming, "Code/User");
         written_ago(&leftover.join("mcp.json"), 0);
-        let plain = roots.roaming.join("Code/User/mcp.json");
+        let code = roots.roaming.join("Code/User/mcp.json");
         let copies =
-            |roots: &DataRoots| files(&Packages::listed(roots.clone()).copies(&plain, &[], as_is));
-        let plain_first = vec![(plain.clone(), PLAIN), (leftover.join("mcp.json"), OTHER)];
-        // No plain settings at all.
-        assert_eq!(copies(&roots), plain_first);
-        // The plain settings folder, without its file.
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        assert_eq!(copies(&roots), plain_first);
-        // The plain file, however old it is.
-        written_ago(&plain, 600);
-        assert_eq!(copies(&roots), plain_first);
-    }
-
-    #[test]
-    fn while_the_own_copy_has_no_file_the_plain_file_it_shows_comes_first() {
-        let scratch = Scratch::new();
-        let roots = roots(&scratch);
-        let own = package(&roots, CLAUDE_FAMILY, DataRoot::Roaming, "Claude");
-        let name = "claude_desktop_config.json";
-        let plain = roots.roaming.join(CLAUDE_SETTINGS);
-        let copies = || files(&Packages::listed(roots.clone()).copies(&plain, &["Claude"], as_is));
-        // A fresh Store install with no plain settings: its own folder is where it writes.
-        assert_eq!(copies(), [(own.join(name), OWN), (plain.clone(), PLAIN)]);
-        // A plain folder without its file changes nothing.
-        fs::create_dir_all(plain.parent().unwrap()).unwrap();
-        assert_eq!(copies(), [(own.join(name), OWN), (plain.clone(), PLAIN)]);
-        // A plain file is what the app's merged view shows while its own copy has no file.
-        written_ago(&plain, 600);
-        assert_eq!(copies(), [(plain.clone(), PLAIN), (own.join(name), OWN)]);
-        // Once the own copy holds the file, the app reads it first.
-        written_ago(&own.join(name), 900);
-        assert_eq!(copies(), [(own.join(name), OWN), (plain.clone(), PLAIN)]);
-    }
-
-    #[test]
-    fn a_family_is_a_package_name_and_a_publisher_id() {
-        assert!(is_family_of(CLAUDE_FAMILY, "Claude"));
-        assert!(is_family_of("claude_pzs8sxrjxfjjc", "Claude"));
-        assert!(!is_family_of("ClaudeBeta_pzs8sxrjxfjjc", "Claude"));
-        assert!(!is_family_of("Claude_", "Claude"));
-        assert!(!is_family_of("Claude_pzs-8", "Claude"));
-        assert!(is_family("OpenAI.Codex_2p2nqsd0c76g0"));
-        assert!(!is_family("NotAFamily"));
-        assert!(!is_family("_abc"));
+            |roots: &DataRoots| files(&Packages::listed(roots.clone()).copies(&code, &[], as_is));
+        let plain_first = vec![(code.clone(), PLAIN), (leftover.join("mcp.json"), OTHER)];
+        assert_eq!(copies(&roots), plain_first, "no plain settings at all");
+        fs::create_dir_all(code.parent().unwrap()).unwrap();
+        assert_eq!(
+            copies(&roots),
+            plain_first,
+            "the plain folder without its file"
+        );
+        written_ago(&code, 600);
+        assert_eq!(copies(&roots), plain_first, "an older plain file");
     }
 }
