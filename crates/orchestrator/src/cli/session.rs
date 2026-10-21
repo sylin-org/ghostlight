@@ -4,10 +4,13 @@
 //! another, and an application shell out repeatedly, and have every call reach the same tabs.
 
 use std::env;
+use std::path::{Path, PathBuf};
 
+use crate::install::apps::AppLocations;
+use crate::install::icons::IconPlaces;
 use crate::intake::session::SessionMarker;
 use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME};
-use sysinfo::{get_current_pid, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{get_current_pid, Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 /// The environment variable a caller sets to pin its own session.
 ///
@@ -18,9 +21,12 @@ pub const SESSION_VARIABLE: &str = "GHOSTLIGHT_SESSION";
 
 /// Describe what owns this command's session.
 ///
-/// An explicit key wins when one is set. Otherwise the caller is the nearest ancestor that is not a
-/// Ghostlight executable, widened to the outermost of the same-named ancestors above it (a
-/// shell and its per-command stubs), identified by the pair the operating system keeps unique.
+/// An explicit key wins when one is set. Otherwise the caller is the nearest ancestor whose program
+/// lies in a catalog agent's installed app, so every call one agent session makes, through whatever
+/// fresh shell its tool spawns, reaches one session (ADR-0106, amendment of 2026-10-21). With no
+/// agent's app among the ancestors, the caller is the nearest ancestor that is not a Ghostlight
+/// executable, widened to the outermost of the same-named ancestors above it (a shell and its
+/// per-command stubs). Either is identified by the pair the operating system keeps unique.
 #[must_use]
 pub fn marker() -> Option<SessionMarker> {
     if let Some(key) = declared() {
@@ -45,12 +51,18 @@ fn declared() -> Option<String> {
 /// keeps a malformed process tree from looping the walk.
 const MAX_ANCESTORS_READ: usize = 8;
 
+/// How many ancestors the agent walk reads before it stops: as many as the service reads to name a
+/// connection's source, so the caller and the name come from the same reach.
+const MAX_AGENT_ANCESTORS_READ: usize = 16;
+
 /// One process as the caller walk sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Ancestor {
     pid: u32,
     started_at: u64,
     name: String,
+    /// The program the process runs, when the operating system names it.
+    image: Option<PathBuf>,
     parent: Option<u32>,
 }
 
@@ -132,7 +144,67 @@ fn nearest_foreign_ancestor(
     caller
 }
 
-/// The caller of this process: its nearest non-Ghostlight ancestor, widened to its same-named run.
+/// The nearest ancestor from `start` whose program lies in a catalog agent's installed app, as
+/// `is_agent_app` says, taken as it is: an agent above it with the same name (the desktop app a
+/// command-line agent runs in) is not folded in, so each agent session that runs as its own process
+/// keeps its own workspace (ADR-0106, amendment of 2026-10-21). The pid-reuse rule of
+/// [`nearest_foreign_ancestor`] applies. Reads at most [`MAX_AGENT_ANCESTORS_READ`] ancestors;
+/// `None` when none of them is an agent's.
+fn nearest_agent_ancestor(
+    start: u32,
+    started_at: u64,
+    mut lookup: impl FnMut(u32) -> Option<Ancestor>,
+    is_agent_app: impl Fn(&Path) -> bool,
+) -> Option<Ancestor> {
+    let mut next = start;
+    let mut child_started_at = started_at;
+    for _ in 0..MAX_AGENT_ANCESTORS_READ {
+        let process = lookup(next)?;
+        if process.started_at > child_started_at {
+            return None;
+        }
+        child_started_at = process.started_at;
+        if process.image.as_deref().is_some_and(&is_agent_app) {
+            return Some(process);
+        }
+        next = process.parent?;
+    }
+    None
+}
+
+/// The caller of the process whose parent is `start` and which began at `started_at`: the nearest
+/// agent's app among its ancestors, else its nearest non-Ghostlight ancestor widened to its
+/// same-named run (a person's terminal).
+fn caller_in(
+    start: u32,
+    started_at: u64,
+    mut lookup: impl FnMut(u32) -> Option<Ancestor>,
+    is_agent_app: impl Fn(&Path) -> bool,
+) -> Option<Ancestor> {
+    nearest_agent_ancestor(start, started_at, &mut lookup, is_agent_app)
+        .or_else(|| nearest_foreign_ancestor(start, started_at, &mut lookup))
+}
+
+/// The process `pid` as the caller walk sees it, read now.
+fn read_ancestor(system: &mut System, pid: u32) -> Option<Ancestor> {
+    let pid = Pid::from_u32(pid);
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet),
+    );
+    let process = system.process(pid)?;
+    Some(Ancestor {
+        pid: pid.as_u32(),
+        started_at: process.start_time(),
+        name: process.name().to_string_lossy().into_owned(),
+        image: process.exe().map(Path::to_path_buf),
+        parent: process.parent().map(Pid::as_u32),
+    })
+}
+
+/// The caller of this process ([`caller_in`]): the agent whose app it runs under, else the
+/// terminal.
 ///
 /// Returns `None` when it cannot be identified, which leaves the workspace bound to the
 /// connection exactly as it was before. A caller that loses session continuity is a smaller failure
@@ -147,21 +219,14 @@ fn caller() -> Option<SessionMarker> {
     );
     let own = system.process(me)?;
     let parent = own.parent()?;
-    let found = nearest_foreign_ancestor(parent.as_u32(), own.start_time(), |pid| {
-        let pid = Pid::from_u32(pid);
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[pid]),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        let process = system.process(pid)?;
-        Some(Ancestor {
-            pid: pid.as_u32(),
-            started_at: process.start_time(),
-            name: process.name().to_string_lossy().into_owned(),
-            parent: process.parent().map(Pid::as_u32),
-        })
-    })?;
+    let started_at = own.start_time();
+    let apps = AppLocations::discover(&IconPlaces::system());
+    let found = caller_in(
+        parent.as_u32(),
+        started_at,
+        |pid| read_ancestor(&mut system, pid),
+        |image| apps.agent_of(image).is_some(),
+    )?;
     Some(SessionMarker::Process {
         pid: found.pid,
         started_at: found.started_at,
@@ -171,9 +236,12 @@ fn caller() -> Option<SessionMarker> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
     use super::{
-        caller, is_ghostlight, marker, nearest_foreign_ancestor, reported_name, Ancestor,
-        EDGE_EXECUTABLE_NAME, MAX_ANCESTORS_READ, SERVICE_EXECUTABLE_NAME, SESSION_VARIABLE,
+        caller, caller_in, is_ghostlight, marker, nearest_foreign_ancestor, reported_name,
+        Ancestor, EDGE_EXECUTABLE_NAME, MAX_ANCESTORS_READ, SERVICE_EXECUTABLE_NAME,
+        SESSION_VARIABLE,
     };
     use crate::intake::session::SessionMarker;
 
@@ -182,8 +250,47 @@ mod tests {
             pid,
             started_at: 1,
             name: name.to_owned(),
+            image: None,
             parent,
         }
+    }
+
+    /// I-D4 (ADR-0106, amendment of 2026-10-21): every `ghostlight call` one agent session makes
+    /// runs in a fresh shell, and each reached a session of its own because the caller was that
+    /// shell. The caller is now the agent's own process, the same for both calls; the desktop app
+    /// above it, a same-named agent, is not folded in.
+    #[test]
+    fn an_agents_calls_through_fresh_shells_reach_the_agents_own_process() {
+        let code = "C:/Users/a/AppData/Roaming/Claude/claude-code/2.1.304/b/claude.exe";
+        let desktop = "C:/Program Files/WindowsApps/Claude_1_x64__p/app/claude.exe";
+        let imaged = |pid, image: &str, parent| Ancestor {
+            image: Some(PathBuf::from(image)),
+            ..process(
+                pid,
+                Path::new(image).file_name().unwrap().to_str().unwrap(),
+                parent,
+            )
+        };
+        let agent_app = |image: &Path| image == Path::new(code) || image == Path::new(desktop);
+        let callers: Vec<_> = [21, 22]
+            .into_iter()
+            .map(|shell| {
+                let chain = [
+                    imaged(shell + 10, SERVICE_EXECUTABLE_NAME, Some(shell)),
+                    imaged(shell, "C:/Windows/System32/cmd.exe", Some(50)),
+                    imaged(50, code, Some(60)),
+                    imaged(60, desktop, Some(1)),
+                ];
+                caller_in(
+                    shell + 10,
+                    u64::MAX,
+                    |pid| chain.iter().find(|p| p.pid == pid).cloned(),
+                    agent_app,
+                )
+                .map(|caller| caller.pid)
+            })
+            .collect();
+        assert_eq!(callers, [Some(50), Some(50)]);
     }
 
     /// Walk from `start` as a process that began after everything in the chain.

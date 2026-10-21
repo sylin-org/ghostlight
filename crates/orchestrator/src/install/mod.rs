@@ -1044,6 +1044,17 @@ const CLAUDE_DESKTOP_ICONS: &[IconSource] = &[
     )]),
 ];
 
+/// Folders a catalog agent's own programs live in that none of its icon sources names, by agent id.
+/// The Claude desktop app downloads Claude Code into
+/// `%APPDATA%\Claude\claude-code\<version>\<build>\claude.exe`, which lies in no folder of the
+/// desktop app's own, so without this entry the caller walk passed it and stopped at the desktop
+/// app's `claude.exe` (ADR-0106, amendment of 2026-10-21).
+const AGENT_APP_FOLDERS: &[(&str, KnownFolder, &str)] = &[(
+    "claude-code",
+    KnownFolder::RoamingAppData,
+    "Claude/claude-code",
+)];
+
 /// Where Cursor's icon may be found: its per-user install, the launcher on `PATH`, and its Linux
 /// desktop entry.
 const CURSOR_ICONS: &[IconSource] = &[
@@ -1777,6 +1788,11 @@ pub fn app_catalog() -> Vec<apps::AgentAppSources> {
                 agent_id: row.agent_id,
                 sources: row.icons.to_vec(),
                 commands: row.executables.to_vec(),
+                folders: AGENT_APP_FOLDERS
+                    .iter()
+                    .filter(|(agent_id, ..)| *agent_id == row.agent_id)
+                    .map(|(_, known, relative)| (*known, *relative))
+                    .collect(),
             });
         }
     }

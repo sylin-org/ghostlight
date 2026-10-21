@@ -178,8 +178,11 @@ pub fn details(attribution: &Attribution, known: Claimed<'_>) -> ConnectionDetai
         .and_then(|source| source.agent.as_deref())
         .and_then(crate::install::catalog_agent);
     let (agent, explanation) = match attribution.channel {
+        // A command-line session is named for the agent whose app runs it, so its tabs sit in that
+        // agent's group, and is "Command line" for a person's terminal (ADR-0106, amendment of
+        // 2026-10-21).
         IntakeChannel::Cli => (
-            Agent::command_line(),
+            source_agent.clone().unwrap_or_else(Agent::command_line),
             source.map_or_else(
                 || format!("{CLI_SESSION} {CLI_SCRIPTS_UNVERIFIED}"),
                 command_line_from,
@@ -545,12 +548,19 @@ mod tests {
                 "{unnamed:?}"
             );
         }
+        // I-D4 (ADR-0106, amendment of 2026-10-21): a command-line session is named for the agent
+        // whose app runs it, whatever its client claims, and is "Command line" for a terminal.
         let cli = started(
             IntakeChannel::Cli,
             source(Some("claude-desktop"), "claude.exe"),
         );
         assert_eq!(
-            details(&cli, Claimed::Live(Some("codex"))).agent,
+            details(&cli, Claimed::Live(Some("codex"))).agent.id,
+            "claude-desktop"
+        );
+        let terminal = started(IntakeChannel::Cli, source(None, "pwsh.exe"));
+        assert_eq!(
+            details(&terminal, Claimed::Live(None)).agent,
             Agent::command_line()
         );
     }

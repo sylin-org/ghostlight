@@ -23,7 +23,9 @@ use std::path::{Path, PathBuf};
 use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME};
 
 use super::entry::{lies_within, same_path};
-use super::icons::{desktop_entry_value, program, read_text, IconPlaces, IconSource, ProgramPlace};
+use super::icons::{
+    desktop_entry_value, program, read_text, IconPlaces, IconSource, KnownFolder, ProgramPlace,
+};
 
 /// The programs that only start another, by file stem in lowercase: shells, consoles, script
 /// interpreters, package runners and process wrappers. A stem compares without the `.exe` suffix
@@ -118,6 +120,9 @@ pub struct AgentAppSources {
     pub sources: Vec<IconSource>,
     /// The commands on `PATH` its hosts are started by, in roster order.
     pub commands: Vec<&'static str>,
+    /// Folders the agent's own programs live in, below a known folder, that no icon source
+    /// names, such as the versioned folders an app downloads its client into.
+    pub folders: Vec<(KnownFolder, &'static str)>,
 }
 
 /// Where one app is installed.
@@ -157,6 +162,11 @@ impl AppLocations {
     fn of(places: &IconPlaces, catalog: &[AgentAppSources]) -> Self {
         let mut apps = Vec::new();
         for agent in catalog {
+            for (known, relative) in &agent.folders {
+                if let Some(folder) = owned_folder(places, *known, relative) {
+                    apps.push((agent.agent_id, Location::Folder(folder)));
+                }
+            }
             for source in &agent.sources {
                 for location in locations(places, *source) {
                     apps.push((agent.agent_id, location));
@@ -180,6 +190,20 @@ impl AppLocations {
             .find(|(_, location)| location.holds(image))
             .map(|(agent_id, _)| *agent_id)
     }
+}
+
+/// The folder `relative` below the known folder `known` on the computer `places` describes, when
+/// it is a Windows computer and the folder exists.
+fn owned_folder(places: &IconPlaces, known: KnownFolder, relative: &str) -> Option<PathBuf> {
+    if !places.is_windows() {
+        return None;
+    }
+    let folder = relative
+        .split('/')
+        .fold(places.folder(known)?.to_path_buf(), |path, part| {
+            path.join(part)
+        });
+    folder.is_dir().then_some(folder)
 }
 
 /// Where `source` says an app is, as it is installed on the computer `places` describes.
@@ -316,11 +340,13 @@ mod tests {
                     "Programs/cursor/Cursor.exe",
                 )])],
                 commands: Vec::new(),
+                folders: Vec::new(),
             },
             AgentAppSources {
                 agent_id: "claude-code",
                 sources: Vec::new(),
                 commands: vec!["claude", "absent"],
+                folders: Vec::new(),
             },
         ];
         let apps = AppLocations::of(&places, &catalog);
@@ -357,6 +383,7 @@ mod tests {
             agent_id: "claude-desktop",
             sources: vec![IconSource::WindowsPackage("Claude")],
             commands: Vec::new(),
+            folders: Vec::new(),
         }];
         let apps = AppLocations::of(&places, &catalog);
         let packaged =
@@ -407,11 +434,13 @@ mod tests {
                 agent_id: "vscode",
                 sources: vec![IconSource::LinuxDesktop(&["code"])],
                 commands: Vec::new(),
+                folders: Vec::new(),
             },
             AgentAppSources {
                 agent_id: "zed",
                 sources: vec![IconSource::LinuxDesktop(&["zed"])],
                 commands: Vec::new(),
+                folders: Vec::new(),
             },
         ];
         let apps = AppLocations::of(&places, &catalog);

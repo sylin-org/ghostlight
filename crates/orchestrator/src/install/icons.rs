@@ -177,6 +177,8 @@ const PREFERRED_LOGO_PIXELS: u32 = 96;
 pub enum KnownFolder {
     /// `%LOCALAPPDATA%`, where per-user installers put `Programs\<app>`.
     LocalAppData,
+    /// `%APPDATA%`, where an app may keep programs it downloads for itself.
+    RoamingAppData,
     /// `%ProgramFiles%`, where machine-wide installers put programs.
     ProgramFiles,
 }
@@ -286,6 +288,8 @@ pub struct IconPlaces {
     windows: bool,
     /// The folder [`KnownFolder::LocalAppData`] names, when known.
     local_app_data: Option<PathBuf>,
+    /// The folder [`KnownFolder::RoamingAppData`] names, when known.
+    roaming_app_data: Option<PathBuf>,
     /// The folder [`KnownFolder::ProgramFiles`] names, when known.
     program_files: Option<PathBuf>,
     /// The directories commands are found in, in order.
@@ -307,6 +311,7 @@ impl IconPlaces {
             Self {
                 windows,
                 local_app_data: Some(dirs.local()),
+                roaming_app_data: Some(dirs.roaming()),
                 program_files: dirs.program_files().first().cloned(),
                 path_entries,
                 data_dirs: Vec::new(),
@@ -316,6 +321,7 @@ impl IconPlaces {
             Self {
                 windows,
                 local_app_data: None,
+                roaming_app_data: None,
                 program_files: None,
                 path_entries,
                 data_dirs: linux_data_dirs(
@@ -350,6 +356,7 @@ impl IconPlaces {
         Self {
             windows: true,
             local_app_data: Some(local_app_data),
+            roaming_app_data: None,
             program_files: Some(program_files),
             path_entries,
             data_dirs: Vec::new(),
@@ -364,9 +371,11 @@ impl IconPlaces {
         self.packages = Some(folders);
     }
 
-    fn folder(&self, folder: KnownFolder) -> Option<&Path> {
+    /// The folder `folder` names on this computer, when known.
+    pub(super) fn folder(&self, folder: KnownFolder) -> Option<&Path> {
         match folder {
             KnownFolder::LocalAppData => self.local_app_data.as_deref(),
+            KnownFolder::RoamingAppData => self.roaming_app_data.as_deref(),
             KnownFolder::ProgramFiles => self.program_files.as_deref(),
         }
     }
