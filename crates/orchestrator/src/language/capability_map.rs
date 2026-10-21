@@ -2,7 +2,7 @@
 
 use crate::governance::CapabilitySet;
 
-use super::{DialogAction, Operation, RecordAction};
+use super::{DialogAction, Operation, RecordAction, Tool};
 
 const READ_WRITE: CapabilitySet = CapabilitySet::READ.union(CapabilitySet::WRITE);
 const READ_ACTION: CapabilitySet = CapabilitySet::READ.union(CapabilitySet::ACTION);
@@ -36,259 +36,259 @@ const fn variant(
 }
 
 const TABS_LIST: CapabilityVariant = variant(
-    "browser_tabs",
+    Tool::Tabs.name(),
     Some("list"),
     CapabilitySet::READ,
     "List this workspace's bound tabs, read live from the browser.",
 );
 
 const TABS_FOCUS: CapabilityVariant = variant(
-    "browser_tabs",
+    Tool::Tabs.name(),
     Some("focus"),
     CapabilitySet::EMPTY,
     "Focus one controlled tab.",
 );
 
 const TABS_CLOSE: CapabilityVariant = variant(
-    "browser_tabs",
+    Tool::Tabs.name(),
     Some("close"),
     CapabilitySet::ACTION,
     "Close one controlled tab.",
 );
 
 const NAVIGATE: CapabilityVariant = variant(
-    "browser_navigate",
+    Tool::Navigate.name(),
     None,
     CapabilitySet::READ,
     "Retrieve a page in a controlled tab.",
 );
 
 const HISTORY: CapabilityVariant = variant(
-    "browser_history",
+    Tool::History.name(),
     None,
     CapabilitySet::ACTION,
     "Traverse or reload browser history.",
 );
 
 const WINDOW_ZOOM: CapabilityVariant = variant(
-    "browser_window",
+    Tool::Window.name(),
     Some("zoom"),
     CapabilitySet::READ,
     "Change page zoom.",
 );
 
 const WINDOW_RESIZE: CapabilityVariant = variant(
-    "browser_window",
+    Tool::Window.name(),
     Some("resize"),
     CapabilitySet::EMPTY,
     "Resize browser chrome.",
 );
 
 const READ: CapabilityVariant = variant(
-    "browser_read",
+    Tool::Read.name(),
     None,
     CapabilitySet::READ,
     "Read bounded page text.",
 );
 
 const INSPECT: CapabilityVariant = variant(
-    "browser_inspect",
+    Tool::Inspect.name(),
     None,
     CapabilitySet::READ,
     "Inspect bounded page structure.",
 );
 
 const FIND: CapabilityVariant = variant(
-    "browser_find",
+    Tool::Find.name(),
     None,
     CapabilitySet::READ,
     "Find semantic page targets.",
 );
 
 const SCREENSHOT: CapabilityVariant = variant(
-    "browser_screenshot",
+    Tool::Screenshot.name(),
     None,
     CapabilitySet::READ,
     "Capture a bounded page image.",
 );
 
 const CLICK: CapabilityVariant = variant(
-    "browser_click",
+    Tool::Click.name(),
     None,
     CapabilitySet::ACTION,
     "Activate a page target.",
 );
 
 const CLICK_SELECTOR: CapabilityVariant = variant(
-    "browser_click",
+    Tool::Click.name(),
     Some("selector"),
     READ_ACTION,
     "Find a named control and activate it.",
 );
 
 const CLICK_EXPECT: CapabilityVariant = variant(
-    "browser_click",
+    Tool::Click.name(),
     Some("expect"),
     READ_ACTION,
     "Activate a page target and observe the requested postcondition.",
 );
 
 const SCROLL: CapabilityVariant = variant(
-    "browser_scroll",
+    Tool::Scroll.name(),
     None,
     CapabilitySet::READ,
     "Scroll or reveal page content.",
 );
 
 const HOVER: CapabilityVariant = variant(
-    "browser_hover",
+    Tool::Hover.name(),
     None,
     CapabilitySet::READ,
     "Hover over page content.",
 );
 
 const FILL: CapabilityVariant = variant(
-    "browser_fill_form",
+    Tool::FillForm.name(),
     Some("fill"),
     READ_WRITE,
     "Read targets and fill declared fields.",
 );
 
 const FILL_SUBMIT: CapabilityVariant = variant(
-    "browser_fill_form",
+    Tool::FillForm.name(),
     Some("submit"),
     READ_WRITE_ACTION,
     "Read targets, fill fields, and submit.",
 );
 
 const TYPE: CapabilityVariant = variant(
-    "browser_type_text",
+    Tool::TypeText.name(),
     None,
     CapabilitySet::ACTION,
     "Type through browser input events.",
 );
 
 const TYPE_SELECTOR: CapabilityVariant = variant(
-    "browser_type_text",
+    Tool::TypeText.name(),
     Some("selector"),
     READ_ACTION,
     "Find a named control and type through browser input events.",
 );
 
 const TYPE_EXPECT: CapabilityVariant = variant(
-    "browser_type_text",
+    Tool::TypeText.name(),
     Some("expect"),
     READ_ACTION,
     "Type through browser input events and observe the requested postcondition.",
 );
 
 const PRESS_KEY: CapabilityVariant = variant(
-    "browser_press_key",
+    Tool::PressKey.name(),
     None,
     CapabilitySet::ACTION,
     "Send one keyboard action.",
 );
 
 const PRESS_KEY_EXPECT: CapabilityVariant = variant(
-    "browser_press_key",
+    Tool::PressKey.name(),
     Some("expect"),
     READ_ACTION,
     "Send one keyboard action and observe the requested postcondition.",
 );
 
 const DRAG: CapabilityVariant = variant(
-    "browser_drag",
+    Tool::Drag.name(),
     None,
     CapabilitySet::ACTION,
     "Perform one pointer drag.",
 );
 
 const UPLOAD: CapabilityVariant = variant(
-    "browser_upload",
+    Tool::Upload.name(),
     None,
     CapabilitySet::WRITE,
     "Place declared files into a page input.",
 );
 
 const UPLOAD_SELECTOR: CapabilityVariant = variant(
-    "browser_upload",
+    Tool::Upload.name(),
     Some("selector"),
     READ_WRITE,
     "Find a named file input and place declared files into it.",
 );
 
 const EXECUTE: CapabilityVariant = variant(
-    "browser_execute",
+    Tool::Execute.name(),
     None,
     CapabilitySet::EXECUTE,
     "Evaluate explicit page JavaScript.",
 );
 
 const WAIT: CapabilityVariant = variant(
-    "browser_wait",
+    Tool::Wait.name(),
     None,
     CapabilitySet::READ,
     "Observe one bounded page condition.",
 );
 
 const FLOW: CapabilityVariant = variant(
-    "browser_flow",
+    Tool::Flow.name(),
     None,
     CapabilitySet::EMPTY,
     "Compose result-aware governed steps; each child authorizes normally.",
 );
 
 const DIALOG_STATUS: CapabilityVariant = variant(
-    "browser_dialog",
+    Tool::Dialog.name(),
     Some("status"),
     CapabilitySet::READ,
     "Inspect JavaScript dialog state.",
 );
 
 const DIALOG_RESOLVE: CapabilityVariant = variant(
-    "browser_dialog",
+    Tool::Dialog.name(),
     Some("resolve"),
     CapabilitySet::ACTION,
     "Accept, dismiss, or respond to a dialog.",
 );
 
 const RECORD_START: CapabilityVariant = variant(
-    "browser_record",
+    Tool::Record.name(),
     Some("start"),
     CapabilitySet::READ,
     "Start capturing a controlled page.",
 );
 
 const RECORD_INSPECT: CapabilityVariant = variant(
-    "browser_record",
+    Tool::Record.name(),
     Some("inspect"),
     CapabilitySet::EMPTY,
     "Inspect, stop, or discard volatile capture.",
 );
 
 const RECORD_SAVE_CLIENT: CapabilityVariant = variant(
-    "browser_record",
+    Tool::Record.name(),
     Some("save_client"),
     CapabilitySet::READ,
     "Return or download a captured page recording.",
 );
 
 const RECORD_SAVE_TARGET: CapabilityVariant = variant(
-    "browser_record",
+    Tool::Record.name(),
     Some("save_target"),
     READ_WRITE,
     "Read captured sources and place a recording into a page target.",
 );
 
 const DIAGNOSE: CapabilityVariant = variant(
-    "browser_diagnose",
+    Tool::Diagnose.name(),
     None,
     CapabilitySet::READ,
     "Read bounded opt-in browser diagnostics.",
 );
 
 const POLICY_EXPLAIN: CapabilityVariant = variant(
-    "policy_explain",
+    Tool::PolicyExplain.name(),
     None,
     CapabilitySet::EMPTY,
     "Explain the authority in force.",
@@ -402,7 +402,7 @@ mod tests {
     use crate::governance::CapabilitySet;
     use serde_json::json;
 
-    use super::{entry, requirements, variants, CapabilityVariant, DIRECTORY};
+    use super::{entry, requirements, variants, CapabilityVariant, Tool, DIRECTORY};
 
     fn decoded(tool: &str, input: serde_json::Value) -> CapabilitySet {
         requirements(&crate::language::decode(tool, input).expect("valid operation"))
@@ -487,33 +487,7 @@ mod tests {
 
     #[test]
     fn every_catalog_tool_has_at_least_one_policy_variant() {
-        let expected: HashSet<_> = [
-            "browser_tabs",
-            "browser_navigate",
-            "browser_history",
-            "browser_window",
-            "browser_read",
-            "browser_inspect",
-            "browser_find",
-            "browser_screenshot",
-            "browser_click",
-            "browser_scroll",
-            "browser_hover",
-            "browser_fill_form",
-            "browser_type_text",
-            "browser_press_key",
-            "browser_drag",
-            "browser_upload",
-            "browser_execute",
-            "browser_wait",
-            "browser_flow",
-            "browser_dialog",
-            "browser_record",
-            "browser_diagnose",
-            "policy_explain",
-        ]
-        .into_iter()
-        .collect();
+        let expected: HashSet<_> = Tool::ALL.into_iter().map(Tool::name).collect();
         let actual: HashSet<_> = DIRECTORY.iter().map(|entry| entry.tool).collect();
         assert_eq!(actual, expected);
     }

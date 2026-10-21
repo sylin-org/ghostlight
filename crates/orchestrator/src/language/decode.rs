@@ -29,12 +29,15 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
     if let Some((_, refusal)) = RETIRED_TOOLS.iter().find(|(retired, _)| *retired == name) {
         return Err(LanguageError::Invalid((*refusal).into()));
     }
-    match name {
-        "browser_tabs" => decode_tabs(input),
-        "browser_navigate" => decode_navigate(input),
-        "browser_history" => decode_history(input),
-        "browser_window" => decode_window(input),
-        "browser_read" => Ok(Operation::ReadPage(parse(
+    let Some(tool) = Tool::named(name) else {
+        return Err(LanguageError::UnknownTool(name.into()));
+    };
+    match tool {
+        Tool::Tabs => decode_tabs(input),
+        Tool::Navigate => decode_navigate(input),
+        Tool::History => decode_history(input),
+        Tool::Window => decode_window(input),
+        Tool::Read => Ok(Operation::ReadPage(parse(
             input,
             &[
                 "visual_settle",
@@ -57,7 +60,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 Ok(())
             },
         )?)),
-        "browser_inspect" => Ok(Operation::InspectPage(parse(
+        Tool::Inspect => Ok(Operation::InspectPage(parse(
             input,
             &[
                 "visual_settle",
@@ -87,7 +90,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 Ok(())
             },
         )?)),
-        "browser_find" => Ok(Operation::Find(parse(
+        Tool::Find => Ok(Operation::Find(parse(
             input,
             &[
                 "visual_settle",
@@ -105,7 +108,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 Ok(())
             },
         )?)),
-        "browser_screenshot" => Ok(Operation::TakeScreenshot(parse(
+        Tool::Screenshot => Ok(Operation::TakeScreenshot(parse(
             input,
             &[
                 "tab",
@@ -121,7 +124,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_screenshot,
         )?)),
-        "browser_click" => Ok(Operation::Click(parse(
+        Tool::Click => Ok(Operation::Click(parse(
             input,
             &[
                 "visual_settle",
@@ -139,7 +142,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_click,
         )?)),
-        "browser_scroll" => {
+        Tool::Scroll => {
             let mut scroll: ScrollPage = parse(
                 input,
                 &[
@@ -161,7 +164,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             }
             Ok(Operation::ScrollPage(scroll))
         }
-        "browser_hover" => Ok(Operation::Hover(parse(
+        Tool::Hover => Ok(Operation::Hover(parse(
             input,
             &[
                 "visual_settle",
@@ -174,7 +177,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_hover,
         )?)),
-        "browser_fill_form" => Ok(Operation::FillForm(parse(
+        Tool::FillForm => Ok(Operation::FillForm(parse(
             input,
             &[
                 "visual_settle",
@@ -187,7 +190,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_fill,
         )?)),
-        "browser_type_text" => Ok(Operation::TypeText(parse(
+        Tool::TypeText => Ok(Operation::TypeText(parse(
             input,
             &[
                 "visual_settle",
@@ -203,7 +206,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_type_text,
         )?)),
-        "browser_press_key" => Ok(Operation::PressKey(parse(
+        Tool::PressKey => Ok(Operation::PressKey(parse(
             input,
             &[
                 "visual_settle",
@@ -218,7 +221,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_press_key,
         )?)),
-        "browser_drag" => Ok(Operation::Drag(parse(
+        Tool::Drag => Ok(Operation::Drag(parse(
             input,
             &[
                 "visual_settle",
@@ -234,7 +237,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_drag,
         )?)),
-        "browser_upload" => Ok(Operation::UploadFiles(parse(
+        Tool::Upload => Ok(Operation::UploadFiles(parse(
             input,
             &[
                 "visual_settle",
@@ -251,7 +254,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_upload,
         )?)),
-        "browser_execute" => Ok(Operation::RunScript(parse(
+        Tool::Execute => Ok(Operation::RunScript(parse(
             input,
             &[
                 "visual_settle",
@@ -272,7 +275,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 Ok(())
             },
         )?)),
-        "browser_wait" => Ok(Operation::Wait(parse(
+        Tool::Wait => Ok(Operation::Wait(parse(
             input,
             &[
                 "condition",
@@ -285,12 +288,11 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             ],
             validate_wait,
         )?)),
-        "browser_flow" => decode_flow(input),
-        "browser_dialog" => decode_dialog(input),
-        "browser_record" => decode_record(input),
-        "browser_diagnose" => decode_diagnose(input),
-        "policy_explain" => decode_explain_policy(input),
-        other => Err(LanguageError::UnknownTool(other.into())),
+        Tool::Flow => decode_flow(input),
+        Tool::Dialog => decode_dialog(input),
+        Tool::Record => decode_record(input),
+        Tool::Diagnose => decode_diagnose(input),
+        Tool::PolicyExplain => decode_explain_policy(input),
     }
 }
 
@@ -658,7 +660,7 @@ fn validate_selector(selector: &SemanticSelector) -> Result<(), LanguageError> {
 }
 
 /// Composite tools a flow step may never name.
-const FLOW_FORBIDDEN_TOOLS: &[&str] = &["browser_flow", "browser_sequence"];
+const FLOW_FORBIDDEN_TOOLS: &[&str] = &[Tool::Flow.name(), "browser_sequence"];
 const FLOW_REF_POINTER_LIMIT: usize = 512;
 const FLOW_REF_DEPTH_LIMIT: usize = 32;
 

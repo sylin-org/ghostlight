@@ -2,23 +2,6 @@
 
 use super::Operation;
 
-/// Ordinary page tools that accept the same settlement preference.
-pub(crate) const PAGE_TOOLS: &[&str] = &[
-    "browser_read",
-    "browser_inspect",
-    "browser_find",
-    "browser_screenshot",
-    "browser_click",
-    "browser_scroll",
-    "browser_hover",
-    "browser_fill_form",
-    "browser_type_text",
-    "browser_press_key",
-    "browser_drag",
-    "browser_upload",
-    "browser_execute",
-];
-
 /// Maximum optional preparation wait, independent of the overall invocation deadline.
 pub(crate) const MAX_WAIT_MS: u64 = 1_000;
 
@@ -77,7 +60,11 @@ mod tests {
             ),
             ("browser_execute", json!({"script":"return 1"})),
         ];
-        assert_eq!(cases.len(), PAGE_TOOLS.len());
+        let settling = crate::language::Tool::ALL
+            .into_iter()
+            .filter(|tool| tool.settles())
+            .count();
+        assert_eq!(cases.len(), settling);
         for (name, mut input) in cases {
             assert!(
                 enabled(&super::super::decode(name, input.clone()).unwrap()),

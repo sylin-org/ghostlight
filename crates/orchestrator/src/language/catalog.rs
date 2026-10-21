@@ -23,40 +23,24 @@ use super::choices::{
     OnError, PointerButton, RecordAction, ScrollAmount, ScrollDirection,
 };
 use super::handle::HandleKind;
+use super::tool::Tool;
 use super::wait::{PageCondition, WaitCondition};
 use super::{
-    DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
-    MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS, SCRIPT_MAX_CHARS,
-    SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT, SEMANTIC_ROLES,
+    DEFAULT_DOCUMENT_DEPTH, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS,
+    NAMED_KEYS, SCRIPT_MAX_CHARS, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT, SEMANTIC_ROLES,
 };
 use super::{HISTORY_RELOAD, WHEEL_DIRECTIONS};
 
 /// Canonical tool names in the complete catalog.
-pub const EXPECTED_TOOL_NAMES: [&str; 23] = [
-    "browser_tabs",
-    "browser_navigate",
-    "browser_history",
-    "browser_window",
-    "browser_read",
-    "browser_inspect",
-    "browser_find",
-    "browser_screenshot",
-    "browser_click",
-    "browser_scroll",
-    "browser_hover",
-    "browser_fill_form",
-    "browser_type_text",
-    "browser_press_key",
-    "browser_drag",
-    "browser_wait",
-    "browser_dialog",
-    "browser_upload",
-    "browser_execute",
-    "browser_flow",
-    "browser_record",
-    "browser_diagnose",
-    "policy_explain",
-];
+pub const EXPECTED_TOOL_NAMES: [&str; Tool::ALL.len()] = {
+    let mut names = [""; Tool::ALL.len()];
+    let mut index = 0;
+    while index < Tool::ALL.len() {
+        names[index] = Tool::ALL[index].name();
+        index += 1;
+    }
+    names
+};
 
 /// Canonical tool count for the complete catalog.
 pub const CATALOG_TOOL_COUNT: usize = EXPECTED_TOOL_NAMES.len();
@@ -66,85 +50,73 @@ pub const CATALOG_TOOL_COUNT: usize = EXPECTED_TOOL_NAMES.len();
 pub fn catalog() -> Vec<ToolDefinition> {
     vec![
         tool(
-            "browser_tabs",
-            "Browser tabs",
+            Tool::Tabs,
             "List, focus, or close this session's tabs. List gives fresh handles from the live browser; with no tab yet it needs none and names those connected.",
             tabs_schema(),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_navigate",
-            "Navigate",
+            Tool::Navigate,
             "Go to an HTTP(S) URL. Reuses the obvious tab; new_tab true opens a new one.",
             navigate_schema(),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_history",
-            "Browser history",
+            Tool::History,
             "Go back or forward, or reload. A new document invalidates target_ and view_ handles, so collect fresh ones.",
             history_schema(),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_window",
-            "Browser window",
+            Tool::Window,
             "Set a tab's zoom or resize its browser window. Either invalidates view_ handles, so take a fresh screenshot before coordinate work.",
             window_schema(),
             Hints::local_mutation(false),
         ),
         tool(
-            "browser_read",
-            "Read page",
+            Tool::Read,
             "Read visible page text, including open shadow roots and frames, or one target. To act, get handles from browser_inspect or browser_find.",
             read_schema(),
             Hints::browser_read(),
         ),
         tool(
-            "browser_inspect",
-            "Inspect page",
+            Tool::Inspect,
             "Inspect controls or page structure for fresh target_ handles. Scope document returns the outline as a bounded tree, without handles. Form controls also carry their value and what they accept: options, type, limits, hint and group.",
             inspect_schema(),
             Hints::browser_read(),
         ),
         tool(
-            "browser_find",
-            "Find on page",
+            Tool::Find,
             "Find targets by visible or accessible text and get fresh target_ handles. Fastest when you know the label. Option text finds its dropdown.",
             find_schema(),
             Hints::browser_read(),
         ),
         tool(
-            "browser_screenshot",
-            "Take screenshot",
+            Tool::Screenshot,
             "Capture the viewport, full page, one target, or a magnified region; returns a view_ handle for coordinate calls.",
             screenshot_schema(),
             Hints::browser_read(),
         ),
         tool(
-            "browser_click",
-            "Click",
+            Tool::Click,
             "Click a target_ handle, a control found by selector, or a point in a view_ screenshot. Needs action; a selector lookup or expect check also needs read. Prefer a target.",
             with_expect(click_schema()),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_scroll",
-            "Scroll",
+            Tool::Scroll,
             "Scroll the page (default down, medium), reveal a target_, or wheel-scroll at a point in a view_ screenshot.",
             scroll_schema(),
             Hints::browser_action(false),
         ),
         tool(
-            "browser_hover",
-            "Hover",
+            Tool::Hover,
             "Hover a target_ handle or a point in a view_ screenshot.",
             hover_schema(),
             Hints::browser_action(false),
         ),
         tool(
-            "browser_fill_form",
-            "Fill form",
+            Tool::FillForm,
             &format!(
                 "Fill {} to {} fields in one call; needs write even for unsent drafts. Nothing submits unless submit_target names the control. A value a control cannot take is refused before any field changes, with what it accepts. For credentials, set user_authorized_credentials only on the user's explicit instruction.",
                 FILL_FIELDS.min, FILL_FIELDS.max
@@ -153,57 +125,49 @@ pub fn catalog() -> Vec<ToolDefinition> {
             Hints::browser_action(true),
         ),
         tool(
-            "browser_type_text",
-            "Type text",
+            Tool::TypeText,
             "Type through real keyboard input. Needs action; a selector lookup or expect check also needs read. Prefer browser_fill_form for plain values. For credentials, set user_authorized_credentials only on the user's explicit instruction.",
             with_expect(type_schema()),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_press_key",
-            "Press key",
+            Tool::PressKey,
             "Send a named key or literal character, optionally at a target_. Needs action; an expect check also needs read. For Control+A send key a with modifiers Control; strokes sends keys in order.",
             with_expect(key_schema()),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_drag",
-            "Drag",
+            Tool::Drag,
             "Drag between two target_ handles or two points in one view_ screenshot.",
             drag_schema(),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_wait",
-            "Wait",
+            Tool::Wait,
             "Wait for one observable page condition. A false condition is a failed result, not an unknown effect.",
             wait_schema(),
             Hints::browser_read(),
         ),
         tool(
-            "browser_dialog",
-            "Browser dialog",
+            Tool::Dialog,
             "Read the open JavaScript dialog with status, then accept, dismiss, or answer it; it blocks its page.",
             dialog_schema(),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_upload",
-            "Upload files",
+            Tool::Upload,
             "Attach local paths, inline files, or one captured image to a file input, or drop the image at a point in a view_. Needs write; a selector lookup also needs read.",
             upload_schema(),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_execute",
-            "Execute JavaScript",
+            Tool::Execute,
             "Run JavaScript in the page main world. It may read, mutate, or navigate; prefer a semantic tool. A script that is one expression is awaited, so a promise it evaluates to resolves.",
             evaluate_schema(),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_flow",
-            "Run flow",
+            Tool::Flow,
             &format!(
                 "Run 1 to {} tool calls. tab defaults tab-scoped steps; a step's own tab wins. Later arguments may reference earlier results. Stops at the first failed step by default.",
                 super::composition::COMPOSITION_STEP_LIMIT
@@ -212,22 +176,19 @@ pub fn catalog() -> Vec<ToolDefinition> {
             Hints::browser_action(true),
         ),
         tool(
-            "browser_record",
-            "Record browser",
+            Tool::Record,
             "Record browser work as a short memory-only GIF. One recording per session; save stops an active capture.",
             record_schema(),
             Hints::browser_action(true),
         ),
         tool(
-            "browser_diagnose",
-            "Diagnose page",
+            Tool::Diagnose,
             "Read opt-in console and network observations for a tab. Observation begins with the first call, so reload or reproduce to capture earlier activity. Sensitive request data is never collected.",
             diagnose_schema(),
             Hints::browser_read(),
         ),
         tool(
-            "policy_explain",
-            "Explain policy",
+            Tool::PolicyExplain,
             "Explain the authority in force: one line per capability with its deciding layer, the rules behind them, permanent ceilings, and each layer's document. Available under every authority; use it to learn why a call was refused or what is allowed.",
             explain_policy_schema(),
             Hints::local_read(),
@@ -303,26 +264,20 @@ impl Hints {
     }
 }
 
-fn tool(
-    name: &str,
-    title: &str,
-    description: &str,
-    input_schema: Value,
-    hints: Hints,
-) -> ToolDefinition {
+fn tool(tool: Tool, description: &str, input_schema: Value, hints: Hints) -> ToolDefinition {
     let mut input_schema = input_schema;
-    input_schema["properties"]["timeout_ms"] = timeout(name);
-    if super::settlement::PAGE_TOOLS.contains(&name) {
+    input_schema["properties"]["timeout_ms"] = timeout(tool);
+    if tool.settles() {
         // Thirteen tools carry it undescribed: the name, type and default say what it is, and
         // LANGUAGE.md carries the budget and the busy-page behavior (ADR-0195).
         input_schema["properties"]["visual_settle"] = boolean(true, "");
     }
     ToolDefinition {
-        name: name.into(),
+        name: tool.name().into(),
         description: description.into(),
         input_schema,
         annotations: Some(ToolAnnotations {
-            title: Some(title.into()),
+            title: Some(tool.title().into()),
             read_only_hint: Some(hints.read_only),
             destructive_hint: Some(hints.destructive),
             idempotent_hint: Some(hints.idempotent),
@@ -1666,13 +1621,8 @@ fn url() -> Value {
 }
 
 /// The `timeout_ms` field every tool accepts, defaulting to what that tool has always been given.
-fn timeout(tool: &str) -> Value {
-    let default = match tool {
-        "browser_fill_form" => DEFAULT_FILL_TIMEOUT_MS,
-        "browser_record" => DEFAULT_RECORD_TIMEOUT_MS,
-        _ => DEFAULT_TIMEOUT_MS,
-    };
-    json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":default})
+fn timeout(tool: Tool) -> Value {
+    json!({"type":"integer","minimum":MIN_TIMEOUT_MS,"maximum":MAX_TIMEOUT_MS,"default":tool.default_timeout_ms()})
 }
 
 /// What the `view` field of every point-taking call says about its x and y.

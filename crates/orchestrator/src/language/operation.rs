@@ -69,30 +69,36 @@ impl Operation {
     /// Return the exact catalog name of this operation.
     #[must_use]
     pub const fn name(&self) -> &'static str {
+        self.tool().name()
+    }
+
+    /// The advertised tool this operation came from.
+    #[must_use]
+    pub const fn tool(&self) -> Tool {
         match self {
-            Self::ListTabs(_) | Self::ActivateTab(_) | Self::CloseTab(_) => "browser_tabs",
-            Self::OpenPage(_) | Self::NavigatePage(_) => "browser_navigate",
-            Self::NavigateHistory(_) | Self::ReloadPage(_) => "browser_history",
-            Self::ReadPage(_) => "browser_read",
-            Self::InspectPage(_) => "browser_inspect",
-            Self::Find(_) => "browser_find",
-            Self::TakeScreenshot(_) => "browser_screenshot",
-            Self::Click(_) => "browser_click",
-            Self::ScrollPage(_) => "browser_scroll",
-            Self::SetZoom(_) | Self::ResizeWindow(_) => "browser_window",
-            Self::Hover(_) => "browser_hover",
-            Self::FillForm(_) => "browser_fill_form",
-            Self::TypeText(_) => "browser_type_text",
-            Self::PressKey(_) => "browser_press_key",
-            Self::Drag(_) => "browser_drag",
-            Self::UploadFiles(_) => "browser_upload",
-            Self::RunScript(_) => "browser_execute",
-            Self::Wait(_) => "browser_wait",
-            Self::RunFlow(_) => "browser_flow",
-            Self::HandleDialog(_) => "browser_dialog",
-            Self::Record(_) => "browser_record",
-            Self::Diagnose(_) => "browser_diagnose",
-            Self::ExplainPolicy(_) => "policy_explain",
+            Self::ListTabs(_) | Self::ActivateTab(_) | Self::CloseTab(_) => Tool::Tabs,
+            Self::OpenPage(_) | Self::NavigatePage(_) => Tool::Navigate,
+            Self::NavigateHistory(_) | Self::ReloadPage(_) => Tool::History,
+            Self::ReadPage(_) => Tool::Read,
+            Self::InspectPage(_) => Tool::Inspect,
+            Self::Find(_) => Tool::Find,
+            Self::TakeScreenshot(_) => Tool::Screenshot,
+            Self::Click(_) => Tool::Click,
+            Self::ScrollPage(_) => Tool::Scroll,
+            Self::SetZoom(_) | Self::ResizeWindow(_) => Tool::Window,
+            Self::Hover(_) => Tool::Hover,
+            Self::FillForm(_) => Tool::FillForm,
+            Self::TypeText(_) => Tool::TypeText,
+            Self::PressKey(_) => Tool::PressKey,
+            Self::Drag(_) => Tool::Drag,
+            Self::UploadFiles(_) => Tool::Upload,
+            Self::RunScript(_) => Tool::Execute,
+            Self::Wait(_) => Tool::Wait,
+            Self::RunFlow(_) => Tool::Flow,
+            Self::HandleDialog(_) => Tool::Dialog,
+            Self::Record(_) => Tool::Record,
+            Self::Diagnose(_) => Tool::Diagnose,
+            Self::ExplainPolicy(_) => Tool::PolicyExplain,
         }
     }
 

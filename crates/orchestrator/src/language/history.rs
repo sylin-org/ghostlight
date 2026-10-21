@@ -279,7 +279,7 @@ impl CompositionKind {
     #[must_use]
     pub const fn tool(self) -> &'static str {
         match self {
-            Self::Flow => "browser_flow",
+            Self::Flow => super::Tool::Flow.name(),
         }
     }
 }

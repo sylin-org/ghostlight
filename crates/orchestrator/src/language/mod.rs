@@ -41,6 +41,7 @@ pub mod readiness;
 pub(crate) mod self_check;
 pub(crate) mod settlement;
 pub mod setup;
+pub mod tool;
 pub mod wait;
 pub mod workbench;
 
@@ -54,6 +55,7 @@ pub(crate) use decode::{decode_flow_step, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTIO
 use decode::{HISTORY_RELOAD, WHEEL_DIRECTIONS};
 pub use handle::HandleKind;
 pub use operation::*;
+pub use tool::Tool;
 pub use wait::{PageCondition, WaitCondition};
 
 use std::path::Path;

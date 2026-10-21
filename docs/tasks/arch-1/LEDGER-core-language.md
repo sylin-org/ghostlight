@@ -33,8 +33,8 @@ In order. "After" names what a slice waits for.
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | landed (test f54e2469, block 512ad4d1) |
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | landed (01cc55e6) |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | landed (d15f5ba5) |
-| LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | landed (move 4f692e1e, rest) |
-| LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
+| LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | landed (move 4f692e1e, rest a6b8d686) |
+| LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | landed |
 | LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed (ec0166d5) |
 | LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | landed (6b5f619e) |
 | LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | landed (0b6c3817) |
@@ -202,3 +202,12 @@ In order. "After" names what a slice waits for.
   `tool_catalog` alias is gone; the root doc names the model-facing and the person-facing
   modules; `COMPOSITION_STEP_LIMIT` moves from `history.rs` to `composition.rs`, with its readers
   in decode, the catalog, the audit and `workbench/history.rs` (surface, one import line).
+- LANG-5: `language::Tool` lists the 23 tools in catalog order with each name, title,
+  settlement flag and default call time. The catalog builds each tool from it (golden
+  byte-identical), `EXPECTED_TOOL_NAMES` and `CATALOG_TOOL_COUNT` derive from `Tool::ALL`,
+  `Operation::tool()` maps every operation (and `name()` reads it), the decoder dispatches on
+  `Tool::named` with an exhaustive match, settlement's `PAGE_TOOLS` gives way to
+  `Tool::settles`, and the capability directory, `CompositionKind::tool` and the flow's
+  forbidden list name tools through it. The directory keeps its own order, so `ghostlight
+  policy` prints the same table. The serde timeout defaults per struct stay, held equal to
+  `Tool::default_timeout_ms` by the existing test.
