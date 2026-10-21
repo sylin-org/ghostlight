@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 33 |
+| `crates/desktop` | 161 | 20 | 25 |
 
 ## Slices
 
@@ -53,7 +53,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | D6 | `crates/desktop/src/session.rs`: a test of the test fake | 1 | 0 | - | landed (2cf00417) |
 | D7 | `crates/desktop/src/window.rs` and `webview.rs`: the window's life and the webview's one origin | 27 + 6 | 3 | promise 2, defect 1 | landed (f9b8a4a2) |
 | D8 | `crates/desktop/src/tray.rs`: each tray state's icon (its two `cfg(windows)` tests wait for the coordinator) | 22 | 1 + 2 Windows | promise 1 | landed (b0796dd0) |
-| D9 | `crates/desktop/src/app.rs`: what the shell says, its alarm, its window slot and what is missing | 13 | 4 | promise 1, defect 3 | landed (this commit) |
+| D9 | `crates/desktop/src/app.rs`: what the shell says, its alarm, its window slot and what is missing | 13 | 4 | promise 1, defect 3 | landed (4b15a853) |
+| D10 | `crates/desktop/src/native.rs`: sections, what the shell may open, and the file pick | 11 | 3 | promise 1, defect 2 | landed (this commit) |
 
 ## Notes
 
@@ -124,6 +125,12 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   proves the replacement, and the next wake must be the next deadline's. A tray shell's success
   exit is now `EXIT_NO_TRAY`, not a bare 0. Cut: the tray-click mapping, which restates
   `tray_action` and whose ids and frame the goldens pin.
+- D10: kept three: a show moves the window to a section by navigating, never by a script, with
+  script-safe addresses (613f01fb); the shell opens only a secure link or a folder while the
+  session lives (desktop 1 and 11); and a file pick is answered from the dialog's callback, so the
+  loop never blocks (ebbbcf49). Cut: the app id test, which restates a literal. Open item: no test
+  proves `SHELL_APP_ID` equals the installer's AUMID (`install/windows_entry.rs`); the root fix is
+  one shared constant, not a test.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against

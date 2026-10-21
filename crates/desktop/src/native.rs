@@ -315,12 +315,6 @@ mod tests {
         outcomes[0].clone()
     }
 
-    #[test]
-    fn the_app_id_is_the_one_the_shortcut_will_carry() {
-        assert_eq!(SHELL_APP_ID, "Sylin.Ghostlight");
-    }
-
-    #[test]
     fn an_address_is_lowercase_letters_slashes_and_hyphens_and_at_most_48_long() {
         for address in [
             "monitor",
@@ -353,7 +347,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn a_window_opened_at_a_section_loads_it_after_the_hash() {
         let base = "http://127.0.0.1:41234/";
         assert_eq!(
@@ -365,8 +358,12 @@ mod tests {
         assert_eq!(start_url(base, Some("")), base);
     }
 
+    /// A show moves the window to a section by navigating to its address, never by running a
+    /// script, so it reaches a page that is still loading, and a window opened at a section loads it
+    /// after the hash; an address that is not script-safe (lowercase letters, slashes and hyphens, at
+    /// most 48 long) names no section (commit 613f01fb; ARCHITECTURE).
     #[test]
-    fn an_open_window_is_moved_by_navigating_to_the_section_not_by_running_a_script() {
+    fn a_show_moves_the_window_to_a_section_by_navigating_never_by_a_script() {
         let origin = "http://127.0.0.1:41234";
         // The first request and every later one take the same road, whatever the window shows.
         for address in ["settings/diagnostics", "settings/sharing", "monitor"] {
@@ -383,9 +380,11 @@ mod tests {
             Some(start_url(&format!("{origin}/"), Some("settings/sharing"))),
             "a window opened at a section and one moved to it load the same address"
         );
+
+        an_address_is_lowercase_letters_slashes_and_hyphens_and_at_most_48_long();
+        a_window_opened_at_a_section_loads_it_after_the_hash();
     }
 
-    #[test]
     fn a_link_and_a_folder_are_opened_and_reported_done() {
         let computer = Recording::default();
         let session = FakeSession::new();
@@ -403,7 +402,6 @@ mod tests {
         );
     }
 
-    #[test]
     fn an_open_the_computer_refuses_is_reported_failed() {
         let computer = Recording {
             refuses: true,
@@ -422,8 +420,11 @@ mod tests {
         }
     }
 
+    /// The shell starts a process only to open a secure link or a folder, reported done, or failed
+    /// when the computer refuses; a link that is not secure, an act it does not know, and anything
+    /// once the session is ending start nothing and fail (ACCEPTANCE, desktop 1 and 11).
     #[test]
-    fn while_the_session_is_ending_nothing_is_started_and_the_act_fails() {
+    fn the_shell_opens_only_a_secure_link_or_a_folder_while_the_session_lives() {
         let computer = Recording::default();
         let session = FakeSession::ending();
         for act in [
@@ -437,9 +438,13 @@ mod tests {
             assert_eq!(outcome_of(&act, &session, &computer), ActOutcome::Failed);
         }
         assert!(computer.asked.borrow().is_empty(), "nothing was started");
+
+        a_link_and_a_folder_are_opened_and_reported_done();
+        an_open_the_computer_refuses_is_reported_failed();
+        a_link_that_is_not_secure_is_never_opened();
+        an_act_this_build_does_not_know_fails();
     }
 
-    #[test]
     fn a_link_that_is_not_secure_is_never_opened() {
         let computer = Recording::default();
         let session = FakeSession::new();
@@ -458,7 +463,6 @@ mod tests {
         assert!(computer.asked.borrow().is_empty());
     }
 
-    #[test]
     fn a_picked_file_is_reported_with_its_path_and_a_closed_dialog_is_cancelled() {
         let session = FakeSession::new();
         let act = NativeAct::PickFile {
@@ -481,6 +485,8 @@ mod tests {
         );
     }
 
+    /// A file pick is answered from the dialog's own callback, with the picked path or as
+    /// cancelled, so the event loop never blocks while the person decides (commit ebbbcf49).
     #[test]
     fn a_dialog_that_is_still_open_leaves_the_act_unanswered_until_the_person_decides() {
         let session = FakeSession::new();
@@ -508,9 +514,10 @@ mod tests {
                 path: "later.json".to_owned()
             }]
         );
+
+        a_picked_file_is_reported_with_its_path_and_a_closed_dialog_is_cancelled();
     }
 
-    #[test]
     fn an_act_this_build_does_not_know_fails() {
         assert_eq!(
             outcome_of(
