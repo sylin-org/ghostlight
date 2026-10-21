@@ -2,6 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The key inside a result's `facts` that holds its coverage block.
+pub const COVERAGE_FACT: &str = "coverage";
+
 /// Coverage relative to the requested supported scope, independent of browser effects.
 /// Multi-primitive operations retain each count's observed maximum, not a sum of repeated reads.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -38,6 +41,14 @@ impl Coverage {
     #[must_use]
     pub fn limited(&self) -> bool {
         self.excluded_documents > 0 || self.unavailable_documents > 0 || self.limited_by_size
+    }
+
+    /// Whether anything was withheld from the caller: a limit on the requested scope, or an
+    /// exclusion elsewhere on the page. A composition keeps such a step's coverage on its row,
+    /// and the model's lean view keeps the block.
+    #[must_use]
+    pub fn withholds(&self) -> bool {
+        self.limited() || self.page_excluded_documents > 0
     }
 
     /// One short qualification, authored without browser content or document identities.

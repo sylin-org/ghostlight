@@ -9,7 +9,10 @@
 //! an empty `children`. Any other fact, such as the `value` a script returned, is page data and is
 //! never read as an item.
 
+use serde::Deserialize;
 use serde_json::{Map, Value};
+
+use crate::language::coverage::{Coverage, COVERAGE_FACT};
 
 /// The value a field has when it carries no news.
 enum Default {
@@ -58,18 +61,6 @@ const ROW_OMISSIONS: [Omission; 1] = [Omission {
     key: "history_storage",
     default: Default::Text("saved"),
 }];
-
-/// The `facts` key that holds a result's coverage block.
-const COVERAGE: &str = "coverage";
-
-/// The coverage fields that signal a limitation. A count above zero or a true flag keeps the
-/// whole block; `inspected_documents` and `targeted` describe scope, not a limit.
-const COVERAGE_LIMITATIONS: [&str; 4] = [
-    "excluded_documents",
-    "page_excluded_documents",
-    "unavailable_documents",
-    "limited_by_size",
-];
 
 /// The `facts` keys that hold the addressable items Ghostlight mints: the controls of an inspect
 /// and the matches of a find. Nothing else in `facts` is read as an item, because a script result
@@ -124,8 +115,8 @@ fn lean_envelope(envelope: &mut Value) {
     };
     omit(fields, &ENVELOPE_OMISSIONS);
     if let Some(facts) = fields.get_mut(FACTS).and_then(Value::as_object_mut) {
-        if facts.get(COVERAGE).is_some_and(shows_no_limitation) {
-            facts.remove(COVERAGE);
+        if facts.get(COVERAGE_FACT).is_some_and(shows_no_limitation) {
+            facts.remove(COVERAGE_FACT);
         }
         if let Some(tree) = facts.get_mut(TREE) {
             lean_tree(tree);
@@ -164,21 +155,9 @@ fn lean_tree(node: &mut Value) {
     }
 }
 
-/// Whether `coverage` is a block with every limitation field clear. Any other shape stays.
+/// Whether `coverage` is a coverage block that withholds nothing. Any other shape stays.
 fn shows_no_limitation(coverage: &Value) -> bool {
-    coverage.as_object().is_some_and(|block| {
-        COVERAGE_LIMITATIONS
-            .iter()
-            .all(|key| block.get(*key).is_none_or(is_clear))
-    })
-}
-
-fn is_clear(value: &Value) -> bool {
-    match value {
-        Value::Bool(flag) => !flag,
-        Value::Number(count) => count.as_u64() == Some(0),
-        _ => false,
-    }
+    Coverage::deserialize(coverage).is_ok_and(|block| !block.withholds())
 }
 
 fn omit(fields: &mut Map<String, Value>, rules: &[Omission]) {
@@ -312,6 +291,42 @@ mod tests {
                 {"position": 3, "omitted": true, "coverage": limited},
             ]}})
         );
+    }
+
+    /// The lean view asks the coverage type what withholds content, so a limitation the type
+    /// learns reaches the model without a second list here.
+    #[test]
+    fn a_new_limitation_field_reaches_the_lean_view() {
+        use crate::language::coverage::Coverage;
+        let shapes = [
+            Coverage::default(),
+            Coverage {
+                targeted: true,
+                inspected_documents: 3,
+                ..Coverage::default()
+            },
+            Coverage {
+                excluded_documents: 1,
+                ..Coverage::default()
+            },
+            Coverage {
+                page_excluded_documents: 2,
+                ..Coverage::default()
+            },
+            Coverage {
+                unavailable_documents: 1,
+                ..Coverage::default()
+            },
+            Coverage {
+                limited_by_size: true,
+                ..Coverage::default()
+            },
+        ];
+        for coverage in shapes {
+            let envelope = json!({"facts": {"tab": "t", "coverage": coverage}});
+            let kept = project(&envelope)["facts"].get("coverage").is_some();
+            assert_eq!(kept, coverage.withholds(), "{coverage:?}");
+        }
     }
 
     #[test]

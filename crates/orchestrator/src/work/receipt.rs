@@ -36,7 +36,7 @@ impl ApplicationExecutor {
             terminal.result.summary =
                 language::coverage::qualify(&terminal.result.summary, coverage);
             terminal.audit = terminal.audit.with_coverage(coverage);
-            terminal.result.facts["coverage"] = json!(coverage);
+            terminal.result.facts[language::coverage::COVERAGE_FACT] = json!(coverage);
         }
         let tool = language::audit::tool_name(tool);
         let event = match terminal.result.status {

@@ -6,15 +6,12 @@ use serde_json::{json, Value};
 
 use crate::governance::Decision;
 use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
-use crate::language::coverage::{qualify, Coverage};
+use crate::language::coverage::{qualify, Coverage, COVERAGE_FACT};
 use crate::language::history::OutcomeClass;
 use crate::language::outcome::Outcome;
 
 use super::result::{Readiness, UnexecutedStatus};
 use super::{Effect, InvocationContext, InvocationResult, Status, Terminal};
-
-/// The key inside a result's `facts` that holds its coverage.
-const COVERAGE: &str = "coverage";
 
 pub(super) struct Composition {
     pub progress: CompositionProgress,
@@ -176,7 +173,7 @@ impl Composition {
         let outcome = Outcome::CompositionRan(self.progress);
         let summary = match &self.coverage {
             Some(coverage) => {
-                facts["coverage"] = json!(coverage);
+                facts[COVERAGE_FACT] = json!(coverage);
                 qualify(&outcome.summary(), coverage)
             }
             None => outcome.summary(),
@@ -202,15 +199,15 @@ impl Composition {
     }
 }
 
-/// The child's coverage when something limited it, read from the canonical child envelope.
+/// The child's coverage when it withheld anything, read from the child's audit projection.
 ///
-/// A limitation is any exclusion, unavailable document or size ceiling. A child that inspected
-/// everything it was asked to contributes nothing.
+/// A child that inspected everything it was asked to contributes nothing.
 fn limited_coverage(terminal: &Terminal) -> Option<Coverage> {
-    let coverage: Coverage =
-        serde_json::from_value(terminal.result.facts.get(COVERAGE)?.clone()).ok()?;
-    let limited = coverage.limited() || coverage.page_excluded_documents > 0;
-    limited.then_some(coverage)
+    terminal
+        .audit
+        .coverage()
+        .filter(|coverage| coverage.withholds())
+        .cloned()
 }
 
 /// Keep recovery metadata outside the optional, budgeted child result payload.
@@ -221,7 +218,7 @@ pub(super) fn terminal_row(step: usize, terminal: &Terminal, cause: Option<StepC
     let mut row = json!({"step":step,"status":terminal.result.status,"effect":terminal.result.effect,
         "repeat_safe":terminal.result.repeat_safe,"cause":cause,"history_storage":terminal.result.history_storage});
     if let Some(coverage) = limited_coverage(terminal) {
-        row[COVERAGE] = json!(coverage);
+        row[COVERAGE_FACT] = json!(coverage);
     }
     row
 }
@@ -452,7 +449,8 @@ mod tests {
 
     fn read_with(coverage: Coverage) -> Terminal {
         let mut terminal = child(Status::Succeeded, Effect::None, None);
-        terminal.result.facts["coverage"] = json!(coverage);
+        terminal.result.facts[COVERAGE_FACT] = json!(coverage);
+        terminal.audit = terminal.audit.with_coverage(&coverage);
         terminal
     }
 

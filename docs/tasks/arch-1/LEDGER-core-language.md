@@ -10,10 +10,9 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D5 have landed, and C17 lands as two commits: C17a (the wait vocabulary) is in, C17b
-(the coverage predicate) is next. The coordinator's hold on C17's files in core-work, adapter and
-core-service lasts until C17b lands. A slice's hash is filled in by the next slice's commit,
-since a rebase before the push changes it.
+L-D1 to L-D5 and C17 (C17a and C17b) have landed; the coordinator's hold on C17's files is
+released. Next is C12b-1. A slice's hash is filled in by the next slice's commit, since a rebase
+before the push changes it.
 
 ## Slices
 
@@ -26,7 +25,7 @@ In order. "After" names what a slice waits for.
 | L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed (09d78bd9) |
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed (b5135a14) |
-| C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | C17a landed; C17b todo |
+| C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b) |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | todo |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | todo |
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | todo |
@@ -85,3 +84,10 @@ In order. "After" names what a slice waits for.
   `work/mod.rs`, `work/tests/execution.rs` (two test matches), `browser/adapter/work.rs`,
   `protocol4/mod.rs`, `translate/observe.rs`, `translate/tests.rs` and `browser/mod.rs`. The
   duration re-parse in `work/forms.rs` stays for WORK-13's `finish_wait`.
+- C17b: `Coverage::withholds` (a limit on the requested scope, or an exclusion elsewhere on the
+  page) and `COVERAGE_FACT` live in `language/coverage.rs`. Composition reads a step's coverage
+  from `terminal.audit.coverage()`, which the completion path sets with the fact, so its JSON
+  parse is gone; the lean view deserializes the block and asks `withholds`, so its field-name
+  list is gone (`a_new_limitation_field_reaches_the_lean_view`). One difference: a partial
+  coverage object, which no result carries, now stays in the lean view instead of being dropped.
+  Cross-lane: `work/composition.rs`, `work/receipt.rs`, `intake/mcp/lean.rs`.
