@@ -64,6 +64,14 @@ pub fn refused_by_quit_latch(reason: StartReason) -> bool {
     matches!(reason, StartReason::Browser | StartReason::Recover)
 }
 
+/// Whether a start with `reason` takes the place of a service that may have ended moments ago:
+/// the installer's start after its swap, or the shell's recovery of a service it lost without a
+/// goodbye. The browsers that service served are then on their way back to this one.
+#[must_use]
+pub fn replaces_a_service(reason: StartReason) -> bool {
+    matches!(reason, StartReason::Update | StartReason::Recover)
+}
+
 /// The source of the current time for the ready watch and the idle watch.
 pub trait Clock: Send + Sync + 'static {
     /// The current instant.
@@ -400,6 +408,22 @@ mod tests {
             StartReason::Update,
         ] {
             assert!(!refused_by_quit_latch(reason), "{reason:?}");
+        }
+    }
+
+    #[test]
+    fn only_an_update_or_recover_start_replaces_a_service() {
+        for reason in [StartReason::Update, StartReason::Recover] {
+            assert!(replaces_a_service(reason), "{reason:?}");
+        }
+        for reason in [
+            StartReason::Agent,
+            StartReason::Browser,
+            StartReason::Command,
+            StartReason::Person,
+            StartReason::Unknown,
+        ] {
+            assert!(!replaces_a_service(reason), "{reason:?}");
         }
     }
 }

@@ -12,7 +12,8 @@ Statuses: `todo`, `landed` (with commits), `blocked` (with the reason).
 
 ## RESUME HERE
 
-S-D1 has landed. Next: S-D2.
+S-D1 and S-D2 have landed. S-D2 fixed the update case; the demand start after a Quit is open and
+waits on the owner's choice (Notes). Next: SERV-7.
 
 ## Slices
 
@@ -20,8 +21,8 @@ In order. "After" names what a slice waits for.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| S-D1 | fix(intake): an opening that carries the largest resume token is accepted | - | SERV-1; the opening cap rises above the token cap, with a const assert, so tokens 2.0.0 edges hold pass too | landed (this commit) |
-| S-D2 | test(browser): the relay's return window covers its backoff after an update | - | BROW-9; a fix follows if the test fails | todo |
+| S-D1 | fix(intake): an opening that carries the largest resume token is accepted | - | SERV-1; the opening cap rises above the token cap, with a const assert, so tokens 2.0.0 edges hold pass too | landed (3db83135) |
+| S-D2 | fix(service): a replacement waits for the browsers of the service it replaced | - | BROW-9; the test failed before the fix | landed (this commit) |
 | SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | todo |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
 | BROW-2 | refactor(browser): the dead recovery decisions go | - | BROW-2 | todo |
@@ -47,3 +48,26 @@ In order. "After" names what a slice waits for.
 
 SERV-2 and SERV-4 are in `cli/`, which is install's. SERV-9 goes with core-work's C16. SERV-13 is
 install's.
+
+S-D2 (BROW-9): the defect is real. A new service has no record of the old one's departures, so
+after a replacement only the window from its publication counts, and each relay of the ended
+service looks for it at 0.5, 1.5, 3.5 and 7.5 s after the loss. A replacement that publishes
+later than 1.5 s left a call with no bound browser to recovery before the relay's next look: on
+Windows Ghostlight ran Chrome, which opened a second window in the running instance; on Linux the
+agent read `browser_startup_manual` for an open browser. The fix: a start with reason `update` or
+`recover` (`lifetime::replaces_a_service`) publishes through
+`RelayBrowserPort::replacement_published`, which expects the relays for `RETURN_GRACE` when the
+home remembers a browser, and for `RELAY_RETURN_WINDOW` otherwise, so a first install keeps its
+startup budget. Tests: `service::tests::a_replacement_waits_for_the_relays_of_the_service_it_replaced`
+(failed before the fix), `a_start_that_replaced_no_browser_waits_only_the_relay_return_window` and
+`lifetime::tests::only_an_update_or_recover_start_replaces_a_service`. ARCHITECTURE, ACCEPTANCE
+and LANGUAGE say so.
+
+Open, the owner's choice: a demand start long after a Quit. The relay of an open browser keeps
+looking every 30 s, and a call that starts the service lands within about a second of its
+publication, so in about 97% of cases the relay's next look falls outside any window a call's
+7 s grace can hold. On Windows a second window opens and most such calls end in
+`browser_handshake_timeout`; on Linux they read `browser_startup_manual`. The relay is locked
+(Decision 13). The ways out: the extension reopens its port on its own schedule while the service
+is absent (package lane), or recovery declines to start a browser whose relay is still alive and
+says it is reconnecting (a new refusal word, and a way to know the relay is alive).

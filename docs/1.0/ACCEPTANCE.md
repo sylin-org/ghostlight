@@ -102,8 +102,10 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     with no browser yet waits before browser startup only while a browser is evidently returning,
     and the evidence is read again on every poll: a registered connection still initializing or
     silent, a connection that ended less than the grace ago, or a service endpoint published less
-    than 1.5 seconds ago, while relays from before a restart reconnect. A call right after a
-    service start therefore attaches to the reconnecting browser instead of launching one. A
+    than 1.5 seconds ago, while relays from before a restart reconnect, or less than the grace ago
+    when the service replaced one that just ended (an update or a recovery) in a home that
+    remembers a browser. A call right after a service start therefore attaches to the
+    reconnecting browser instead of launching one. A
     browser closed longer ago than the grace earns no wait at all, even if it once reported
     attention, and a start with no relay stops waiting after 1.5 seconds, so browser startup keeps
     the rest of the deadline to launch a browser.

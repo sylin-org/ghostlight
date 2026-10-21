@@ -486,9 +486,13 @@ same grace before recovery only while the port reports evidence that a browser i
 `await_any` reads that evidence again on every poll. Each piece lapses on its own: a registered
 connection that is not available lasts as long as the connection, an initialized connection that
 ended lasts `RETURN_GRACE` from its departure, and a freshly published endpoint lasts
-`RELAY_RETURN_WINDOW` (1.5 seconds, two relay retries and the hello) from the publication, which
-covers relays reconnecting after a service update. A relay that does reconnect registers inside
-that window, and its registration then carries the wait through the page-runtime installation.
+`RELAY_RETURN_WINDOW` (1.5 seconds) from the publication. A service started to replace one that
+just ended (an update or the shell's recovery) in a home that remembers a browser publishes with
+`RETURN_GRACE` instead, because each relay of the ended service looks for it on its own doubling
+backoff (0.5, 1.5, 3.5 and 7.5 seconds after the loss), and a replacement slower than 1.5 seconds
+would otherwise stop waiting before the look that finds it. A relay that does reconnect registers
+inside its window, and its registration then carries the wait through the page-runtime
+installation.
 Reported attention is not evidence, because it never lapses. Once no evidence remains, recovery
 runs at once, so a browser closed long ago or a cold start with no relay keeps nearly the whole
 deadline for a launch.

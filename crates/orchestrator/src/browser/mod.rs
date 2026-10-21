@@ -44,15 +44,19 @@ const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long a call waits for a browser that is on its way back before it says what is true.
 ///
 /// It covers one relay reconnect attempt (500 ms), the hello exchange of the new connection (the
-/// 5 s exchange budget), and a margin. Callers cap it by their own invocation deadline.
+/// 5 s exchange budget), and a margin. Callers cap it by their own invocation deadline. After a
+/// replacement, a call with no browser waits this long for the browsers of the service that ended
+/// ([`RelayBrowserPort::replacement_published`]).
 pub const RETURN_GRACE: Duration = Duration::from_secs(7);
 
-/// How long after the service publishes its endpoint a call with no browser still waits for the
-/// relays that served an earlier service.
+/// How long after the service publishes its endpoint a call with no browser still waits for
+/// relays that may be looking for it, when the service replaced none.
 ///
-/// A waiting relay retries every 500 ms. This covers two retries and the hello. A relay that does
-/// reconnect registers inside it. A cold start with no browser loses only this much of its
-/// browser startup budget.
+/// A browser relay looks for the service on its own doubling backoff, counted from when it began
+/// looking: 0.5, 1.5, 3.5 and 7.5 s after, then later ([`ghostlight_relay::spawn::Backoff`]).
+/// The relay of a browser that started this service registers inside the window when the service
+/// publishes before that relay's second look. A cold start with no browser loses only this much
+/// of its browser startup budget.
 pub(crate) const RELAY_RETURN_WINDOW: Duration = Duration::from_millis(1_500);
 
 /// Liveness timing for one relay port. Production uses the defaults; tests shorten them.
@@ -506,9 +510,9 @@ impl AdapterRegistry {
     /// Whether a browser is evidently on its way back at `now` (ADR-0196 Decision 12).
     ///
     /// Each piece of evidence lapses on its own: a registered connection that is silent lasts as
-    /// long as the connection, a departure lasts the return grace, and a freshly opened port
-    /// lasts the relay return window.
-    fn returning(&self, now: Instant, opened: Instant, timeout: Duration) -> bool {
+    /// long as the connection, a departure lasts the return grace, and the relays of an earlier
+    /// service are expected until `relays_until`.
+    fn returning(&self, now: Instant, relays_until: Instant, timeout: Duration) -> bool {
         let silent = self
             .connections
             .values()
@@ -516,7 +520,7 @@ impl AdapterRegistry {
         let departed_recently = self
             .departed
             .is_some_and(|departed| now.saturating_duration_since(departed) < RETURN_GRACE);
-        let relays_reconnecting = now.saturating_duration_since(opened) < RELAY_RETURN_WINDOW;
+        let relays_reconnecting = now < relays_until;
         silent || departed_recently || relays_reconnecting
     }
 
@@ -722,10 +726,11 @@ pub struct RelayBrowserPort {
     /// recovery. Unset, the port remembers nothing.
     last_browser: Mutex<Option<PathBuf>>,
     heartbeat: HeartbeatSettings,
-    /// When relays could last begin reconnecting to this port: its construction, then the moment
-    /// the service published the endpoint relays find it by. Right after that, relays that served
-    /// an earlier service are still on their way back.
-    opened: Mutex<Instant>,
+    /// Until when relays that served an earlier service may still be on their way back to this
+    /// port: the relay return window from its construction, then from the moment the service
+    /// published the endpoint relays find it by, or the return grace from that moment after a
+    /// replacement.
+    relays_until: Mutex<Instant>,
 }
 
 impl std::fmt::Debug for RelayBrowserPort {
@@ -770,21 +775,50 @@ impl RelayBrowserPort {
             assets,
             last_browser: Mutex::new(None),
             heartbeat,
-            opened: Mutex::new(Instant::now()),
+            relays_until: Mutex::new(Instant::now() + RELAY_RETURN_WINDOW),
         }
     }
 
     /// Record that the service is publishing the endpoint relays find it by.
     ///
-    /// Relays that served an earlier service reconnect within a retry or two of this moment, so
-    /// it starts the short window in which a call with no browser waits for them. Construction
-    /// is too early a start: the desktop may take a second or more to publish.
+    /// Relays that served an earlier service find it from this moment, so it starts the short
+    /// window in which a call with no browser waits for them (`RELAY_RETURN_WINDOW`).
+    /// Construction is too early a start: the desktop may take a second or more to publish.
     pub fn endpoint_published(&self) {
-        *lock(&self.opened) = Instant::now();
+        self.expect_relays_for(RELAY_RETURN_WINDOW);
     }
 
-    /// Move this port's evidence clock back, as if `elapsed` had passed since it opened and
-    /// since its last browser left.
+    /// Record that the service is publishing the endpoint relays find it by in place of a
+    /// service that just ended, as an update or the shell's recovery does.
+    ///
+    /// The browsers that service served left with it, and each one's relay looks for this one on
+    /// its own doubling backoff, counted from that loss: 0.5, 1.5, 3.5 and 7.5 s after it. A
+    /// replacement that publishes just after one look waits nearly the whole next wait for the
+    /// look that finds it, which outlasts the short window once the replacement takes 1.5 s. So
+    /// these browsers count as on their way back for the return grace, as any browser that left
+    /// moments ago does. When a replacement publishes before the relay's fourth look, the relay
+    /// looks again within 4 s, which leaves 3 s of the grace for it to hand its browser to a new
+    /// native port.
+    ///
+    /// A home that remembers no browser ([`BrowserPort::last_connected_browser`]), as on a first
+    /// install, had none to hand over, so there this is [`Self::endpoint_published`], and a call
+    /// with no browser keeps its browser startup budget.
+    pub fn replacement_published(&self) {
+        let window = if self.last_connected_browser().is_some() {
+            RETURN_GRACE
+        } else {
+            RELAY_RETURN_WINDOW
+        };
+        self.expect_relays_for(window);
+    }
+
+    /// Expect relays that served an earlier service for `window` from now.
+    fn expect_relays_for(&self, window: Duration) {
+        *lock(&self.relays_until) = Instant::now() + window;
+    }
+
+    /// Move this port's evidence clock back, as if `elapsed` had passed since it published its
+    /// endpoint and since its last browser left.
     #[cfg(test)]
     pub(crate) fn backdate(&self, elapsed: Duration) {
         let earlier = |instant: Instant| {
@@ -793,8 +827,8 @@ impl RelayBrowserPort {
                 .expect("the monotonic clock has run longer than the backdate")
         };
         {
-            let mut opened = lock(&self.opened);
-            *opened = earlier(*opened);
+            let mut relays_until = lock(&self.relays_until);
+            *relays_until = earlier(*relays_until);
         }
         let mut adapters = lock(&self.adapters);
         adapters.departed = adapters.departed.map(earlier);
@@ -1146,13 +1180,14 @@ impl BrowserPort for RelayBrowserPort {
 
     /// The evidence is any of: a registered connection that is silent; a connection that ended
     /// less than the return grace ago, as when an extension worker restarts its native port; or
-    /// an endpoint published less than the relay return window ago, while relays that served an
-    /// earlier service reconnect. Attention a browser reported at some point is not evidence: it
-    /// never lapses, and a browser closed long ago would then spend the whole wait that browser
-    /// startup needs.
+    /// an endpoint published less than the relay return window ago, or less than the return
+    /// grace ago in place of a service that just ended, while relays that served an earlier
+    /// service reconnect. Attention a browser reported at some point is not evidence: it never
+    /// lapses, and a browser closed long ago would then spend the whole wait that browser startup
+    /// needs.
     fn browser_returning(&self) -> bool {
-        let opened = *lock(&self.opened);
-        lock(&self.adapters).returning(Instant::now(), opened, self.heartbeat.timeout)
+        let relays_until = *lock(&self.relays_until);
+        lock(&self.adapters).returning(Instant::now(), relays_until, self.heartbeat.timeout)
     }
 
     /// Runtime control is a property of Ghostlight, not of one browser, so every connected

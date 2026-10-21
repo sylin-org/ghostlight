@@ -505,8 +505,13 @@ impl ServiceHost {
         }
         let workbench = self.start_workbench();
         // Edges that served an earlier service find this one from here on, so a call with no
-        // browser waits for them from this moment, not from construction.
-        self.browser.endpoint_published();
+        // browser waits for them from this moment, not from construction. After a replacement
+        // they are the browsers of the service that just ended, on their relays' backoff.
+        if lifetime::replaces_a_service(self.intake.started_by) {
+            self.browser.replacement_published();
+        } else {
+            self.browser.endpoint_published();
+        }
         let listener = match Listener::bind_first(&self.home).context("bind the relay endpoint") {
             Ok(listener) => Arc::new(listener),
             Err(error) => {
@@ -4988,6 +4993,102 @@ mod tests {
             StartReason::Person
         );
         drop(host);
+    }
+
+    /// How many of a browser relay's looks for a returning service a replacement may take to
+    /// publish and still have that relay waited for. The fourth look comes 7.5 s after the old
+    /// service ended; the measured updates published within about a second of that end.
+    const REPLACEMENT_LOOKS: usize = 4;
+
+    /// How long a relay's look that finds the service takes to put its browser back: the relay
+    /// exits, the extension opens a new native port at once and the new relay's hello is
+    /// answered. Well under a second where it was measured
+    /// (`docs/testing/alpine-2.0.1-bundle-2026-10-20.md`); two seconds leaves room for a slow
+    /// native-host start.
+    const RELAY_HANDOVER: Duration = Duration::from_secs(2);
+
+    /// A home that remembers a browser, as every home a browser has connected to does.
+    fn home_that_remembers_a_browser(name: &str) -> Scratch {
+        let directory = temp_home(name);
+        let layout = crate::install::layout::Layout::new(directory.path());
+        crate::install::last_browser::record(&layout.last_browser_record(), "chrome").unwrap();
+        directory
+    }
+
+    /// An update, or the shell's recovery of a service it lost without a goodbye, takes over from
+    /// a service whose browsers left with it. Each browser's relay looks for the new service on
+    /// its own doubling backoff, counted from the moment it lost the old one, so a replacement
+    /// that publishes just after one look waits nearly the whole next wait for the look that
+    /// finds it. A call with no browser waits for that relay until it is back, for any
+    /// replacement that publishes before the relay's fourth look, and stops at the return grace
+    /// (ADR-0196 Decision 12). The schedule is the relay's own, so a backoff that outgrows the
+    /// grace fails here.
+    #[test]
+    fn a_replacement_waits_for_the_relays_of_the_service_it_replaced() {
+        use crate::browser::{BrowserPort, RETURN_GRACE};
+        use ghostlight_relay::spawn::Backoff;
+
+        let mut backoff = Backoff::new();
+        let longest_wait = (0..REPLACEMENT_LOOKS)
+            .map(|_| backoff.next_wait())
+            .max()
+            .expect("the relay looks at least once");
+        let slowest = longest_wait + RELAY_HANDOVER;
+        assert!(
+            slowest < RETURN_GRACE,
+            "a relay can be back {slowest:?} after the publication, past the return grace"
+        );
+
+        for reason in [StartReason::Update, StartReason::Recover] {
+            let directory = home_that_remembers_a_browser("replacement-relays");
+            let host = start_for(&directory, StartTerms::for_reason(reason)).unwrap();
+            host.publish_ready().unwrap();
+
+            host.browser.backdate(slowest);
+            assert!(
+                host.browser.browser_returning(),
+                "{reason:?}: a relay back {slowest:?} after the publication is still waited for"
+            );
+            host.browser.backdate(RETURN_GRACE - slowest);
+            assert!(
+                !host.browser.browser_returning(),
+                "{reason:?}: the wait for the replaced service's relays ends with the return grace"
+            );
+            drop(host);
+        }
+    }
+
+    /// A start that replaced no service, and an update in a home no browser has connected to, as
+    /// on a first install, wait only the short relay window, so a call with no browser keeps
+    /// nearly its whole budget for starting one.
+    #[test]
+    fn a_start_that_replaced_no_browser_waits_only_the_relay_return_window() {
+        use crate::browser::{BrowserPort, RELAY_RETURN_WINDOW};
+
+        for (reason, directory) in [
+            (StartReason::Update, temp_home("first-install")),
+            (
+                StartReason::Agent,
+                home_that_remembers_a_browser("agent-start"),
+            ),
+            (
+                StartReason::Browser,
+                home_that_remembers_a_browser("browser-start"),
+            ),
+        ] {
+            let host = start_for(&directory, StartTerms::for_reason(reason)).unwrap();
+            host.publish_ready().unwrap();
+            assert!(
+                host.browser.browser_returning(),
+                "{reason:?}: relays may be reconnecting"
+            );
+            host.browser.backdate(RELAY_RETURN_WINDOW);
+            assert!(
+                !host.browser.browser_returning(),
+                "{reason:?}: nothing replaced holds the wait past the relay window"
+            );
+            drop(host);
+        }
     }
 
     #[test]

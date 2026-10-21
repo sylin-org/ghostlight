@@ -315,7 +315,8 @@ Refusals say what is true, and their next steps suggest only what the caller can
   back. A session that already works in a browser always waits for that browser. A session with
   no browser yet waits only while a connection is registered but initializing or silent, a
   browser connection ended less than the wait ago, or the service published its endpoint in the
-  last 1.5 seconds. It stops waiting as soon as none of these holds, so a browser closed long ago
+  last 1.5 seconds, or within the wait after it replaced a service that just ended, in a home that
+  remembers a browser. It stops waiting as soon as none of these holds, so a browser closed long ago
   goes straight to browser startup with the whole deadline to launch it. The wait lasts up to
   about seven seconds and ends early enough to leave the call time to run.
   A silent browser gets one liveness probe at once. Under `on_demand`, when Ghostlight knows
