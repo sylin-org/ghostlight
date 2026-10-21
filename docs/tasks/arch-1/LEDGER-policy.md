@@ -180,12 +180,11 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-03 (Alpine), after core-work. A
 slice's specification is its finding in [sweep-2026-10-20/work.md](sweep-2026-10-20/work.md), read
-with its skeptic's corrections. WORK-15 is under way: its `HostPattern` and `url_host` have landed;
-`layer_denial` is next.
+with its skeptic's corrections. WORK-15 has landed. Next: WORK-11.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | `HostPattern` (ddd76f9c) and `url_host` landed; `layer_denial` todo |
+| WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | landed (ddd76f9c, 86013a28 and `layer_denial`) |
 | WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | todo |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |
 
@@ -201,3 +200,10 @@ WORK-15, `url_host`: `host_pattern::url_host(&Url)` is the lowercase host every 
 The never-touch match, host admission and the decision evidence read it. Three more copies are in
 core-work's files and adopt it there: `observed_host` (`work/mod.rs`), `TabHold::host`
 (`workspace/mod.rs`) and `reusable_site` (`workspace/released.rs`).
+
+WORK-15, `layer_denial`: the six policy refusals (a grant's, the screenshot, channel, never-touch,
+tab-close and audit-availability settings) go through `AuthoritySnapshot::layer_denial`, the one
+place `Decision::policy` and `denial_bytes` are written. It derives the layer's document hash and
+the deciding grant's id itself; a layer the snapshot does not hold digests the snapshot's id, the
+tab-close fallback, which no other site can reach. `every_policy_refusal_keeps_its_denial_id` pins
+the six persisted ids, captured from the code before the change.

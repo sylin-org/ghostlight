@@ -96,19 +96,11 @@ impl AuthoritySnapshot {
         else {
             return super::Decision::permitted();
         };
-        let rule = super::PolicyRule::AuditAvailability;
-        super::Decision::policy(
+        self.layer_denial(
             super::ReasonCode::AuditUnavailable,
-            super::PolicyAttribution {
-                layer: index,
-                grant: None,
-                rule,
-                denial: super::denial_bytes(
-                    &self.layers[usize::from(index)].manifest.hash,
-                    "",
-                    rule,
-                ),
-            },
+            usize::from(index),
+            None,
+            super::PolicyRule::AuditAvailability,
         )
     }
 }

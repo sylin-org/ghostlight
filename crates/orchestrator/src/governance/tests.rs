@@ -1620,3 +1620,49 @@ fn no_probe_matches_an_authored_suffix() {
         }
     }
 }
+
+#[test]
+fn every_policy_refusal_keeps_its_denial_id() {
+    let snapshot = snapshot_for(
+        "denial-ids",
+        policy(
+            "denials",
+            r#"[{"id":"reader","hosts":{"allow":["example.com"]},"allowed":["read"]}]"#,
+            r#"[{"key":"browser.screenshots.enabled","value":false,"level":"mandatory"},
+               {"key":"browser.tabs.allow_close","value":false,"level":"mandatory"},
+               {"key":"channels.mcp.enabled","value":false,"level":"mandatory"},
+               {"key":"content.security.sacred_domains","value":["bank.example"],"level":"mandatory"},
+               {"key":"audit.availability","value":"require_audit","level":"mandatory"}]"#,
+        ),
+    );
+    let grant = snapshot.authorize_landing(Capability::Write, "https://example.com/");
+    assert_eq!(snapshot.attribution(grant), Some(("user", Some("reader"))));
+    let refusals = [
+        grant,
+        snapshot.authorize_screenshot(),
+        snapshot.channel_refusal(IntakeChannel::Mcp).unwrap().0,
+        snapshot.authorize_landing(Capability::Read, "https://bank.example/"),
+        snapshot.authorize_tab_close(),
+        snapshot.authorize_audit(false),
+    ];
+    let ids: Vec<String> = refusals
+        .iter()
+        .map(|refusal| {
+            refusal
+                .denial_id()
+                .expect("a policy refusal has a denial id")
+        })
+        .collect();
+    // The ids an audit log already holds: a refactor of how they are built must not move them.
+    assert_eq!(
+        ids,
+        [
+            "D-bf3492e7",
+            "D-4b81180e",
+            "D-debaf9fd",
+            "D-0b9ad60a",
+            "D-e2dfd3a3",
+            "D-899efd47"
+        ]
+    );
+}

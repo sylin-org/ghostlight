@@ -520,14 +520,11 @@ impl AuthoritySnapshot {
                 .boolean_setting(PolicySetting::ScreenshotsEnabled)
                 == Some(false)
             {
-                return Decision::policy(
+                return self.layer_denial(
                     ReasonCode::ScreenshotDenied,
-                    PolicyAttribution {
-                        layer: u16::try_from(index).expect("policy layer count is bounded"),
-                        grant: None,
-                        rule: PolicyRule::Screenshot,
-                        denial: denial_bytes(&layer.manifest.hash, "", PolicyRule::Screenshot),
-                    },
+                    index,
+                    None,
+                    PolicyRule::Screenshot,
                 );
             }
         }
@@ -549,15 +546,8 @@ impl AuthoritySnapshot {
             .iter()
             .enumerate()
             .find(|(_, layer)| layer.manifest.boolean_setting(setting) == Some(false))?;
-        let decision = Decision::policy(
-            ReasonCode::ChannelDenied,
-            PolicyAttribution {
-                layer: u16::try_from(index).expect("policy layer count is bounded"),
-                grant: None,
-                rule: PolicyRule::Channel,
-                denial: denial_bytes(&layer.manifest.hash, "", PolicyRule::Channel),
-            },
-        );
+        let decision =
+            self.layer_denial(ReasonCode::ChannelDenied, index, None, PolicyRule::Channel);
         let author = match layer.tier {
             AuthorityTier::Managed => PolicyAuthor::Organization,
             AuthorityTier::User => PolicyAuthor::User,
@@ -620,17 +610,39 @@ impl AuthoritySnapshot {
     /// decision. Its denial id is derived from the layer and the rule alone, so it names no
     /// listed host.
     fn never_touch_refusal(&self, author: usize) -> Decision {
-        Decision::policy(
+        self.layer_denial(
             ReasonCode::ProtectedHost,
+            author,
+            None,
+            PolicyRule::SacredHost,
+        )
+    }
+
+    /// The policy refusal `reason` the layer at `layer` makes under `rule`, through `grant` when
+    /// one grant decided it.
+    ///
+    /// The denial id digests the layer's document hash, the deciding grant's id (empty when no
+    /// grant decided) and the rule, so it names no host and stays the same for the same document.
+    /// A layer this snapshot does not hold digests the snapshot's id in place of a document hash.
+    fn layer_denial(
+        &self,
+        reason: ReasonCode,
+        layer: usize,
+        grant: Option<u16>,
+        rule: PolicyRule,
+    ) -> Decision {
+        let held = self.layers.get(layer);
+        let source = held.map_or(self.id.as_str(), |held| held.manifest.hash.as_str());
+        let grant_id = grant
+            .and_then(|index| held?.manifest.grants.get(usize::from(index)))
+            .map_or("", |grant| grant.id.as_str());
+        Decision::policy(
+            reason,
             PolicyAttribution {
-                layer: u16::try_from(author).expect("policy layer count is bounded"),
-                grant: None,
-                rule: PolicyRule::SacredHost,
-                denial: denial_bytes(
-                    &self.layers[author].manifest.hash,
-                    "",
-                    PolicyRule::SacredHost,
-                ),
+                layer: u16::try_from(layer).expect("policy layer count is bounded"),
+                grant,
+                rule,
+                denial: denial_bytes(source, grant_id, rule),
             },
         )
     }
@@ -676,19 +688,11 @@ impl AuthoritySnapshot {
         if self.tab_close_allowed {
             Decision::allow()
         } else {
-            let layer = self.tab_close_source.unwrap_or(0);
-            let source = self
-                .layers
-                .get(usize::from(layer))
-                .map_or(self.id.as_str(), |value| value.manifest.hash.as_str());
-            Decision::policy(
+            self.layer_denial(
                 ReasonCode::TabCloseDenied,
-                PolicyAttribution {
-                    layer,
-                    grant: None,
-                    rule: PolicyRule::TabClose,
-                    denial: denial_bytes(source, "", PolicyRule::TabClose),
-                },
+                usize::from(self.tab_close_source.unwrap_or(0)),
+                None,
+                PolicyRule::TabClose,
             )
         }
     }
@@ -968,21 +972,7 @@ impl AuthoritySnapshot {
             .iter()
             .enumerate()
             .find_map(|(index, outcome)| outcome.denial.map(|denial| (index, denial)))?;
-        let layer = &self.layers[denial.0];
-        let grant_id = denial
-            .1
-            .grant
-            .and_then(|index| layer.manifest.grants.get(usize::from(index)))
-            .map_or("", |grant| grant.id.as_str());
-        Some(Decision::policy(
-            denial.1.reason,
-            PolicyAttribution {
-                layer: u16::try_from(denial.0).expect("policy layer count is bounded"),
-                grant: denial.1.grant,
-                rule: denial.1.rule,
-                denial: denial_bytes(&layer.manifest.hash, grant_id, denial.1.rule),
-            },
-        ))
+        Some(self.layer_denial(denial.1.reason, denial.0, denial.1.grant, denial.1.rule))
     }
 
     /// Monotonic signed managed-policy publish sequence, when managed authority was active.
