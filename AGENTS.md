@@ -170,6 +170,11 @@ live tree plus `docs/1.0/ARCHITECTURE.md` for current placement.
 
 Before committing, run the checks for what you changed. CI runs the full set on every push.
 
+- Tests are meaningful, not many (ADR-0204). Write one only when it proves a user promise, guards a
+  contract between two components, reproduces a fixed defect, or covers unsafe code, and let it
+  replace a weaker one: the workspace holds at most 500 Rust tests. A test waits on a condition,
+  never on a fixed sleep.
+
 - Any Rust, `Cargo.toml`, `Cargo.lock` or `rust-toolchain.toml` change: `cargo fmt --all -- --check`
   and `cargo clippy --workspace --all-targets -- -D warnings` (always workspace-wide: a manifest
   change can break clippy in untouched code), then `cargo test` for the touched crates, or

@@ -26,6 +26,13 @@ the owner wants, and what this project learned the hard way.
 
 ## Standing owner directives
 
+- **Meaningful tests, not many tests.** On 2026-10-21 the owner judged the suite bloated with
+  poorly written, low-value tests and set the mandate: "I want the mandate to be 'meaningful
+  tests', not 'massive number of tests'." A test is kept for what it protects: a user promise, a
+  contract between two components, a defect that was fixed, or unsafe code. It waits on a
+  condition, never a fixed sleep. A ceiling of 500 Rust tests keeps the mandate honest, and a new
+  test replaces a weaker one unless the owner raises it (ADR-0204, batch tests-1).
+
 - **Only main and dev.** The owner directed this on 2026-10-05. Main contains the
   published product; every new change and release candidate comes from dev. No
   feature, agent or release branches. Archive tags retain earlier branch heads,

@@ -42,6 +42,7 @@ and commit-safety rules add to AGENTS.md and take precedence for that batch.
 
 | Batch | Opened | Note |
 | --- | --- | --- |
+| [tests-1](tests-1/BOOTSTRAP.md) | 2026-10-21 | ADR-0204, meaningful tests: the owner's mandate of meaningful tests over many tests, with at most 500 Rust tests. Five lanes cut the 2,851 Rust tests area by area against a budget, keeping what proves a user promise, guards a contract, reproduces a fixed defect or covers unsafe code, before 2.0.1. One ledger per lane. |
 | [linux-2](linux-2/BOOTSTRAP.md) | 2026-10-19 | The Linux part of the 2.0 release, by linux-claude on the owner's CachyOS machine: Alpine (musl) images in the release, installing from a local release bundle, Bluefin readiness, the Claude Code plugin facts, then the full test from the release workflow's bundle and the owner's steps for Bluefin and Alpine. One ledger. |
 | [arch-1](arch-1/BOOTSTRAP.md) | 2026-10-19 | ADR-0203, one owner for each fact: the architecture sweep's 102 confirmed findings as thirteen decisions, in seven lanes (docs, core, adapter, policy, surface, install, package). Candidate slices before the release candidate. One ledger per lane, and findings.md maps every finding. |
 | [ux-2](ux-2/BOOTSTRAP.md) | 2026-10-18 | The visual re-walk of the deployed rc-1 and request-1 build: everything still partial, not done or newly found, ranked by what a person notices, under the owner's rule that teal means live. A sequential window lane beside native, extension, outcome and docs lanes. One ledger. |

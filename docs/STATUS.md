@@ -243,6 +243,10 @@ Now:
   cut inside an emoji (a long tab title, a script's result) dropped the browser connection for
   every session; the extension now sends text well formed, and the service skips a frame it cannot
   decode.
+- tests-1 opened on 2026-10-21 (ADR-0204, the owner's mandate of meaningful tests): the 2,851
+  Rust tests are cut to at most 500 before the 2.0.1 candidate, in five lanes on the test
+  machines and the coordinator's ([BOOTSTRAP](tasks/tests-1/BOOTSTRAP.md)). arch-1's refactor
+  slices wait for it; core-work's W-D4 goes first. The lanes start when the test machines are on.
 - Owed before the new 2.0.1 candidate: the changelog and `release/notes-v2.0.1.md` take the
   second sweep's user-visible fixes. About twenty landed after the changelog's last entry
   (7cecdda7), and of those only P-D3, P-D4 and P-D5 wrote theirs.
