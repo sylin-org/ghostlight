@@ -24,17 +24,17 @@ In order. "After" names what a slice waits for.
 | S-D1 | fix(intake): an opening that carries the largest resume token is accepted | - | SERV-1; the opening cap rises above the token cap, with a const assert, so tokens 2.0.0 edges hold pass too | landed (3db83135) |
 | S-D2 | fix(service): a replacement waits for the browsers of the service it replaced | - | BROW-9; the test failed before the fix | landed (9c257daa) |
 | SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | landed (0ba38fa7) |
-| S-D3 | fix(relay): a ready service wakes the edges that wait for it | - | BROW-9's open half, the owner's design (ADR-0199 amendment of 2026-10-20); relay revision 5 | landed (this commit) |
+| S-D3 | fix(relay): a ready service wakes the edges that wait for it | - | BROW-9's open half, the owner's design (ADR-0199 amendment of 2026-10-20); relay revision 5 | landed (e4a9fade, b0290246) |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
-| BROW-2 | refactor(browser): the dead recovery decisions go | - | BROW-2 | todo |
+| BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
 | C3c | refactor(browser): one browser start, recorded in the launch guard | C3b, BROW-2 | ADR-0203 C3c, moved from core | todo |
-| C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | - | ADR-0203 C18, moved from core; SURF-4's label half; EXT-5's pins | todo |
+| C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | - | ADR-0203 C18, moved from core; SURF-4's label half; EXT-5's pins | moved to test-02 (LEDGER-package.md), 2026-10-20 |
 | C19b | feat(audit): the record names the browser | I1 | ADR-0203 C19b, moved from core | todo |
 | SERV-3 | refactor(service): `service/mod.rs` splits on its seams, and its tests move to `service/tests/` | C19c-s | SERV-3; the moves land alone | todo |
 | SERV-8 | refactor(service): one end for the three exits | SERV-3 | SERV-8 | todo |
 | SERV-10 | refactor(service): one start function | SERV-3 | SERV-10; the two browser handles stay for the tests' fake | todo |
-| SERV-6 | refactor(intake): the service's vocabulary is read where the CLI reads it | - | SERV-6, the intake half; the CLI half is install's | todo |
+| SERV-6 | refactor(intake): the service's vocabulary is read where the CLI reads it | - | SERV-6, both halves in one slice | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | SERV-12 | refactor(diagnostics): one typed record | - | SERV-12; optional fields, relay's writer pinned by a round-trip test | todo |
 | SERV-11 | refactor(service): one name per meaning on the service side | SERV-3 | SERV-11's service half | todo |
 | SERV-14 | docs(service): the module docs map the crate | SERV-11 | SERV-14 | todo |
