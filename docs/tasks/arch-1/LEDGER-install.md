@@ -439,7 +439,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | INST-9 | refactor(install): the install's sentences move to `language/deployment.rs` | - | INST-9; some reach the agent, so model-visible text stays byte-equal | landed (this commit) |
 | INST-8 | refactor(install): `inspect` reads its state once | - | INST-8 | landed (this commit) |
 | INST-6 | refactor(install): one `edit` for every dialect | INST-8 | INST-6 | landed (this commit) |
-| INST-7 | refactor(install): each dialect names its keys once | INST-6 | INST-7 | todo |
+| INST-7 | refactor(install): each dialect names its keys once | INST-6 | INST-7 | landed (this commit) |
 | INST-12 | refactor(install): the roster rows share one base | - | INST-12 | todo |
 | INST-13 | refactor(install): one per-agent catalog loop, and `AppPlace` | - | INST-13 | todo |
 | INST-14 | refactor(install): one program-file helper, one manifest name, and files and paths modules | - | INST-14 as corrected | todo |

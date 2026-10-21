@@ -63,6 +63,29 @@ const SERVER_NAME: &str = "ghostlight";
 const COMMAND_KEY: &str = "command";
 /// The key of the program's arguments, in the dialects that keep them apart from the command.
 const ARGS_KEY: &str = "args";
+/// The key of the servers collection in the dialects that keep it at the top as `mcpServers`.
+const MCP_SERVERS_KEY: &str = "mcpServers";
+/// The key of the servers collection in the dialects that call it `servers`, at the top or
+/// below `mcp`.
+const SERVERS_KEY: &str = "servers";
+/// The key of the servers collection in Zed's settings.
+const CONTEXT_SERVERS_KEY: &str = "context_servers";
+/// The key of the `mcp` object that holds the servers, or holds `servers`, in its dialects.
+const MCP_KEY: &str = "mcp";
+/// The Codex table that holds every MCP server.
+const CODEX_SERVERS_KEY: &str = "mcp_servers";
+/// The key of a Codex entry's own fixed environment.
+const CODEX_ENV_KEY: &str = "env";
+/// The key of the variables a Codex entry forwards to its program.
+const CODEX_ENV_VARS_KEY: &str = "env_vars";
+/// The key of a forwarded variable's name, when it is written as a table.
+const CODEX_FORWARD_NAME_KEY: &str = "name";
+/// The key of where a forwarded variable is read from, when it is written as a table.
+const CODEX_FORWARD_SOURCE_KEY: &str = "source";
+/// A forwarded variable read from Codex's own process, the default.
+const CODEX_SOURCE_LOCAL: &str = "local";
+/// A forwarded variable read from Codex's remote session.
+const CODEX_SOURCE_REMOTE: &str = "remote";
 /// The key of the kind of server an entry describes, in the dialects that need one.
 const TYPE_KEY: &str = "type";
 /// The arguments that make the edge the MCP relay, in every client's entry.
@@ -995,12 +1018,12 @@ impl Format {
         match self {
             Self::Codex => {
                 let mut entry = Item::Table(Table::new());
-                entry["command"] = value(context.edge.to_string_lossy().into_owned());
-                entry["args"] = value(mcp_arguments_array());
+                entry[COMMAND_KEY] = value(context.edge.to_string_lossy().into_owned());
+                entry[ARGS_KEY] = value(mcp_arguments_array());
                 forward_codex_desktop_environment(&mut entry, context.linux)?;
                 let mut document = DocumentMut::new();
-                document["mcp_servers"] = Item::Table(Table::new());
-                document["mcp_servers"][SERVER_NAME] = entry;
+                document[CODEX_SERVERS_KEY] = Item::Table(Table::new());
+                document[CODEX_SERVERS_KEY][SERVER_NAME] = entry;
                 Ok(document.to_string())
             }
             Self::Json(dialect) => manual_json_setup(&context.edge, dialect),
@@ -2259,7 +2282,7 @@ fn json_entry_state(
 fn inspect_toml(source: &str, context: &HarnessContext) -> Result<RegistrationState, HarnessError> {
     let document = parse_toml(source)?;
     document
-        .get("mcp_servers")
+        .get(CODEX_SERVERS_KEY)
         .and_then(Item::as_table)
         .and_then(|servers| servers.get(SERVER_NAME))
         .map_or(Ok(RegistrationState::Missing), |entry| {
@@ -2277,7 +2300,7 @@ fn toml_entry_state(
     context: &HarnessContext,
 ) -> Result<RegistrationState, HarnessError> {
     let command = entry
-        .get("command")
+        .get(COMMAND_KEY)
         .and_then(Item::as_str)
         .unwrap_or_default();
     let args = toml_entry_args(entry);
@@ -2306,7 +2329,7 @@ fn missing_codex_desktop_environment(
         return Ok(Vec::new());
     }
     let forwarded = entry
-        .get("env_vars")
+        .get(CODEX_ENV_VARS_KEY)
         .map(|item| {
             let values = item.as_array().ok_or(HarnessError::Malformed(None))?;
             // Validate every member before deciding whether any handoff is missing.
@@ -2315,15 +2338,18 @@ fn missing_codex_desktop_environment(
                 let valid = value.as_str().is_some()
                     || value.as_inline_table().is_some_and(|table| {
                         table
-                            .get("name")
+                            .get(CODEX_FORWARD_NAME_KEY)
                             .and_then(toml_edit::Value::as_str)
                             .is_some()
-                            && table.get("source").is_none_or(|source| {
-                                matches!(source.as_str(), Some("local" | "remote"))
+                            && table.get(CODEX_FORWARD_SOURCE_KEY).is_none_or(|source| {
+                                matches!(
+                                    source.as_str(),
+                                    Some(CODEX_SOURCE_LOCAL | CODEX_SOURCE_REMOTE)
+                                )
                             })
-                            && table
-                                .iter()
-                                .all(|(key, _)| matches!(key, "name" | "source"))
+                            && table.iter().all(|(key, _)| {
+                                matches!(key, CODEX_FORWARD_NAME_KEY | CODEX_FORWARD_SOURCE_KEY)
+                            })
                     });
                 if !valid {
                     return Err(HarnessError::Malformed(None));
@@ -2337,7 +2363,7 @@ fn missing_codex_desktop_environment(
         .copied()
         .filter(|name| {
             let explicit = entry
-                .get("env")
+                .get(CODEX_ENV_KEY)
                 .and_then(|env| env.get(name))
                 .and_then(Item::as_str)
                 .is_some();
@@ -2345,11 +2371,14 @@ fn missing_codex_desktop_environment(
                 values.iter().any(|value| {
                     value.as_str() == Some(name)
                         || value.as_inline_table().is_some_and(|table| {
-                            table.get("name").and_then(toml_edit::Value::as_str) == Some(name)
+                            table
+                                .get(CODEX_FORWARD_NAME_KEY)
+                                .and_then(toml_edit::Value::as_str)
+                                == Some(name)
                                 && table
-                                    .get("source")
+                                    .get(CODEX_FORWARD_SOURCE_KEY)
                                     .and_then(toml_edit::Value::as_str)
-                                    .is_none_or(|source| source == "local")
+                                    .is_none_or(|source| source == CODEX_SOURCE_LOCAL)
                         })
                 })
             });
@@ -2361,10 +2390,10 @@ fn missing_codex_desktop_environment(
 fn forward_codex_desktop_environment(entry: &mut Item, linux: bool) -> Result<(), HarnessError> {
     let missing = missing_codex_desktop_environment(entry, linux)?;
     if !missing.is_empty() {
-        if entry.get("env_vars").is_none() {
-            entry["env_vars"] = value(Array::new());
+        if entry.get(CODEX_ENV_VARS_KEY).is_none() {
+            entry[CODEX_ENV_VARS_KEY] = value(Array::new());
         }
-        let forwarded = entry["env_vars"]
+        let forwarded = entry[CODEX_ENV_VARS_KEY]
             .as_array_mut()
             .expect("the environment array was validated above");
         for name in missing {
@@ -2607,12 +2636,12 @@ fn edit_toml_with(
     let source = read_or_empty(path)?;
     let mut document = parse_toml(&source)?;
     let existing = document
-        .get("mcp_servers")
+        .get(CODEX_SERVERS_KEY)
         .and_then(Item::as_table)
         .and_then(|servers| servers.get(SERVER_NAME));
     if let Some(entry) = existing {
         let command = entry
-            .get("command")
+            .get(COMMAND_KEY)
             .and_then(Item::as_str)
             .unwrap_or_default();
         let args = toml_entry_args(entry);
@@ -2641,37 +2670,42 @@ fn edit_toml_with(
             .unwrap_or_else(|| Item::Table(Table::new()))
     };
     if intent.installs() {
-        updated["command"] = value(edge.to_string_lossy().into_owned());
-        updated["args"] = value(mcp_arguments_array());
+        updated[COMMAND_KEY] = value(edge.to_string_lossy().into_owned());
+        updated[ARGS_KEY] = value(mcp_arguments_array());
         forward_codex_desktop_environment(&mut updated, context.linux)?;
-        if !document.contains_key("mcp_servers") {
-            document["mcp_servers"] = Item::Table(Table::new());
+        if !document.contains_key(CODEX_SERVERS_KEY) {
+            document[CODEX_SERVERS_KEY] = Item::Table(Table::new());
         }
-        let servers = document["mcp_servers"]
+        let servers = document[CODEX_SERVERS_KEY]
             .as_table_mut()
             .ok_or(HarnessError::Malformed(None))?;
         servers[SERVER_NAME] = updated;
-    } else if let Some(servers) = document["mcp_servers"].as_table_mut() {
+    } else if let Some(servers) = document[CODEX_SERVERS_KEY].as_table_mut() {
         servers.remove(SERVER_NAME);
         if servers.is_empty() {
-            document.remove("mcp_servers");
+            document.remove(CODEX_SERVERS_KEY);
         }
     }
     replace_with_backup(path, document.to_string().as_bytes())?;
     Ok(true)
 }
 
-fn json_entry(root: &Value, dialect: JsonDialect) -> Option<&Value> {
+/// The keys from a client's root to the object that holds its servers, in `dialect`.
+const fn collection_path(dialect: JsonDialect) -> &'static [&'static str] {
     match dialect {
-        JsonDialect::McpServers | JsonDialect::Copilot => root.get("mcpServers")?.get(SERVER_NAME),
-        JsonDialect::Servers => root.get("servers")?.get(SERVER_NAME),
-        JsonDialect::ContextServers => root.get("context_servers")?.get(SERVER_NAME),
-        JsonDialect::Crush => root.get("mcp")?.get(SERVER_NAME),
-        JsonDialect::OpenCodeV1 => root.get("mcp")?.get(SERVER_NAME),
-        JsonDialect::OpenCodeV2 | JsonDialect::ZCode => {
-            root.get("mcp")?.get("servers")?.get(SERVER_NAME)
-        }
+        JsonDialect::McpServers | JsonDialect::Copilot => &[MCP_SERVERS_KEY],
+        JsonDialect::Servers => &[SERVERS_KEY],
+        JsonDialect::ContextServers => &[CONTEXT_SERVERS_KEY],
+        JsonDialect::Crush | JsonDialect::OpenCodeV1 => &[MCP_KEY],
+        JsonDialect::OpenCodeV2 | JsonDialect::ZCode => &[MCP_KEY, SERVERS_KEY],
     }
+}
+
+fn json_entry(root: &Value, dialect: JsonDialect) -> Option<&Value> {
+    collection_path(dialect)
+        .iter()
+        .try_fold(root, |object, key| object.get(key))?
+        .get(SERVER_NAME)
 }
 
 /// The `type` Ghostlight's entry carries in `dialect`, where the dialect needs one to start a
@@ -2769,46 +2803,23 @@ fn json_collection(
     dialect: JsonDialect,
     create: bool,
 ) -> Result<Option<CstObject>, HarnessError> {
-    if matches!(dialect, JsonDialect::OpenCodeV2 | JsonDialect::ZCode) {
-        let mcp = if create {
-            root.object_value_or_create("mcp")
+    let mut object = root.clone();
+    for key in collection_path(dialect) {
+        let child = if create {
+            object.object_value_or_create(key)
         } else {
-            root.object_value("mcp")
+            object.object_value(key)
         };
-        let Some(mcp) = mcp else {
-            return if create && root.get("mcp").is_some() {
-                Err(HarnessError::Malformed(None))
-            } else {
-                Ok(None)
-            };
-        };
-        let servers = if create {
-            mcp.object_value_or_create("servers")
-        } else {
-            mcp.object_value("servers")
-        };
-        return if create && servers.is_none() && mcp.get("servers").is_some() {
-            Err(HarnessError::Malformed(None))
-        } else {
-            Ok(servers)
-        };
+        match child {
+            Some(child) => object = child,
+            // A key that holds something other than an object cannot take Ghostlight's entry.
+            None if create && object.get(key).is_some() => {
+                return Err(HarnessError::Malformed(None))
+            }
+            None => return Ok(None),
+        }
     }
-    let key = match dialect {
-        JsonDialect::McpServers | JsonDialect::Copilot => "mcpServers",
-        JsonDialect::Servers => "servers",
-        JsonDialect::ContextServers => "context_servers",
-        JsonDialect::Crush | JsonDialect::OpenCodeV1 => "mcp",
-        JsonDialect::OpenCodeV2 | JsonDialect::ZCode => unreachable!("handled above"),
-    };
-    let collection = if create {
-        root.object_value_or_create(key)
-    } else {
-        root.object_value(key)
-    };
-    if create && collection.is_none() && root.get(key).is_some() {
-        return Err(HarnessError::Malformed(None));
-    }
-    Ok(collection)
+    Ok(Some(object))
 }
 
 fn cst_input(value: Value) -> CstInputValue {
@@ -2914,17 +2925,14 @@ fn manual_setup(
 
 fn manual_json_setup(edge: &Path, dialect: JsonDialect) -> Result<String, HarnessError> {
     let entry = expected_json_entry(edge, dialect);
-    let document = match dialect {
-        JsonDialect::McpServers | JsonDialect::Copilot => {
-            json!({"mcpServers": {SERVER_NAME: entry}})
-        }
-        JsonDialect::Servers => json!({"servers": {SERVER_NAME: entry}}),
-        JsonDialect::ContextServers => json!({"context_servers": {SERVER_NAME: entry}}),
-        JsonDialect::Crush | JsonDialect::OpenCodeV1 => json!({"mcp": {SERVER_NAME: entry}}),
-        JsonDialect::OpenCodeV2 | JsonDialect::ZCode => {
-            json!({"mcp": {"servers": {SERVER_NAME: entry}}})
-        }
-    };
+    let document =
+        collection_path(dialect)
+            .iter()
+            .rev()
+            .fold(json!({ SERVER_NAME: entry }), |inner, key| {
+                let key: &str = key;
+                json!({ key: inner })
+            });
     serde_json::to_string_pretty(&document).map_err(|_| HarnessError::Malformed(None))
 }
 
@@ -2945,7 +2953,7 @@ fn manual_yaml_setup(edge: &Path, dialect: ManualDialect) -> String {
 
 fn toml_entry_args(entry: &Item) -> Option<Vec<&str>> {
     entry
-        .get("args")?
+        .get(ARGS_KEY)?
         .as_array()?
         .iter()
         .map(toml_edit::Value::as_str)
@@ -3039,8 +3047,8 @@ fn opencode_dialect(context: &HarnessContext, source: &str) -> Result<JsonDialec
     } else {
         source
     })?;
-    let mcp = parsed.get("mcp").and_then(Value::as_object);
-    let v2 = mcp.is_some_and(|mcp| mcp.contains_key("servers"))
+    let mcp = parsed.get(MCP_KEY).and_then(Value::as_object);
+    let v2 = mcp.is_some_and(|mcp| mcp.contains_key(SERVERS_KEY))
         || !mcp.is_some_and(|mcp| mcp.contains_key(SERVER_NAME))
             && executable_on_path(context, "opencode2")
             && !executable_on_path(context, "opencode");
