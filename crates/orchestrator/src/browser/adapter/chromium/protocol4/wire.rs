@@ -47,41 +47,89 @@ pub mod error_code {
 }
 
 /// The closed names of the primitives, as the `name` tag of a request spells them.
-pub mod primitive_name {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrimitiveName {
     /// `list_tabs`.
-    pub const LIST_TABS: &str = "list_tabs";
+    ListTabs,
     /// `open_tab`.
-    pub const OPEN_TAB: &str = "open_tab";
+    OpenTab,
     /// `navigate`.
-    pub const NAVIGATE: &str = "navigate";
+    Navigate,
     /// `focus_tab`.
-    pub const FOCUS_TAB: &str = "focus_tab";
+    FocusTab,
     /// `close_tab`.
-    pub const CLOSE_TAB: &str = "close_tab";
+    CloseTab,
     /// `set_zoom`.
-    pub const SET_ZOOM: &str = "set_zoom";
+    SetZoom,
     /// `resize_window`.
-    pub const RESIZE_WINDOW: &str = "resize_window";
+    ResizeWindow,
     /// `frames`.
-    pub const FRAMES: &str = "frames";
+    Frames,
     /// `call`.
-    pub const CALL: &str = "call";
+    Call,
     /// `evaluate_main`.
-    pub const EVALUATE_MAIN: &str = "evaluate_main";
+    EvaluateMain,
     /// `view`.
-    pub const VIEW: &str = "view";
+    View,
     /// `input`.
-    pub const INPUT: &str = "input";
+    Input,
     /// `capture`.
-    pub const CAPTURE: &str = "capture";
+    Capture,
     /// `dialog`.
-    pub const DIALOG: &str = "dialog";
+    Dialog,
     /// `diagnostics`.
-    pub const DIAGNOSTICS: &str = "diagnostics";
+    Diagnostics,
     /// `recording`.
-    pub const RECORDING: &str = "recording";
+    Recording,
     /// `accessibility_snapshot`.
-    pub const ACCESSIBILITY_SNAPSHOT: &str = "accessibility_snapshot";
+    AccessibilitySnapshot,
+}
+
+impl PrimitiveName {
+    /// Every primitive the service can send.
+    pub const ALL: [Self; 17] = [
+        Self::ListTabs,
+        Self::OpenTab,
+        Self::Navigate,
+        Self::FocusTab,
+        Self::CloseTab,
+        Self::SetZoom,
+        Self::ResizeWindow,
+        Self::Frames,
+        Self::Call,
+        Self::EvaluateMain,
+        Self::View,
+        Self::Input,
+        Self::Capture,
+        Self::Dialog,
+        Self::Diagnostics,
+        Self::Recording,
+        Self::AccessibilitySnapshot,
+    ];
+
+    /// The `name` tag a request carries for this primitive.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ListTabs => "list_tabs",
+            Self::OpenTab => "open_tab",
+            Self::Navigate => "navigate",
+            Self::FocusTab => "focus_tab",
+            Self::CloseTab => "close_tab",
+            Self::SetZoom => "set_zoom",
+            Self::ResizeWindow => "resize_window",
+            Self::Frames => "frames",
+            Self::Call => "call",
+            Self::EvaluateMain => "evaluate_main",
+            Self::View => "view",
+            Self::Input => "input",
+            Self::Capture => "capture",
+            Self::Dialog => "dialog",
+            Self::Diagnostics => "diagnostics",
+            Self::Recording => "recording",
+            Self::AccessibilitySnapshot => "accessibility_snapshot",
+        }
+    }
 }
 
 // ---- frames, extension to service ----

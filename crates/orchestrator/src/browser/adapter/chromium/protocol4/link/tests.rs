@@ -1121,7 +1121,7 @@ fn every_spec_names_the_primitive_it_sends() {
         serde_json::to_value(primitive).unwrap()["name"].clone()
     }
     fn check<P: Spec>(primitive: P) {
-        assert_eq!(name_of(primitive.into_primitive()), P::NAME);
+        assert_eq!(name_of(primitive.into_primitive()), P::NAME.as_str());
     }
     let guard = None;
     check(wire::ListTabs { tab_ids: None });

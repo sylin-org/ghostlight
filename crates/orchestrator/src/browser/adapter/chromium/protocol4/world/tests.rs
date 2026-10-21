@@ -34,176 +34,194 @@ fn every_kind_has_one_constructor_and_the_classes_of_its_table_row() {
     let table = [
         (
             read_text(None, None, 10),
-            kind::READ_TEXT,
+            WorldKind::ReadText,
             Content,
             Read,
             true,
         ),
-        (inspect("controls", 5), kind::INSPECT, Content, Read, true),
+        (
+            inspect("controls", 5),
+            WorldKind::Inspect,
+            Content,
+            Read,
+            true,
+        ),
         (
             inspect_tree(None, 6, 400),
-            kind::INSPECT_TREE,
+            WorldKind::InspectTree,
             Content,
             Read,
             true,
         ),
-        (find("Save", "control", 8), kind::FIND, Content, Read, true),
+        (
+            find("Save", "control", 8),
+            WorldKind::Find,
+            Content,
+            Read,
+            true,
+        ),
         (
             query_semantic("Email", None, false, true, 8),
-            kind::QUERY_SEMANTIC,
+            WorldKind::QuerySemantic,
             Content,
             Read,
             true,
         ),
-        (describe(&[]), kind::DESCRIBE, Content, Read, false),
+        (describe(&[]), WorldKind::Describe, Content, Read, false),
         (
             describe_focused(),
-            kind::DESCRIBE_FOCUSED,
+            WorldKind::DescribeFocused,
             Content,
             Read,
             false,
         ),
         (
             verify_focused_text(false),
-            kind::VERIFY_FOCUSED_TEXT,
+            WorldKind::VerifyFocusedText,
             Content,
             Read,
             false,
         ),
-        (box_("l"), kind::BOX, Content, Read, false),
+        (box_("l"), WorldKind::Box, Content, Read, false),
         (
             prepare_fill(&fields, false, None),
-            kind::PREPARE_FILL,
+            WorldKind::PrepareFill,
             Content,
             Read,
             true,
         ),
         (
             verify_fill_retained(&fields, false, 3_000),
-            kind::VERIFY_FILL_RETAINED,
+            WorldKind::VerifyFillRetained,
             Content,
             Read,
             false,
         ),
         (
             observe("load_ready", None, None, 5_000, false),
-            kind::OBSERVE,
+            WorldKind::Observe,
             Content,
             Read,
             false,
         ),
-        (activate("l"), kind::ACTIVATE, Content, Read, false),
-        (hover("l"), kind::HOVER, Content, Read, false),
-        (focus("l"), kind::FOCUS, Content, Read, false),
+        (activate("l"), WorldKind::Activate, Content, Read, false),
+        (hover("l"), WorldKind::Hover, Content, Read, false),
+        (focus("l"), WorldKind::Focus, Content, Read, false),
         (
             scroll_point(1.0, 2.0),
-            kind::SCROLL_POINT,
+            WorldKind::ScrollPoint,
             Content,
             Read,
             false,
         ),
         (
             viewport_point(1.0, 2.0),
-            kind::VIEWPORT_POINT,
+            WorldKind::ViewportPoint,
             Metadata,
             Read,
             false,
         ),
-        (scroll_offset(), kind::SCROLL_OFFSET, Metadata, Read, false),
+        (
+            scroll_offset(),
+            WorldKind::ScrollOffset,
+            Metadata,
+            Read,
+            false,
+        ),
         (
             hit_point(1.0, 2.0, false),
-            kind::HIT_POINT,
+            WorldKind::HitPoint,
             Metadata,
             Read,
             false,
         ),
-        (owner_box(), kind::OWNER_BOX, Metadata, Read, false),
+        (owner_box(), WorldKind::OwnerBox, Metadata, Read, false),
         (
             owner_probe(1.0, 2.0),
-            kind::OWNER_PROBE,
+            WorldKind::OwnerProbe,
             Metadata,
             Read,
             false,
         ),
-        (focus_probe(), kind::FOCUS_PROBE, Metadata, Read, false),
+        (focus_probe(), WorldKind::FocusProbe, Metadata, Read, false),
         (
             require_focused(),
-            kind::REQUIRE_FOCUSED,
+            WorldKind::RequireFocused,
             Metadata,
             Read,
             false,
         ),
         (
             fill_local(&fields[0], false),
-            kind::FILL_LOCAL,
+            WorldKind::FillLocal,
             Content,
             Effect,
             false,
         ),
         (
             focus_text_field(&fields[0], false),
-            kind::FOCUS_TEXT_FIELD,
+            WorldKind::FocusTextField,
             Content,
             Effect,
             true,
         ),
         (
             submit_fill(&fields, "l", false),
-            kind::SUBMIT_FILL,
+            WorldKind::SubmitFill,
             Content,
             Effect,
             false,
         ),
         (
             type_text("l", "t", true, false),
-            kind::TYPE_TEXT,
+            WorldKind::TypeText,
             Content,
             Effect,
             false,
         ),
         (
             clear_focused(false),
-            kind::CLEAR_FOCUSED,
+            WorldKind::ClearFocused,
             Content,
             Effect,
             false,
         ),
         (
             scroll(None, None, None),
-            kind::SCROLL,
+            WorldKind::Scroll,
             Content,
             Effect,
             false,
         ),
         (
             upload_files("l", &files),
-            kind::UPLOAD_FILES,
+            WorldKind::UploadFiles,
             Content,
             Effect,
             false,
         ),
         (
             drop_files(1.0, 2.0, &files),
-            kind::DROP_FILES,
+            WorldKind::DropFiles,
             Content,
             Effect,
             false,
         ),
         (
             attach_file("l", "demo.gif"),
-            kind::ATTACH_FILE,
+            WorldKind::AttachFile,
             Content,
             Effect,
             false,
         ),
     ];
-    assert_eq!(table.len(), 32);
+    assert_eq!(table.len(), WorldKind::ALL.len());
     for (message, name, scope, effect, settles) in table {
         assert_eq!(message.kind(), name);
-        assert_eq!(message.payload()["kind"], name);
-        assert_eq!(message.scope_class(), scope, "{name}");
-        assert_eq!(message.effect_class(), effect, "{name}");
-        assert_eq!(message.takes_settle(), settles, "{name}");
+        assert_eq!(message.payload()["kind"], name.as_str());
+        assert_eq!(message.scope_class(), scope, "{name:?}");
+        assert_eq!(message.effect_class(), effect, "{name:?}");
+        assert_eq!(message.takes_settle(), settles, "{name:?}");
     }
 }
 
@@ -368,7 +386,7 @@ fn constructors_build_the_payloads_the_assets_read() {
         ),
     ];
     for (message, expected) in cases {
-        assert_eq!(message.to_json(), expected, "{}", message.kind());
+        assert_eq!(message.to_json(), expected, "{:?}", message.kind());
     }
 }
 

@@ -14,11 +14,11 @@ use serde_json::Value;
 
 use super::link::{FocusTab, Frames, Spec, View, WorldCalls};
 use super::wire::{
-    self, primitive_name, CallAnswer, CallFailure, CallMode, DiagnosticDetail, DiagnosticSource,
-    Event, Failure, Inbound, InputStop, KeyAction, MouseAction, MouseButton, Outbound, Readiness,
+    self, CallAnswer, CallFailure, CallMode, DiagnosticDetail, DiagnosticSource, Event, Failure,
+    Inbound, InputStop, KeyAction, MouseAction, MouseButton, Outbound, PrimitiveName, Readiness,
     RuntimeControlState,
 };
-use super::world::{self, kind, AssetErrorCode, Message};
+use super::world::{self, AssetErrorCode, Message, WorldKind};
 use crate::browser::adapter::{PhysicalField, PhysicalFile, RuntimeControlIntent};
 use crate::language::field_problem::{FieldProblemKind, WrongToolRoute};
 
@@ -47,63 +47,6 @@ const UNKNOWN_PRIMITIVE: &str = "unknown_primitive";
 
 /// Frame kinds whose fixtures have their own sections: requests, receipts and events.
 const SECTIONED_KINDS: [&str; 3] = ["request", "receipt", "event"];
-
-/// Every world message kind the service can build.
-const WORLD_KINDS: [&str; 32] = [
-    kind::READ_TEXT,
-    kind::INSPECT,
-    kind::INSPECT_TREE,
-    kind::FIND,
-    kind::QUERY_SEMANTIC,
-    kind::DESCRIBE,
-    kind::DESCRIBE_FOCUSED,
-    kind::VERIFY_FOCUSED_TEXT,
-    kind::BOX,
-    kind::PREPARE_FILL,
-    kind::VERIFY_FILL_RETAINED,
-    kind::OBSERVE,
-    kind::ACTIVATE,
-    kind::HOVER,
-    kind::FOCUS,
-    kind::SCROLL_POINT,
-    kind::VIEWPORT_POINT,
-    kind::SCROLL_OFFSET,
-    kind::HIT_POINT,
-    kind::OWNER_BOX,
-    kind::OWNER_PROBE,
-    kind::FOCUS_PROBE,
-    kind::REQUIRE_FOCUSED,
-    kind::FILL_LOCAL,
-    kind::FOCUS_TEXT_FIELD,
-    kind::SUBMIT_FILL,
-    kind::TYPE_TEXT,
-    kind::CLEAR_FOCUSED,
-    kind::SCROLL,
-    kind::UPLOAD_FILES,
-    kind::DROP_FILES,
-    kind::ATTACH_FILE,
-];
-
-/// Every primitive name the service can send.
-const PRIMITIVES: [&str; 17] = [
-    primitive_name::LIST_TABS,
-    primitive_name::OPEN_TAB,
-    primitive_name::NAVIGATE,
-    primitive_name::FOCUS_TAB,
-    primitive_name::CLOSE_TAB,
-    primitive_name::SET_ZOOM,
-    primitive_name::RESIZE_WINDOW,
-    primitive_name::FRAMES,
-    primitive_name::CALL,
-    primitive_name::EVALUATE_MAIN,
-    primitive_name::VIEW,
-    primitive_name::INPUT,
-    primitive_name::CAPTURE,
-    primitive_name::DIALOG,
-    primitive_name::DIAGNOSTICS,
-    primitive_name::RECORDING,
-    primitive_name::ACCESSIBILITY_SNAPSHOT,
-];
 
 /// The serialized names of every variant of a unit enum, listed through an exhaustive match so
 /// a variant added in Rust fails to compile here until the vocabulary test sees it.
@@ -223,33 +166,36 @@ fn through<T: DeserializeOwned + Serialize>(context: &str, ok: &Value) -> Value 
 
 /// Decode a receipt's `ok` object as the outcome of the named primitive, and serialize it back.
 fn outcome(primitive: &str, ok: &Value) -> Value {
-    match primitive {
-        primitive_name::LIST_TABS => through::<<wire::ListTabs as Spec>::Outcome>(primitive, ok),
-        primitive_name::OPEN_TAB => through::<<wire::OpenTab as Spec>::Outcome>(primitive, ok),
-        primitive_name::NAVIGATE => through::<<wire::Navigate as Spec>::Outcome>(primitive, ok),
-        primitive_name::FOCUS_TAB => through::<<FocusTab as Spec>::Outcome>(primitive, ok),
-        primitive_name::CLOSE_TAB => through::<<wire::CloseTab as Spec>::Outcome>(primitive, ok),
-        primitive_name::SET_ZOOM => through::<<wire::SetZoom as Spec>::Outcome>(primitive, ok),
-        primitive_name::RESIZE_WINDOW => {
+    let name = PrimitiveName::ALL
+        .into_iter()
+        .find(|name| name.as_str() == primitive)
+        .unwrap_or_else(|| panic!("no primitive {primitive}"));
+    match name {
+        PrimitiveName::ListTabs => through::<<wire::ListTabs as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::OpenTab => through::<<wire::OpenTab as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::Navigate => through::<<wire::Navigate as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::FocusTab => through::<<FocusTab as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::CloseTab => through::<<wire::CloseTab as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::SetZoom => through::<<wire::SetZoom as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::ResizeWindow => {
             through::<<wire::ResizeWindow as Spec>::Outcome>(primitive, ok)
         }
-        primitive_name::FRAMES => through::<<Frames as Spec>::Outcome>(primitive, ok),
-        primitive_name::CALL => through::<<WorldCalls as Spec>::Outcome>(primitive, ok),
-        primitive_name::EVALUATE_MAIN => {
+        PrimitiveName::Frames => through::<<Frames as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::Call => through::<<WorldCalls as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::EvaluateMain => {
             through::<<wire::EvaluateMain as Spec>::Outcome>(primitive, ok)
         }
-        primitive_name::VIEW => through::<<View as Spec>::Outcome>(primitive, ok),
-        primitive_name::INPUT => through::<<wire::Input as Spec>::Outcome>(primitive, ok),
-        primitive_name::CAPTURE => through::<<wire::Capture as Spec>::Outcome>(primitive, ok),
-        primitive_name::DIALOG => through::<<wire::Dialog as Spec>::Outcome>(primitive, ok),
-        primitive_name::DIAGNOSTICS => {
+        PrimitiveName::View => through::<<View as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::Input => through::<<wire::Input as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::Capture => through::<<wire::Capture as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::Dialog => through::<<wire::Dialog as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::Diagnostics => {
             through::<<wire::DiagnosticsOp as Spec>::Outcome>(primitive, ok)
         }
-        primitive_name::RECORDING => through::<<wire::RecordingOp as Spec>::Outcome>(primitive, ok),
-        primitive_name::ACCESSIBILITY_SNAPSHOT => {
+        PrimitiveName::Recording => through::<<wire::RecordingOp as Spec>::Outcome>(primitive, ok),
+        PrimitiveName::AccessibilitySnapshot => {
             through::<<wire::AccessibilitySnapshot as Spec>::Outcome>(primitive, ok)
         }
-        other => panic!("no outcome for primitive {other}"),
     }
 }
 
@@ -283,7 +229,7 @@ fn every_request_serializes_back_to_its_fixture() {
     }
     assert_eq!(
         named,
-        set(PRIMITIVES),
+        set(PrimitiveName::ALL.map(PrimitiveName::as_str)),
         "every primitive has a request fixture"
     );
 }
@@ -387,17 +333,17 @@ fn tolerance_fixtures_decode_with_unknowns_mapped() {
         let expect = &fixture["expect"];
         match stem.as_str() {
             "call.unknown_answer_status" => {
-                let (_, ok) = typed_receipt(primitive_name::CALL, frame);
+                let (_, ok) = typed_receipt(PrimitiveName::Call.as_str(), frame);
                 let called: wire::Called = decode(&stem, &ok.expect("ok"));
                 assert_eq!(called.answers, vec![CallAnswer::Unknown]);
             }
             "input.unknown_stop_reason" => {
-                let (_, ok) = typed_receipt(primitive_name::INPUT, frame);
+                let (_, ok) = typed_receipt(PrimitiveName::Input.as_str(), frame);
                 let done: wire::InputDone = decode(&stem, &ok.expect("ok"));
                 assert_eq!(done.stopped, Some(InputStop::Other));
             }
             "tab.unknown_readiness" => {
-                let (_, ok) = typed_receipt(primitive_name::NAVIGATE, frame);
+                let (_, ok) = typed_receipt(PrimitiveName::Navigate.as_str(), frame);
                 let navigated: wire::Navigated = decode(&stem, &ok.expect("ok"));
                 assert_eq!(navigated.tab.readiness, Readiness::Unknown);
             }
@@ -433,8 +379,8 @@ fn tolerance_fixtures_decode_with_unknowns_mapped() {
             "receipt.extra_fields" => {
                 let target = read(expect["decodes_as"].as_str().expect("a fixture"));
                 assert_eq!(
-                    typed_receipt(primitive_name::NAVIGATE, frame),
-                    typed_receipt(primitive_name::NAVIGATE, &target)
+                    typed_receipt(PrimitiveName::Navigate.as_str(), frame),
+                    typed_receipt(PrimitiveName::Navigate.as_str(), &target)
                 );
             }
             "request.unknown_primitive" => {
@@ -477,7 +423,10 @@ fn closed_names_equal_the_vocabulary() {
     let check = |key: &str, names: BTreeSet<String>| {
         assert_eq!(names, listed(&vocabulary, key), "vocabulary.{key}");
     };
-    check("primitives", set(PRIMITIVES));
+    check(
+        "primitives",
+        set(PrimitiveName::ALL.map(PrimitiveName::as_str)),
+    );
     check(
         "receipt_failures",
         set(
@@ -529,7 +478,10 @@ fn closed_names_equal_the_vocabulary() {
         "control_states",
         set(names!(RuntimeControlState: Active, Held, Ended)),
     );
-    check("world_message_kinds", set(WORLD_KINDS));
+    check(
+        "world_message_kinds",
+        set(WorldKind::ALL.map(WorldKind::as_str)),
+    );
 
     let steps = |value: &Value| {
         value
@@ -657,7 +609,7 @@ fn content_js_dispatches_exactly_the_kinds_the_service_builds() {
         .skip(1)
         .map(|rest| rest.split('"').next().expect("a kind").to_owned())
         .collect();
-    assert_eq!(dispatched, set(WORLD_KINDS));
+    assert_eq!(dispatched, set(WorldKind::ALL.map(WorldKind::as_str)));
 }
 
 /// The fields of a fill fixture.
@@ -696,73 +648,76 @@ fn build(kind_name: &str, f: &Value) -> Message {
     };
     let credentials = || flag("allow_credentials");
     let field = || decode::<PhysicalField>("field", &f["field"]);
-    let message = match kind_name {
-        kind::READ_TEXT => {
+    let kind = WorldKind::ALL
+        .into_iter()
+        .find(|kind| kind.as_str() == kind_name)
+        .unwrap_or_else(|| panic!("no world kind {kind_name}"));
+    let message = match kind {
+        WorldKind::ReadText => {
             world::read_text(optional("locator"), optional("mode"), size("max_chars"))
         }
-        kind::INSPECT => world::inspect(text("inspect_kind"), size("max_items")),
-        kind::INSPECT_TREE => {
+        WorldKind::Inspect => world::inspect(text("inspect_kind"), size("max_items")),
+        WorldKind::InspectTree => {
             world::inspect_tree(optional("locator"), size("max_depth"), size("max_nodes"))
         }
-        kind::FIND => world::find(text("text"), text("find_kind"), size("max_results")),
-        kind::QUERY_SEMANTIC => world::query_semantic(
+        WorldKind::Find => world::find(text("text"), text("find_kind"), size("max_results")),
+        WorldKind::QuerySemantic => world::query_semantic(
             text("name"),
             optional("role"),
             flag("exact"),
             flag("form_scope"),
             size("max_results"),
         ),
-        kind::DESCRIBE => world::describe(&decode::<Vec<String>>("locators", &f["locators"])),
-        kind::DESCRIBE_FOCUSED => world::describe_focused(),
-        kind::VERIFY_FOCUSED_TEXT => world::verify_focused_text(credentials()),
-        kind::BOX => world::box_(text("locator")),
-        kind::PREPARE_FILL => world::prepare_fill(
+        WorldKind::Describe => world::describe(&decode::<Vec<String>>("locators", &f["locators"])),
+        WorldKind::DescribeFocused => world::describe_focused(),
+        WorldKind::VerifyFocusedText => world::verify_focused_text(credentials()),
+        WorldKind::Box => world::box_(text("locator")),
+        WorldKind::PrepareFill => world::prepare_fill(
             &fields(&f["fields"]),
             credentials(),
             optional("submit_locator"),
         ),
-        kind::VERIFY_FILL_RETAINED => {
+        WorldKind::VerifyFillRetained => {
             world::verify_fill_retained(&fields(&f["fields"]), credentials(), count("limit_ms"))
         }
-        kind::OBSERVE => world::observe(
+        WorldKind::Observe => world::observe(
             text("condition"),
             optional("value"),
             optional("locator"),
             count("timeout_ms"),
             flag("until_satisfied"),
         ),
-        kind::ACTIVATE => world::activate(text("locator")),
-        kind::HOVER => world::hover(text("locator")),
-        kind::FOCUS => world::focus(text("locator")),
-        kind::SCROLL_POINT => world::scroll_point(number("x"), number("y")),
-        kind::VIEWPORT_POINT => world::viewport_point(number("x"), number("y")),
-        kind::SCROLL_OFFSET => world::scroll_offset(),
-        kind::HIT_POINT => world::hit_point(number("x"), number("y"), flag("page")),
-        kind::OWNER_BOX => world::owner_box(),
-        kind::OWNER_PROBE => world::owner_probe(number("x"), number("y")),
-        kind::FOCUS_PROBE => world::focus_probe(),
-        kind::REQUIRE_FOCUSED => world::require_focused(),
-        kind::FILL_LOCAL => world::fill_local(&field(), credentials()),
-        kind::FOCUS_TEXT_FIELD => world::focus_text_field(&field(), credentials()),
-        kind::SUBMIT_FILL => {
+        WorldKind::Activate => world::activate(text("locator")),
+        WorldKind::Hover => world::hover(text("locator")),
+        WorldKind::Focus => world::focus(text("locator")),
+        WorldKind::ScrollPoint => world::scroll_point(number("x"), number("y")),
+        WorldKind::ViewportPoint => world::viewport_point(number("x"), number("y")),
+        WorldKind::ScrollOffset => world::scroll_offset(),
+        WorldKind::HitPoint => world::hit_point(number("x"), number("y"), flag("page")),
+        WorldKind::OwnerBox => world::owner_box(),
+        WorldKind::OwnerProbe => world::owner_probe(number("x"), number("y")),
+        WorldKind::FocusProbe => world::focus_probe(),
+        WorldKind::RequireFocused => world::require_focused(),
+        WorldKind::FillLocal => world::fill_local(&field(), credentials()),
+        WorldKind::FocusTextField => world::focus_text_field(&field(), credentials()),
+        WorldKind::SubmitFill => {
             world::submit_fill(&fields(&f["fields"]), text("submit_locator"), credentials())
         }
-        kind::TYPE_TEXT => world::type_text(
+        WorldKind::TypeText => world::type_text(
             text("locator"),
             text("text"),
             flag("clear_first"),
             credentials(),
         ),
-        kind::CLEAR_FOCUSED => world::clear_focused(credentials()),
-        kind::SCROLL => world::scroll(
+        WorldKind::ClearFocused => world::clear_focused(credentials()),
+        WorldKind::Scroll => world::scroll(
             optional("locator"),
             optional("direction"),
             optional("amount"),
         ),
-        kind::UPLOAD_FILES => world::upload_files(text("locator"), &files(&f["files"])),
-        kind::DROP_FILES => world::drop_files(number("x"), number("y"), &files(&f["files"])),
-        kind::ATTACH_FILE => world::attach_file(text("locator"), text("file_name")),
-        other => panic!("no constructor for world kind {other}"),
+        WorldKind::UploadFiles => world::upload_files(text("locator"), &files(&f["files"])),
+        WorldKind::DropFiles => world::drop_files(number("x"), number("y"), &files(&f["files"])),
+        WorldKind::AttachFile => world::attach_file(text("locator"), text("file_name")),
     };
     match f.get("settle_ms").and_then(Value::as_u64) {
         Some(settle_ms) => message.with_settle(
@@ -780,7 +735,7 @@ fn every_world_constructor_builds_its_fixture() {
     let mut seen = BTreeSet::new();
     for (stem, fixture) in section("world") {
         let message = build(&stem, &fixture);
-        assert_eq!(message.kind(), stem);
+        assert_eq!(message.kind().as_str(), stem);
         assert_eq!(
             normalized(&message.to_json()),
             normalized(&fixture),
@@ -788,5 +743,9 @@ fn every_world_constructor_builds_its_fixture() {
         );
         seen.insert(stem);
     }
-    assert_eq!(seen, set(WORLD_KINDS), "every world kind has a fixture");
+    assert_eq!(
+        seen,
+        set(WorldKind::ALL.map(WorldKind::as_str)),
+        "every world kind has a fixture"
+    );
 }

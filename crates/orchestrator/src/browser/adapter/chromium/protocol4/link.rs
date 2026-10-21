@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use super::connection::{ReceiptResult, Receipts};
 use super::scope::{PlannedCall, Scope};
-use super::wire::{self, primitive_name};
+use super::wire::{self, PrimitiveName};
 use super::world::{self, EffectClass};
 use crate::browser::transport::{SocketWriter, DELIVERY_TIMEOUT};
 use crate::browser::{lock, BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
@@ -62,7 +62,7 @@ pub trait Spec {
     /// The `ok` object of the primitive's receipt.
     type Outcome: DeserializeOwned;
     /// The primitive's wire name.
-    const NAME: &'static str;
+    const NAME: PrimitiveName;
     /// The primitive's class.
     const CLASS: Class;
     /// Whether this request can change the browser. Most primitives answer by class; a few
@@ -80,7 +80,7 @@ macro_rules! spec {
     ($arguments:ty, $outcome:ty, $name:expr, $class:expr, $variant:ident) => {
         impl Spec for $arguments {
             type Outcome = $outcome;
-            const NAME: &'static str = $name;
+            const NAME: PrimitiveName = $name;
             const CLASS: Class = $class;
 
             fn into_primitive(self) -> wire::Primitive {
@@ -93,77 +93,77 @@ macro_rules! spec {
 spec!(
     wire::ListTabs,
     wire::Tabs,
-    primitive_name::LIST_TABS,
+    PrimitiveName::ListTabs,
     Class::Read,
     ListTabs
 );
 spec!(
     wire::OpenTab,
     wire::TabOpened,
-    primitive_name::OPEN_TAB,
+    PrimitiveName::OpenTab,
     Class::Effect,
     OpenTab
 );
 spec!(
     wire::Navigate,
     wire::Navigated,
-    primitive_name::NAVIGATE,
+    PrimitiveName::Navigate,
     Class::Effect,
     Navigate
 );
 spec!(
     wire::CloseTab,
     wire::TabClosed,
-    primitive_name::CLOSE_TAB,
+    PrimitiveName::CloseTab,
     Class::Effect,
     CloseTab
 );
 spec!(
     wire::SetZoom,
     wire::Zoomed,
-    primitive_name::SET_ZOOM,
+    PrimitiveName::SetZoom,
     Class::Effect,
     SetZoom
 );
 spec!(
     wire::ResizeWindow,
     wire::WindowResized,
-    primitive_name::RESIZE_WINDOW,
+    PrimitiveName::ResizeWindow,
     Class::Effect,
     ResizeWindow
 );
 spec!(
     wire::EvaluateMain,
     wire::Evaluated,
-    primitive_name::EVALUATE_MAIN,
+    PrimitiveName::EvaluateMain,
     Class::Effect,
     EvaluateMain
 );
 spec!(
     wire::Input,
     wire::InputDone,
-    primitive_name::INPUT,
+    PrimitiveName::Input,
     Class::Effect,
     Input
 );
 spec!(
     wire::Capture,
     wire::Captured,
-    primitive_name::CAPTURE,
+    PrimitiveName::Capture,
     Class::Read,
     Capture
 );
 spec!(
     wire::DiagnosticsOp,
     wire::DiagnosticsFacts,
-    primitive_name::DIAGNOSTICS,
+    PrimitiveName::Diagnostics,
     Class::Read,
     Diagnostics
 );
 spec!(
     wire::AccessibilitySnapshot,
     wire::AxSnapshot,
-    primitive_name::ACCESSIBILITY_SNAPSHOT,
+    PrimitiveName::AccessibilitySnapshot,
     Class::Read,
     AccessibilitySnapshot
 );
@@ -174,7 +174,7 @@ pub struct FocusTab(pub u64);
 
 impl Spec for FocusTab {
     type Outcome = wire::TabFocused;
-    const NAME: &'static str = primitive_name::FOCUS_TAB;
+    const NAME: PrimitiveName = PrimitiveName::FocusTab;
     const CLASS: Class = Class::Effect;
 
     fn into_primitive(self) -> wire::Primitive {
@@ -188,7 +188,7 @@ pub struct Frames(pub u64);
 
 impl Spec for Frames {
     type Outcome = wire::FrameInventory;
-    const NAME: &'static str = primitive_name::FRAMES;
+    const NAME: PrimitiveName = PrimitiveName::Frames;
     const CLASS: Class = Class::Read;
 
     fn into_primitive(self) -> wire::Primitive {
@@ -202,7 +202,7 @@ pub struct View(pub u64);
 
 impl Spec for View {
     type Outcome = wire::ViewFacts;
-    const NAME: &'static str = primitive_name::VIEW;
+    const NAME: PrimitiveName = PrimitiveName::View;
     const CLASS: Class = Class::Read;
 
     fn into_primitive(self) -> wire::Primitive {
@@ -221,7 +221,7 @@ pub struct WorldCalls {
 
 impl Spec for WorldCalls {
     type Outcome = wire::Called;
-    const NAME: &'static str = primitive_name::CALL;
+    const NAME: PrimitiveName = PrimitiveName::Call;
     const CLASS: Class = Class::Effect;
 
     fn carries_effect(&self) -> bool {
@@ -235,7 +235,7 @@ impl Spec for WorldCalls {
 
 impl Spec for wire::Dialog {
     type Outcome = wire::DialogFacts;
-    const NAME: &'static str = primitive_name::DIALOG;
+    const NAME: PrimitiveName = PrimitiveName::Dialog;
     const CLASS: Class = Class::Read;
 
     /// Reading a dialog's status changes nothing; handling it does.
@@ -250,7 +250,7 @@ impl Spec for wire::Dialog {
 
 impl Spec for wire::RecordingOp {
     type Outcome = wire::RecordingFacts;
-    const NAME: &'static str = primitive_name::RECORDING;
+    const NAME: PrimitiveName = PrimitiveName::Recording;
     const CLASS: Class = Class::Read;
 
     /// An export into a page attaches a file, and an export to Downloads saves one. Either
@@ -815,7 +815,7 @@ impl<'a> Link<'a> {
             wire::Failure::DialogOpen => BrowserError::DialogOpen,
             wire::Failure::NoHistoryEntry => BrowserError::NoHistoryEntry,
             wire::Failure::Unsupported => BrowserError::Unsupported {
-                primitive: P::NAME.into(),
+                primitive: P::NAME.as_str().into(),
             },
             wire::Failure::InvalidRequest => BrowserError::Protocol(message),
             wire::Failure::DebuggerUnavailable

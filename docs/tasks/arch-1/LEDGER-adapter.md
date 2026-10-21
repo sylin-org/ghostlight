@@ -9,8 +9,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset waited on (see
 Notes).
 
-The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7
-and BROW-6 have landed; BROW-14 is next.
+The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7,
+BROW-6 and BROW-14 have landed; BROW-8a is next.
 
 ## Slices
 
@@ -139,7 +139,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10, BROW-4, BROW-7 and BROW-6 have landed; BROW-14 is next.
+with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6 and BROW-14 have landed; BROW-8a is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -147,7 +147,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7 and BROW-6 have landed; 
 | BROW-4 | refactor(adapter): one activate variant each, with a modifier list | - | BROW-4 | landed (this commit) |
 | BROW-7 | refactor(adapter): one call request in place of seven arguments | - | BROW-7 | landed (this commit) |
 | BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | landed (this commit) |
-| BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | todo |
+| BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | landed (this commit) |
 | BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | todo |
 | BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | todo |
 | BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | todo |
@@ -213,3 +213,13 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7 and BROW-6 have landed; 
   becomes `the_runtime_control_state_reaches_the_wire_by_its_name`. The module doc now says each
   mirror converts in the one direction it crosses; completing its list of mirrors is BROW-11a's.
   No macro, as the skeptic corrected, and the protocol 4 goldens pass unchanged.
+- BROW-14: `world::WorldKind` and `wire::PrimitiveName` replace the `kind` and `primitive_name`
+  string modules, each with `ALL` and a `const fn as_str`, in the shape of `TreeNodeKind`.
+  `Message` carries its `WorldKind`, and `Spec::NAME` is a `PrimitiveName`, so a world message or a
+  primitive request cannot name a word outside its set. `golden.rs` loses its two hand lists
+  (`WORLD_KINDS`, `PRIMITIVES`) and reads `ALL`, and its two string matches (the world builder and
+  the receipt outcomes) decode the fixture's word into the enum first and match it exhaustively,
+  so a new kind or primitive without a builder or an outcome fails to compile. The words are
+  unchanged: the request, receipt and world fixtures and the vocabulary golden pass as they were.
+  The slice was parked uncommitted while C17 was in flight (the coordinator's direction), saved
+  as a patch outside the tree, and re-applied cleanly on top of it.

@@ -75,71 +75,149 @@ const FILL_POLL_MS: u64 = 25;
 const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
 
 /// The closed vocabulary of world message kinds.
-pub mod kind {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorldKind {
     /// Read page text.
-    pub const READ_TEXT: &str = "read_text";
+    ReadText,
     /// List controls or structure.
-    pub const INSPECT: &str = "inspect";
+    Inspect,
     /// Read the structure tree.
-    pub const INSPECT_TREE: &str = "inspect_tree";
+    InspectTree,
     /// Find targets by visible text.
-    pub const FIND: &str = "find";
+    Find,
     /// Find targets by role and name.
-    pub const QUERY_SEMANTIC: &str = "query_semantic";
+    QuerySemantic,
     /// Describe targets by locator.
-    pub const DESCRIBE: &str = "describe";
+    Describe,
     /// Describe the focused control.
-    pub const DESCRIBE_FOCUSED: &str = "describe_focused";
+    DescribeFocused,
     /// Check that the focused control takes text.
-    pub const VERIFY_FOCUSED_TEXT: &str = "verify_focused_text";
+    VerifyFocusedText,
     /// Measure a target.
-    pub const BOX: &str = "box";
+    Box,
     /// Validate a fill and wait for a stable form.
-    pub const PREPARE_FILL: &str = "prepare_fill";
+    PrepareFill,
     /// Wait until filled values are retained.
-    pub const VERIFY_FILL_RETAINED: &str = "verify_fill_retained";
+    VerifyFillRetained,
     /// Wait for a condition.
-    pub const OBSERVE: &str = "observe";
+    Observe,
     /// Scroll a target into view and report where to click.
-    pub const ACTIVATE: &str = "activate";
+    Activate,
     /// Scroll a target into view and report where to hover.
-    pub const HOVER: &str = "hover";
+    Hover,
     /// Focus a target.
-    pub const FOCUS: &str = "focus";
+    Focus,
     /// Scroll a page point into view.
-    pub const SCROLL_POINT: &str = "scroll_point";
+    ScrollPoint,
     /// Map a page point to the viewport.
-    pub const VIEWPORT_POINT: &str = "viewport_point";
+    ViewportPoint,
     /// Report the scroll offset.
-    pub const SCROLL_OFFSET: &str = "scroll_offset";
+    ScrollOffset,
     /// Report what lies under a point.
-    pub const HIT_POINT: &str = "hit_point";
+    HitPoint,
     /// Measure the content box of the owner element.
-    pub const OWNER_BOX: &str = "owner_box";
+    OwnerBox,
     /// Check whether the owner element lies under a point.
-    pub const OWNER_PROBE: &str = "owner_probe";
+    OwnerProbe,
     /// Report whether the page holds focus.
-    pub const FOCUS_PROBE: &str = "focus_probe";
+    FocusProbe,
     /// Require that the page holds focus.
-    pub const REQUIRE_FOCUSED: &str = "require_focused";
+    RequireFocused,
     /// Fill one control that takes no keystrokes.
-    pub const FILL_LOCAL: &str = "fill_local";
+    FillLocal,
     /// Focus a text control for browser typing.
-    pub const FOCUS_TEXT_FIELD: &str = "focus_text_field";
+    FocusTextField,
     /// Click the submit control of a validated fill.
-    pub const SUBMIT_FILL: &str = "submit_fill";
+    SubmitFill,
     /// Type into a control.
-    pub const TYPE_TEXT: &str = "type_text";
+    TypeText,
     /// Clear the focused control.
-    pub const CLEAR_FOCUSED: &str = "clear_focused";
+    ClearFocused,
     /// Scroll a target or the page.
-    pub const SCROLL: &str = "scroll";
+    Scroll,
     /// Attach files to a file input.
-    pub const UPLOAD_FILES: &str = "upload_files";
+    UploadFiles,
     /// Drop files at a point.
-    pub const DROP_FILES: &str = "drop_files";
+    DropFiles,
     /// Attach the call's attachment to a file input.
-    pub const ATTACH_FILE: &str = "attach_file";
+    AttachFile,
+}
+
+impl WorldKind {
+    /// Every kind the service can build.
+    pub const ALL: [Self; 32] = [
+        Self::ReadText,
+        Self::Inspect,
+        Self::InspectTree,
+        Self::Find,
+        Self::QuerySemantic,
+        Self::Describe,
+        Self::DescribeFocused,
+        Self::VerifyFocusedText,
+        Self::Box,
+        Self::PrepareFill,
+        Self::VerifyFillRetained,
+        Self::Observe,
+        Self::Activate,
+        Self::Hover,
+        Self::Focus,
+        Self::ScrollPoint,
+        Self::ViewportPoint,
+        Self::ScrollOffset,
+        Self::HitPoint,
+        Self::OwnerBox,
+        Self::OwnerProbe,
+        Self::FocusProbe,
+        Self::RequireFocused,
+        Self::FillLocal,
+        Self::FocusTextField,
+        Self::SubmitFill,
+        Self::TypeText,
+        Self::ClearFocused,
+        Self::Scroll,
+        Self::UploadFiles,
+        Self::DropFiles,
+        Self::AttachFile,
+    ];
+
+    /// The word the page asset dispatches this kind on.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadText => "read_text",
+            Self::Inspect => "inspect",
+            Self::InspectTree => "inspect_tree",
+            Self::Find => "find",
+            Self::QuerySemantic => "query_semantic",
+            Self::Describe => "describe",
+            Self::DescribeFocused => "describe_focused",
+            Self::VerifyFocusedText => "verify_focused_text",
+            Self::Box => "box",
+            Self::PrepareFill => "prepare_fill",
+            Self::VerifyFillRetained => "verify_fill_retained",
+            Self::Observe => "observe",
+            Self::Activate => "activate",
+            Self::Hover => "hover",
+            Self::Focus => "focus",
+            Self::ScrollPoint => "scroll_point",
+            Self::ViewportPoint => "viewport_point",
+            Self::ScrollOffset => "scroll_offset",
+            Self::HitPoint => "hit_point",
+            Self::OwnerBox => "owner_box",
+            Self::OwnerProbe => "owner_probe",
+            Self::FocusProbe => "focus_probe",
+            Self::RequireFocused => "require_focused",
+            Self::FillLocal => "fill_local",
+            Self::FocusTextField => "focus_text_field",
+            Self::SubmitFill => "submit_fill",
+            Self::TypeText => "type_text",
+            Self::ClearFocused => "clear_focused",
+            Self::Scroll => "scroll",
+            Self::UploadFiles => "upload_files",
+            Self::DropFiles => "drop_files",
+            Self::AttachFile => "attach_file",
+        }
+    }
 }
 
 /// Which documents may receive a message.
@@ -164,7 +242,7 @@ pub enum EffectClass {
 /// One message for a page asset, built only by the constructors in this module.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
-    kind: &'static str,
+    kind: WorldKind,
     payload: Value,
     scope: ScopeClass,
     effect: EffectClass,
@@ -172,13 +250,16 @@ pub struct Message {
 }
 
 impl Message {
-    fn new(kind: &'static str, scope: ScopeClass, effect: EffectClass, fields: Value) -> Self {
+    fn new(kind: WorldKind, scope: ScopeClass, effect: EffectClass, fields: Value) -> Self {
         let mut payload = match fields {
             Value::Object(members) => members,
             _ => Map::new(),
         };
         payload.retain(|_, member| !member.is_null());
-        payload.insert(KIND_FIELD.to_owned(), Value::String(kind.to_owned()));
+        payload.insert(
+            KIND_FIELD.to_owned(),
+            Value::String(kind.as_str().to_owned()),
+        );
         Self {
             kind,
             payload: Value::Object(payload),
@@ -195,7 +276,7 @@ impl Message {
 
     /// The kind this message names.
     #[must_use]
-    pub const fn kind(&self) -> &'static str {
+    pub const fn kind(&self) -> WorldKind {
         self.kind
     }
 
@@ -249,7 +330,7 @@ impl Message {
 #[must_use]
 pub fn read_text(locator: Option<&str>, mode: Option<&str>, max_chars: usize) -> Message {
     Message::new(
-        kind::READ_TEXT,
+        WorldKind::ReadText,
         Content,
         Read,
         json!({"locator": locator, "mode": mode, "max_chars": max_chars}),
@@ -261,7 +342,7 @@ pub fn read_text(locator: Option<&str>, mode: Option<&str>, max_chars: usize) ->
 #[must_use]
 pub fn inspect(inspect_kind: &str, max_items: usize) -> Message {
     Message::new(
-        kind::INSPECT,
+        WorldKind::Inspect,
         Content,
         Read,
         json!({"inspect_kind": inspect_kind, "max_items": max_items}),
@@ -273,7 +354,7 @@ pub fn inspect(inspect_kind: &str, max_items: usize) -> Message {
 #[must_use]
 pub fn inspect_tree(locator: Option<&str>, max_depth: usize, max_nodes: usize) -> Message {
     Message::new(
-        kind::INSPECT_TREE,
+        WorldKind::InspectTree,
         Content,
         Read,
         json!({"locator": locator, "max_depth": max_depth, "max_nodes": max_nodes}),
@@ -285,7 +366,7 @@ pub fn inspect_tree(locator: Option<&str>, max_depth: usize, max_nodes: usize) -
 #[must_use]
 pub fn find(text: &str, find_kind: &str, max_results: usize) -> Message {
     Message::new(
-        kind::FIND,
+        WorldKind::Find,
         Content,
         Read,
         json!({"text": text, "find_kind": find_kind, "max_results": max_results}),
@@ -303,7 +384,7 @@ pub fn query_semantic(
     max_results: usize,
 ) -> Message {
     Message::new(
-        kind::QUERY_SEMANTIC,
+        WorldKind::QuerySemantic,
         Content,
         Read,
         json!({"name": name, "role": role, "exact": exact, "form_scope": form_scope,
@@ -315,20 +396,25 @@ pub fn query_semantic(
 /// Describe targets by their local locators.
 #[must_use]
 pub fn describe(locators: &[String]) -> Message {
-    Message::new(kind::DESCRIBE, Content, Read, json!({"locators": locators}))
+    Message::new(
+        WorldKind::Describe,
+        Content,
+        Read,
+        json!({"locators": locators}),
+    )
 }
 
 /// Describe the focused control.
 #[must_use]
 pub fn describe_focused() -> Message {
-    Message::new(kind::DESCRIBE_FOCUSED, Content, Read, json!({}))
+    Message::new(WorldKind::DescribeFocused, Content, Read, json!({}))
 }
 
 /// Check that the focused control takes text.
 #[must_use]
 pub fn verify_focused_text(allow_credentials: bool) -> Message {
     Message::new(
-        kind::VERIFY_FOCUSED_TEXT,
+        WorldKind::VerifyFocusedText,
         Content,
         Read,
         json!({"allow_credentials": allow_credentials}),
@@ -338,7 +424,7 @@ pub fn verify_focused_text(allow_credentials: bool) -> Message {
 /// Measure a target without moving the page.
 #[must_use]
 pub fn box_(locator: &str) -> Message {
-    Message::new(kind::BOX, Content, Read, json!({"locator": locator}))
+    Message::new(WorldKind::Box, Content, Read, json!({"locator": locator}))
 }
 
 /// Validate every field and the submit control, and wait for the form to be stable, before any
@@ -350,7 +436,7 @@ pub fn prepare_fill(
     submit_locator: Option<&str>,
 ) -> Message {
     Message::new(
-        kind::PREPARE_FILL,
+        WorldKind::PrepareFill,
         Content,
         Read,
         json!({
@@ -372,7 +458,7 @@ pub fn verify_fill_retained(
     limit_ms: u64,
 ) -> Message {
     Message::new(
-        kind::VERIFY_FILL_RETAINED,
+        WorldKind::VerifyFillRetained,
         Content,
         Read,
         json!({
@@ -396,7 +482,7 @@ pub fn observe(
     until_satisfied: bool,
 ) -> Message {
     Message::new(
-        kind::OBSERVE,
+        WorldKind::Observe,
         Content,
         Read,
         json!({
@@ -412,26 +498,31 @@ pub fn observe(
 /// Scroll a target into view and report its rectangle and subject, ready for a click.
 #[must_use]
 pub fn activate(locator: &str) -> Message {
-    Message::new(kind::ACTIVATE, Content, Read, json!({"locator": locator}))
+    Message::new(
+        WorldKind::Activate,
+        Content,
+        Read,
+        json!({"locator": locator}),
+    )
 }
 
 /// Scroll a target into view and report its rectangle and subject, ready for a hover.
 #[must_use]
 pub fn hover(locator: &str) -> Message {
-    Message::new(kind::HOVER, Content, Read, json!({"locator": locator}))
+    Message::new(WorldKind::Hover, Content, Read, json!({"locator": locator}))
 }
 
 /// Scroll a target into view and focus it.
 #[must_use]
 pub fn focus(locator: &str) -> Message {
-    Message::new(kind::FOCUS, Content, Read, json!({"locator": locator}))
+    Message::new(WorldKind::Focus, Content, Read, json!({"locator": locator}))
 }
 
 /// Scroll a page point into view and report it in viewport coordinates.
 #[must_use]
 pub fn scroll_point(x: f64, y: f64) -> Message {
     Message::new(
-        kind::SCROLL_POINT,
+        WorldKind::ScrollPoint,
         Content,
         Read,
         json!({"x": coordinate(x), "y": coordinate(y)}),
@@ -442,7 +533,7 @@ pub fn scroll_point(x: f64, y: f64) -> Message {
 #[must_use]
 pub fn viewport_point(x: f64, y: f64) -> Message {
     Message::new(
-        kind::VIEWPORT_POINT,
+        WorldKind::ViewportPoint,
         Metadata,
         Read,
         json!({"x": coordinate(x), "y": coordinate(y)}),
@@ -452,14 +543,14 @@ pub fn viewport_point(x: f64, y: f64) -> Message {
 /// Report the document's scroll offset.
 #[must_use]
 pub fn scroll_offset() -> Message {
-    Message::new(kind::SCROLL_OFFSET, Metadata, Read, json!({}))
+    Message::new(WorldKind::ScrollOffset, Metadata, Read, json!({}))
 }
 
 /// Report what lies under a point of the viewport, or of the page when `page` is set.
 #[must_use]
 pub fn hit_point(x: f64, y: f64, page: bool) -> Message {
     Message::new(
-        kind::HIT_POINT,
+        WorldKind::HitPoint,
         Metadata,
         Read,
         json!({"x": coordinate(x), "y": coordinate(y), "page": page}),
@@ -469,14 +560,14 @@ pub fn hit_point(x: f64, y: f64, page: bool) -> Message {
 /// Measure the content box of the owner element. The call names the child frame it owns.
 #[must_use]
 pub fn owner_box() -> Message {
-    Message::new(kind::OWNER_BOX, Metadata, Read, json!({}))
+    Message::new(WorldKind::OwnerBox, Metadata, Read, json!({}))
 }
 
 /// Say whether the owner element lies under a point, and where its content box starts.
 #[must_use]
 pub fn owner_probe(x: f64, y: f64) -> Message {
     Message::new(
-        kind::OWNER_PROBE,
+        WorldKind::OwnerProbe,
         Metadata,
         Read,
         json!({"x": coordinate(x), "y": coordinate(y)}),
@@ -486,20 +577,20 @@ pub fn owner_probe(x: f64, y: f64) -> Message {
 /// Say whether this document holds the page's focus.
 #[must_use]
 pub fn focus_probe() -> Message {
-    Message::new(kind::FOCUS_PROBE, Metadata, Read, json!({}))
+    Message::new(WorldKind::FocusProbe, Metadata, Read, json!({}))
 }
 
 /// Fail with `focus_lost` unless this document holds the page's focus on a non-frame element.
 #[must_use]
 pub fn require_focused() -> Message {
-    Message::new(kind::REQUIRE_FOCUSED, Metadata, Read, json!({}))
+    Message::new(WorldKind::RequireFocused, Metadata, Read, json!({}))
 }
 
 /// Fill one control that takes no keystrokes.
 #[must_use]
 pub fn fill_local(field: &PhysicalField, allow_credentials: bool) -> Message {
     Message::new(
-        kind::FILL_LOCAL,
+        WorldKind::FillLocal,
         Content,
         Effect,
         json!({"field": field, "allow_credentials": allow_credentials}),
@@ -510,7 +601,7 @@ pub fn fill_local(field: &PhysicalField, allow_credentials: bool) -> Message {
 #[must_use]
 pub fn focus_text_field(field: &PhysicalField, allow_credentials: bool) -> Message {
     Message::new(
-        kind::FOCUS_TEXT_FIELD,
+        WorldKind::FocusTextField,
         Content,
         Effect,
         json!({"field": field, "allow_credentials": allow_credentials}),
@@ -527,7 +618,7 @@ pub fn submit_fill(
     allow_credentials: bool,
 ) -> Message {
     Message::new(
-        kind::SUBMIT_FILL,
+        WorldKind::SubmitFill,
         Content,
         Effect,
         json!({
@@ -542,7 +633,7 @@ pub fn submit_fill(
 #[must_use]
 pub fn type_text(locator: &str, text: &str, clear_first: bool, allow_credentials: bool) -> Message {
     Message::new(
-        kind::TYPE_TEXT,
+        WorldKind::TypeText,
         Content,
         Effect,
         json!({
@@ -558,7 +649,7 @@ pub fn type_text(locator: &str, text: &str, clear_first: bool, allow_credentials
 #[must_use]
 pub fn clear_focused(allow_credentials: bool) -> Message {
     Message::new(
-        kind::CLEAR_FOCUSED,
+        WorldKind::ClearFocused,
         Content,
         Effect,
         json!({"allow_credentials": allow_credentials}),
@@ -569,7 +660,7 @@ pub fn clear_focused(allow_credentials: bool) -> Message {
 #[must_use]
 pub fn scroll(locator: Option<&str>, direction: Option<&str>, amount: Option<&str>) -> Message {
     Message::new(
-        kind::SCROLL,
+        WorldKind::Scroll,
         Content,
         Effect,
         json!({"locator": locator, "direction": direction, "amount": amount}),
@@ -580,7 +671,7 @@ pub fn scroll(locator: Option<&str>, direction: Option<&str>, amount: Option<&st
 #[must_use]
 pub fn upload_files(locator: &str, files: &[PhysicalFile]) -> Message {
     Message::new(
-        kind::UPLOAD_FILES,
+        WorldKind::UploadFiles,
         Content,
         Effect,
         json!({"locator": locator, "files": files}),
@@ -591,7 +682,7 @@ pub fn upload_files(locator: &str, files: &[PhysicalFile]) -> Message {
 #[must_use]
 pub fn drop_files(x: f64, y: f64, files: &[PhysicalFile]) -> Message {
     Message::new(
-        kind::DROP_FILES,
+        WorldKind::DropFiles,
         Content,
         Effect,
         json!({"x": coordinate(x), "y": coordinate(y), "files": files}),
@@ -602,7 +693,7 @@ pub fn drop_files(x: f64, y: f64, files: &[PhysicalFile]) -> Message {
 #[must_use]
 pub fn attach_file(locator: &str, file_name: &str) -> Message {
     Message::new(
-        kind::ATTACH_FILE,
+        WorldKind::AttachFile,
         Content,
         Effect,
         json!({"locator": locator, "file_name": file_name}),
