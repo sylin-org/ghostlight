@@ -9,6 +9,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset waited on (see
 Notes). The lane has no open slice.
 
+The second sweep (2026-10-20) opens this lane again: see its section below.
+
 ## Slices
 
 In the ADR's order. "After" names what a slice waits for, including the ux-2-first rule.
@@ -131,3 +133,22 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `a_target_screenshot_under_one_second_still_measures` in `protocol4/translate/tests/interaction.rs`;
   `a_tree_over_the_node_budget_is_cut_once_and_says_so` in `protocol4/translate/tests.rs`. The
   page-asset tests pass with `assets.sha256` regenerated. No journey is needed.
+
+## The second sweep (2026-10-20)
+
+Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
+slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
+with its skeptic's corrections. Nothing has landed yet; start with BROW-10.
+
+| Slice | Subject | After | Source | Status |
+| --- | --- | --- | --- | --- |
+| BROW-10 | refactor(assets): one table of the page's error codes, tested against what `content.js` throws, and `visualIdentity` derived from its beats | - | BROW-10 as corrected; `assets.sha256` regenerates | todo |
+| BROW-4 | refactor(adapter): one activate variant each, with a modifier list | - | BROW-4 | todo |
+| BROW-7 | refactor(adapter): one call request in place of seven arguments | - | BROW-7 | todo |
+| BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | todo |
+| BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | todo |
+| BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | todo |
+| BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | todo |
+| BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | todo |
+| BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | todo |
+| BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | todo |

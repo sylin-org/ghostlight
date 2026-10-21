@@ -121,3 +121,67 @@ and the in-place deploy through `scripts/dev-loop.ps1` run (docs/MEMORY.md, One 
 - The slice's ledger row changes in the slice's own commit.
 - Nothing is deployed, released or published by a lane. The coordinator integrates at each lane's
   close, has the journeys run as above, deploys in place, checks live and pushes.
+
+## The second sweep (2026-10-20)
+
+The [ADR-0203 amendment of 2026-10-20](../../adr/0203-one-owner-for-each-fact.md#amendment-2026-10-20-the-second-sweep)
+decides it, and [the second sweep](sweep-2026-10-20/README.md) holds its findings, their verdicts
+and the defects that go first. The first sweep's open slices are part of it: each lane takes the
+ones that share its files before the new findings in those files.
+
+### Lanes and machines
+
+Core is split in three for the second sweep; every other lane keeps its files.
+
+| Lane | Files | Machine | Ledger |
+| --- | --- | --- | --- |
+| core-language | `language/` apart from `policy.rs`, `deployment.rs`, `workbench.rs`, `setup.rs` and `readiness.rs`; the catalog and result goldens | test-01 (CachyOS) | [LEDGER-core-language.md](LEDGER-core-language.md) |
+| core-work | `work/**`, `workspace/**` | test-03 (Alpine) | [LEDGER-core-work.md](LEDGER-core-work.md) |
+| core-service | `service/**`, `intake/` apart from `intake/desktop.rs`, `browser/` outside `browser/adapter/`, `presentation/**`, `audit.rs`, `audit/**`, `events.rs`, `provenance.rs`, `diagnostics.rs`, `lib.rs`, `main.rs`, the journeys in `tests/`, `tests/lib/**` and `tests/guards/**` | the coordinator, on the owner's machine | [LEDGER-core-service.md](LEDGER-core-service.md) |
+| adapter | as above | test-02 (Bluefin) | [LEDGER-adapter.md](LEDGER-adapter.md) |
+| package | as above | test-02, after adapter | [LEDGER-package.md](LEDGER-package.md) |
+| policy | as above | test-03, after core-work | [LEDGER-policy.md](LEDGER-policy.md) |
+| install | as above, `cli/**` included | leo-desktop-02 | [LEDGER-install.md](LEDGER-install.md) |
+| surface | as above | leo-desktop-02, after install | [LEDGER-surface.md](LEDGER-surface.md) |
+| docs | as above | the coordinator | [LEDGER-docs.md](LEDGER-docs.md) |
+
+[LEDGER-core.md](LEDGER-core.md) keeps the first sweep's record; its open slices moved to the
+three core ledgers.
+
+### Five checkouts
+
+The first sweep ran in one checkout and the coordinator pushed. The second runs on five machines,
+each in its own checkout of `dev`, so lanes push their own slices:
+
+- After a slice, run the checks AGENTS.md names for what it changed, commit by path with `-s` and
+  the ledger row, `git pull --rebase origin dev`, run the touched crates' tests again when the
+  rebase brought commits in them, and push. A rebase conflict in another lane's file: stop and tell
+  the coordinator.
+- CI runs on every push, and a red run a slice caused is its lane's next task. Linux cannot compile
+  Windows-only code, nor Windows the Linux-only code: a slice that edits such code says so and its
+  lane watches the CI run, or the code goes to the lane on the matching system.
+- Journeys that start a service run on the lane's machine from a fresh build named by
+  `GHOSTLIGHT_BIN_DIR`, never on the owner's machine.
+- Live checks: a lane deploys its machine's build in place and runs an agent task (the desk bell)
+  after each defect fix and at each lane milestone. The coordinator deploys `dev` in place on the
+  owner's machine at every lane close and before the candidate, and checks it live. A push to `dev`
+  reaches no user, and the candidate is deployed and checked on the owner's machine and on all four
+  test machines before anything is released. That is how this batch keeps docs/MEMORY.md's "Test
+  locally before anything leaves the machine" with five checkouts.
+- Build in `.target-lane-arch-<lane>`. The rest of "One checkout" above still binds: stage by
+  path, never stash, amend or `git add -A`, the ledger row in the slice's commit, no shims.
+
+### Order across lanes
+
+- C17 (one wait vocabulary) is core-language's first refactor. core-work and adapter leave the
+  wait uses alone until it lands.
+- C12b's language half lands in core-language before core-work's half and WORK-2, WORK-3 and
+  WORK-4, which extend its constructor.
+- LANG-3's closed vocabularies are defined in core-language with their uses edited in the same
+  commit, under the cross-lane rule above. BROW-3's adapter half follows in adapter.
+- LANG-2's `HandleKind` is defined in core-language. core-work adopts it in `workspace/`.
+- SERV-7's poison-tolerant `lock` becomes one crate helper in core-service's first refactor. Each
+  lane then replaces its own copies.
+- The package lane ends with the freeze golden regenerated and the extension ready for one new
+  2.0.1 submission. Cancelling the staged review and submitting are the owner's go.
+- Surface's S3 wires INST-15's `resymbol`. Docs takes the lines other lanes owe, as D2 does.

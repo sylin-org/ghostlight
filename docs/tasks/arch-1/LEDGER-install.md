@@ -9,6 +9,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 Every arch-1 slice has landed; I11 landed with follow-up F2 after the owner's answer to question 1. The
 follow-up slices of 2026-10-19 are recorded under Notes, Follow-up (2026-10-19).
 
+The second sweep (2026-10-20) opens this lane again: see its section below.
+
 ## Slices
 
 In the ADR's order. "After" names what a slice waits for, including the ux-2-first rule.
@@ -391,3 +393,34 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   before the entries. Making a file another principal owns needs the restore privilege, so
   `a_file_another_principal_owns_is_open` proves the decision on the owner and grants directly,
   including an Administrators-owned file whose list grants only the user and SYSTEM.
+
+## The second sweep (2026-10-20)
+
+Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: leo-desktop-02 (Windows). A
+slice's specification is its finding in [sweep-2026-10-20/install.md](sweep-2026-10-20/install.md), read
+with its skeptic's corrections. Nothing has landed yet; start with I-D1.
+
+| Slice | Subject | After | Source | Status |
+| --- | --- | --- | --- | --- |
+| I-D1 | fix(install): an empty `XDG_CONFIG_HOME`, `APPDATA` or `CODEX_HOME` counts as unset | - | INST-4's defect | todo |
+| I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | todo |
+| I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | todo |
+| INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | todo |
+| INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | todo |
+| INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | todo |
+| INST-9 | refactor(install): the install's sentences move to `language/deployment.rs` | - | INST-9; some reach the agent, so model-visible text stays byte-equal | todo |
+| INST-8 | refactor(install): `inspect` reads its state once | - | INST-8 | todo |
+| INST-6 | refactor(install): one `edit` for every dialect | INST-8 | INST-6 | todo |
+| INST-7 | refactor(install): each dialect names its keys once | INST-6 | INST-7 | todo |
+| INST-12 | refactor(install): the roster rows share one base | - | INST-12 | todo |
+| INST-13 | refactor(install): one per-agent catalog loop, and `AppPlace` | - | INST-13 | todo |
+| INST-14 | refactor(install): one program-file helper, one manifest name, and files and paths modules | - | INST-14 as corrected | todo |
+| INST-10 | refactor(install): `InstallOutcome` | - | INST-10 | todo |
+| INST-11 | refactor(install): one process-stopping engine with both failure rules | - | INST-11 as corrected; the image match stays per caller | todo |
+| INST-2 | refactor(install): the harness feature moves to `install/harness/` | INST-14 | INST-2 as corrected; `install::writer_golden` and `install::agent_list` keep their paths | todo |
+| INST-3 | refactor(install): one glossary for identifiers | INST-2 | INST-3 as corrected; machine words stay | todo |
+| SERV-6c | refactor(cli): the CLI reads the service's vocabulary as types | - | SERV-6's CLI half | todo |
+| SERV-13 | refactor(cli): install and uninstall run as two flows that collect, then print | - | SERV-13 as corrected; the printed order stays | todo |
+| SERV-11c | refactor(cli): one name per meaning in `cli/` | SERV-13 | SERV-11's CLI half | todo |
+| EXT-2 | refactor(win-peer): the user's SID comes from relay | - | EXT-2 | todo |
+| I-lock | refactor(install): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |

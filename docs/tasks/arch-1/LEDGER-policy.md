@@ -9,6 +9,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 Every slice landed: P10, P1, P2, P3, P4, P9, P5, P6, P7 and P8. The lane is closed. S4a is
 unblocked, P5 unblocks C10c and S3, and P7 and P8 unblock S4b.
 
+The second sweep (2026-10-20) opens this lane again, after core-work: see its section below.
+
 ## Slices
 
 In the ADR's order. "After" names what a slice waits for, including the ux-2-first rule.
@@ -173,3 +175,15 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `the_window_and_the_error_say_one_sentence_for_a_policy_this_window_cannot_change` lives in
   `governance/tests.rs` and covers a named file, an absent named file and a machine with no home.
   The catalog and result goldens are unchanged.
+
+## The second sweep (2026-10-20)
+
+Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-03 (Alpine), after core-work. A
+slice's specification is its finding in [sweep-2026-10-20/work.md](sweep-2026-10-20/work.md), read
+with its skeptic's corrections. Nothing has landed yet; start with WORK-15.
+
+| Slice | Subject | After | Source | Status |
+| --- | --- | --- | --- | --- |
+| WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | todo |
+| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | todo |
+| P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |

@@ -8,6 +8,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 S1, S2, S4a and S9 landed. Next: S8 and S7, which can start now.
 
+The second sweep (2026-10-20) adds its slices below, on leo-desktop-02 after install; the order there includes S3 to S8.
+
 ## Slices
 
 In the ADR's order. "After" names what a slice waits for, including the ux-2-first rule.
@@ -100,3 +102,30 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   alone (`manage && agent.can_uninstall`). The page test "Remove follows the service's answer
   alone, so an updatable entry it can remove shows Remove" pins it both ways. No golden changed,
   and no journey needs a test machine.
+
+## The second sweep (2026-10-20)
+
+Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: leo-desktop-02 (Windows), after install. A
+slice's specification is its finding in [sweep-2026-10-20/surface.md](sweep-2026-10-20/surface.md), read
+with its skeptic's corrections. Nothing has landed yet; start with U-D1.
+
+Order: U-D1 to U-D3, then the first sweep's open slices in their rows above (S8 and S7, then S3,
+which also covers SURF-2 and wires INST-15's `resymbol`, then S4b, S5 after C18, and S6 after
+C3c), then the rows below.
+
+| Slice | Subject | After | Source | Status |
+| --- | --- | --- | --- | --- |
+| U-D1 | fix(workbench): a policy draft near the limit gets the policy-size sentence | - | SURF-5's size defect; one web test | todo |
+| U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | todo |
+| U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | todo |
+| SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1 | todo |
+| SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | todo |
+| SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | todo |
+| SURF-8 | refactor(workbench): what a watcher may do is said once | - | SURF-8 | todo |
+| SURF-10 | refactor(workbench): the small repeats go | - | SURF-10 | todo |
+| SURF-12 | refactor(workbench): watching, everywhere | - | SURF-12; the route path changes with the preview server | todo |
+| SURF-13 | refactor(window): the setup flow is one object and the click handler a table | - | SURF-13 | todo |
+| SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | todo |
+| SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | todo |
+| SURF-9 | refactor(workbench): `workbench/mod.rs` splits on its seams | S3 | SURF-9; no `kit.css` rename | todo |
+| SURF-11 | refactor(window): the palette has tokens, and the desktop one module | - | SURF-11; colour values stay | todo |

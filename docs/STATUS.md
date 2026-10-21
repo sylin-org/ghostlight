@@ -208,10 +208,16 @@ Now:
 - The 2.0.1 extension (`bddfb37a...`) is submitted to the Chrome Web Store for review as a staged
   publish, at the owner's go after the Linux checks (2026-10-20). The store still serves 2.0.0 at
   100%. From now on, changing a packaged file means resubmitting, which is the owner's call
-  (ADR-0200 Decision 16). Next, at the owner's go: the cutover of `docs/RELEASE.md` for 2.0.1
-  (the GitHub release from this bundle with `release/notes-v2.0.1.md`, npm, the MCP Registry, the
-  website, WinGet and `main`), and publishing the staged extension once Google approves it. The
-  2.0.1 service works with the 2.0.0 extension, so neither waits on the other.
+  (ADR-0200 Decision 16).
+- 2.0.1 is held for a maintainability pass (owner, 2026-10-20: "Refactor first, ship later"), so
+  the candidate above is not cut over. arch-1 reopens with a second sweep: 100 findings over every
+  area, each checked by a skeptic (57 confirmed, 43 partial, none refuted), and the 15 defects it
+  found go first ([the sweep](tasks/arch-1/sweep-2026-10-20/README.md), the ADR-0203 amendment
+  of 2026-10-20). Its lanes run on five machines, each lane in its own files
+  ([BOOTSTRAP](tasks/arch-1/BOOTSTRAP.md#the-second-sweep-2026-10-20)). After the pass, a new 2.0.1
+  candidate is built and re-verified on every machine. Then, at the owner's go, the staged store
+  submission is cancelled for the refactored extension, and the cutover of `docs/RELEASE.md`
+  follows.
 - The public one-liner on the real installations, which the cutover went on without: done on
   CachyOS (test-01, `docs/testing/cachyos-public-2.0.0-2026-10-20.md`; a same-version candidate
   service is kept until `--restore`, so a second candidate of one version is installed after an

@@ -12,6 +12,8 @@ C18, C19b, C19c, C20, S3 to S8 and I11) get their lines in a later D2 commit, af
 Notes lists the lines each one owes. D1's lines that wait on the owner's two questions are listed
 under Notes too.
 
+The second sweep (2026-10-20) adds the contract lines its slices owe: see its section below.
+
 ## Slices
 
 In the ADR's order. "After" names what a slice waits for, including the ux-2-first rule.
@@ -114,3 +116,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   is the install from the workflow's bundle with `GHOSTLIGHT_FROM`: journey.md's RESUME HERE, c02,
   x01 and the release-order bullet in Owed to the owner, and seams.md's RESUME HERE and f12h owed
   line. The Notes for certification carry no pinned commands.
+
+## The second sweep (2026-10-20)
+
+Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: the coordinator. A
+slice's specification is its finding in [sweep-2026-10-20/README.md](sweep-2026-10-20/README.md), read
+with its skeptic's corrections. Nothing has landed yet; start with D3 once a lane's first slices land.
+
+| Slice | Subject | After | Source | Status |
+| --- | --- | --- | --- | --- |
+| D3 | docs: the contract lines the second sweep's slices owe | each slice | AGENTS.md, ARCHITECTURE.md and LANGUAGE.md lines named by the slices, as D2 does | todo |

@@ -1740,3 +1740,49 @@ keeps its tools back only by answering its first `tools/list` with none.
 Slice I11 takes option A: the plugin keeps its `npx -y ghostlight` server, and its "the plugin or
 `ghostlight install`, not both" line is not needed. The RC notes still tell plugin users to disable
 the plugin until the cutover, because npm still serves 1.3.14.
+
+## Amendment (2026-10-20): the second sweep
+
+On 2026-10-20 the owner asked for a quality pass ("several magic strings/numbers in the code,
+confusing namespaces/function names... Identify convoluted architecture takes and streamline
+them") and held 2.0.1 until it lands ("Refactor first, ship later"). The same day the owner set
+the standing rule "Ignore any rules that artificially constrain the benefits to the end users"
+(docs/MEMORY.md, "Rules serve the end user"). Seven lenses, one per area, read the tree at
+8f6a43ec, and a skeptic per area checked every finding against the code: 100 findings, 57
+confirmed, 43 partial, none refuted. The findings, their verdicts and the corrections are in
+[the second sweep](../tasks/arch-1/sweep-2026-10-20/README.md); a finding's file, read with its
+skeptic's corrections, is the specification of the slice that takes it.
+
+14. **Maintainability is a reason.** The first sweep set aside changes that fix no defect a person
+    or agent meets. The owner's request makes a maintainable tree a goal of its own, so the second
+    sweep takes refactors whose payoff is one copy of a fact, closed types and clear names. This
+    reopens the "Considered and not taken" entry on closed enums: `on_error`, `Record.action`,
+    `HandleDialog.action` and Diagnose's fields become types decoded once, beside the wait
+    vocabulary C17 already decides (LANG-3, WORK-5, BROW-3).
+15. **Defects first.** Each defect the sweep found lands as its own fix slice with a regression
+    test, before the refactors in its files. The list is in the sweep's README.
+16. **What people and agents read stays, unless a slice says so.** A refactor slice keeps the
+    catalog golden, the result goldens, the writer goldens, the protocol 4 goldens, the persisted
+    names (audit events, policy keys, home file names) and the window's words and look. A slice
+    that changes one of them says so in its title and commit, as a deliberate change.
+17. **Pure moves land alone.** A file split moves code without editing it, in its own commit, so
+    review compares paths. The two install test modules whose paths the 26 writer goldens name
+    (`install::writer_golden`, `install::agent_list`) keep their module paths.
+18. **One glossary per area, for identifiers.** In install the core word is "harness": one agent's
+    MCP configuration on one host. "Agent" is the catalog identity, "host app" only what
+    `runs_inside` names, "native host" only browser native messaging, and "client" and "host" only
+    in words people read. In governance one word names the never-touch rule internally, and
+    `AuthorityTier` folds into `PolicyAuthor`. The service says "service" for its process. Wire and
+    persisted words keep their spelling, among them `harness_attached`, `mcp_clients`, `target`,
+    `sacred_domains` and the tier words.
+19. **The extension is in scope.** Its findings land in the package lane and go to the Chrome Web
+    Store as one new 2.0.1 submission, after the staged one is cancelled, at the owner's go.
+    `crates/edge` and `crates/relay` stay as they are (Decision 13): EXT-3 and EXT-4 would need a
+    relay revision, which the service would refuse to every running 2.0.x edge.
+20. **Not taken.** The sweep's README lists what the skeptics corrected out: the registry stays in
+    `browser/` (only protocol 4's frames move), the `mirror!` macro, WORK-14's lease rewrite,
+    the typed coverage field, the single browser handle, the `bridge` fold (V-11 stands) and the
+    `kit.css` rename outside the package resubmission.
+
+The lanes stand, with core split in three for the second sweep: core-language, core-work and
+core-service. [BOOTSTRAP.md](../tasks/arch-1/BOOTSTRAP.md) names their files, machines and order.

@@ -9,6 +9,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbound tabs (see
 Notes). The lane is done; B1 rides in the same candidate as C21, or neither does.
 
+The second sweep (2026-10-20) opens this lane again, after adapter: see its section below.
+
 ## Slices
 
 In the ADR's order. "After" names what a slice waits for, including the ux-2-first rule.
@@ -77,3 +79,25 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   worker restart (`chrome://serviceworker-internals` stop) and a service replace should keep a
   single-page app's tab bound, and a browser restart should leave its handle "no longer open".
   `tests/golden/agents/native/linux.txt` is unchanged.
+
+## The second sweep (2026-10-20)
+
+Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
+slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
+with its skeptic's corrections. Nothing has landed yet; start with P-D1.
+
+| Slice | Subject | After | Source | Status |
+| --- | --- | --- | --- | --- |
+| P-D1 | fix(extension): a dialog that opens during world setup reads `dialog_open` | - | EXT-9 as corrected | todo |
+| EXT-5 | refactor(extension): `protocol.js` names its words and owns `failure`, and the vocabulary gains the missing words under new keys | C18 | EXT-5 as corrected | todo |
+| EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | todo |
+| EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | todo |
+| EXT-8 | refactor(extension): the argument checks come from `arguments.js` | - | EXT-8 | todo |
+| EXT-9 | refactor(extension): one CDP method table and one session-lost classifier | P-D1 | EXT-9 | todo |
+| EXT-10 | refactor(extension): one module of the extension's own message words | - | EXT-10 | todo |
+| EXT-11 | refactor(extension): sessions owns the dialog watch | EXT-9 | EXT-11 | todo |
+| EXT-13 | refactor(extension): `script-evaluator.js` folds into `evaluate.js` | - | EXT-13 | todo |
+| EXT-14 | refactor(extension): `withLease` and `withHidden` | - | EXT-14 | todo |
+| EXT-12 | refactor(extension): the native link moves into `lib/link.js` | EXT-5, EXT-7, EXT-10 | EXT-12 | todo |
+| EXT-15 | docs(extension): module docs, and the README lists every file | - | EXT-15; the README is not packaged | todo |
+| B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | todo |

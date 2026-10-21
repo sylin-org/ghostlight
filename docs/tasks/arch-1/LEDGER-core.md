@@ -11,6 +11,12 @@ landed with C13. Every candidate slice of core is in; B1 and C21 ride in the sam
 are the slices gated none: C3b, C3c, C12b, C10c (after P1 and P5), C16, C17, C18, C19b, C19c and
 C20 (after I9b).
 
+The second sweep (2026-10-20) split core in three. C17, C12b's language half and C20 moved to
+[LEDGER-core-language.md](LEDGER-core-language.md); C10c, C16, C19c and C12b's work half to
+[LEDGER-core-work.md](LEDGER-core-work.md); C3b, C3c, C18, C19b and C19c's service half to
+[LEDGER-core-service.md](LEDGER-core-service.md). Their rows below stay as the first sweep's
+record and name where each moved.
+
 ## Slices
 
 In the ADR's order. "After" names what a slice waits for, including the ux-2-first rule.
@@ -32,16 +38,16 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | see Notes | landed (a35d7b58) |
 | C19a | fix(audit): a step that never started carries the policy sequence | candidate | ux-2 closes | see Notes | landed (647b4d97) |
 | C21 | feat(adapter): the service reads the browser's life | candidate | C4, B1 | lands with B1; cross-lane `protocol4/wire.rs`; see Notes | landed (this commit) |
-| C3b | fix(browser): a pinned wait reads its own browser | none | C3a | - | todo |
-| C3c | refactor(browser): one browser start, recorded in the launch guard | none | C3b | - | todo |
-| C12b | refactor(language): each refusal is typed where it is learned, and its code is written once | none | ux-2 closes | two commits | todo |
-| C10c | refactor(work): the executor reads one publication | none | P1, P5 | - | todo |
-| C16 | refactor(work): which recording a workspace holds is a workspace fact | none | ux-2 closes | cross-lane `protocol4/link.rs`, `workbench/tests.rs` | todo |
-| C17 | refactor(language): one wait vocabulary and one coverage predicate | none | ux-2 closes | cross-lane `translate/observe.rs` | todo |
-| C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | none | C6 | cross-lane `protocol4/golden.rs` and the page assets | todo |
-| C19b | feat(audit): the record names the browser | none | I1 | - | todo |
-| C19c | refactor(work): the completion path's leftovers go | none | ux-2 closes | - | todo |
-| C20 | test(language): the plugin skill names only catalog tools and fields | none | I9b | - | todo |
+| C3b | fix(browser): a pinned wait reads its own browser | none | C3a | - | moved to LEDGER-core-service.md |
+| C3c | refactor(browser): one browser start, recorded in the launch guard | none | C3b | - | moved to LEDGER-core-service.md |
+| C12b | refactor(language): each refusal is typed where it is learned, and its code is written once | none | ux-2 closes | two commits | moved to LEDGER-core-language.md and LEDGER-core-work.md |
+| C10c | refactor(work): the executor reads one publication | none | P1, P5 | - | moved to LEDGER-core-work.md |
+| C16 | refactor(work): which recording a workspace holds is a workspace fact | none | ux-2 closes | cross-lane `protocol4/link.rs`, `workbench/tests.rs` | moved to LEDGER-core-work.md |
+| C17 | refactor(language): one wait vocabulary and one coverage predicate | none | ux-2 closes | cross-lane `translate/observe.rs` | moved to LEDGER-core-language.md |
+| C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | none | C6 | cross-lane `protocol4/golden.rs` and the page assets | moved to LEDGER-core-service.md |
+| C19b | feat(audit): the record names the browser | none | I1 | - | moved to LEDGER-core-service.md |
+| C19c | refactor(work): the completion path's leftovers go | none | ux-2 closes | - | moved to LEDGER-core-work.md and LEDGER-core-service.md |
+| C20 | test(language): the plugin skill names only catalog tools and fields | none | I9b | - | moved to LEDGER-core-language.md |
 | C22 | refactor(intake): the "MCP client" placeholder goes | none | C13 | cross-lane `agent/mod.rs`, `workbench/tests.rs`; see Notes | landed (with C13, c78d4bd3) |
 
 ## Notes
