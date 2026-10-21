@@ -334,6 +334,11 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   `chunk_limits`), and `golden.rs` pins that the longest title the service composes fits it.
   `shared.bounded` still cuts by code units and can leave half an emoji at the end of a cut tab
   title, which drops the browser connection; P-D5 takes that.
+- P-D4, found live on 2026-10-21 after it landed: `diagnostics.read` checks `match_text` a second
+  time, by its `length`, so a 260-emoji `browser_diagnose` filter still came back as
+  `invalid_request` after `requireText` passed it. That check counts code points now too, and
+  `diagnostics.test.js` holds the 260-emoji case. No other check of agent text counts code units:
+  the remaining `length` checks are on arrays and on ids the extension makes.
 - P-D5, found live on the owner's machine on 2026-10-21 while checking P-D4's note: a script set
   a tab's title to 499 letters, an emoji and a letter, and the next call failed with "Connection
   lost before the browser confirmed completion." The session lost the tab. The cut to 500 code

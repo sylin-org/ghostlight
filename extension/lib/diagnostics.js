@@ -566,8 +566,9 @@
       if (!Number.isInteger(limit) || limit < 1 || limit > MAX_READ_LIMIT) {
         throw new RangeError(`limit must be an integer from 1 to ${MAX_READ_LIMIT}`);
       }
+      // The limit counts characters (code points), as arguments.requireText and the service do.
       if (matchText !== undefined
-        && (typeof matchText !== "string" || matchText.length < 1 || matchText.length > MAX_MATCH_CHARS)) {
+        && (typeof matchText !== "string" || matchText.length < 1 || [...matchText].length > MAX_MATCH_CHARS)) {
         throw new RangeError(`match_text must contain 1 to ${MAX_MATCH_CHARS} characters`);
       }
 

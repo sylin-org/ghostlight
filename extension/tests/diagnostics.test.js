@@ -248,6 +248,8 @@ test("entry, byte, text, cursor, and read bounds are enforced", () => {
   assert.throws(() => diagnostics.read(5, { limit: 0 }), /limit/);
   assert.throws(() => diagnostics.read(5, { limit: 201 }), /limit/);
   assert.throws(() => diagnostics.read(5, { match_text: "x".repeat(501) }), /match_text/);
+  // 260 emoji are 260 characters, within the limit, though their length is 520 (P-D4, found live).
+  assert.doesNotThrow(() => diagnostics.read(5, { match_text: "\u{1F600}".repeat(260) }));
   assert.throws(() => diagnostics.read(5, { after: `diag_${"x".repeat(200)}` }), /160/);
 
   const textBound = diagnosticsApi.create({ now: clock(), cursorSecret: "bound" });
