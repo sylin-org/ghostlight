@@ -653,7 +653,6 @@ mod tests {
     ];
 
     #[cfg(windows)]
-    #[test]
     fn the_small_icon_size_follows_the_scale() {
         assert_eq!(Taskbar::new(false, 1.0).small_icon, 16);
         assert_eq!(Taskbar::new(false, 1.25).small_icon, 20);
@@ -666,7 +665,6 @@ mod tests {
     }
 
     #[cfg(windows)]
-    #[test]
     fn the_16_pixel_art_is_drawn_at_16_and_the_32_pixel_art_at_24_and_32() {
         for light in [false, true] {
             for (scale, size) in [(1.0, 16), (1.25, 32), (1.5, 32), (2.0, 32)] {
@@ -727,6 +725,10 @@ mod tests {
         the_light_mascot_keeps_its_face_at_16_pixels();
         #[cfg(not(windows))]
         a_host_that_picks_its_own_size_gets_the_32_pixel_icon_at_any_scale();
+        #[cfg(windows)]
+        the_small_icon_size_follows_the_scale();
+        #[cfg(windows)]
+        the_16_pixel_art_is_drawn_at_16_and_the_32_pixel_art_at_24_and_32();
     }
 
     fn the_dot_sits_in_the_lower_right_in_the_colour_of_the_state() {
