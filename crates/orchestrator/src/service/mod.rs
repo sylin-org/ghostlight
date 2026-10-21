@@ -235,28 +235,86 @@ pub struct AuthorityAlreadyRunning;
 #[error("{}", QUIT_HELD)]
 pub struct QuitLatched;
 
-impl ServiceHost {
-    /// Prepare the service in the Ghostlight home `home` under its lifetime lock, without
-    /// binding the endpoint and without the elevation check a production start makes.
-    #[cfg(test)]
-    pub(crate) fn start(home: &Path) -> Result<Self> {
-        Self::start_with_token(home, StartTerms::asking_once(StartReason::Agent), || {
-            Ok(false)
-        })
+/// The presence world a start makes from the installation and the question "has a quit begun".
+type PresenceWorld =
+    Box<dyn FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>>;
+
+/// What a start reads and acts on outside the service: whether this process's token is elevated,
+/// the world presence acts on, the clock the idle limit is judged by, and where the installed
+/// agents' icons are looked for, if anywhere.
+pub struct World {
+    elevated: Box<dyn FnOnce() -> io::Result<bool>>,
+    presence: PresenceWorld,
+    idle_clock: Arc<dyn Clock>,
+    /// Read once the start has succeeded. Only the system world has them, so a test service never
+    /// reads this computer's apps.
+    icon_places: Option<fn() -> IconPlaces>,
+}
+
+impl World {
+    /// This computer: the process token, presence that starts the shell, the system clock and
+    /// the installed agents' icons.
+    #[must_use]
+    pub fn system() -> Self {
+        Self {
+            elevated: Box::new(ghostlight_win_peer::is_elevated),
+            presence: Box::new(presence::System::boxed),
+            idle_clock: Arc::new(SystemClock),
+            icon_places: Some(IconPlaces::system),
+        }
     }
 
-    /// Like [`ServiceHost::start`], with presence acting on `world` and so starting no process.
+    /// The system world with a token that is not elevated and no icon lookup.
     #[cfg(test)]
-    pub(crate) fn start_in_world(
-        home: &Path,
-        world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>,
-    ) -> Result<Self> {
-        Self::start_with_world(
+    pub(crate) fn test() -> Self {
+        Self {
+            elevated: Box::new(|| Ok(false)),
+            icon_places: None,
+            ..Self::system()
+        }
+    }
+
+    /// This world with the answer to "is this process elevated" given by `elevated`.
+    #[cfg(test)]
+    pub(crate) fn with_token(self, elevated: impl FnOnce() -> io::Result<bool> + 'static) -> Self {
+        Self {
+            elevated: Box::new(elevated),
+            ..self
+        }
+    }
+
+    /// This world with presence acting on what `world` makes, so a test starts no process.
+    #[cfg(test)]
+    pub(crate) fn with_presence(
+        self,
+        world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>
+            + 'static,
+    ) -> Self {
+        Self {
+            presence: Box::new(world),
+            ..self
+        }
+    }
+
+    /// This world with the idle limit judged by `clock`, which a test moves by hand.
+    #[cfg(test)]
+    pub(crate) fn with_idle_clock(self, clock: Arc<dyn Clock>) -> Self {
+        Self {
+            idle_clock: clock,
+            ..self
+        }
+    }
+}
+
+impl ServiceHost {
+    /// Prepare the service in the Ghostlight home `home` for an agent start that asks for the lock
+    /// once, in the test world, without binding the endpoint.
+    #[cfg(test)]
+    pub(crate) fn start_for_test(home: &Path) -> Result<Self> {
+        Self::start(
             home,
             StartTerms::asking_once(StartReason::Agent),
-            || Ok(false),
-            world,
-            Arc::new(SystemClock),
+            World::test(),
         )
     }
 
@@ -269,69 +327,27 @@ impl ServiceHost {
         ))
     }
 
-    /// Prepare the service in the Ghostlight home `home` for a start made for `reason`, under its
-    /// lifetime lock, without binding the endpoint. `publish_ready` binds it.
+    /// Prepare the service in the Ghostlight home `home` for a start on `terms`, in `world`, under
+    /// its lifetime lock, without binding the endpoint. `publish_ready` binds it.
     ///
-    /// In order: a process whose token is elevated is refused; a browser or recover start is
-    /// refused while the quit latch is set ([`QuitLatched`]); the lock is taken, and a start that
-    /// finds it held asks again, an update for [`lifetime::UPDATE_LOCK_WAIT`] so the service it
-    /// replaces can finish leaving and any other start for [`lifetime::LEAVING_LOCK_WAIT`] so it
-    /// outlasts a service leaving on idle, and gives way ([`AuthorityAlreadyRunning`]) when the
-    /// wait ends; a browser or recover start that waited looks at the latch again once it holds
-    /// the lock; and only then does any other start clear the latch and open state.
-    ///
-    /// The service then shows the installed agents' own icons: it publishes the icon cache in the
-    /// home's state directory, which every agent's symbol reads, and looks for the icons in the
-    /// background. Only this start does, so a test service never reads this computer's apps.
-    pub fn start_waiting(home: &Path, reason: StartReason) -> Result<Self> {
-        let host = Self::start_with_token(
-            home,
-            StartTerms::for_reason(reason),
-            ghostlight_win_peer::is_elevated,
-        )?;
-        let cache = IconCache::open(
-            install::layout::Layout::new(home).icons(),
-            IconPlaces::system(),
-            Some(host.diagnostics.sink()),
-        );
-        icons::publish(&cache);
-        host.workbench.attach_icons(cache);
-        Ok(host)
-    }
-
-    /// Like [`ServiceHost::start_waiting`], with the terms spelled out and the answer to "is this
-    /// process elevated" given by `elevated`.
-    pub(crate) fn start_with_token(
-        home: &Path,
-        terms: StartTerms,
-        elevated: impl FnOnce() -> io::Result<bool>,
-    ) -> Result<Self> {
-        Self::start_with_world(
-            home,
-            terms,
+    /// The start is admitted first ([`admit`]) and opens no state before it is. When `world` names
+    /// where the installed agents' icons are, the service then shows their own icons: it
+    /// publishes the icon cache in the home's state directory, which every agent's symbol reads,
+    /// and looks for the icons in the background.
+    pub fn start(home: &Path, terms: StartTerms, world: World) -> Result<Self> {
+        let World {
             elevated,
-            presence::System::boxed,
-            Arc::new(SystemClock),
-        )
-    }
-
-    /// Like [`ServiceHost::start_with_token`], with the world presence acts on made by `world`
-    /// from the installation and the question "has a quit begun", and the idle limit judged by
-    /// `idle_clock`. A test passes a world that starts no process and a clock it moves by hand.
-    pub(crate) fn start_with_world(
-        home: &Path,
-        terms: StartTerms,
-        elevated: impl FnOnce() -> io::Result<bool>,
-        world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>,
-        idle_clock: Arc<dyn Clock>,
-    ) -> Result<Self> {
+            presence,
+            idle_clock,
+            icon_places,
+        } = world;
         let diagnostics = DiagnosticsHub::birth(home);
-        Self::start_with_diagnostics(
+        let host = Self::assemble(
             home,
             Arc::clone(&diagnostics),
             terms,
             elevated,
-            world,
+            presence,
             idle_clock,
         )
         .inspect_err(|error| {
@@ -347,32 +363,31 @@ impl ServiceHost {
             } else if !error.is::<AuthorityAlreadyRunning>() {
                 startup_failed(&diagnostics, error);
             }
-        })
+        })?;
+        if let Some(places) = icon_places {
+            let cache = IconCache::open(
+                install::layout::Layout::new(home).icons(),
+                places(),
+                Some(host.diagnostics.sink()),
+            );
+            icons::publish(&cache);
+            host.workbench.attach_icons(cache);
+        }
+        Ok(host)
     }
 
-    fn start_with_diagnostics(
+    /// Admit the start, then build the service's parts and start its threads.
+    fn assemble(
         home: &Path,
         diagnostics: Arc<DiagnosticsHub>,
         terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
-        world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>,
+        world: PresenceWorld,
         idle_clock: Arc<dyn Clock>,
     ) -> Result<Self> {
-        refuse_elevated_token(elevated)?;
         let layout = install::layout::Layout::new(home);
-        if lifetime::refused_by_quit_latch(terms.reason) && latch::is_set(&layout.quit_latch()) {
-            return Err(QuitLatched.into());
-        }
-        let lock = acquire_lock(&layout.service_lock(), terms.lock_wait)?;
+        let lock = admit(&layout, terms, elevated)?;
         let lock_taken = Instant::now();
-        // A Quit that began while this start waited for the lock is the old service's own, and
-        // this start must not bring back what the person just quit.
-        if lifetime::refused_by_quit_latch(terms.reason) && latch::is_set(&layout.quit_latch()) {
-            return Err(QuitLatched.into());
-        }
-        if !lifetime::refused_by_quit_latch(terms.reason) {
-            latch::clear(&layout.quit_latch()).context("clear the quit latch")?;
-        }
         if let Ok(executable) = env::current_exe() {
             remove_old_images_beside(&executable);
             register_missing_browsers(home, &executable);
@@ -2155,6 +2170,36 @@ fn remember_resumed_tabs(workspaces: &WorkspaceStore, workspace: &WorkspaceId, k
     }
 }
 
+/// Admit a start on `terms` to the home `layout` describes, and hand it the service lock.
+///
+/// In order: a process whose token `elevated` says is elevated is refused; a browser or recover
+/// start is refused while the quit latch is set ([`QuitLatched`]); the lock is taken, and a start
+/// that finds it held asks again, an update for [`lifetime::UPDATE_LOCK_WAIT`] so the service it
+/// replaces can finish leaving and any other start for [`lifetime::LEAVING_LOCK_WAIT`] so it
+/// outlasts a service leaving on idle, and gives way ([`AuthorityAlreadyRunning`]) when the wait
+/// ends; a browser or recover start that waited looks at the latch again once it holds the lock;
+/// and only then does any other start clear the latch.
+fn admit(
+    layout: &install::layout::Layout,
+    terms: StartTerms,
+    elevated: impl FnOnce() -> io::Result<bool>,
+) -> Result<ServiceLock> {
+    refuse_elevated_token(elevated)?;
+    if lifetime::refused_by_quit_latch(terms.reason) && latch::is_set(&layout.quit_latch()) {
+        return Err(QuitLatched.into());
+    }
+    let lock = acquire_lock(&layout.service_lock(), terms.lock_wait)?;
+    // A Quit that began while this start waited for the lock is the old service's own, and this
+    // start must not bring back what the person just quit.
+    if lifetime::refused_by_quit_latch(terms.reason) && latch::is_set(&layout.quit_latch()) {
+        return Err(QuitLatched.into());
+    }
+    if !lifetime::refused_by_quit_latch(terms.reason) {
+        latch::clear(&layout.quit_latch()).context("clear the quit latch")?;
+    }
+    Ok(lock)
+}
+
 /// Take the service lock at `path`, asking again until `wait` has passed while another process
 /// holds it.
 fn acquire_lock(path: &Path, wait: Duration) -> Result<ServiceLock> {
@@ -2502,7 +2547,7 @@ mod tests {
 
     use super::{
         cleanup_released_tabs, AuthorityAlreadyRunning, QuitLatched, ServiceHost, StartTerms,
-        QUIT_GRACE,
+        World, QUIT_GRACE,
     };
 
     /// The MCP revision the test clients speak and the resume tokens name.
@@ -2911,7 +2956,7 @@ mod tests {
                 let _ = woken.send(());
             }
         });
-        let host = ServiceHost::start(home.path()).unwrap();
+        let host = ServiceHost::start_for_test(home.path()).unwrap();
         host.publish_ready().unwrap();
         wakes
             .recv_timeout(PATIENCE)
@@ -3937,7 +3982,7 @@ mod tests {
     #[test]
     fn publishing_starts_the_workbench_and_bars_agents_from_its_address() {
         let home = TestHome::new("workbench-published");
-        let host = ServiceHost::start(home.path()).unwrap();
+        let host = ServiceHost::start_for_test(home.path()).unwrap();
         assert!(host.workbench_address().is_none());
         host.publish_ready().unwrap();
         let address = host.workbench_address().expect("the workbench is served");
@@ -3964,7 +4009,7 @@ mod tests {
     /// session is gone.
     fn session_is_released_after(name: &str, goodbye: impl FnOnce(&mut Connection)) {
         let home = TestHome::new(name);
-        let host = ServiceHost::start(home.path()).unwrap();
+        let host = ServiceHost::start_for_test(home.path()).unwrap();
         host.publish_ready().unwrap();
         let mut socket = open_mcp(None);
         initialize(&mut socket);
@@ -4001,7 +4046,7 @@ mod tests {
 
     /// Start for `terms` in `directory` with a token that is not elevated.
     fn start_for(directory: &std::path::Path, terms: StartTerms) -> anyhow::Result<ServiceHost> {
-        ServiceHost::start_with_token(directory, terms, || Ok(false))
+        ServiceHost::start(directory, terms, World::test())
     }
 
     /// Every file and directory under `root`, as paths relative to it.
@@ -4099,13 +4144,13 @@ mod tests {
             let directory = directory.path().to_path_buf();
             thread::spawn(move || {
                 // The token check comes before the start's first look at the latch.
-                ServiceHost::start_with_token(
+                ServiceHost::start(
                     &directory,
                     waiting(StartReason::Browser, PATIENCE),
-                    move || {
+                    World::test().with_token(move || {
                         let _ = began.send(());
                         Ok(false)
-                    },
+                    }),
                 )
                 .map(drop)
             })
@@ -4224,22 +4269,25 @@ mod tests {
         use super::decide_elevation;
 
         let directory = temp_home("elevated");
-        let refused = ServiceHost::start_with_token(&directory, agent(), || Ok(true))
-            .err()
-            .expect("an elevated start is refused");
+        let refused =
+            ServiceHost::start(&directory, agent(), World::test().with_token(|| Ok(true)))
+                .err()
+                .expect("an elevated start is refused");
         assert_eq!(format!("{refused:#}"), super::ELEVATED_SERVICE);
         assert!(
             !directory.join("run").exists(),
             "no lock, run directory or socket was made"
         );
-        let unreadable = ServiceHost::start_with_token(&directory, agent(), || {
-            Err(std::io::Error::other("no token"))
-        })
+        let unreadable = ServiceHost::start(
+            &directory,
+            agent(),
+            World::test().with_token(|| Err(std::io::Error::other("no token"))),
+        )
         .err()
         .expect("a token that cannot be read is refused");
         assert!(format!("{unreadable:#}").contains("no token"));
         assert!(!directory.join("run").exists());
-        assert!(ServiceHost::start_with_token(&directory, agent(), || Ok(false)).is_ok());
+        assert!(ServiceHost::start(&directory, agent(), World::test()).is_ok());
 
         // The waiver: only an elevated answer can be waived.
         let refused = decide_elevation(Ok(true), false).unwrap_err();
@@ -4293,7 +4341,7 @@ mod tests {
     /// A host that signals through a channel instead of a desktop.
     fn quittable_host(name: &str) -> (TestHome, ServiceHost, mpsc::Receiver<()>) {
         let home = TestHome::new(name);
-        let host = ServiceHost::start(home.path()).unwrap();
+        let host = ServiceHost::start_for_test(home.path()).unwrap();
         host.publish_ready().unwrap();
         let (quit, quit_requested) = mpsc::channel();
         host.install_quit_signal(Arc::new(move || {
@@ -5126,7 +5174,7 @@ mod tests {
     fn a_stalled_start_stops_by_itself_and_becoming_ready_cancels_the_stop() {
         // A start whose limit passes before it accepts openings stops.
         let stalled_home = temp_home("ready-stalled");
-        let stalled = ServiceHost::start(&stalled_home).unwrap();
+        let stalled = ServiceHost::start_for_test(&stalled_home).unwrap();
         let (stopped, stop) = mpsc::channel::<()>();
         stalled
             .expect_ready_by(Instant::now(), move || {
@@ -5138,7 +5186,7 @@ mod tests {
         drop(stalled);
 
         let directory = temp_home("ready-published");
-        let host = ServiceHost::start(&directory).unwrap();
+        let host = ServiceHost::start_for_test(&directory).unwrap();
         let (expired, fired) = mpsc::channel::<()>();
         // A limit far past what this test waits, armed before the endpoint is bound, as serve does.
         host.expect_ready_by(Instant::now() + PATIENCE * 6, move || {
@@ -5275,7 +5323,7 @@ mod tests {
     #[test]
     fn a_shell_that_attaches_gets_the_workbench_and_its_bearer_or_is_told_the_place_is_taken() {
         let home = TestHome::new("desktop-place");
-        let host = ServiceHost::start(home.path()).unwrap();
+        let host = ServiceHost::start_for_test(home.path()).unwrap();
         host.publish_ready().unwrap();
         let address = host.workbench_address().unwrap();
 
@@ -5405,7 +5453,7 @@ mod tests {
 
         {
             let home = TestHome::new("show-setup");
-            let host = ServiceHost::start(home.path()).unwrap();
+            let host = ServiceHost::start_for_test(home.path()).unwrap();
             host.publish_ready().unwrap();
             let mut shell = attached_shell(&host);
             let browser = super::ServiceBrowserEvents::new(
@@ -5471,10 +5519,14 @@ mod tests {
         {
             let home = TestHome::new("show-launch");
             let fake = Arc::new(Fake::default());
-            let host = ServiceHost::start_in_world(home.path(), {
-                let fake = Arc::clone(&fake);
-                move |_, _| fake.world()
-            })
+            let host = ServiceHost::start(
+                home.path(),
+                agent(),
+                World::test().with_presence({
+                    let fake = Arc::clone(&fake);
+                    move |_, _| fake.world()
+                }),
+            )
             .unwrap();
             host.publish_ready().unwrap();
 
@@ -5520,10 +5572,14 @@ mod tests {
 
         let home = TestHome::new("status-window");
         let fake = Arc::new(Fake::default());
-        let host = ServiceHost::start_in_world(home.path(), {
-            let fake = Arc::clone(&fake);
-            move |_, _| fake.world()
-        })
+        let host = ServiceHost::start(
+            home.path(),
+            agent(),
+            World::test().with_presence({
+                let fake = Arc::clone(&fake);
+                move |_, _| fake.world()
+            }),
+        )
         .unwrap();
         host.publish_ready().unwrap();
         // With setup complete a tray Open only says the person has the window open.
@@ -5621,7 +5677,7 @@ mod tests {
             body: TRAY_HINT_BODY.to_owned(),
         };
         let stays = DesktopFrame::Closed { stays: true };
-        let host = ServiceHost::start(home.path()).unwrap();
+        let host = ServiceHost::start_for_test(home.path()).unwrap();
         host.publish_ready().unwrap();
 
         // An update's goodbye and a shell that vanishes leave the hint unused.
@@ -5658,7 +5714,7 @@ mod tests {
         drop(host);
 
         // The next service of the home, which starts with its agents active, says it no more.
-        let host = ServiceHost::start(home.path()).unwrap();
+        let host = ServiceHost::start_for_test(home.path()).unwrap();
         host.publish_ready().unwrap();
         let mut shell = attached_shell(&host);
         let heard = heard_before_a_click(&mut shell, &stays, TrayItemId::Hold);
@@ -5673,7 +5729,7 @@ mod tests {
     fn every_native_act_gets_one_answer_from_the_shell_or_unavailable_when_it_goes() {
         {
             let home = TestHome::new("shell-acts");
-            let host = ServiceHost::start(home.path()).unwrap();
+            let host = ServiceHost::start_for_test(home.path()).unwrap();
             host.publish_ready().unwrap();
             let mut stream = attached_shell(&host);
 
@@ -5898,12 +5954,12 @@ mod tests {
         let home = TestHome::new(name);
         let clock = HandClock::default();
         let fake = Arc::clone(fake);
-        let host = ServiceHost::start_with_world(
+        let host = ServiceHost::start(
             home.path(),
             idling(),
-            || Ok(false),
-            move |_, ending| Box::new(EndsWithQuit(fake.world(), ending)),
-            Arc::new(clock.clone()),
+            World::test()
+                .with_presence(move |_, ending| Box::new(EndsWithQuit(fake.world(), ending)))
+                .with_idle_clock(Arc::new(clock.clone())),
         )
         .unwrap();
         let (quit, quit_requested) = mpsc::channel();
@@ -6107,13 +6163,13 @@ mod tests {
         let starter = thread::spawn(move || {
             let started = Instant::now();
             // The token check comes before the start first asks for the lock.
-            let served = ServiceHost::start_with_token(
+            let served = ServiceHost::start(
                 &directory,
                 StartTerms::for_reason(StartReason::Browser),
-                move || {
+                World::test().with_token(move || {
                     let _ = began.send(());
                     Ok(false)
-                },
+                }),
             )
             .map(drop);
             (served, started.elapsed())
@@ -6150,7 +6206,7 @@ mod tests {
         let named = browser_id_named(hello["browser_name"].as_str().unwrap());
         assert!(named.is_some(), "{hello}");
         {
-            let host = ServiceHost::start(home.path()).unwrap();
+            let host = ServiceHost::start_for_test(home.path()).unwrap();
             assert_eq!(host.browser.last_connected_browser(), None);
             let (service, extension) = pair().unwrap();
             let fake = FakeExtension::connect(extension, &hello, listing());
@@ -6158,7 +6214,7 @@ mod tests {
             assert_eq!(host.browser.last_connected_browser().as_deref(), named);
             fake.close();
         }
-        let fresh = ServiceHost::start(home.path()).unwrap();
+        let fresh = ServiceHost::start_for_test(home.path()).unwrap();
         assert_eq!(
             fresh.browser.last_connected_browser().as_deref(),
             named,

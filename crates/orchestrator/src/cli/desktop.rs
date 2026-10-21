@@ -31,7 +31,7 @@ use crate::install::record;
 use crate::language::environment::SESSION_LISTENER_FAILED;
 use crate::language::workbench::WindowReason;
 use crate::service::presence::{self, LaunchRefusal};
-use crate::service::{Quit, ServiceHost};
+use crate::service::{Quit, ServiceHost, StartTerms, World};
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
@@ -110,7 +110,9 @@ pub fn serve(start: ServeStart) -> anyhow::Result<()> {
             &home,
             start.reason,
             listen_for_session_end,
-            ServiceHost::start_waiting,
+            |home, reason| {
+                ServiceHost::start(home, StartTerms::for_reason(reason), World::system())
+            },
         )
     } else {
         relaunch(
@@ -465,7 +467,8 @@ mod tests {
 
         fn start(&self, reason: StartReason) -> io::Result<()> {
             self.reasons.borrow_mut().push(reason);
-            let host = crate::service::ServiceHost::start(&self.home).map_err(io::Error::other)?;
+            let host = crate::service::ServiceHost::start_for_test(&self.home)
+                .map_err(io::Error::other)?;
             host.publish_ready().map_err(io::Error::other)?;
             host.workbench.attach_presentation(self.reveals.clone());
             *self.host.borrow_mut() = Some(host);
@@ -569,7 +572,7 @@ mod tests {
                 },
                 |home, _| {
                     order.lock().unwrap().push("start");
-                    ServiceHost::start(home)
+                    ServiceHost::start_for_test(home)
                 },
             );
             assert!(quitter.join().unwrap(), "the endpoint was bound and quit");
@@ -630,7 +633,7 @@ mod tests {
                 &path,
                 StartReason::Command,
                 |_| Ok(()),
-                |home, _| ServiceHost::start(home),
+                |home, _| ServiceHost::start_for_test(home),
             )
             .unwrap();
             assert!(quitter.join().unwrap(), "the service answered");
@@ -751,7 +754,7 @@ mod tests {
             }
 
             let home = crate::service::test_home::TestHome::new("delayed-presentation");
-            let host = crate::service::ServiceHost::start(home.path()).unwrap();
+            let host = crate::service::ServiceHost::start_for_test(home.path()).unwrap();
             host.publish_ready().unwrap();
             assert!(!crate::cli::client::activate_workbench().unwrap());
             let timeout_started = std::time::Instant::now();
