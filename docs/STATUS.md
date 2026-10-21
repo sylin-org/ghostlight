@@ -237,8 +237,10 @@ Now:
   title is the ghost emoji and the agent's name instead of `Ghostlight - `, and the extension
   retitles a group 2.0.0 named rather than opening a second one (ADR-0098 amendment of
   2026-10-21). P-D3 changes three packaged extension files, so the next candidate carries it.
-  The owner checked the tab strip on Windows on 2026-10-21 ("it's working beautifully"); the four
-  test machines check theirs as their tests-1 lanes start, the Alpine one first. dev
+  The owner checked the tab strip on Windows on 2026-10-21 ("it's working beautifully"), and the
+  color ghost renders on CachyOS (KDE Wayland) and on Alpine, both with Noto Color Emoji; Bluefin and
+  leo-desktop-02 check theirs as their lanes start. Both Linux browsers run the store 2.0.0
+  extension, so the old group's rename was seen on neither. dev
   73d5cc46 is deployed on the owner's machine and was checked live on the local 2.0.1 extension:
   the desk with its prompt and a held dialog, the three forms, diagnose and wait, history, a
   script, a screenshot and a kept close, plus P-D4 and P-D5. The morning's extension check had run
