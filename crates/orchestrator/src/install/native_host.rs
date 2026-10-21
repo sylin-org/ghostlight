@@ -1589,116 +1589,6 @@ mod tests {
         }
     }
 
-    fn symlink_probe_directory(name: &str) -> Scratch {
-        Scratch::named(&format!("native-host-{name}"))
-    }
-
-    /// The names in `directory`, sorted.
-    fn names_in(directory: &Path) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(directory)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        names
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_registration_file_is_written_through_a_link() {
-        use std::os::unix::fs::symlink;
-
-        let directory = symlink_probe_directory("symlink-unix");
-        let real = directory.join("real-registration.json");
-        fs::write(&real, "old").unwrap();
-        let link = directory.join("registration.json");
-        symlink(&real, &link).unwrap();
-
-        SystemRegistrationIo.write_file(&link, "new").unwrap();
-
-        // The link stays a link to the same file, and the file holds the new bytes.
-        let metadata = fs::symlink_metadata(&link).unwrap();
-        assert!(metadata.file_type().is_symlink());
-        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
-        assert_eq!(fs::read_to_string(&link).unwrap(), "new");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_registration_file_is_written_through_a_link() {
-        use std::os::windows::fs::symlink_file;
-
-        let directory = symlink_probe_directory("symlink-windows");
-        let real = directory.join("real-registration.json");
-        fs::write(&real, "old").unwrap();
-        let link = directory.join("registration.json");
-        if symlink_file(&real, &link).is_err() {
-            // No symlink privilege (Developer Mode / an elevated shell) in this environment.
-            // The equivalent Unix test exercises the same replace.
-            return;
-        }
-
-        SystemRegistrationIo.write_file(&link, "new").unwrap();
-
-        let metadata = fs::symlink_metadata(&link).unwrap();
-        assert!(metadata.file_type().is_symlink());
-        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
-        assert_eq!(fs::read_to_string(&link).unwrap(), "new");
-    }
-
-    #[test]
-    fn a_failed_native_host_write_leaves_no_temporary() {
-        let directory = symlink_probe_directory("failed-write");
-        // A directory where the manifest belongs: the rename over it fails after the temporary
-        // was written.
-        let manifest = directory.join(format!("{HOST_NAME}.json"));
-        fs::create_dir(&manifest).unwrap();
-
-        assert!(SystemRegistrationIo.write_file(&manifest, "{}").is_err());
-        assert!(manifest.is_dir());
-        assert_eq!(names_in(&directory), [format!("{HOST_NAME}.json")]);
-    }
-
-    #[test]
-    fn register_and_inspect_agree_on_a_respelled_registry_value() {
-        let (_root, context) = windows_context_with_connector();
-        let registration_io = DiskFiles::default();
-        apply_install(&context, &registration_io).unwrap();
-        let written = registration_io.memory.registry_writes().len();
-        assert_eq!(written, BROWSERS.len());
-
-        // The same manifest, spelled through `.`, and on Windows also with forward slashes and in
-        // capitals, as another tool may have written the value.
-        let manifest = canonical_path(&windows_manifest_path(&context));
-        let respelled = manifest
-            .parent()
-            .unwrap()
-            .join(".")
-            .join(manifest.file_name().unwrap())
-            .to_string_lossy()
-            .into_owned();
-        let respelled = if cfg!(windows) {
-            respelled.replace('\\', "/").to_uppercase()
-        } else {
-            respelled
-        };
-        for browser in BROWSERS {
-            registration_io
-                .memory
-                .registry()
-                .insert(context.registry_key(browser), respelled.clone());
-        }
-
-        let report = inspect(&context, &registration_io).unwrap();
-        assert!(report
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Current));
-        let again = apply_install(&context, &registration_io).unwrap();
-        assert!(!again.changed);
-        assert_eq!(registration_io.memory.registry_writes().len(), written);
-    }
-
     /// A context rooted in a fresh scratch directory, which lives as long as the returned guard.
     fn context(platform: NativeHostPlatform) -> (Scratch, NativeHostContext) {
         let root = Scratch::named("native-host");
@@ -1726,631 +1616,6 @@ mod tests {
         (root, context)
     }
 
-    #[test]
-    fn empty_native_host_variables_resolve_below_the_home_and_isolate_nothing() {
-        use super::user_dirs::{
-            HOME_VARIABLE, LOCAL_APP_DATA_VARIABLE, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE,
-        };
-        use std::ffi::OsString;
-
-        let home = if cfg!(windows) {
-            "C:/Users/test"
-        } else {
-            "/home/test"
-        };
-        let lookup = |name: &str| match name {
-            USER_PROFILE_VARIABLE | HOME_VARIABLE => Some(OsString::from(home)),
-            NATIVE_HOST_DIR_VARIABLE | LOCAL_APP_DATA_VARIABLE | XDG_CONFIG_HOME_VARIABLE => {
-                Some(OsString::new())
-            }
-            _ => None,
-        };
-        let dirs = UserDirs::from_lookup(&lookup, cfg!(windows));
-        let (resolved, local, config, isolated) = environment_native_host_roots(&dirs, &lookup);
-        let home = Path::new(home);
-        assert_eq!(resolved, home);
-        assert_eq!(local, home.join("AppData").join("Local"));
-        assert_eq!(config, home.join(".config"));
-        assert!(!isolated);
-    }
-
-    #[test]
-    fn an_explicit_native_host_root_isolates_both_platform_roots() {
-        let (home, local, config, isolated) = native_host_roots(
-            Some(PathBuf::from("/isolated")),
-            Some(PathBuf::from("/real/Local")),
-            Some(PathBuf::from("/real/config")),
-            Path::new("/home/test"),
-        );
-        assert_eq!(home, PathBuf::from("/isolated"));
-        assert_eq!(local, PathBuf::from("/isolated"));
-        assert_eq!(config, PathBuf::from("/isolated"));
-        assert!(isolated);
-
-        let (home, local, config, isolated) = native_host_roots(
-            None,
-            Some(PathBuf::from("/real/Local")),
-            Some(PathBuf::from("/real/config")),
-            Path::new("/home/test"),
-        );
-        assert_eq!(home, PathBuf::from("/home/test"));
-        assert_eq!(local, PathBuf::from("/real/Local"));
-        assert_eq!(config, PathBuf::from("/real/config"));
-        assert!(!isolated);
-
-        let (home, local, config, isolated) =
-            native_host_roots(None, None, None, Path::new("/home/test"));
-        assert_eq!(home, PathBuf::from("/home/test"));
-        assert_eq!(local, PathBuf::from("/home/test/AppData/Local"));
-        assert_eq!(config, PathBuf::from("/home/test/.config"));
-        assert!(!isolated);
-    }
-
-    #[test]
-    fn an_isolated_context_writes_registry_keys_only_ghostlight_owns() {
-        let (_isolated_root, mut isolated) = context(NativeHostPlatform::Windows);
-        isolated.registry_isolated = true;
-        assert_eq!(
-            isolated.registry_key(&BROWSERS[0]),
-            r"Software\Ghostlight\Isolated\Google\Chrome\NativeMessagingHosts\org.sylin.ghostlight"
-        );
-        let (_real_root, real) = context(NativeHostPlatform::Windows);
-        assert_eq!(
-            real.registry_key(&BROWSERS[0]),
-            r"Software\Google\Chrome\NativeMessagingHosts\org.sylin.ghostlight"
-        );
-    }
-
-    #[test]
-    fn manifest_keeps_both_established_extension_identities() {
-        let chrome = HostManifest::expected(Path::new("/opt/ghostlight/browser"));
-        assert_eq!(chrome.name, HOST_NAME);
-        assert_eq!(chrome.connection_type, "stdio");
-        assert_eq!(
-            chrome.allowed_origins,
-            vec![
-                format!("chrome-extension://{STORE_EXTENSION_ID}/"),
-                format!("chrome-extension://{DEVELOPMENT_EXTENSION_ID}/"),
-            ]
-        );
-    }
-
-    #[test]
-    fn install_removes_only_owned_retired_firefox_registration() {
-        for platform in [NativeHostPlatform::Windows, NativeHostPlatform::Linux] {
-            let (_root, context) = context(platform);
-            let registration_io = MemoryIo::default();
-            fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
-            fs::write(&context.connector, b"connector").unwrap();
-
-            let retired_manifest = match platform {
-                NativeHostPlatform::Windows => context
-                    .local
-                    .join("Ghostlight/NativeMessagingHosts/org.sylin.ghostlight.firefox.json"),
-                NativeHostPlatform::Linux => context
-                    .home
-                    .join(".mozilla/native-messaging-hosts/org.sylin.ghostlight.json"),
-            };
-            registration_io.files().insert(
-                retired_manifest.clone(),
-                HostManifest::expected(&context.connector)
-                    .to_json()
-                    .unwrap(),
-            );
-            if platform == NativeHostPlatform::Windows {
-                registration_io.registry().insert(
-                    r"Software\Mozilla\NativeMessagingHosts\org.sylin.ghostlight".into(),
-                    retired_manifest.to_string_lossy().into_owned(),
-                );
-            }
-
-            let result = apply_install(&context, &registration_io).unwrap();
-            assert!(result.changed);
-            assert!(!registration_io.files().contains_key(&retired_manifest));
-            assert!(!registration_io
-                .registry()
-                .contains_key(r"Software\Mozilla\NativeMessagingHosts\org.sylin.ghostlight"));
-        }
-    }
-
-    #[test]
-    fn layouts_cover_the_four_browser_families_exactly() {
-        let linux = NativeHostContext {
-            platform: NativeHostPlatform::Linux,
-            home: PathBuf::from("/home/test"),
-            config: PathBuf::from("/home/test/.config"),
-            local: PathBuf::from(r"C:\Users\test\AppData\Local"),
-            layout: Layout::new("/home/test/.ghostlight"),
-            manifests: PathBuf::from("/home/test/.ghostlight/manifests"),
-            connector: PathBuf::from("/opt/ghostlight/ghostlight"),
-            browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
-            windows_browser_roots: Vec::new(),
-            registry_isolated: false,
-            residence: Residence::Regular,
-        };
-        let windows = NativeHostContext {
-            platform: NativeHostPlatform::Windows,
-            home: PathBuf::from("/home/test"),
-            config: PathBuf::from("/home/test/.config"),
-            local: PathBuf::from(r"C:\Users\test\AppData\Local"),
-            layout: Layout::new("/home/test/.ghostlight"),
-            manifests: PathBuf::from("/home/test/.ghostlight/manifests"),
-            connector: PathBuf::from(r"C:\Users\test\.ghostlight\bin\ghostlight.exe"),
-            browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
-            windows_browser_roots: Vec::new(),
-            registry_isolated: false,
-            residence: Residence::Regular,
-        };
-        assert_eq!(BROWSERS.len(), 4);
-        assert_eq!(
-            browser_manifest_path(&linux, &BROWSERS[0]),
-            PathBuf::from(
-                "/home/test/.config/google-chrome/NativeMessagingHosts/org.sylin.ghostlight.json"
-            )
-        );
-        assert_eq!(
-            windows_registry_key(&BROWSERS[2]),
-            r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\org.sylin.ghostlight"
-        );
-        assert_eq!(
-            browser_manifest_path(&windows, &BROWSERS[0]),
-            windows_manifest_path(&windows)
-        );
-    }
-
-    #[test]
-    fn a_reported_browser_name_maps_to_its_one_browser_id() {
-        assert_eq!(browser_id_named("Google Chrome"), Some("chrome"));
-        assert_eq!(browser_id_named("Chrome"), Some("chrome"));
-        assert_eq!(browser_id_named("Microsoft Edge"), Some("edge"));
-        assert_eq!(browser_id_named("Brave"), Some("brave"));
-        assert_eq!(browser_id_named("Chromium"), Some("chromium"));
-        assert_eq!(browser_id_named("Opera"), None);
-        assert_eq!(browser_id_named(""), None);
-    }
-
-    #[test]
-    fn user_data_directories_follow_the_table_on_both_platforms() {
-        let (_windows_root, windows) = context(NativeHostPlatform::Windows);
-        let (_linux_root, linux) = context(NativeHostPlatform::Linux);
-        let windows_tails = [
-            "Google/Chrome/User Data",
-            "Microsoft/Edge/User Data",
-            "BraveSoftware/Brave-Browser/User Data",
-            "Chromium/User Data",
-        ];
-        let linux_tails = [
-            "google-chrome",
-            "microsoft-edge",
-            "BraveSoftware/Brave-Browser",
-            "chromium",
-        ];
-        for (index, browser) in BROWSERS.iter().enumerate() {
-            let on_windows = user_data_directory(&windows, browser);
-            assert!(on_windows.starts_with(&windows.local), "{}", browser.id);
-            assert!(on_windows.ends_with(windows_tails[index]), "{}", browser.id);
-            let on_linux = user_data_directory(&linux, browser);
-            assert!(on_linux.starts_with(&linux.config), "{}", browser.id);
-            assert!(on_linux.ends_with(linux_tails[index]), "{}", browser.id);
-        }
-    }
-
-    #[test]
-    fn the_registry_answers_user_data_and_identities_in_table_order() {
-        let root = Scratch::named("user-data-registry");
-        let registry = NativeHostRegistry::isolated(&root, &root.join("ghostlight"));
-
-        assert_eq!(
-            registry.user_data_directory("brave"),
-            Some(root.join(".config/BraveSoftware/Brave-Browser"))
-        );
-        assert_eq!(registry.user_data_directory("firefox"), None);
-        let identities: Vec<(&str, &str)> = registry
-            .browser_identities()
-            .iter()
-            .map(|browser| (browser.id, browser.short))
-            .collect();
-        assert_eq!(
-            identities,
-            [
-                ("chrome", "Chrome"),
-                ("edge", "Edge"),
-                ("brave", "Brave"),
-                ("chromium", "Chromium")
-            ]
-        );
-        assert_eq!(registry.browser_identities()[0].name, "Google Chrome");
-    }
-
-    #[test]
-    fn windows_executable_discovery_uses_only_fixed_roots_for_all_families() {
-        let (_root, context) = context(NativeHostPlatform::Windows);
-        let outside = context.home.join("Portable");
-        let decoy = windows_browser_executable_path(&outside, &BROWSERS[0]);
-        fs::create_dir_all(decoy.parent().unwrap()).unwrap();
-        fs::write(&decoy, b"portable browser").unwrap();
-        assert_eq!(browser_executable(&context, &BROWSERS[0]), None);
-
-        let placements = [(0, 0), (1, 1), (2, 2), (3, 0)];
-        for (browser_index, root_index) in placements {
-            let browser = &BROWSERS[browser_index];
-            let expected = windows_browser_executable_path(
-                &context.windows_browser_roots[root_index],
-                browser,
-            );
-            fs::create_dir_all(expected.parent().unwrap()).unwrap();
-            fs::write(&expected, b"ordinary browser").unwrap();
-            assert_eq!(browser_executable(&context, browser), Some(expected));
-        }
-    }
-
-    #[test]
-    fn same_tree_stale_is_updatable_and_another_installation_is_owned_elsewhere() {
-        let expected = HostManifest::expected(Path::new("/opt/ghost/browser-connector"));
-        let mut stale = expected.clone();
-        stale.description = "Ghostlight connector (old)".into();
-        assert_eq!(
-            classify_manifest(
-                Some(&stale.to_json().unwrap()),
-                &expected,
-                NativeHostPlatform::Linux,
-                true
-            )
-            .unwrap()
-            .0,
-            NativeHostState::Updatable
-        );
-        let elsewhere = HostManifest::expected(Path::new("/other/tree/browser-connector"))
-            .to_json()
-            .unwrap();
-        let (state, registered) =
-            classify_manifest(Some(&elsewhere), &expected, NativeHostPlatform::Linux, true)
-                .unwrap();
-        assert_eq!(state, NativeHostState::OwnedElsewhere);
-        assert_eq!(
-            registered.as_deref(),
-            Some(Path::new("/other/tree/browser-connector"))
-        );
-        assert_eq!(
-            classify_manifest(
-                Some(r#"{"name":"org.example.foreign"}"#),
-                &expected,
-                NativeHostPlatform::Linux,
-                true
-            )
-            .unwrap()
-            .0,
-            NativeHostState::NeedsAttention
-        );
-        assert_eq!(
-            classify_manifest(Some("not json"), &expected, NativeHostPlatform::Linux, true)
-                .unwrap()
-                .0,
-            NativeHostState::NeedsAttention
-        );
-    }
-
-    #[test]
-    fn a_registration_owned_elsewhere_is_diagnosed_then_adopted_only_by_install() {
-        let (_root, context) = context(NativeHostPlatform::Windows);
-        let registration_io = MemoryIo::default();
-        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
-        fs::write(&context.connector, b"connector").unwrap();
-        // Joined components, not a backslash literal: Path::parent must split this path on
-        // every host operating system, not only on Windows.
-        let other_connector = context.local.join("other-tree").join("ghostlight.exe");
-        let manifest_path = context.local.join("Ghostlight-old/host.json");
-        registration_io.files().insert(
-            manifest_path.clone(),
-            HostManifest::expected(&other_connector).to_json().unwrap(),
-        );
-        // The other installation still exists, so the diagnosis names it as alive.
-        registration_io
-            .files()
-            .insert(other_connector.clone(), "connector".into());
-        for browser in BROWSERS {
-            registration_io.registry().insert(
-                windows_registry_key(browser),
-                manifest_path.to_string_lossy().into_owned(),
-            );
-        }
-
-        let observed = inspect(&context, &registration_io).unwrap();
-        assert!(observed
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::OwnedElsewhere));
-        assert!(
-            observed.browsers.iter().all(|browser| browser
-                .detail
-                .contains("Another Ghostlight installation at"))
-                && observed
-                    .browsers
-                    .iter()
-                    .all(|browser| browser.detail.contains("other-tree"))
-        );
-
-        // The owning installation is deleted: the dead-path diagnosis replaces the alive one.
-        registration_io.files().remove(&other_connector);
-        let removed = inspect(&context, &registration_io).unwrap();
-        assert!(removed.browsers.iter().all(|browser| browser
-            .detail
-            .contains("A removed Ghostlight installation at")));
-
-        // Recovery's ownership-checked repair refuses; only a deliberate install adopts.
-        let refused = apply_owned_repair_for(&context, &registration_io, &[BROWSERS[0]]);
-        assert!(matches!(
-            refused,
-            Err(NativeHostError::OwnedRepairUnavailable(_))
-        ));
-        assert!(apply_install(&context, &registration_io).unwrap().changed);
-        assert!(inspect(&context, &registration_io)
-            .unwrap()
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Current));
-    }
-
-    #[test]
-    fn unix_install_is_idempotent_and_uninstall_removes_only_owned_files() {
-        let (_root, context) = context(NativeHostPlatform::Linux);
-        let registration_io = MemoryIo::default();
-        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
-        fs::write(&context.connector, b"connector").unwrap();
-
-        let first = apply_install(&context, &registration_io).unwrap();
-        assert!(first.changed);
-        assert!(first
-            .report
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Current));
-        assert!(!apply_install(&context, &registration_io).unwrap().changed);
-
-        let foreign_path = browser_manifest_path(&context, &BROWSERS[0]);
-        registration_io.files().insert(
-            foreign_path.clone(),
-            r#"{"name":"org.example.foreign"}"#.into(),
-        );
-        let removed = apply_uninstall(&context, &registration_io).unwrap();
-        assert!(removed.changed);
-        assert!(registration_io.files().contains_key(&foreign_path));
-        assert_eq!(
-            removed.report.browsers[0].state,
-            NativeHostState::NeedsAttention
-        );
-    }
-
-    #[test]
-    fn windows_install_repairs_owned_old_paths_and_refuses_unowned_ones() {
-        let (_root, context) = context(NativeHostPlatform::Windows);
-        let registration_io = MemoryIo::default();
-        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
-        fs::write(&context.connector, b"connector").unwrap();
-        let old_path = context.local.join("Ghostlight-old/host.json");
-        registration_io.files().insert(
-            old_path.clone(),
-            HostManifest::expected(Path::new(r"C:\old\ghostlight.exe"))
-                .to_json()
-                .unwrap(),
-        );
-        for browser in BROWSERS {
-            registration_io.registry().insert(
-                windows_registry_key(browser),
-                old_path.to_string_lossy().into_owned(),
-            );
-        }
-
-        assert!(apply_install(&context, &registration_io).unwrap().changed);
-        assert!(inspect(&context, &registration_io)
-            .unwrap()
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Current));
-
-        let foreign_path = context.local.join("foreign.json");
-        registration_io.files().insert(
-            foreign_path.clone(),
-            r#"{"name":"org.example.foreign"}"#.into(),
-        );
-        registration_io.registry().insert(
-            windows_registry_key(&BROWSERS[0]),
-            foreign_path.to_string_lossy().into_owned(),
-        );
-        registration_io
-            .registry()
-            .remove(&windows_registry_key(&BROWSERS[1]));
-        let partial = apply_install(&context, &registration_io).unwrap();
-        assert!(partial.changed);
-        assert_eq!(
-            partial.report.browsers[0].state,
-            NativeHostState::NeedsAttention
-        );
-        assert_eq!(partial.report.browsers[1].state, NativeHostState::Current);
-    }
-
-    #[test]
-    fn a_ghostlight_value_naming_a_manifest_that_is_gone_is_missing_and_install_rewrites_it() {
-        let (_root, context) = windows_context_with_connector();
-        let registration_io = MemoryIo::default();
-        let gone = legacy_windows_manifest_directory(&context).join("org.sylin.ghostlight.json");
-        for browser in BROWSERS {
-            registration_io.registry().insert(
-                windows_registry_key(browser),
-                gone.to_string_lossy().into_owned(),
-            );
-        }
-        let foreign = context.local.join("Other").join("host.json");
-        registration_io.registry().insert(
-            windows_registry_key(&BROWSERS[1]),
-            foreign.to_string_lossy().into_owned(),
-        );
-
-        let observed = inspect(&context, &registration_io).unwrap();
-        assert_eq!(observed.browsers[0].state, NativeHostState::Missing);
-        assert_eq!(observed.browsers[1].state, NativeHostState::NeedsAttention);
-
-        assert!(apply_install(&context, &registration_io).unwrap().changed);
-        let repaired = inspect(&context, &registration_io).unwrap();
-        assert_eq!(repaired.browsers[0].state, NativeHostState::Current);
-        assert_eq!(
-            registration_io
-                .registry()
-                .get(&windows_registry_key(&BROWSERS[0])),
-            Some(
-                &canonical_path(&windows_manifest_path(&context))
-                    .to_string_lossy()
-                    .into_owned()
-            )
-        );
-        // Another product's value is never touched, even when its file is gone too.
-        assert_eq!(repaired.browsers[1].state, NativeHostState::NeedsAttention);
-        assert_eq!(
-            registration_io
-                .registry()
-                .get(&windows_registry_key(&BROWSERS[1])),
-            Some(&foreign.to_string_lossy().into_owned())
-        );
-    }
-
-    #[test]
-    fn only_the_hosts_own_file_name_makes_a_value_ghostlights() {
-        for own in [
-            r"C:\Users\person\AppData\Local\Ghostlight\NativeMessagingHosts\org.sylin.ghostlight.json",
-            r"C:\Users\person\.ghostlight\manifests\ORG.SYLIN.GHOSTLIGHT.JSON",
-            "/home/person/.config/google-chrome/NativeMessagingHosts/org.sylin.ghostlight.json",
-        ] {
-            assert!(names_host_manifest(Path::new(own)), "{own}");
-        }
-        for other in [
-            r"C:\Users\person\org.sylin.ghostlight\host.json",
-            r"C:\Users\person\org.sylin.ghostlight.json.bak",
-            r"C:\Users\person\org.example.foreign.json",
-            "",
-        ] {
-            assert!(!names_host_manifest(Path::new(other)), "{other}");
-        }
-    }
-
-    #[test]
-    fn windows_owned_repair_revalidates_before_writing() {
-        let (_root, context) = context(NativeHostPlatform::Windows);
-        let registration_io = MemoryIo::default();
-        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
-        fs::write(&context.connector, b"connector").unwrap();
-        let browser = BROWSERS[0];
-        let key = windows_registry_key(&browser);
-        let current_manifest = windows_manifest_path(&context);
-
-        assert!(matches!(
-            apply_owned_repair_for(&context, &registration_io, &[browser]),
-            Err(NativeHostError::OwnedRepairUnavailable(id)) if id == browser.id
-        ));
-        assert!(registration_io.registry().is_empty());
-        assert!(!registration_io.files().contains_key(&current_manifest));
-
-        let occupied = context.local.join("foreign.json");
-        registration_io
-            .registry()
-            .insert(key.clone(), occupied.to_string_lossy().into_owned());
-        registration_io
-            .files()
-            .insert(occupied.clone(), r#"{"name":"org.example.foreign"}"#.into());
-        assert!(matches!(
-            apply_owned_repair_for(&context, &registration_io, &[browser]),
-            Err(NativeHostError::OwnedRepairUnavailable(id)) if id == browser.id
-        ));
-        assert_eq!(
-            registration_io.registry().get(&key),
-            Some(&occupied.to_string_lossy().into_owned())
-        );
-        assert_eq!(
-            registration_io.files().get(&occupied).map(String::as_str),
-            Some(r#"{"name":"org.example.foreign"}"#)
-        );
-        assert!(!registration_io.files().contains_key(&current_manifest));
-
-        // Same-tree stale details are the state recovery may silently repair; an edge in
-        // another installation is OwnedElsewhere and is pinned by its own test.
-        let stale_connector = context.connector.with_file_name("ghostlight-old.exe");
-        registration_io.files().insert(
-            occupied,
-            HostManifest::expected(&stale_connector).to_json().unwrap(),
-        );
-        let repaired = apply_owned_repair_for(&context, &registration_io, &[browser]).unwrap();
-        assert!(repaired.changed);
-        assert_eq!(repaired.report.browsers[0].state, NativeHostState::Current);
-        assert_eq!(
-            registration_io.registry().get(&key),
-            Some(&current_manifest.to_string_lossy().into_owned())
-        );
-        assert!(
-            !apply_owned_repair_for(&context, &registration_io, &[browser])
-                .unwrap()
-                .changed
-        );
-    }
-
-    #[test]
-    fn windows_uninstall_removes_an_unreferenced_owned_shared_manifest() {
-        let (_root, context) = context(NativeHostPlatform::Windows);
-        let registration_io = MemoryIo::default();
-        let manifest_path = windows_manifest_path(&context);
-        registration_io.files().insert(
-            manifest_path.clone(),
-            HostManifest::expected(&context.connector)
-                .to_json()
-                .unwrap(),
-        );
-
-        let result = apply_uninstall(&context, &registration_io).unwrap();
-
-        assert!(result.changed);
-        assert!(!registration_io.files().contains_key(&manifest_path));
-        assert!(result
-            .report
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Missing));
-    }
-
-    #[test]
-    fn selected_unix_install_and_uninstall_touch_only_named_browsers() {
-        let (_root, context) = context(NativeHostPlatform::Linux);
-        let registration_io = MemoryIo::default();
-        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
-        fs::write(&context.connector, b"connector").unwrap();
-
-        let installed = apply_install_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
-        assert_eq!(installed.report.browsers[0].state, NativeHostState::Current);
-        assert!(installed.report.browsers[1..]
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Missing));
-
-        apply_install_for(&context, &registration_io, &[BROWSERS[1]]).unwrap();
-        let removed = apply_uninstall_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
-        assert_eq!(removed.report.browsers[0].state, NativeHostState::Missing);
-        assert_eq!(removed.report.browsers[1].state, NativeHostState::Current);
-        assert!(select_browsers(&["firefox".into()]).is_err());
-        assert!(select_browsers(&["safari".into()]).is_err());
-    }
-
-    #[test]
-    fn selected_windows_uninstall_preserves_a_shared_manifest_still_in_use() {
-        let (_root, context) = context(NativeHostPlatform::Windows);
-        let registration_io = MemoryIo::default();
-        fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
-        fs::write(&context.connector, b"connector").unwrap();
-        apply_install_for(&context, &registration_io, &BROWSERS[..2]).unwrap();
-
-        let removed = apply_uninstall_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
-        assert_eq!(removed.report.browsers[0].state, NativeHostState::Missing);
-        assert_eq!(removed.report.browsers[1].state, NativeHostState::Current);
-        assert!(registration_io
-            .files()
-            .contains_key(&windows_manifest_path(&context)));
-    }
-
     fn windows_context_with_connector() -> (Scratch, NativeHostContext) {
         let (root, context) = context(NativeHostPlatform::Windows);
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
@@ -2368,174 +1633,6 @@ mod tests {
             .iter()
             .map(|browser| browser.name.to_owned())
             .collect()
-    }
-
-    #[test]
-    fn the_windows_manifest_lives_in_the_home_and_every_browser_names_it() {
-        let (_root, context) = windows_context_with_connector();
-        let registration_io = MemoryIo::default();
-
-        let result = apply_install(&context, &registration_io).unwrap();
-
-        let manifest = windows_manifest_path(&context);
-        assert!(manifest.starts_with(context.layout.home()));
-        assert_eq!(
-            manifest,
-            context.layout.manifests().join("org.sylin.ghostlight.json")
-        );
-        assert!(registration_io.files().contains_key(&manifest));
-        for browser in BROWSERS {
-            assert_eq!(
-                registration_io
-                    .registry()
-                    .get(&context.registry_key(browser)),
-                Some(&manifest.to_string_lossy().into_owned()),
-                "{}",
-                browser.id
-            );
-        }
-        assert!(result.changed);
-        assert!(result.private.is_empty());
-        assert_eq!(result.report.private_view, None);
-    }
-
-    #[test]
-    fn a_registry_value_is_written_only_when_it_differs() {
-        let (_root, context) = windows_context_with_connector();
-        let registration_io = MemoryIo::default();
-        apply_install(&context, &registration_io).unwrap();
-        assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
-
-        // A stale manifest is rewritten; the registry already names it, so it is not touched.
-        let manifest = windows_manifest_path(&context);
-        let mut stale = HostManifest::expected(&context.connector);
-        stale.description = "Ghostlight connector (old)".into();
-        registration_io
-            .files()
-            .insert(manifest.clone(), stale.to_json().unwrap());
-        let repaired = apply_install(&context, &registration_io).unwrap();
-        assert!(repaired.changed);
-        assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
-        assert!(repaired
-            .report
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Current));
-
-        assert!(!apply_install(&context, &registration_io).unwrap().changed);
-        assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
-    }
-
-    #[test]
-    fn inside_a_container_the_manifest_is_written_and_no_registry_value_is() {
-        let (_root, context) = windows_context_with_connector();
-        let context = inside_container(context, "Claude");
-        let registration_io = MemoryIo::default();
-
-        let result = apply_install(&context, &registration_io).unwrap();
-
-        assert!(registration_io
-            .files()
-            .contains_key(&windows_manifest_path(&context)));
-        assert!(registration_io.registry_writes().is_empty());
-        assert!(registration_io.registry().is_empty());
-        assert!(result.changed);
-        assert_eq!(result.private, browser_names());
-        assert_eq!(
-            result.report.private_view,
-            Some(AppContainer {
-                app: "Claude".into()
-            })
-        );
-        assert!(result
-            .report
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Missing));
-    }
-
-    #[test]
-    fn inside_a_container_an_install_that_finds_the_registration_writes_nothing_private() {
-        let (_regular_root, regular) = windows_context_with_connector();
-        let registration_io = MemoryIo::default();
-        apply_install(&regular, &registration_io).unwrap();
-        let writes = registration_io.registry_writes().len();
-
-        // The manifest is stale but the registry value is right: only the manifest changes.
-        let manifest = windows_manifest_path(&regular);
-        let mut stale = HostManifest::expected(&regular.connector);
-        stale.description = "Ghostlight connector (old)".into();
-        registration_io
-            .files()
-            .insert(manifest.clone(), stale.to_json().unwrap());
-        let context = inside_container(regular, "Codex");
-        let result = apply_install(&context, &registration_io).unwrap();
-
-        assert!(result.changed);
-        assert!(result.private.is_empty());
-        assert_eq!(registration_io.registry_writes().len(), writes);
-        assert!(result
-            .report
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Current));
-        assert!(!apply_install(&context, &registration_io).unwrap().changed);
-    }
-
-    #[test]
-    fn inside_a_container_a_value_naming_a_manifest_that_is_gone_is_neither_written_nor_kept_private(
-    ) {
-        let (_root, context) = windows_context_with_connector();
-        let context = inside_container(context, "Claude");
-        let registration_io = MemoryIo::default();
-        let gone = legacy_windows_manifest_directory(&context).join("org.sylin.ghostlight.json");
-        for browser in BROWSERS {
-            registration_io.registry().insert(
-                windows_registry_key(browser),
-                gone.to_string_lossy().into_owned(),
-            );
-        }
-
-        let observed = inspect(&context, &registration_io).unwrap();
-        assert!(observed
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::NeedsAttention));
-
-        let result = apply_install(&context, &registration_io).unwrap();
-        assert!(result.private.is_empty());
-        assert!(registration_io.registry_writes().is_empty());
-        for browser in BROWSERS {
-            assert_eq!(
-                registration_io
-                    .registry()
-                    .get(&windows_registry_key(browser)),
-                Some(&gone.to_string_lossy().into_owned()),
-                "{}",
-                browser.id
-            );
-        }
-    }
-
-    #[test]
-    fn inside_a_container_an_uninstall_is_refused_before_anything_changes() {
-        let (_root, context) = windows_context_with_connector();
-        let context = inside_container(context, "Claude");
-        let registration_io = MemoryIo::default();
-        let manifest = windows_manifest_path(&context);
-        registration_io.files().insert(
-            manifest.clone(),
-            HostManifest::expected(&context.connector)
-                .to_json()
-                .unwrap(),
-        );
-
-        let refused = apply_uninstall(&context, &registration_io).unwrap_err();
-
-        assert!(matches!(refused, NativeHostError::PrivateView(_)));
-        assert!(refused.to_string().contains("Claude"));
-        assert!(refused.to_string().ends_with("uninstall"));
-        assert!(registration_io.files().contains_key(&manifest));
     }
 
     /// Plant an owned manifest in the old per-user `AppData` directory and point `browsers` at it.
@@ -2565,97 +1662,887 @@ mod tests {
         legacy
     }
 
+    /// Protects the native-messaging contract each Chromium browser reads: the manifest names both
+    /// established extension identities, every browser family has the manifest location and registry
+    /// key its browser reads, a brand name the browser reports maps to its one browser, user data
+    /// lives where each browser keeps it, and on Windows a browser is found only under fixed roots, so
+    /// no portable decoy is launched (defect 47d26b0b).
     #[test]
-    fn the_old_appdata_manifest_is_repointed_removed_and_its_directory_goes() {
-        let (_root, context) = windows_context_with_connector();
-        let registration_io = MemoryIo::default();
-        let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
-        let before = inspect(&context, &registration_io).unwrap();
-        assert!(before
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Updatable));
+    fn the_browser_table_matches_where_each_chromium_browser_reads_and_names_itself() {
+        {
+            let chrome = HostManifest::expected(Path::new("/opt/ghostlight/browser"));
+            assert_eq!(chrome.name, HOST_NAME);
+            assert_eq!(chrome.connection_type, "stdio");
+            assert_eq!(
+                chrome.allowed_origins,
+                vec![
+                    format!("chrome-extension://{STORE_EXTENSION_ID}/"),
+                    format!("chrome-extension://{DEVELOPMENT_EXTENSION_ID}/"),
+                ]
+            );
+        }
+        {
+            let linux = NativeHostContext {
+                platform: NativeHostPlatform::Linux,
+                home: PathBuf::from("/home/test"),
+                config: PathBuf::from("/home/test/.config"),
+                local: PathBuf::from(r"C:\Users\test\AppData\Local"),
+                layout: Layout::new("/home/test/.ghostlight"),
+                manifests: PathBuf::from("/home/test/.ghostlight/manifests"),
+                connector: PathBuf::from("/opt/ghostlight/ghostlight"),
+                browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
+                windows_browser_roots: Vec::new(),
+                registry_isolated: false,
+                residence: Residence::Regular,
+            };
+            let windows = NativeHostContext {
+                platform: NativeHostPlatform::Windows,
+                home: PathBuf::from("/home/test"),
+                config: PathBuf::from("/home/test/.config"),
+                local: PathBuf::from(r"C:\Users\test\AppData\Local"),
+                layout: Layout::new("/home/test/.ghostlight"),
+                manifests: PathBuf::from("/home/test/.ghostlight/manifests"),
+                connector: PathBuf::from(r"C:\Users\test\.ghostlight\bin\ghostlight.exe"),
+                browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
+                windows_browser_roots: Vec::new(),
+                registry_isolated: false,
+                residence: Residence::Regular,
+            };
+            assert_eq!(BROWSERS.len(), 4);
+            assert_eq!(
+            browser_manifest_path(&linux, &BROWSERS[0]),
+            PathBuf::from(
+                "/home/test/.config/google-chrome/NativeMessagingHosts/org.sylin.ghostlight.json"
+            )
+        );
+            assert_eq!(
+                windows_registry_key(&BROWSERS[2]),
+                r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\org.sylin.ghostlight"
+            );
+            assert_eq!(
+                browser_manifest_path(&windows, &BROWSERS[0]),
+                windows_manifest_path(&windows)
+            );
+        }
+        {
+            assert_eq!(browser_id_named("Google Chrome"), Some("chrome"));
+            assert_eq!(browser_id_named("Chrome"), Some("chrome"));
+            assert_eq!(browser_id_named("Microsoft Edge"), Some("edge"));
+            assert_eq!(browser_id_named("Brave"), Some("brave"));
+            assert_eq!(browser_id_named("Chromium"), Some("chromium"));
+            assert_eq!(browser_id_named("Opera"), None);
+            assert_eq!(browser_id_named(""), None);
+        }
+        {
+            let (_windows_root, windows) = context(NativeHostPlatform::Windows);
+            let (_linux_root, linux) = context(NativeHostPlatform::Linux);
+            let windows_tails = [
+                "Google/Chrome/User Data",
+                "Microsoft/Edge/User Data",
+                "BraveSoftware/Brave-Browser/User Data",
+                "Chromium/User Data",
+            ];
+            let linux_tails = [
+                "google-chrome",
+                "microsoft-edge",
+                "BraveSoftware/Brave-Browser",
+                "chromium",
+            ];
+            for (index, browser) in BROWSERS.iter().enumerate() {
+                let on_windows = user_data_directory(&windows, browser);
+                assert!(on_windows.starts_with(&windows.local), "{}", browser.id);
+                assert!(on_windows.ends_with(windows_tails[index]), "{}", browser.id);
+                let on_linux = user_data_directory(&linux, browser);
+                assert!(on_linux.starts_with(&linux.config), "{}", browser.id);
+                assert!(on_linux.ends_with(linux_tails[index]), "{}", browser.id);
+            }
+        }
+        {
+            let (_root, context) = context(NativeHostPlatform::Windows);
+            let outside = context.home.join("Portable");
+            let decoy = windows_browser_executable_path(&outside, &BROWSERS[0]);
+            fs::create_dir_all(decoy.parent().unwrap()).unwrap();
+            fs::write(&decoy, b"portable browser").unwrap();
+            assert_eq!(browser_executable(&context, &BROWSERS[0]), None);
 
-        let result = apply_install(&context, &registration_io).unwrap();
+            let placements = [(0, 0), (1, 1), (2, 2), (3, 0)];
+            for (browser_index, root_index) in placements {
+                let browser = &BROWSERS[browser_index];
+                let expected = windows_browser_executable_path(
+                    &context.windows_browser_roots[root_index],
+                    browser,
+                );
+                fs::create_dir_all(expected.parent().unwrap()).unwrap();
+                fs::write(&expected, b"ordinary browser").unwrap();
+                assert_eq!(browser_executable(&context, browser), Some(expected));
+            }
+        }
+    }
 
-        assert!(result.changed);
-        let manifest = windows_manifest_path(&context);
-        for browser in BROWSERS {
+    /// Protects Browser 22 and 23: a stale registration from this tree is updatable and repaired
+    /// silently only after it is checked again, while one owned by another installation is diagnosed
+    /// and adopted only by an explicit install.
+    #[test]
+    fn recovery_repairs_only_its_own_stale_registration_and_only_install_adopts_another() {
+        {
+            let expected = HostManifest::expected(Path::new("/opt/ghost/browser-connector"));
+            let mut stale = expected.clone();
+            stale.description = "Ghostlight connector (old)".into();
+            assert_eq!(
+                classify_manifest(
+                    Some(&stale.to_json().unwrap()),
+                    &expected,
+                    NativeHostPlatform::Linux,
+                    true
+                )
+                .unwrap()
+                .0,
+                NativeHostState::Updatable
+            );
+            let elsewhere = HostManifest::expected(Path::new("/other/tree/browser-connector"))
+                .to_json()
+                .unwrap();
+            let (state, registered) =
+                classify_manifest(Some(&elsewhere), &expected, NativeHostPlatform::Linux, true)
+                    .unwrap();
+            assert_eq!(state, NativeHostState::OwnedElsewhere);
+            assert_eq!(
+                registered.as_deref(),
+                Some(Path::new("/other/tree/browser-connector"))
+            );
+            assert_eq!(
+                classify_manifest(
+                    Some(r#"{"name":"org.example.foreign"}"#),
+                    &expected,
+                    NativeHostPlatform::Linux,
+                    true
+                )
+                .unwrap()
+                .0,
+                NativeHostState::NeedsAttention
+            );
+            assert_eq!(
+                classify_manifest(Some("not json"), &expected, NativeHostPlatform::Linux, true)
+                    .unwrap()
+                    .0,
+                NativeHostState::NeedsAttention
+            );
+        }
+        {
+            let (_root, context) = context(NativeHostPlatform::Windows);
+            let registration_io = MemoryIo::default();
+            fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+            fs::write(&context.connector, b"connector").unwrap();
+            // Joined components, not a backslash literal: Path::parent must split this path on
+            // every host operating system, not only on Windows.
+            let other_connector = context.local.join("other-tree").join("ghostlight.exe");
+            let manifest_path = context.local.join("Ghostlight-old/host.json");
+            registration_io.files().insert(
+                manifest_path.clone(),
+                HostManifest::expected(&other_connector).to_json().unwrap(),
+            );
+            // The other installation still exists, so the diagnosis names it as alive.
+            registration_io
+                .files()
+                .insert(other_connector.clone(), "connector".into());
+            for browser in BROWSERS {
+                registration_io.registry().insert(
+                    windows_registry_key(browser),
+                    manifest_path.to_string_lossy().into_owned(),
+                );
+            }
+
+            let observed = inspect(&context, &registration_io).unwrap();
+            assert!(observed
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::OwnedElsewhere));
+            assert!(
+                observed.browsers.iter().all(|browser| browser
+                    .detail
+                    .contains("Another Ghostlight installation at"))
+                    && observed
+                        .browsers
+                        .iter()
+                        .all(|browser| browser.detail.contains("other-tree"))
+            );
+
+            // The owning installation is deleted: the dead-path diagnosis replaces the alive one.
+            registration_io.files().remove(&other_connector);
+            let removed = inspect(&context, &registration_io).unwrap();
+            assert!(removed.browsers.iter().all(|browser| browser
+                .detail
+                .contains("A removed Ghostlight installation at")));
+
+            // Recovery's ownership-checked repair refuses; only a deliberate install adopts.
+            let refused = apply_owned_repair_for(&context, &registration_io, &[BROWSERS[0]]);
+            assert!(matches!(
+                refused,
+                Err(NativeHostError::OwnedRepairUnavailable(_))
+            ));
+            assert!(apply_install(&context, &registration_io).unwrap().changed);
+            assert!(inspect(&context, &registration_io)
+                .unwrap()
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Current));
+        }
+        {
+            let (_root, context) = context(NativeHostPlatform::Windows);
+            let registration_io = MemoryIo::default();
+            fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+            fs::write(&context.connector, b"connector").unwrap();
+            let browser = BROWSERS[0];
+            let key = windows_registry_key(&browser);
+            let current_manifest = windows_manifest_path(&context);
+
+            assert!(matches!(
+                apply_owned_repair_for(&context, &registration_io, &[browser]),
+                Err(NativeHostError::OwnedRepairUnavailable(id)) if id == browser.id
+            ));
+            assert!(registration_io.registry().is_empty());
+            assert!(!registration_io.files().contains_key(&current_manifest));
+
+            let occupied = context.local.join("foreign.json");
+            registration_io
+                .registry()
+                .insert(key.clone(), occupied.to_string_lossy().into_owned());
+            registration_io
+                .files()
+                .insert(occupied.clone(), r#"{"name":"org.example.foreign"}"#.into());
+            assert!(matches!(
+                apply_owned_repair_for(&context, &registration_io, &[browser]),
+                Err(NativeHostError::OwnedRepairUnavailable(id)) if id == browser.id
+            ));
+            assert_eq!(
+                registration_io.registry().get(&key),
+                Some(&occupied.to_string_lossy().into_owned())
+            );
+            assert_eq!(
+                registration_io.files().get(&occupied).map(String::as_str),
+                Some(r#"{"name":"org.example.foreign"}"#)
+            );
+            assert!(!registration_io.files().contains_key(&current_manifest));
+
+            // Same-tree stale details are the state recovery may silently repair; an edge in
+            // another installation is OwnedElsewhere and is pinned by its own test.
+            let stale_connector = context.connector.with_file_name("ghostlight-old.exe");
+            registration_io.files().insert(
+                occupied,
+                HostManifest::expected(&stale_connector).to_json().unwrap(),
+            );
+            let repaired = apply_owned_repair_for(&context, &registration_io, &[browser]).unwrap();
+            assert!(repaired.changed);
+            assert_eq!(repaired.report.browsers[0].state, NativeHostState::Current);
+            assert_eq!(
+                registration_io.registry().get(&key),
+                Some(&current_manifest.to_string_lossy().into_owned())
+            );
+            assert!(
+                !apply_owned_repair_for(&context, &registration_io, &[browser])
+                    .unwrap()
+                    .changed
+            );
+        }
+    }
+
+    /// Protects the registration promise of ADR-0197 and defect c51204ca: an install writes the manifest
+    /// in the home, names it from every browser, writes a registry value only when it differs and
+    /// reads a respelled value as the same location, so a second install changes nothing; a selection
+    /// touches only the named browsers; an uninstall removes only what Ghostlight owns, keeps a shared
+    /// manifest another browser still uses and leaves no empty directory; and an empty root variable
+    /// resolves below the home while only an explicit root isolates both platform roots.
+    #[test]
+    fn install_is_idempotent_and_uninstall_removes_only_what_ghostlight_owns() {
+        {
+            let (_root, context) = windows_context_with_connector();
+            let registration_io = DiskFiles::default();
+            apply_install(&context, &registration_io).unwrap();
+            let written = registration_io.memory.registry_writes().len();
+            assert_eq!(written, BROWSERS.len());
+
+            // The same manifest, spelled through `.`, and on Windows also with forward slashes and in
+            // capitals, as another tool may have written the value.
+            let manifest = canonical_path(&windows_manifest_path(&context));
+            let respelled = manifest
+                .parent()
+                .unwrap()
+                .join(".")
+                .join(manifest.file_name().unwrap())
+                .to_string_lossy()
+                .into_owned();
+            let respelled = if cfg!(windows) {
+                respelled.replace('\\', "/").to_uppercase()
+            } else {
+                respelled
+            };
+            for browser in BROWSERS {
+                registration_io
+                    .memory
+                    .registry()
+                    .insert(context.registry_key(browser), respelled.clone());
+            }
+
+            let report = inspect(&context, &registration_io).unwrap();
+            assert!(report
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Current));
+            let again = apply_install(&context, &registration_io).unwrap();
+            assert!(!again.changed);
+            assert_eq!(registration_io.memory.registry_writes().len(), written);
+        }
+        {
+            use super::user_dirs::{
+                HOME_VARIABLE, LOCAL_APP_DATA_VARIABLE, USER_PROFILE_VARIABLE,
+                XDG_CONFIG_HOME_VARIABLE,
+            };
+            use std::ffi::OsString;
+
+            let home = if cfg!(windows) {
+                "C:/Users/test"
+            } else {
+                "/home/test"
+            };
+            let lookup = |name: &str| match name {
+                USER_PROFILE_VARIABLE | HOME_VARIABLE => Some(OsString::from(home)),
+                NATIVE_HOST_DIR_VARIABLE | LOCAL_APP_DATA_VARIABLE | XDG_CONFIG_HOME_VARIABLE => {
+                    Some(OsString::new())
+                }
+                _ => None,
+            };
+            let dirs = UserDirs::from_lookup(&lookup, cfg!(windows));
+            let (resolved, local, config, isolated) = environment_native_host_roots(&dirs, &lookup);
+            let home = Path::new(home);
+            assert_eq!(resolved, home);
+            assert_eq!(local, home.join("AppData").join("Local"));
+            assert_eq!(config, home.join(".config"));
+            assert!(!isolated);
+        }
+        {
+            let (home, local, config, isolated) = native_host_roots(
+                Some(PathBuf::from("/isolated")),
+                Some(PathBuf::from("/real/Local")),
+                Some(PathBuf::from("/real/config")),
+                Path::new("/home/test"),
+            );
+            assert_eq!(home, PathBuf::from("/isolated"));
+            assert_eq!(local, PathBuf::from("/isolated"));
+            assert_eq!(config, PathBuf::from("/isolated"));
+            assert!(isolated);
+
+            let (home, local, config, isolated) = native_host_roots(
+                None,
+                Some(PathBuf::from("/real/Local")),
+                Some(PathBuf::from("/real/config")),
+                Path::new("/home/test"),
+            );
+            assert_eq!(home, PathBuf::from("/home/test"));
+            assert_eq!(local, PathBuf::from("/real/Local"));
+            assert_eq!(config, PathBuf::from("/real/config"));
+            assert!(!isolated);
+
+            let (home, local, config, isolated) =
+                native_host_roots(None, None, None, Path::new("/home/test"));
+            assert_eq!(home, PathBuf::from("/home/test"));
+            assert_eq!(local, PathBuf::from("/home/test/AppData/Local"));
+            assert_eq!(config, PathBuf::from("/home/test/.config"));
+            assert!(!isolated);
+        }
+        {
+            let (_isolated_root, mut isolated) = context(NativeHostPlatform::Windows);
+            isolated.registry_isolated = true;
+            assert_eq!(
+                isolated.registry_key(&BROWSERS[0]),
+                r"Software\Ghostlight\Isolated\Google\Chrome\NativeMessagingHosts\org.sylin.ghostlight"
+            );
+            let (_real_root, real) = context(NativeHostPlatform::Windows);
+            assert_eq!(
+                real.registry_key(&BROWSERS[0]),
+                r"Software\Google\Chrome\NativeMessagingHosts\org.sylin.ghostlight"
+            );
+        }
+        {
+            let (_root, context) = context(NativeHostPlatform::Linux);
+            let registration_io = MemoryIo::default();
+            fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+            fs::write(&context.connector, b"connector").unwrap();
+
+            let first = apply_install(&context, &registration_io).unwrap();
+            assert!(first.changed);
+            assert!(first
+                .report
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Current));
+            assert!(!apply_install(&context, &registration_io).unwrap().changed);
+
+            let foreign_path = browser_manifest_path(&context, &BROWSERS[0]);
+            registration_io.files().insert(
+                foreign_path.clone(),
+                r#"{"name":"org.example.foreign"}"#.into(),
+            );
+            let removed = apply_uninstall(&context, &registration_io).unwrap();
+            assert!(removed.changed);
+            assert!(registration_io.files().contains_key(&foreign_path));
+            assert_eq!(
+                removed.report.browsers[0].state,
+                NativeHostState::NeedsAttention
+            );
+        }
+        {
+            let (_root, context) = context(NativeHostPlatform::Windows);
+            let registration_io = MemoryIo::default();
+            let manifest_path = windows_manifest_path(&context);
+            registration_io.files().insert(
+                manifest_path.clone(),
+                HostManifest::expected(&context.connector)
+                    .to_json()
+                    .unwrap(),
+            );
+
+            let result = apply_uninstall(&context, &registration_io).unwrap();
+
+            assert!(result.changed);
+            assert!(!registration_io.files().contains_key(&manifest_path));
+            assert!(result
+                .report
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Missing));
+        }
+        {
+            let (_root, context) = context(NativeHostPlatform::Linux);
+            let registration_io = MemoryIo::default();
+            fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+            fs::write(&context.connector, b"connector").unwrap();
+
+            let installed = apply_install_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
+            assert_eq!(installed.report.browsers[0].state, NativeHostState::Current);
+            assert!(installed.report.browsers[1..]
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Missing));
+
+            apply_install_for(&context, &registration_io, &[BROWSERS[1]]).unwrap();
+            let removed = apply_uninstall_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
+            assert_eq!(removed.report.browsers[0].state, NativeHostState::Missing);
+            assert_eq!(removed.report.browsers[1].state, NativeHostState::Current);
+            assert!(select_browsers(&["firefox".into()]).is_err());
+            assert!(select_browsers(&["safari".into()]).is_err());
+        }
+        {
+            let (_root, context) = context(NativeHostPlatform::Windows);
+            let registration_io = MemoryIo::default();
+            fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+            fs::write(&context.connector, b"connector").unwrap();
+            apply_install_for(&context, &registration_io, &BROWSERS[..2]).unwrap();
+
+            let removed = apply_uninstall_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
+            assert_eq!(removed.report.browsers[0].state, NativeHostState::Missing);
+            assert_eq!(removed.report.browsers[1].state, NativeHostState::Current);
+            assert!(registration_io
+                .files()
+                .contains_key(&windows_manifest_path(&context)));
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let registration_io = MemoryIo::default();
+
+            let result = apply_install(&context, &registration_io).unwrap();
+
+            let manifest = windows_manifest_path(&context);
+            assert!(manifest.starts_with(context.layout.home()));
+            assert_eq!(
+                manifest,
+                context.layout.manifests().join("org.sylin.ghostlight.json")
+            );
+            assert!(registration_io.files().contains_key(&manifest));
+            for browser in BROWSERS {
+                assert_eq!(
+                    registration_io
+                        .registry()
+                        .get(&context.registry_key(browser)),
+                    Some(&manifest.to_string_lossy().into_owned()),
+                    "{}",
+                    browser.id
+                );
+            }
+            assert!(result.changed);
+            assert!(result.private.is_empty());
+            assert_eq!(result.report.private_view, None);
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let registration_io = MemoryIo::default();
+            apply_install(&context, &registration_io).unwrap();
+            assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
+
+            // A stale manifest is rewritten; the registry already names it, so it is not touched.
+            let manifest = windows_manifest_path(&context);
+            let mut stale = HostManifest::expected(&context.connector);
+            stale.description = "Ghostlight connector (old)".into();
+            registration_io
+                .files()
+                .insert(manifest.clone(), stale.to_json().unwrap());
+            let repaired = apply_install(&context, &registration_io).unwrap();
+            assert!(repaired.changed);
+            assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
+            assert!(repaired
+                .report
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Current));
+
+            assert!(!apply_install(&context, &registration_io).unwrap().changed);
+            assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let registration_io = MemoryIo::default();
+            apply_install(&context, &registration_io).unwrap();
+
+            apply_uninstall(&context, &registration_io).unwrap();
+
+            assert!(!registration_io.has_directory(&context.manifests));
+        }
+    }
+
+    /// Protects ACCEPTANCE C14 and defects 53a04ef2 and 85fbfa83: an install repoints Ghostlight's own
+    /// old registrations and refuses any other. A value is Ghostlight's only by the host's own file
+    /// name, a Ghostlight value naming a manifest that is gone is rewritten, the old AppData manifest
+    /// is repointed and removed with its directory unless it holds anything else or a browser outside
+    /// the install still names it, and the retired Firefox registration goes only when it is owned.
+    #[test]
+    fn install_repoints_ghostlights_old_registrations_and_leaves_any_other() {
+        {
+            for platform in [NativeHostPlatform::Windows, NativeHostPlatform::Linux] {
+                let (_root, context) = context(platform);
+                let registration_io = MemoryIo::default();
+                fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+                fs::write(&context.connector, b"connector").unwrap();
+
+                let retired_manifest = match platform {
+                    NativeHostPlatform::Windows => context
+                        .local
+                        .join("Ghostlight/NativeMessagingHosts/org.sylin.ghostlight.firefox.json"),
+                    NativeHostPlatform::Linux => context
+                        .home
+                        .join(".mozilla/native-messaging-hosts/org.sylin.ghostlight.json"),
+                };
+                registration_io.files().insert(
+                    retired_manifest.clone(),
+                    HostManifest::expected(&context.connector)
+                        .to_json()
+                        .unwrap(),
+                );
+                if platform == NativeHostPlatform::Windows {
+                    registration_io.registry().insert(
+                        r"Software\Mozilla\NativeMessagingHosts\org.sylin.ghostlight".into(),
+                        retired_manifest.to_string_lossy().into_owned(),
+                    );
+                }
+
+                let result = apply_install(&context, &registration_io).unwrap();
+                assert!(result.changed);
+                assert!(!registration_io.files().contains_key(&retired_manifest));
+                assert!(!registration_io
+                    .registry()
+                    .contains_key(r"Software\Mozilla\NativeMessagingHosts\org.sylin.ghostlight"));
+            }
+        }
+        {
+            let (_root, context) = context(NativeHostPlatform::Windows);
+            let registration_io = MemoryIo::default();
+            fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
+            fs::write(&context.connector, b"connector").unwrap();
+            let old_path = context.local.join("Ghostlight-old/host.json");
+            registration_io.files().insert(
+                old_path.clone(),
+                HostManifest::expected(Path::new(r"C:\old\ghostlight.exe"))
+                    .to_json()
+                    .unwrap(),
+            );
+            for browser in BROWSERS {
+                registration_io.registry().insert(
+                    windows_registry_key(browser),
+                    old_path.to_string_lossy().into_owned(),
+                );
+            }
+
+            assert!(apply_install(&context, &registration_io).unwrap().changed);
+            assert!(inspect(&context, &registration_io)
+                .unwrap()
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Current));
+
+            let foreign_path = context.local.join("foreign.json");
+            registration_io.files().insert(
+                foreign_path.clone(),
+                r#"{"name":"org.example.foreign"}"#.into(),
+            );
+            registration_io.registry().insert(
+                windows_registry_key(&BROWSERS[0]),
+                foreign_path.to_string_lossy().into_owned(),
+            );
+            registration_io
+                .registry()
+                .remove(&windows_registry_key(&BROWSERS[1]));
+            let partial = apply_install(&context, &registration_io).unwrap();
+            assert!(partial.changed);
+            assert_eq!(
+                partial.report.browsers[0].state,
+                NativeHostState::NeedsAttention
+            );
+            assert_eq!(partial.report.browsers[1].state, NativeHostState::Current);
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let registration_io = MemoryIo::default();
+            let gone =
+                legacy_windows_manifest_directory(&context).join("org.sylin.ghostlight.json");
+            for browser in BROWSERS {
+                registration_io.registry().insert(
+                    windows_registry_key(browser),
+                    gone.to_string_lossy().into_owned(),
+                );
+            }
+            let foreign = context.local.join("Other").join("host.json");
+            registration_io.registry().insert(
+                windows_registry_key(&BROWSERS[1]),
+                foreign.to_string_lossy().into_owned(),
+            );
+
+            let observed = inspect(&context, &registration_io).unwrap();
+            assert_eq!(observed.browsers[0].state, NativeHostState::Missing);
+            assert_eq!(observed.browsers[1].state, NativeHostState::NeedsAttention);
+
+            assert!(apply_install(&context, &registration_io).unwrap().changed);
+            let repaired = inspect(&context, &registration_io).unwrap();
+            assert_eq!(repaired.browsers[0].state, NativeHostState::Current);
             assert_eq!(
                 registration_io
                     .registry()
-                    .get(&context.registry_key(browser)),
-                Some(&manifest.to_string_lossy().into_owned())
+                    .get(&windows_registry_key(&BROWSERS[0])),
+                Some(
+                    &canonical_path(&windows_manifest_path(&context))
+                        .to_string_lossy()
+                        .into_owned()
+                )
+            );
+            // Another product's value is never touched, even when its file is gone too.
+            assert_eq!(repaired.browsers[1].state, NativeHostState::NeedsAttention);
+            assert_eq!(
+                registration_io
+                    .registry()
+                    .get(&windows_registry_key(&BROWSERS[1])),
+                Some(&foreign.to_string_lossy().into_owned())
             );
         }
-        assert!(!registration_io.files().contains_key(&legacy));
-        assert!(!registration_io.has_directory(legacy.parent().unwrap()));
-        assert!(result
-            .report
-            .browsers
-            .iter()
-            .all(|browser| browser.state == NativeHostState::Current));
+        {
+            for own in [
+                r"C:\Users\person\AppData\Local\Ghostlight\NativeMessagingHosts\org.sylin.ghostlight.json",
+                r"C:\Users\person\.ghostlight\manifests\ORG.SYLIN.GHOSTLIGHT.JSON",
+                "/home/person/.config/google-chrome/NativeMessagingHosts/org.sylin.ghostlight.json",
+            ] {
+                assert!(names_host_manifest(Path::new(own)), "{own}");
+            }
+            for other in [
+                r"C:\Users\person\org.sylin.ghostlight\host.json",
+                r"C:\Users\person\org.sylin.ghostlight.json.bak",
+                r"C:\Users\person\org.example.foreign.json",
+                "",
+            ] {
+                assert!(!names_host_manifest(Path::new(other)), "{other}");
+            }
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let registration_io = MemoryIo::default();
+            let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
+            let before = inspect(&context, &registration_io).unwrap();
+            assert!(before
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Updatable));
+
+            let result = apply_install(&context, &registration_io).unwrap();
+
+            assert!(result.changed);
+            let manifest = windows_manifest_path(&context);
+            for browser in BROWSERS {
+                assert_eq!(
+                    registration_io
+                        .registry()
+                        .get(&context.registry_key(browser)),
+                    Some(&manifest.to_string_lossy().into_owned())
+                );
+            }
+            assert!(!registration_io.files().contains_key(&legacy));
+            assert!(!registration_io.has_directory(legacy.parent().unwrap()));
+            assert!(result
+                .report
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Current));
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let registration_io = MemoryIo::default();
+            let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
+            let other = legacy.with_file_name("notes.txt");
+            registration_io.files().insert(other.clone(), "mine".into());
+
+            apply_install(&context, &registration_io).unwrap();
+
+            assert!(!registration_io.files().contains_key(&legacy));
+            assert!(registration_io.files().contains_key(&other));
+            assert!(registration_io.has_directory(legacy.parent().unwrap()));
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let registration_io = MemoryIo::default();
+            let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
+
+            apply_install_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
+
+            assert!(registration_io.files().contains_key(&legacy));
+            assert_eq!(
+                registration_io
+                    .registry()
+                    .get(&context.registry_key(&BROWSERS[1])),
+                Some(&legacy.to_string_lossy().into_owned())
+            );
+        }
     }
 
+    /// Protects defects 85fbfa83 and 2b251105: inside an app container an install writes the manifest
+    /// in the shared home and no registry value, which would land only in the container's private
+    /// view. A registration it finds writes nothing private, a value naming a manifest that is gone is
+    /// neither written nor judged, the old manifest and its values are left alone, and an uninstall is
+    /// refused before anything changes.
     #[test]
-    fn the_old_appdata_directory_stays_while_it_holds_anything_else() {
-        let (_root, context) = windows_context_with_connector();
-        let registration_io = MemoryIo::default();
-        let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
-        let other = legacy.with_file_name("notes.txt");
-        registration_io.files().insert(other.clone(), "mine".into());
+    fn inside_an_app_container_install_writes_the_manifest_and_names_what_it_cannot_register() {
+        {
+            let (_root, context) = windows_context_with_connector();
+            let context = inside_container(context, "Claude");
+            let registration_io = MemoryIo::default();
 
-        apply_install(&context, &registration_io).unwrap();
+            let result = apply_install(&context, &registration_io).unwrap();
 
-        assert!(!registration_io.files().contains_key(&legacy));
-        assert!(registration_io.files().contains_key(&other));
-        assert!(registration_io.has_directory(legacy.parent().unwrap()));
-    }
+            assert!(registration_io
+                .files()
+                .contains_key(&windows_manifest_path(&context)));
+            assert!(registration_io.registry_writes().is_empty());
+            assert!(registration_io.registry().is_empty());
+            assert!(result.changed);
+            assert_eq!(result.private, browser_names());
+            assert_eq!(
+                result.report.private_view,
+                Some(AppContainer {
+                    app: "Claude".into()
+                })
+            );
+            assert!(result
+                .report
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Missing));
+        }
+        {
+            let (_regular_root, regular) = windows_context_with_connector();
+            let registration_io = MemoryIo::default();
+            apply_install(&regular, &registration_io).unwrap();
+            let writes = registration_io.registry_writes().len();
 
-    #[test]
-    fn the_old_manifest_stays_while_a_browser_outside_the_install_still_names_it() {
-        let (_root, context) = windows_context_with_connector();
-        let registration_io = MemoryIo::default();
-        let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
-
-        apply_install_for(&context, &registration_io, &[BROWSERS[0]]).unwrap();
-
-        assert!(registration_io.files().contains_key(&legacy));
-        assert_eq!(
+            // The manifest is stale but the registry value is right: only the manifest changes.
+            let manifest = windows_manifest_path(&regular);
+            let mut stale = HostManifest::expected(&regular.connector);
+            stale.description = "Ghostlight connector (old)".into();
             registration_io
-                .registry()
-                .get(&context.registry_key(&BROWSERS[1])),
-            Some(&legacy.to_string_lossy().into_owned())
-        );
-    }
+                .files()
+                .insert(manifest.clone(), stale.to_json().unwrap());
+            let context = inside_container(regular, "Codex");
+            let result = apply_install(&context, &registration_io).unwrap();
 
-    #[test]
-    fn inside_a_container_the_old_manifest_and_its_registry_values_are_left_alone() {
-        let (_root, context) = windows_context_with_connector();
-        let context = inside_container(context, "Claude");
-        let registration_io = MemoryIo::default();
-        let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
+            assert!(result.changed);
+            assert!(result.private.is_empty());
+            assert_eq!(registration_io.registry_writes().len(), writes);
+            assert!(result
+                .report
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::Current));
+            assert!(!apply_install(&context, &registration_io).unwrap().changed);
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let context = inside_container(context, "Claude");
+            let registration_io = MemoryIo::default();
+            let gone =
+                legacy_windows_manifest_directory(&context).join("org.sylin.ghostlight.json");
+            for browser in BROWSERS {
+                registration_io.registry().insert(
+                    windows_registry_key(browser),
+                    gone.to_string_lossy().into_owned(),
+                );
+            }
 
-        let result = apply_install(&context, &registration_io).unwrap();
+            let observed = inspect(&context, &registration_io).unwrap();
+            assert!(observed
+                .browsers
+                .iter()
+                .all(|browser| browser.state == NativeHostState::NeedsAttention));
 
-        assert!(registration_io.files().contains_key(&legacy));
-        assert!(registration_io.has_directory(legacy.parent().unwrap()));
-        assert!(registration_io.registry_writes().is_empty());
-        assert_eq!(result.private, browser_names());
-        // The manifest in the home is ready for the install that runs outside the container.
-        assert!(registration_io
-            .files()
-            .contains_key(&windows_manifest_path(&context)));
-    }
+            let result = apply_install(&context, &registration_io).unwrap();
+            assert!(result.private.is_empty());
+            assert!(registration_io.registry_writes().is_empty());
+            for browser in BROWSERS {
+                assert_eq!(
+                    registration_io
+                        .registry()
+                        .get(&windows_registry_key(browser)),
+                    Some(&gone.to_string_lossy().into_owned()),
+                    "{}",
+                    browser.id
+                );
+            }
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let context = inside_container(context, "Claude");
+            let registration_io = MemoryIo::default();
+            let manifest = windows_manifest_path(&context);
+            registration_io.files().insert(
+                manifest.clone(),
+                HostManifest::expected(&context.connector)
+                    .to_json()
+                    .unwrap(),
+            );
 
-    #[test]
-    fn uninstall_removes_the_empty_manifests_directory() {
-        let (_root, context) = windows_context_with_connector();
-        let registration_io = MemoryIo::default();
-        apply_install(&context, &registration_io).unwrap();
+            let refused = apply_uninstall(&context, &registration_io).unwrap_err();
 
-        apply_uninstall(&context, &registration_io).unwrap();
+            assert!(matches!(refused, NativeHostError::PrivateView(_)));
+            assert!(refused.to_string().contains("Claude"));
+            assert!(refused.to_string().ends_with("uninstall"));
+            assert!(registration_io.files().contains_key(&manifest));
+        }
+        {
+            let (_root, context) = windows_context_with_connector();
+            let context = inside_container(context, "Claude");
+            let registration_io = MemoryIo::default();
+            let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
 
-        assert!(!registration_io.has_directory(&context.manifests));
+            let result = apply_install(&context, &registration_io).unwrap();
+
+            assert!(registration_io.files().contains_key(&legacy));
+            assert!(registration_io.has_directory(legacy.parent().unwrap()));
+            assert!(registration_io.registry_writes().is_empty());
+            assert_eq!(result.private, browser_names());
+            // The manifest in the home is ready for the install that runs outside the container.
+            assert!(registration_io
+                .files()
+                .contains_key(&windows_manifest_path(&context)));
+        }
     }
 }
