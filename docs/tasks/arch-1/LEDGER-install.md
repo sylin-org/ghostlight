@@ -404,7 +404,7 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
 | --- | --- | --- | --- | --- |
 | I-D1 | fix(install): an empty `XDG_CONFIG_HOME`, `APPDATA` or `CODEX_HOME` counts as unset | - | INST-4's defect | landed (this commit); see Notes, second sweep |
 | I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | landed (this commit); see Notes, second sweep |
-| I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | todo |
+| I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | landed (this commit); see Notes, second sweep |
 | INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | todo |
 | INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | todo |
 | INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | todo |
@@ -445,3 +445,10 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
   SERV-2's three prose-only ties (`SHOW_PATIENCE`, `UPDATE_LOCK_WAIT`, `SERVICE_READY_TIMEOUT`)
   are core-service's and cli/desktop.rs's refactor, not this defect; the "did not stop" line's
   tray-icon advice is surface's `language/setup.rs`.
+- I-D3: `run_call` read `std::env::args()`, which panics (exit 101) on an argument that is not
+  valid UTF-8. It now reads `args_os` through `call_arguments`, which turns such an argument into
+  the usage line "call arguments must be valid UTF-8" and `EXIT_USAGE`; the literal `1` is
+  `EXIT_USAGE` too. A parse error still prints its bare line, as the skeptic asked, and nothing
+  else of `call` moves: SERV-4's `cli/call.rs`, the one parse in `main` and the `launch_mode`
+  table are SERV-6c, SERV-13 and SERV-11c. The test's non-UTF-8 argument is `cfg(unix)` on Linux,
+  which only CI compiles from here.

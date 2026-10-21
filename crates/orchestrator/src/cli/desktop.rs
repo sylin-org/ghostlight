@@ -11,6 +11,7 @@
 //! its endpoint as soon as it has started (ADR-0199 Decision 5), and the shell that shows the
 //! window and the tray is started by presence (`service::presence`).
 
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -37,6 +38,10 @@ const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
 const WORKBENCH_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(15);
 /// The status a `serve` start exits with when it never bound its endpoint in time.
 pub const READY_STALLED_EXIT: i32 = 3;
+/// The command word that runs one browser tool from the command line.
+const CALL_COMMAND: &str = "call";
+/// The usage error for a `call` argument that is not valid UTF-8.
+const CALL_ARGUMENTS_NOT_UTF8: &str = "call arguments must be valid UTF-8";
 const WORKBENCH_OPEN_TIMEOUT_MESSAGE: &str =
     "The Ghostlight workbench did not open in time. Run 'ghostlight open' to try again.";
 
@@ -293,22 +298,35 @@ pub fn finish_activation(activation: ActivationState) -> anyhow::Result<()> {
 /// A script that runs before anything else has started gets a service rather than an error: the
 /// command line starts one as a `command` start.
 pub fn run_call() -> anyhow::Result<()> {
-    let arguments: Vec<String> = std::env::args()
-        .skip(1)
-        .skip_while(|argument| argument != "call")
-        .skip(1)
-        .collect();
-    let command = match crate::cli::parse(&arguments) {
+    let command = match call_arguments(std::env::args_os())
+        .and_then(|arguments| crate::cli::parse(&arguments).map_err(|error| error.to_string()))
+    {
         Ok(command) => command,
         Err(error) => {
             eprintln!("{error}");
-            std::process::exit(1);
+            std::process::exit(super::EXIT_USAGE);
         }
     };
     reach_service(&Detached)?;
     let mut out = std::io::stdout().lock();
     let code = crate::cli::run(command, &mut out);
     std::process::exit(code);
+}
+
+/// The arguments after `call` in the process's `arguments`, its own name first. One that is not
+/// valid UTF-8 is a usage error, never a panic.
+fn call_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<Vec<String>, String> {
+    arguments
+        .into_iter()
+        .skip(1)
+        .skip_while(|argument| argument != CALL_COMMAND)
+        .skip(1)
+        .map(|argument| {
+            argument
+                .into_string()
+                .map_err(|_| CALL_ARGUMENTS_NOT_UTF8.to_owned())
+        })
+        .collect()
 }
 
 /// Make sure a service answers, starting one as a `command` start through `starter` when none
@@ -349,6 +367,42 @@ mod tests {
     use crate::workbench::{
         PageAddress, WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
     };
+
+    /// An argument that is not valid UTF-8 on this system.
+    fn not_utf8() -> OsString {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            OsString::from_wide(&[0xD800])
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            OsString::from_vec(vec![0xFF])
+        }
+    }
+
+    #[test]
+    fn call_arguments_are_the_words_after_call() {
+        let arguments = ["ghostlight", "call", "browser_tabs", "{}"].map(OsString::from);
+        assert_eq!(
+            call_arguments(arguments),
+            Ok(vec!["browser_tabs".to_owned(), "{}".to_owned()])
+        );
+    }
+
+    #[test]
+    fn a_call_argument_that_is_not_utf8_is_a_usage_error() {
+        let arguments = vec![
+            OsString::from("ghostlight"),
+            OsString::from("call"),
+            not_utf8(),
+        ];
+        assert_eq!(
+            call_arguments(arguments),
+            Err(CALL_ARGUMENTS_NOT_UTF8.to_owned())
+        );
+    }
 
     #[test]
     fn the_session_listener_is_installed_before_the_service_starts_and_the_endpoint_binds_after() {
