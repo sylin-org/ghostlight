@@ -40,38 +40,4 @@ function normalizeNeedle(value) {
     .trim();
 }
 
-function presentationLabel(signal) {
-  const labels = {
-    start: "Ghostlight starting",
-    target: "Ghostlight target",
-    progress: "Ghostlight working",
-    completion: "Ghostlight complete",
-    denial: "Ghostlight blocked"
-  };
-  return labels[signal] ?? "Ghostlight";
-}
-
-function activityLabel(activity) {
-  const labels = {
-    quiet: "Ghostlight",
-    navigate: "Navigating",
-    click: "Clicking",
-    hover: "Hovering",
-    drag: "Dragging",
-    type: "Typing",
-    key: "Keyboard",
-    scroll: "Scrolling",
-    read: "Reading page",
-    find: "Finding on page",
-    screenshot: "Screenshot",
-    zoom: "Zooming",
-    fill: "Filling form",
-    upload: "Uploading file",
-    script: "Running JavaScript",
-    wait: "Waiting",
-    dialog: "Browser dialog"
-  };
-  return labels[activity] ?? "Ghostlight";
-}
-
-const shared = Object.freeze({ bounded, isCredentialMetadata, normalizeNeedle, presentationLabel, activityLabel });
+const shared = Object.freeze({ bounded, isCredentialMetadata, normalizeNeedle });

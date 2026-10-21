@@ -30,6 +30,36 @@ const presentation = (() => {
   // How long a caption stays on screen.
   const CAPTION_MS = 1500;
 
+  // The signal kinds and activities the service sends. golden.rs reads both tables and holds
+  // them equal to the service's names, so a kind or activity this page does not know fails a
+  // test instead of drawing nothing.
+  const SIGNAL = Object.freeze({
+    start: "start",
+    target: "target",
+    progress: "progress",
+    completion: "completion",
+    denial: "denial"
+  });
+  const ACTIVITY = Object.freeze({
+    quiet: "quiet",
+    navigate: "navigate",
+    click: "click",
+    hover: "hover",
+    drag: "drag",
+    type: "type",
+    key: "key",
+    scroll: "scroll",
+    read: "read",
+    find: "find",
+    screenshot: "screenshot",
+    zoom: "zoom",
+    fill: "fill",
+    upload: "upload",
+    script: "script",
+    wait: "wait",
+    dialog: "dialog"
+  });
+
   // The transient effect vocabulary. One row per treatment, and the row is the whole truth
   // about it: `selector` enrolls it for reduced motion, and `beat` is how long it is visibly
   // on screen, which is what its teardown is derived from.
@@ -379,7 +409,7 @@ const presentation = (() => {
   function signatureMarkup(kind) {
     const icon = document.createElement("div");
     icon.className = "signature-icon";
-    if (kind === "script") {
+    if (kind === ACTIVITY.script) {
       const wheel = document.createElement("div");
       wheel.className = "workwheel";
       wheel.append(svgElement("svg", {
@@ -402,7 +432,7 @@ const presentation = (() => {
         particle.className = `particle p${index}`;
         icon.appendChild(particle);
       }
-    } else if (kind === "type") {
+    } else if (kind === ACTIVITY.type) {
       const keyboard = document.createElement("div");
       keyboard.className = "keyboard";
       keyboard.append(svgElement("svg", {
@@ -419,12 +449,12 @@ const presentation = (() => {
         })
       ]));
       icon.appendChild(keyboard);
-    } else if (kind === "wait") {
+    } else if (kind === ACTIVITY.wait) {
       const lights = document.createElement("div");
       lights.className = "wait-lights";
       lights.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
       icon.appendChild(lights);
-    } else if (kind === "find") {
+    } else if (kind === ACTIVITY.find) {
       const lens = document.createElement("div");
       lens.className = "lens";
       lens.append(svgElement("svg", {
@@ -506,10 +536,10 @@ const presentation = (() => {
     }, SIGNATURE_COMPLETE_MS);
   }
 
-  function showCaption(activity, enabled) {
-    if (!enabled) return;
+  function showCaption(label, enabled) {
+    if (!enabled || !label) return;
     unlater(captionTimer);
-    caption.textContent = shared.activityLabel(activity);
+    caption.textContent = label;
     caption.classList.add("on");
     captionTimer = later(() => caption.classList.remove("on"), CAPTION_MS);
   }
@@ -532,10 +562,10 @@ const presentation = (() => {
     const text = document.createElement("div");
     const title = document.createElement("div");
     title.className = "denial-title";
-    title.textContent = shared.bounded(signal.phase || "Ghostlight blocked this action", 100);
+    title.textContent = shared.bounded(signal.phase, 100);
     const description = document.createElement("div");
     description.className = "denial-description";
-    description.textContent = shared.bounded(signal.detail || "A configured guardrail prevented it.", 240);
+    description.textContent = shared.bounded(signal.detail, 240);
     text.append(title, description);
     ribbon.append(badge, text);
     denialLayer.appendChild(ribbon);
@@ -552,48 +582,48 @@ const presentation = (() => {
   function render(signal, preferences, rectangle) {
     mount();
     const kind = signal.signal;
-    const activity = signal.activity || "quiet";
-    if (kind === "denial") {
+    const activity = signal.activity || ACTIVITY.quiet;
+    if (kind === SIGNAL.denial) {
       if (signatureInvocation === signal.invocation) removeSignature();
       showDenial(signal);
       return true;
     }
     // Teardown belongs to the invocation, regardless of its final activity, outcome,
     // or a preference change while it was running. Another invocation cannot finish it.
-    if (kind === "completion") finishSignature(signal.invocation);
-    if ((kind === "start" || kind === "progress") && signatureInvocation === signal.invocation
+    if (kind === SIGNAL.completion) finishSignature(signal.invocation);
+    if ((kind === SIGNAL.start || kind === SIGNAL.progress) && signatureInvocation === signal.invocation
       && signatureKind !== activity) removeSignature();
     if (!preferences.effects) removeSignature();
-    if (activity === "quiet") return false;
-    showCaption(activity, Boolean(preferences.captions));
+    if (activity === ACTIVITY.quiet) return false;
+    showCaption(signal.label, Boolean(preferences.captions));
     if (!preferences.effects) return Boolean(preferences.captions);
 
-    if (kind === "start" || kind === "progress") {
-      if (activity === "read") readScan();
-      if (["find", "script", "type", "wait"].includes(activity)) beginSignature(activity, signal.invocation);
-      if (activity === "key") keyLozenge();
-      if (activity === "scroll") scrollCue(null);
+    if (kind === SIGNAL.start || kind === SIGNAL.progress) {
+      if (activity === ACTIVITY.read) readScan();
+      if ([ACTIVITY.find, ACTIVITY.script, ACTIVITY.type, ACTIVITY.wait].includes(activity)) beginSignature(activity, signal.invocation);
+      if (activity === ACTIVITY.key) keyLozenge();
+      if (activity === ACTIVITY.scroll) scrollCue(null);
     }
 
-    if (kind === "target") {
-      if (["click", "hover"].includes(activity)) moveCursor(rectangle);
-      if (activity === "click") {
+    if (kind === SIGNAL.target) {
+      if ([ACTIVITY.click, ACTIVITY.hover].includes(activity)) moveCursor(rectangle);
+      if (activity === ACTIVITY.click) {
         targetGlow(rectangle);
         clickRipple(rectangle, signal.click);
       }
-      if (activity === "drag") dragTrail(rectangle);
-      if (["fill", "upload"].includes(activity)) fieldEffect(rectangle, "field-splash");
-      if (activity === "type") fieldEffect(rectangle, "field-shimmer");
-      if (activity === "scroll") scrollCue(rectangle);
+      if (activity === ACTIVITY.drag) dragTrail(rectangle);
+      if ([ACTIVITY.fill, ACTIVITY.upload].includes(activity)) fieldEffect(rectangle, "field-splash");
+      if (activity === ACTIVITY.type) fieldEffect(rectangle, "field-shimmer");
+      if (activity === ACTIVITY.scroll) scrollCue(rectangle);
     }
 
-    if (kind === "completion") {
-      if (activity === "navigate") navigationPill();
-      if (activity === "screenshot") {
+    if (kind === SIGNAL.completion) {
+      if (activity === ACTIVITY.navigate) navigationPill();
+      if (activity === ACTIVITY.screenshot) {
         screenshotEffect();
-        beginSignature("screenshot", signal.invocation, true);
+        beginSignature(ACTIVITY.screenshot, signal.invocation, true);
       }
-      if (activity === "zoom") zoomEffect(rectangle);
+      if (activity === ACTIVITY.zoom) zoomEffect(rectangle);
     }
     return true;
   }

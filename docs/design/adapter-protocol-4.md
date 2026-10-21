@@ -1567,7 +1567,7 @@ async function flush(tabId) {                               // on tabs.onActivat
 
 - **The asset set.** The service builds one level-4 asset set: `{id, source}`.
   - `source` is `assets/world.js`, with the other level-4 sources inlined at its include marker, in this
-    order: `page-shared.js` (`bounded`, `isCredentialMetadata`, `activityLabel`, `presentationLabel`),
+    order: `page-shared.js` (`bounded`, `isCredentialMetadata`, `normalizeNeedle`),
     `sensor.js`, `presentation-css.js`, `presentation.js`, `content.js`.
   - `id` is the lowercase hex SHA-256 of `source`, which holds LF line endings only, so the id does not depend on a checkout's line-ending conversion. One value is both integrity and identity.
 - **The wrapper is fixed extension glue**, `WRAP(source) = function(__ghostlightAssetId) {\n<source>\n}`:

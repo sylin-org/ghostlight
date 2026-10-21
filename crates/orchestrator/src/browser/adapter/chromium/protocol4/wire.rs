@@ -1004,7 +1004,8 @@ pub struct NoticeSignal {
     pub activity: PresentationActivity,
     /// Fixed Ghostlight-authored phase label.
     pub phase: String,
-    /// Fixed Ghostlight-authored activity label; an adapter falls back to its own word when absent.
+    /// Fixed Ghostlight-authored activity label, which the page draws as its caption. A frame
+    /// without one shows no caption: the page has no words of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// Fixed Ghostlight-authored supporting detail.

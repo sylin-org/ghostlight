@@ -11,7 +11,7 @@ use crate::browser::adapter::{
 use thiserror::Error;
 
 use crate::browser::{addressed_tab, BrowserError, BrowserPort};
-use crate::events::{DenialPresentation, DomainEvent};
+use crate::events::DomainEvent;
 use crate::language::presentation as presentation_words;
 use crate::sync::lock;
 use crate::workspace::WorkspaceStore;
@@ -158,7 +158,7 @@ impl PresentationReactor {
                 (
                     PresentationKind::Start,
                     *activity,
-                    activity_label(*activity),
+                    presentation_words::activity_label(*activity),
                     None,
                     None,
                     None,
@@ -180,7 +180,7 @@ impl PresentationReactor {
                 (
                     PresentationKind::Start,
                     *activity,
-                    activity_label(*activity),
+                    presentation_words::activity_label(*activity),
                     None,
                     *physical_id,
                     None,
@@ -190,7 +190,7 @@ impl PresentationReactor {
             DomainEvent::TabCreated { physical_id, .. } => (
                 PresentationKind::Progress,
                 current(),
-                activity_label(current()),
+                presentation_words::activity_label(current()),
                 None,
                 Some(*physical_id),
                 None,
@@ -199,7 +199,7 @@ impl PresentationReactor {
             DomainEvent::DocumentCommitted { physical_id, .. } => (
                 PresentationKind::Progress,
                 current(),
-                activity_label(current()),
+                presentation_words::activity_label(current()),
                 None,
                 Some(*physical_id),
                 None,
@@ -212,7 +212,7 @@ impl PresentationReactor {
             } => (
                 PresentationKind::Target,
                 current(),
-                activity_label(current()),
+                presentation_words::activity_label(current()),
                 None,
                 Some(*physical_id),
                 Some(locator.clone()),
@@ -232,7 +232,7 @@ impl PresentationReactor {
                 presentation,
                 ..
             } => {
-                let (phase, detail) = denial_copy(*presentation);
+                let (phase, detail) = presentation_words::denial_lines(*presentation);
                 (
                     PresentationKind::Denial,
                     current(),
@@ -246,7 +246,7 @@ impl PresentationReactor {
             DomainEvent::WorkCompleted { physical_id, .. } => (
                 PresentationKind::Completion,
                 current(),
-                activity_label(current()),
+                presentation_words::activity_label(current()),
                 None,
                 physical_id.or_else(recorded_tab),
                 None,
@@ -263,7 +263,7 @@ impl PresentationReactor {
             signal,
             activity,
             phase: phase.into(),
-            label: activity_label(activity).into(),
+            label: presentation_words::activity_label(activity).into(),
             detail: detail.map(str::to_owned),
             tab_id,
             locator,
@@ -300,8 +300,8 @@ impl PresentationReactor {
                 invocation: invocation.into(),
                 signal: PresentationKind::Start,
                 activity,
-                phase: activity_label(activity).into(),
-                label: activity_label(activity).into(),
+                phase: presentation_words::activity_label(activity).into(),
+                label: presentation_words::activity_label(activity).into(),
                 detail: None,
                 tab_id: Some(tab),
                 locator: None,
@@ -317,45 +317,6 @@ impl PresentationReactor {
         if let Some(active) = lock(&self.activities).get_mut(invocation) {
             active.tab = Some(tab);
         }
-    }
-}
-
-fn denial_copy(presentation: DenialPresentation) -> (&'static str, &'static str) {
-    match presentation {
-        DenialPresentation::Guardrail => (
-            "Ghostlight blocked this action",
-            "A configured guardrail prevented it.",
-        ),
-        DenialPresentation::TabKeptOpenByPolicy => (
-            "Ghostlight kept this tab open",
-            "Closing tabs is blocked by policy. You can close it yourself.",
-        ),
-        DenialPresentation::TabKeptOpenBySetting => (
-            "Ghostlight kept this tab open",
-            "Your Preserve Ghostlight tabs setting is on. You can close it yourself.",
-        ),
-    }
-}
-
-fn activity_label(activity: PresentationActivity) -> &'static str {
-    match activity {
-        PresentationActivity::Quiet => "Ghostlight",
-        PresentationActivity::Navigate => "Navigating",
-        PresentationActivity::Click => "Clicking",
-        PresentationActivity::Hover => "Hovering",
-        PresentationActivity::Drag => "Dragging",
-        PresentationActivity::Type => "Typing",
-        PresentationActivity::Key => "Keyboard",
-        PresentationActivity::Scroll => "Scrolling",
-        PresentationActivity::Read => "Reading page",
-        PresentationActivity::Find => "Finding on page",
-        PresentationActivity::Screenshot => "Screenshot",
-        PresentationActivity::Zoom => "Zooming",
-        PresentationActivity::Fill => "Filling form",
-        PresentationActivity::Upload => "Uploading file",
-        PresentationActivity::Script => "Running JavaScript",
-        PresentationActivity::Wait => "Waiting",
-        PresentationActivity::Dialog => "Browser dialog",
     }
 }
 
@@ -378,7 +339,8 @@ mod tests {
     use crate::events::{DenialPresentation, DomainEvent};
     use crate::governance::Capability;
 
-    use super::{activity_label, PresentationError, PresentationPort, PresentationReactor};
+    use super::{PresentationError, PresentationPort, PresentationReactor};
+    use crate::language::presentation as presentation_words;
 
     #[derive(Default)]
     struct RecordingPort(Mutex<Vec<PresentationSignal>>);
@@ -580,7 +542,7 @@ mod tests {
             let signals = port.0.lock().unwrap();
             assert!(!signals.is_empty());
             for signal in signals.iter() {
-                assert_eq!(signal.label, activity_label(activity));
+                assert_eq!(signal.label, presentation_words::activity_label(activity));
                 assert!(!signal.label.is_empty());
             }
         }

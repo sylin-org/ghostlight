@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10 and EXT-11 have landed; EXT-5 is next (after C18).
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11 and C18 have landed; EXT-5 is next.
 
 ## Slices
 
@@ -85,11 +85,12 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10 and EXT-11 have landed; EXT-5 is next (after C18).
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11 and C18 have landed; EXT-5 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | P-D1 | fix(extension): a dialog that opens during world setup reads `dialog_open` | - | EXT-9 as corrected | landed (this commit) |
+| C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | - | ADR-0203 C18, moved from core-service; SURF-4's label half; EXT-5's pins | landed (this commit) |
 | EXT-5 | refactor(extension): `protocol.js` names its words and owns `failure`, and the vocabulary gains the missing words under new keys | C18 | EXT-5 as corrected | todo |
 | EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | todo |
 | EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | landed (this commit) |
@@ -230,3 +231,31 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   `lifecycle.openDialog`, as the worker does, and the golden receipts pass unchanged. Proof: "a
   dialog watch wakes with the type when a dialog opens, and at once when one is already open" in
   `sessions.test.js`.
+- C18 (cross-lane, moved from core-service by the coordinator): `language/presentation.rs` holds
+  the one table of the words the page shows, `activity_label` for the 17 activities and
+  `denial_lines` for the phase and detail of a blocked job, beside the held-tab lines it already
+  had. `presentation/mod.rs` reads it, and its `activity_label` and `denial_copy` go. The page
+  draws only the service's words: the caption shows `signal.label`, or nothing when a frame has
+  none, and the denial shows `signal.phase` and `signal.detail` without its two fallback
+  sentences. `page-shared.js` loses `activityLabel` and the unused `presentationLabel`.
+  `presentation.js` names the kinds and activities it draws in two frozen tables, `SIGNAL` and
+  `ACTIVITY`, which `render` and the signature code read in place of 33 literals, so `golden.rs`
+  can pin them. Five pins in `protocol4/golden.rs` read the JavaScript and edit none of it:
+  `every_presentation_name_the_service_sends_is_one_the_page_draws` (both tables equal the wire's
+  `PresentationKind` and `PresentationActivity`),
+  `every_area_and_tier_the_page_names_is_one_the_service_decodes` (`content.js`'s `AREA_WORDS`
+  and `LEFT_OUT` equal `PageArea::ALL` and `LeftOutKey::ALL`),
+  `every_stop_reason_the_extension_sends_is_one_the_service_decodes` (the `STOP_REASON` tables
+  of `worker.js` and `lib/buffers.js` and `recording.js`'s literals decode to a known
+  `RecordingStopReason`), and EXT-5's two pins,
+  `the_runtime_states_the_extension_reports_are_the_services_and_disconnected` and
+  `the_extensions_chunk_limits_equal_the_services` (`lib/chunks.js`'s 512 KiB, 8 MiB and 64
+  equal `wire.rs`'s). No packaged file changes. The extension's own `activityLabel` in
+  `lib/shared.js` stays: it is packaged and frozen. S5, in the surface lane, points
+  `workbench/mod.rs` at `activity_label` and deletes its copy. Proofs for the page: "the page
+  caption is the word the service sent" and "a denial draws the phase and detail the service sent
+  and invents neither" (`assets/tests/world.test.js`). The service half is
+  `every_notice_carries_the_label_of_its_activity` (`presentation/mod.rs`), now against the
+  language table. The asset id is regenerated on purpose (`tests/golden/protocol4/assets.sha256`).
+  Also corrected: the asset-set export list in `docs/design/adapter-protocol-4.md` and the wire
+  comment on `NoticeSignal.label`.

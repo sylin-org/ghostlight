@@ -15,11 +15,12 @@ use serde_json::Value;
 use super::link::{FocusTab, Frames, Spec, View, WorldCalls};
 use super::wire::{
     self, CallAnswer, CallFailure, CallMode, DiagnosticDetail, DiagnosticSource, Event, Failure,
-    Inbound, InputStop, KeyAction, MouseAction, MouseButton, Outbound, PrimitiveName, Readiness,
-    RuntimeControlState,
+    Inbound, InputStop, KeyAction, MouseAction, MouseButton, Outbound, PresentationActivity,
+    PresentationKind, PrimitiveName, Readiness, RecordingStopReason, RuntimeControlState,
 };
 use super::world::{self, AssetErrorCode, Message, WorldKind};
 use crate::browser::adapter::{PhysicalField, PhysicalFile, RuntimeControlIntent};
+use crate::language::area::{LeftOutKey, PageArea};
 use crate::language::field_problem::{FieldProblemKind, WrongToolRoute};
 
 /// The fixture directory, from the orchestrator crate.
@@ -38,6 +39,43 @@ const TABLE_CLOSE: &str = "});";
 const DISPATCH_TEST: &str = "message.kind === \"";
 /// Where `content.js` opens its table of the routes a wrong-tool problem names.
 const ROUTES_OPEN: &str = "const WRONG_TOOL_ROUTES = Object.freeze({";
+/// Where `content.js` opens its list of the page areas an item can belong to.
+const AREAS_OPEN: &str = "const AREA_WORDS = Object.freeze([";
+/// Where `content.js` opens its table of the tiers a capped answer is cut by.
+const LEFT_OUT_OPEN: &str = "const LEFT_OUT = Object.freeze({";
+/// Where a frozen list closes.
+const LIST_CLOSE: &str = "]);";
+/// The page asset that draws presentation signals.
+const PRESENTATION_JS: &str = include_str!("assets/presentation.js");
+/// Where `presentation.js` opens its table of signal kinds.
+const SIGNALS_OPEN: &str = "const SIGNAL = Object.freeze({";
+/// Where `presentation.js` opens its table of activities.
+const ACTIVITIES_OPEN: &str = "const ACTIVITY = Object.freeze({";
+/// Where `presentation.js` reads the runtime state the extension reports.
+const RUNTIME_READ_OPEN: &str = "function setRuntimeState(";
+/// Where a function of the presentation module closes.
+const FUNCTION_CLOSE: &str = "\n  }\n";
+/// The extension, from the orchestrator crate. Its packaged files are read, never edited, so
+/// these pins hold the frozen package to the service without changing it.
+const EXTENSION: &str = "../../extension";
+/// The extension modules that name the recording stop reasons they send in a table.
+const STOP_REASON_TABLES: [&str; 2] = ["worker.js", "lib/buffers.js"];
+/// Where each of those modules opens its table of stop reasons.
+const STOP_REASONS_OPEN: &str = "const STOP_REASON = Object.freeze({";
+/// The extension module that also names stop reasons as literals.
+const RECORDING_JS: &str = "lib/recording.js";
+/// What precedes each stop-reason literal in `recording.js`.
+const STOP_REASON_LITERALS: [&str; 3] = ["freeze(state, \"", "reason === \"", "reason = \""];
+/// The extension module that names the runtime states it reports.
+const WORKER_JS: &str = "worker.js";
+/// Where `worker.js` opens its table of runtime states.
+const RUNTIME_OPEN: &str = "const RUNTIME = Object.freeze({";
+/// The extension module that reports a lost service to the page.
+const EXTENSION_WORLD_JS: &str = "lib/world.js";
+/// How that module names the runtime fact of a lost service.
+const DISCONNECTED_OPEN: &str = "const RUNTIME_DISCONNECTED = \"";
+/// The extension module that reassembles chunked commands.
+const CHUNKS_JS: &str = "lib/chunks.js";
 /// The file name suffix of every fixture.
 const JSON_SUFFIX: &str = ".json";
 /// The case-name prefix of a receipt fixture that carries an outcome.
@@ -602,14 +640,126 @@ fn every_wrong_tool_route_content_js_names_is_one_the_service_decodes() {
     assert_eq!(named, known);
 }
 
+/// The quoted word that follows each occurrence of `marker`.
+fn quoted_after(source: &str, marker: &str) -> BTreeSet<String> {
+    source
+        .split(marker)
+        .skip(1)
+        .map(|rest| rest.split('"').next().expect("a word").to_owned())
+        .collect()
+}
+
 #[test]
 fn content_js_dispatches_exactly_the_kinds_the_service_builds() {
-    let dispatched: BTreeSet<String> = CONTENT_JS
-        .split(DISPATCH_TEST)
-        .skip(1)
-        .map(|rest| rest.split('"').next().expect("a kind").to_owned())
-        .collect();
+    let dispatched = quoted_after(CONTENT_JS, DISPATCH_TEST);
     assert_eq!(dispatched, set(WorldKind::ALL.map(WorldKind::as_str)));
+}
+
+#[test]
+fn every_presentation_name_the_service_sends_is_one_the_page_draws() {
+    let kinds = set(names!(PresentationKind: Start, Target, Progress, Completion, Denial));
+    assert_eq!(
+        quoted_between(PRESENTATION_JS, SIGNALS_OPEN, TABLE_CLOSE),
+        kinds
+    );
+    let activities = set(
+        names!(PresentationActivity: Quiet, Navigate, Click, Hover, Drag, Type, Key, Scroll,
+        Read, Find, Screenshot, Zoom, Fill, Upload, Script, Wait, Dialog),
+    );
+    assert_eq!(
+        quoted_between(PRESENTATION_JS, ACTIVITIES_OPEN, TABLE_CLOSE),
+        activities
+    );
+}
+
+#[test]
+fn every_area_and_tier_the_page_names_is_one_the_service_decodes() {
+    assert_eq!(
+        quoted_between(CONTENT_JS, AREAS_OPEN, LIST_CLOSE),
+        set(PageArea::ALL.map(PageArea::word))
+    );
+    assert_eq!(
+        quoted_between(CONTENT_JS, LEFT_OUT_OPEN, TABLE_CLOSE),
+        set(LeftOutKey::ALL.map(LeftOutKey::word))
+    );
+}
+
+/// One packaged extension source.
+fn extension(relative: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(EXTENSION)
+        .join(relative);
+    fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path:?}: {error}"))
+}
+
+#[test]
+fn every_stop_reason_the_extension_sends_is_one_the_service_decodes() {
+    let mut sent = BTreeSet::new();
+    for module in STOP_REASON_TABLES {
+        let named = quoted_between(&extension(module), STOP_REASONS_OPEN, TABLE_CLOSE);
+        assert!(!named.is_empty(), "{module} names its stop reasons");
+        sent.extend(named);
+    }
+    let recording = extension(RECORDING_JS);
+    for marker in STOP_REASON_LITERALS {
+        sent.extend(quoted_after(&recording, marker));
+    }
+    for reason in &sent {
+        let decoded: RecordingStopReason = decode(reason, &Value::String(reason.clone()));
+        assert_ne!(decoded, RecordingStopReason::Unknown, "{reason}");
+    }
+}
+
+#[test]
+fn the_runtime_states_the_extension_reports_are_the_services_and_disconnected() {
+    let disconnected = quoted_after(&extension(EXTENSION_WORLD_JS), DISCONNECTED_OPEN);
+    assert_eq!(disconnected.len(), 1, "{disconnected:?}");
+    let mut reported = set(names!(RuntimeControlState: Active, Held, Ended));
+    reported.extend(disconnected.iter().cloned());
+    assert_eq!(
+        quoted_between(&extension(WORKER_JS), RUNTIME_OPEN, TABLE_CLOSE),
+        reported
+    );
+    let read = quoted_between(PRESENTATION_JS, RUNTIME_READ_OPEN, FUNCTION_CLOSE);
+    assert!(
+        read.is_superset(&disconnected) && read.is_subset(&reported),
+        "{read:?}"
+    );
+}
+
+/// The value of a numeric constant an extension module declares as a product of integers.
+fn js_constant(source: &str, name: &str) -> u64 {
+    let marker = format!("const {name} = ");
+    let start = source.find(&marker).unwrap_or_else(|| panic!("no {name}")) + marker.len();
+    let end = start + source[start..].find(';').expect("the declaration ends");
+    source[start..end]
+        .split('*')
+        .map(|factor| {
+            factor
+                .trim()
+                .replace('_', "")
+                .parse::<u64>()
+                .unwrap_or_else(|error| panic!("{name}: {error}"))
+        })
+        .product()
+}
+
+#[test]
+fn the_extensions_chunk_limits_equal_the_services() {
+    let chunks = extension(CHUNKS_JS);
+    let limit = |value: usize| u64::try_from(value).expect("a limit");
+    assert_eq!(
+        js_constant(&chunks, "DEFAULT_MAX_CHUNK_BYTES"),
+        limit(wire::CHUNK_PAYLOAD_BYTES)
+    );
+    assert_eq!(
+        js_constant(&chunks, "DEFAULT_MAX_BYTES"),
+        limit(wire::TRANSFER_MAX_BYTES)
+    );
+    assert_eq!(
+        js_constant(&chunks, "DEFAULT_MAX_CHUNKS"),
+        u64::from(wire::TRANSFER_MAX_CHUNKS)
+    );
 }
 
 /// The fields of a fill fixture.

@@ -300,6 +300,49 @@ test("presentation builds its markup with DOM calls, so Trusted Types pages rend
   assert.equal(runtime.present({ signal: "denial", phase: "Blocked", detail: "Not allowed here." }, LOCAL), true);
 });
 
+// The first element under the presentation host that carries the class.
+function classed(dom, name) {
+  const walk = (node) => {
+    for (const child of node.childNodes ?? []) {
+      if (child.classes?.has(name)) return child;
+      const found = walk(child);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(hostOf(dom).shadow);
+}
+
+test("the page caption is the word the service sent", () => {
+  const captions = { ...LOCAL, preferences: { effects: false, captions: true } };
+  const dom = createFakeDom();
+  const runtime = install(dom);
+  const label = "Words only the service knows";
+  assert.equal(runtime.present({ signal: "start", activity: "read", invocation: "i-1", label }, captions), true);
+  const caption = classed(dom, "caption");
+  assert.equal(caption.textContent, label);
+  assert.ok(caption.classes.has("on"));
+
+  const bare = createFakeDom();
+  const unlabelled = install(bare);
+  unlabelled.present({ signal: "start", activity: "read", invocation: "i-2" }, captions);
+  const silent = classed(bare, "caption");
+  assert.equal(silent.textContent, "", "a signal without a label shows no word of the page's own");
+  assert.equal(silent.classes.has("on"), false);
+});
+
+test("a denial draws the phase and detail the service sent and invents neither", () => {
+  const dom = createFakeDom();
+  const runtime = install(dom);
+  runtime.present({ signal: "denial", phase: "Ghostlight kept this tab open", detail: "You can close it yourself." }, LOCAL);
+  assert.equal(classed(dom, "denial-title").textContent, "Ghostlight kept this tab open");
+  assert.equal(classed(dom, "denial-description").textContent, "You can close it yourself.");
+
+  runtime.present({ signal: "denial", phase: "Ghostlight stopped on this page" }, LOCAL);
+  assert.equal(classed(dom, "denial-title").textContent, "Ghostlight stopped on this page");
+  assert.equal(classed(dom, "denial-description").textContent, "");
+});
+
 test("dispose removes the host, the timers and the global", () => {
   const dom = createFakeDom();
   const runtime = install(dom);
