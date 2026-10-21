@@ -61,6 +61,46 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 
 ## Notes
 
+- The page assets' plan (2026-10-21), from a read-only classification of
+  `protocol4/assets/tests/content.test.js` (252) and `world.test.js` (23) at a48c7968, for when the
+  owner sets the JavaScript ceiling. Line numbers are the tests' lines then; find each by name
+  before cutting. 69 stay (content 57, world 12): 28 promise, 16 contract, 25 defect. They hold 265
+  of the 275 as folded cases; 10 go outright (content 765, 794, 2065, 2858, 3137, 3259; world 42,
+  78, 203, 218). Proposed ceiling 75: 69, one boundary test for A-D1, and a small spare.
+  Last proofs that must stay: 431 (the semantic query keeps the service's maximum; the work lane
+  cut its Rust half in c2f4b188), 398 (every semantic role is producible; `language/mod.rs` names
+  it), world 54 (the asset hash pin), 3236 (the page accepts the world goldens), 3095 (the page
+  half of `is_pre_effect`, which `link.rs`'s `acted()` relies on), 1940 (the only reproduction of
+  778ce9d1; rebuild it as a find), and 2235 and 3768 (when a fill failure carries no detail).
+  Folds, content.test.js:
+  reads 127+170, 182+249+270+1748, 214+233; walk 289+1776+3932; roles and states
+  316+348+445+464+737; 398; 431; 481; outline 529+558+580+603; names 615+710+727; text find
+  638+663+688+505; owner box 784+800+814; point routing 831+849+866+910+936; focused control
+  892+1263+1276; 945; file delivery 964+1058+1087; preparing kinds 989+1041+749; refusal codes
+  1009+1024 (codes only, ADR-0198 amendment of 2026-10-18); 1100; one edit or none
+  1138+1166+1207+1220+1232+1247; credential allowance 1190+1287+1301+1320+1333; preparation
+  1354+1377+1477; preparation budget 1400+1419+1425+1431; retained timing
+  1486+1517+1547+1560+3768; page text only 1661+1671+1683+1696+1716; 1729; observe timeout
+  1762+1792+1807; quiet reads 1880+1888+1901+1909+1940; handles 1972+2003; stale words
+  2020+2028+2037+2052+2087; refused fill 2114+2235+2600+2821 and 2136+2146+2189+2205+2221; select
+  2300+2311+2323+2333+2349+2359+2369+1437+2170+2585; lists 2388+2402+2413+2424+2760; checkbox
+  2441+2461+1457; radio 2475+2491+2506+2523+2537+2552+2575; shapes 2634 to 2744 (10); wrong tool
+  2767+2794+2809; pre-effect 3095+3085+3120 with rows from 977, 1075, 1125, 1597, 1614; 3236;
+  select item 3294+3316+3341+3359+3380+3393; field item 3406+3421+3433+3463+3489+3579; error
+  words 3518+3555; 3591; 3632; echo 3660+3680+3693+3703+3719+1569+2251+2844; credential echo
+  3740+3754; area 3803+3854+3964; form 3871+3897+3912+3990; cap by tier
+  4023+4043+4066+4083+4165; behind dialog 4097+4117+4133+4148; context 4211 to 4339 (9); same by
+  proof 4392 to 4569 (11); recycled rows 4595+4610+4625; lookup shape 4635+4658+4672+4693+4709;
+  follow by proof 4749 to 4983 (13); only the call's start follows 4964+4999+5013+5029+5045.
+  world.test.js: pin 54; codes 100+82; forbidden scan 135+124; install 141+152; envelope 171;
+  tail click 230 with content 1578; ambient 265 with 280's ambient rows; subframe 280's present
+  rows with content 3266; DOM render 294; service words 316+334; dispose 346+159+360; cancel
+  375+390 with content 1829, 1836, 1843, 1853, 1862.
+  No test sleeps in real time. Fixed fake-clock advances that restate an internal interval (world
+  375 and 390, the `cancelled()` helper, 1762, 1940) become step-until-answered loops with a step
+  cap, and windows that restate page constants (1377, 1419, 1431, 1547, 1486) are bound by the
+  message's own budget; the 300 ms in 1880-1909 may stay, since LANGUAGE promises it.
+
 - From the coordinator (2026-10-21): `crates/desktop` moves here from the install lane, with its
   budget of 20 (161 tests at the batch's opening, 158 now). Some of its code and tests compile only on
   Windows: send any change there to the coordinator to check on Windows before it lands. Its
