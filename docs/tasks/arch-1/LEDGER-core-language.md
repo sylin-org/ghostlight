@@ -10,7 +10,7 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 and L-D2 have landed. Next is L-D3. A slice's hash is filled in by the next slice's commit,
+L-D1, L-D2 and L-D3 have landed. Next is L-D4. A slice's hash is filled in by the next slice's commit,
 since a rebase before the push changes it.
 
 ## Slices
@@ -20,8 +20,8 @@ In order. "After" names what a slice waits for.
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | L-D1 | fix(language): a wheel scroll may leave out its direction, and its amount is checked | - | LANG-3's skeptic note | landed (59c67621) |
-| L-D2 | fix(language): a summary with its coverage note stays within its bound, to the character | - | LANG-6 and its note | landed |
-| L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | todo |
+| L-D2 | fix(language): a summary with its coverage note stays within its bound, to the character | - | LANG-6 and its note | landed (69e58321) |
+| L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed |
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | todo |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | todo |
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | todo |
@@ -54,3 +54,6 @@ In order. "After" names what a slice waits for.
   (`CHILDREN_UNSAVED`, `HISTORY_UNSAVED`). When storage fails on a summary already at the bound,
   the storage note wins and can cut the coverage note's words; the result's `coverage` fact still
   carries them. `workbench/mod.rs` still spells the children note (surface, LANG-6's refactor).
+- L-D3: one skipped entry reads "1 unreadable history entry was skipped." in the history and
+  status detail, as the unconfirmed-receipts sentence already did. Person-facing, on purpose.
+  LANG-9 later folds both hand-written plurals into the shared phrase helpers.

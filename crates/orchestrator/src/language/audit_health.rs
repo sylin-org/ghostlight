@@ -110,10 +110,14 @@ impl AuditHealth {
             }
         }
         if self.unreadable_entries > 0 {
-            detail.push_str(&format!(
-                " {} unreadable history entries were skipped.",
-                self.unreadable_entries
-            ));
+            if self.unreadable_entries == 1 {
+                detail.push_str(" 1 unreadable history entry was skipped.");
+            } else {
+                detail.push_str(&format!(
+                    " {} unreadable history entries were skipped.",
+                    self.unreadable_entries
+                ));
+            }
         }
         if self.history_unavailable {
             detail.push_str(" Earlier history could not be fully loaded. Restart Ghostlight to reload it once storage is available.");
@@ -133,8 +137,28 @@ impl AuditHealth {
 
 #[cfg(test)]
 mod tests {
-    use super::{qualify_children, Storage, CHILDREN_UNSAVED, HISTORY_UNSAVED};
+    use super::{qualify_children, AuditHealth, Storage, CHILDREN_UNSAVED, HISTORY_UNSAVED};
     use crate::language::outcome::SUMMARY_MAX_CHARS;
+
+    #[test]
+    fn skipped_history_entries_are_counted_in_number() {
+        let detail = |unreadable_entries| {
+            AuditHealth {
+                unreadable_entries,
+                ..AuditHealth::default()
+            }
+            .detail(false)
+        };
+        assert_eq!(
+            detail(1),
+            "History is saving. 1 unreadable history entry was skipped."
+        );
+        assert_eq!(
+            detail(2),
+            "History is saving. 2 unreadable history entries were skipped."
+        );
+        assert_eq!(detail(0), "History is saving.");
+    }
 
     #[test]
     fn a_storage_note_fills_the_summary_bound_to_the_character() {
