@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 94 |
+| `crates/desktop` | 161 | 20 | 92 |
 
 ## Slices
 
@@ -48,7 +48,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | D1 | `crates/desktop/src/machine.rs`: what the shell starts and when | 37 | 5 | promise 4, defect 1 | landed (60dbba71; its ledger row came in the next commit) |
 | D2 | `crates/desktop/src/link.rs`: the frames the service writes, the bearer and the link's life | 26 | 3 | contract 2, promise 1 | landed (e3d4bb73) |
 | D3 | `crates/desktop/src/states.rs`: a state screen navigates nowhere else | 9 | 1 | promise 1 | landed (7ce3ebf5) |
-| D4 | `crates/desktop/src/lib.rs`: the launch parser's restating tests | 4 | 0 | - | landed (this commit) |
+| D4 | `crates/desktop/src/lib.rs`: the launch parser's restating tests | 4 | 0 | - | landed (7edcc0fd) |
+| D5 | `crates/desktop/src/scratch.rs`: tests of a test helper | 2 | 0 | - | landed (this commit) |
 
 ## Notes
 
@@ -92,6 +93,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   A contract gap stays open: the service writes the shell's `--tray` separately
   (`service/presence.rs`), and no test sees both words. The root fix is one constant both crates
   read; a test would only restate it.
+- D5: the scratch directory's two tests tested a test helper; the helper stays for the link and
+  webview tests.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against

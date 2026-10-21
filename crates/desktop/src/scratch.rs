@@ -60,33 +60,3 @@ impl Drop for Scratch {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::panic::{catch_unwind, AssertUnwindSafe};
-
-    use super::*;
-
-    #[test]
-    fn the_directory_and_what_it_holds_are_gone_after_the_drop() {
-        let scratch = Scratch::named("drop");
-        fs::write(scratch.join("file.txt"), b"x").unwrap();
-        let root = scratch.path().to_path_buf();
-        assert!(root.is_dir());
-        drop(scratch);
-        assert!(!root.exists());
-    }
-
-    #[test]
-    fn a_panic_still_removes_the_directory() {
-        let mut seen = None;
-        let unwound = catch_unwind(AssertUnwindSafe(|| {
-            let scratch = Scratch::named("panic");
-            fs::write(scratch.join("file.txt"), b"x").unwrap();
-            seen = Some(scratch.path().to_path_buf());
-            panic!("the test fails while its scratch lives");
-        }));
-        assert!(unwound.is_err());
-        assert!(!seen.expect("the scratch was made").exists());
-    }
-}
