@@ -44,7 +44,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | command = "<edge>"
   | args = ["mcp"]
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -87,7 +87,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | args = ["mcp"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -140,7 +140,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | args = ["mcp"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -242,7 +242,7 @@ says: Codex already has the current Ghostlight registration.
 after: installed (connected) | Ghostlight is registered for this user context.
 wrote nothing
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -306,7 +306,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | args = ["mcp"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -378,7 +378,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | env = { NOTE = "kept" }
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -442,7 +442,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | args = ["mcp"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -506,7 +506,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | args = ["mcp"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -611,7 +611,7 @@ wrote <root>/located/config.toml:
   | args = ["mcp"]
 wrote <root>/located/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -658,7 +658,7 @@ says: Codex already has the current Ghostlight registration.
 after: installed (connected) | Ghostlight is registered for this user context.
 wrote nothing
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -716,7 +716,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | args = ["mcp"]
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -761,7 +761,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -816,7 +816,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -933,7 +933,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -999,7 +999,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1072,7 +1072,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | env = { NOTE = "kept" }
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1138,7 +1138,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1204,7 +1204,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1312,7 +1312,7 @@ wrote <root>/located/config.toml:
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
 wrote <root>/located/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -1360,7 +1360,7 @@ says: Codex already has the current Ghostlight registration.
 after: installed (connected) | Ghostlight is registered for this user context.
 wrote nothing
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1416,7 +1416,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | command = "<edge>"
   | args = ["mcp"]
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -1469,7 +1469,7 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | args = ["mcp"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -1515,7 +1515,7 @@ says: Codex already has the current Ghostlight registration.
 after: installed (connected) | Ghostlight is registered for this user context.
 wrote nothing
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes

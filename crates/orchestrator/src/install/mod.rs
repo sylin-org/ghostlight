@@ -2499,7 +2499,7 @@ fn edit_json_with(
             return Ok(false);
         }
     } else if intent.replaces_foreign() {
-        return Err(HarnessError::NotFixable);
+        return Err(HarnessError::NoEntryToFix);
     } else if !intent.installs() {
         return Ok(false);
     }
@@ -2578,7 +2578,7 @@ fn edit_toml_with(
             return Ok(false);
         }
     } else if intent.replaces_foreign() {
-        return Err(HarnessError::NotFixable);
+        return Err(HarnessError::NoEntryToFix);
     } else if !intent.installs() {
         return Ok(false);
     }
@@ -3224,9 +3224,12 @@ pub enum HarnessError {
     /// Ghostlight's npm launcher holds Ghostlight's registration name; only Fix changes it.
     #[error("{}", words::LAUNCHER_ENTRY_LEFT)]
     LauncherEntry,
-    /// The explicit fix no longer points at one foreign entry.
+    /// A Fix found Ghostlight's own entry where it expected a foreign one.
     #[error("{}", words::NOT_FIXABLE)]
     NotFixable,
+    /// A Fix found no entry under Ghostlight's name.
+    #[error("{}", words::NOTHING_TO_FIX)]
+    NoEntryToFix,
     /// A located path is neither a matching configuration nor an executable.
     #[error("{}", words::located_path_invalid(.0))]
     LocatedPathInvalid(PathBuf),

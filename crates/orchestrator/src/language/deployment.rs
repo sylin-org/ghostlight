@@ -1127,9 +1127,14 @@ pub fn configuration_unwritable(reason: &str) -> String {
 pub const FOREIGN_ENTRY_LEFT: &str =
     "a foreign `ghostlight` entry is present; Ghostlight left it untouched";
 
-/// The refusal of a Fix whose entry changed since it was offered.
-pub const NOT_FIXABLE: &str =
-    "the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations";
+/// The refusal of a Fix when the entry under Ghostlight's name is Ghostlight's own: there is
+/// nothing foreign to replace, whether it always was or became so after Fix was offered.
+pub const NOT_FIXABLE: &str = "the `ghostlight` entry is already Ghostlight's own, so Fix has \
+                                nothing to replace; Install keeps it current";
+
+/// The refusal of a Fix when no entry holds Ghostlight's name.
+pub const NOTHING_TO_FIX: &str =
+    "there is no `ghostlight` entry for Fix to replace; Install adds one";
 
 /// The refusal of a located `path` that is neither the client's configuration nor an executable.
 #[must_use]

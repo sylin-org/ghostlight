@@ -55,7 +55,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   |   }
   | }
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -109,7 +109,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -174,7 +174,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -291,7 +291,7 @@ says: Windsurf already has the current Ghostlight registration.
 after: installed (connected) | Ghostlight is registered for this user context.
 wrote nothing
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -362,7 +362,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -433,7 +433,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -508,7 +508,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -583,7 +583,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -710,7 +710,7 @@ wrote <root>/located/mcp_config.json:
   | }
 wrote <root>/located/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -770,7 +770,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   |   }
   | }
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -824,7 +824,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -889,7 +889,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -1006,7 +1006,7 @@ says: Windsurf already has the current Ghostlight registration.
 after: installed (connected) | Ghostlight is registered for this user context.
 wrote nothing
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1077,7 +1077,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1148,7 +1148,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1223,7 +1223,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1298,7 +1298,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
@@ -1425,7 +1425,7 @@ wrote <root>/located/mcp_config.json:
   | }
 wrote <root>/located/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -1485,7 +1485,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   |   }
   | }
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -1550,7 +1550,7 @@ wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json:
   | }
 wrote <root>/Pat Doe/.codeium/windsurf/mcp_config.json.ghostlight-backup: the seed's bytes
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: there is no `ghostlight` entry for Fix to replace; Install adds one
 wrote nothing
 -- uninstall
 changed: no
@@ -1602,7 +1602,7 @@ says: Windsurf already has the current Ghostlight registration.
 after: installed (connected) | Ghostlight is registered for this user context.
 wrote nothing
 -- fix
-refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+refused: the `ghostlight` entry is already Ghostlight's own, so Fix has nothing to replace; Install keeps it current
 wrote nothing
 -- uninstall
 changed: yes
