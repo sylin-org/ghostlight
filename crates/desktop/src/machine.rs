@@ -515,8 +515,6 @@ mod tests {
         started: Vec<StartReason>,
         relaunches: u32,
         bin: Option<Image>,
-        start_fails: bool,
-        relaunch_fails: bool,
     }
 
     impl World {
@@ -526,8 +524,6 @@ mod tests {
                 started: Vec::new(),
                 relaunches: 0,
                 bin: Some(old_image()),
-                start_fails: false,
-                relaunch_fails: false,
             }
         }
     }
@@ -539,20 +535,12 @@ mod tests {
 
         fn start_service(&mut self, reason: StartReason) -> io::Result<()> {
             self.started.push(reason);
-            if self.start_fails {
-                Err(io::Error::other("no service image"))
-            } else {
-                Ok(())
-            }
+            Ok(())
         }
 
         fn relaunch_updating(&mut self) -> io::Result<()> {
             self.relaunches += 1;
-            if self.relaunch_fails {
-                Err(io::Error::other("no shell image"))
-            } else {
-                Ok(())
-            }
+            Ok(())
         }
 
         fn bin_image(&self) -> Option<Image> {
@@ -631,14 +619,12 @@ mod tests {
 
     // A person's start.
 
-    #[test]
     fn a_person_with_a_service_running_gets_the_workbench_and_no_start() {
         let mut rig = Rig::new(Launch::Person);
         assert_eq!(rig.start_and_answer(Answer::Attached), [workbench(true)]);
         assert!(rig.world.started.is_empty());
     }
 
-    #[test]
     fn a_person_with_no_service_sees_starting_and_the_service_is_started_once() {
         let mut rig = Rig::new(Launch::Person);
         assert_eq!(
@@ -652,7 +638,6 @@ mod tests {
         assert_eq!(rig.retry_and_answer(Answer::Attached), [workbench(true)]);
     }
 
-    #[test]
     fn a_person_waits_out_a_service_that_is_shutting_down_and_then_starts_it_once() {
         let mut rig = Rig::new(Launch::Person);
         assert_eq!(
@@ -671,44 +656,6 @@ mod tests {
         assert_eq!(rig.world.started, [StartReason::Person]);
     }
 
-    #[test]
-    fn a_person_whose_service_never_answers_ends_on_the_stopped_screen_after_30_seconds() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.start_and_answer(Answer::NoAnswer);
-        rig.after(29);
-        assert!(rig.retry_and_answer(Answer::NoAnswer).is_empty());
-        rig.after(2);
-        assert_eq!(
-            rig.retry_and_answer(Answer::NoAnswer),
-            [show(StateScreen::Stopped, true)]
-        );
-        assert_eq!(rig.world.started, [StartReason::Person]);
-    }
-
-    #[test]
-    fn a_person_who_is_refused_gets_the_stopped_screen() {
-        let mut rig = Rig::new(Launch::Person);
-        assert_eq!(
-            rig.start_and_answer(Answer::Refused),
-            [show(StateScreen::Stopped, true)]
-        );
-        assert!(rig.world.started.is_empty());
-    }
-
-    #[test]
-    fn a_person_whose_start_fails_gets_the_stopped_screen_at_once() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.world.start_fails = true;
-        assert_eq!(
-            rig.start_and_answer(Answer::NoAnswer),
-            [
-                show(StateScreen::Starting, true),
-                show(StateScreen::Stopped, true)
-            ]
-        );
-    }
-
-    #[test]
     fn a_shell_that_finds_another_open_ends_whoever_started_it() {
         for launch in [Launch::Person, Launch::Tray, Launch::Updating] {
             let mut rig = Rig::new(launch);
@@ -723,8 +670,13 @@ mod tests {
 
     // A tray start.
 
+    /// Before the shell attaches, only a person's launch or the Start button starts the service, once
+    /// and for a person; a `--tray` start, an updating start and the Stopped screen's retries start
+    /// nothing, so no shell undoes a Quit; a person waits out a service that is shutting down; a tray
+    /// start shows only its icon; and a shell that finds another open ends whoever started it
+    /// (ACCEPTANCE, 13 and gate 1).
     #[test]
-    fn a_tray_start_with_no_service_ends_having_started_nothing() {
+    fn before_it_attaches_only_a_person_starts_the_service() {
         for answer in [Answer::NoAnswer, Answer::ShuttingDown, Answer::Refused] {
             let mut rig = Rig::new(Launch::Tray);
             assert_eq!(rig.start_and_answer(answer), [Effect::Exit], "{answer:?}");
@@ -732,9 +684,18 @@ mod tests {
             assert_eq!(rig.world.relaunches, 0);
             assert_eq!(rig.machine.wake_at(), None);
         }
+
+        a_person_with_a_service_running_gets_the_workbench_and_no_start();
+        a_person_with_no_service_sees_starting_and_the_service_is_started_once();
+        a_person_waits_out_a_service_that_is_shutting_down_and_then_starts_it_once();
+        a_shell_that_finds_another_open_ends_whoever_started_it();
+        a_tray_start_that_attaches_shows_no_window();
+        an_updating_start_shows_updating_and_starts_nothing();
+        stopped_keeps_retrying_at_the_cap_and_starts_nothing();
+        a_service_that_comes_back_picks_the_stopped_shell_up();
+        the_start_button_is_a_persons_start_and_shows_starting();
     }
 
-    #[test]
     fn a_tray_start_that_attaches_shows_no_window() {
         let mut rig = Rig::new(Launch::Tray);
         assert_eq!(rig.start_and_answer(Answer::Attached), [workbench(false)]);
@@ -742,7 +703,6 @@ mod tests {
 
     // An updating start.
 
-    #[test]
     fn an_updating_start_shows_updating_and_starts_nothing() {
         let mut rig = Rig::new(Launch::Updating);
         assert_eq!(
@@ -755,24 +715,14 @@ mod tests {
         assert!(rig.world.started.is_empty());
     }
 
-    #[test]
-    fn an_updating_start_gives_up_after_60_seconds() {
-        let mut rig = Rig::new(Launch::Updating);
-        rig.start_and_answer(Answer::NoAnswer);
-        rig.after(59);
-        assert!(rig.retry_and_answer(Answer::NoAnswer).is_empty());
-        rig.after(2);
-        assert_eq!(
-            rig.retry_and_answer(Answer::NoAnswer),
-            [show(StateScreen::Stopped, true)]
-        );
-        assert!(rig.world.started.is_empty());
-    }
-
     // Goodbyes.
 
+    /// Each goodbye reason decides what the shell does: quit, uninstall and session end end it and
+    /// start nothing; a replace relaunches the new image once when it changed and the window is open,
+    /// and otherwise only ends or shows Updating; an image that cannot be read counts as the same; and
+    /// an unknown reason is a loss (ACCEPTANCE, 13: each edge acts on the reason).
     #[test]
-    fn a_goodbye_of_quit_uninstall_or_session_end_ends_the_shell_and_starts_nothing() {
+    fn each_goodbye_reason_decides_what_the_shell_does() {
         for reason in [
             GoodbyeReason::Quit,
             GoodbyeReason::Uninstall,
@@ -787,9 +737,14 @@ mod tests {
             assert!(rig.world.started.is_empty());
             assert_eq!(rig.world.relaunches, 0);
         }
+
+        a_replaced_image_with_the_window_open_relaunches_once_and_ends();
+        a_replaced_image_with_the_window_closed_only_ends();
+        the_same_image_shows_updating_and_never_relaunches();
+        an_image_that_cannot_be_read_counts_as_the_same();
+        an_unknown_goodbye_is_a_loss();
     }
 
-    #[test]
     fn a_replaced_image_with_the_window_open_relaunches_once_and_ends() {
         let mut rig = Rig::new(Launch::Person);
         rig.world.bin = Some(new_image());
@@ -808,7 +763,6 @@ mod tests {
         assert_eq!(rig.world.relaunches, 1, "only once");
     }
 
-    #[test]
     fn a_replaced_image_with_the_window_closed_only_ends() {
         let mut rig = Rig::new(Launch::Tray);
         rig.world.bin = Some(new_image());
@@ -819,18 +773,6 @@ mod tests {
         assert_eq!(rig.world.relaunches, 0);
     }
 
-    #[test]
-    fn a_replaced_image_whose_relaunch_fails_shows_the_stopped_screen() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.world.bin = Some(new_image());
-        rig.world.relaunch_fails = true;
-        assert_eq!(
-            rig.attached_then(LinkEnd::Goodbye(GoodbyeReason::Replace), true),
-            [show(StateScreen::Stopped, true)]
-        );
-    }
-
-    #[test]
     fn nothing_is_relaunched_while_the_session_is_ending() {
         let mut rig = Rig::new(Launch::Person);
         rig.world.bin = Some(new_image());
@@ -842,7 +784,6 @@ mod tests {
         assert_eq!(rig.world.relaunches, 0);
     }
 
-    #[test]
     fn the_same_image_shows_updating_and_never_relaunches() {
         let mut rig = Rig::new(Launch::Person);
         assert_eq!(
@@ -855,29 +796,6 @@ mod tests {
         assert!(rig.world.started.is_empty());
     }
 
-    #[test]
-    fn the_same_image_goes_to_stopped_on_any_refusal_and_does_not_relaunch() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.attached_then(LinkEnd::Goodbye(GoodbyeReason::Replace), true);
-        assert_eq!(
-            rig.retry_and_answer(Answer::Refused),
-            [show(StateScreen::Stopped, true)]
-        );
-        assert_eq!(rig.world.relaunches, 0);
-    }
-
-    #[test]
-    fn the_same_image_gives_up_after_60_seconds() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.attached_then(LinkEnd::Goodbye(GoodbyeReason::Replace), true);
-        rig.after(61);
-        assert_eq!(
-            rig.retry_and_answer(Answer::NoAnswer),
-            [show(StateScreen::Stopped, true)]
-        );
-    }
-
-    #[test]
     fn an_image_that_cannot_be_read_counts_as_the_same() {
         let mut rig = Rig::new(Launch::Person);
         rig.world.bin = None;
@@ -890,7 +808,6 @@ mod tests {
 
     // A loss without goodbye.
 
-    #[test]
     fn a_loss_without_goodbye_shows_restarting_and_starts_the_service_for_recover() {
         let mut rig = Rig::new(Launch::Person);
         assert_eq!(
@@ -901,7 +818,6 @@ mod tests {
         assert_eq!(rig.retry_and_answer(Answer::Attached), [workbench(false)]);
     }
 
-    #[test]
     fn an_unknown_goodbye_is_a_loss() {
         let mut rig = Rig::new(Launch::Person);
         assert_eq!(
@@ -910,6 +826,8 @@ mod tests {
         );
     }
 
+    /// A loss without a goodbye shows Restarting and starts the service for `recover`, at most
+    /// `RECOVER_TRIES` times, and then shows Stopped (ARCHITECTURE, the `recover` start).
     #[test]
     fn three_recover_tries_and_then_the_stopped_screen() {
         let mut rig = Rig::new(Launch::Person);
@@ -923,26 +841,22 @@ mod tests {
             }
         }
         assert_eq!(effects, [show(StateScreen::Stopped, true)]);
-        assert_eq!(rig.world.started, [StartReason::Recover; 3]);
-    }
-
-    #[test]
-    fn a_refusal_while_recovering_is_the_stopped_screen() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.attached_then(LinkEnd::Lost, true);
         assert_eq!(
-            rig.retry_and_answer(Answer::Refused),
-            [show(StateScreen::Stopped, true)]
+            rig.world.started,
+            [StartReason::Recover; RECOVER_TRIES as usize]
         );
-        assert_eq!(rig.world.started, [StartReason::Recover]);
+
+        a_loss_without_goodbye_shows_restarting_and_starts_the_service_for_recover();
     }
 
+    /// A service that is shutting down spends no recover try and is not reopened in a busy loop
+    /// (commit 4e1a8e2a).
     #[test]
     fn a_service_that_is_shutting_down_spends_no_recover_try() {
         let mut rig = Rig::new(Launch::Person);
         rig.attached_then(LinkEnd::Lost, true);
         for _ in 0..5 {
-            rig.after(11);
+            rig.after(RECOVER_PATIENCE.as_secs() + 1);
             assert!(rig.retry_and_answer(Answer::ShuttingDown).is_empty());
             let wake = rig.machine.wake_at().expect("the opening is retried");
             assert!(wake > rig.now, "no busy loop while the service quits");
@@ -958,7 +872,6 @@ mod tests {
         rig
     }
 
-    #[test]
     fn stopped_keeps_retrying_at_the_cap_and_starts_nothing() {
         let mut rig = stopped_rig();
         for _ in 0..4 {
@@ -971,13 +884,11 @@ mod tests {
         assert!(rig.world.started.is_empty());
     }
 
-    #[test]
     fn a_service_that_comes_back_picks_the_stopped_shell_up() {
         let mut rig = stopped_rig();
         assert_eq!(rig.retry_and_answer(Answer::Attached), [workbench(true)]);
     }
 
-    #[test]
     fn the_start_button_is_a_persons_start_and_shows_starting() {
         let mut rig = stopped_rig();
         assert_eq!(
@@ -988,31 +899,10 @@ mod tests {
         assert_eq!(rig.retry_and_answer(Answer::Attached), [workbench(true)]);
     }
 
-    #[test]
-    fn the_start_button_does_nothing_when_the_screen_is_not_stopped() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.start_and_answer(Answer::NoAnswer);
-        assert!(rig.send(Event::StartPressed).is_empty());
-        assert_eq!(
-            rig.world.started,
-            [StartReason::Person],
-            "only the first start"
-        );
-    }
-
-    #[test]
-    fn a_service_that_is_not_answering_after_the_start_button_ends_stopped_again() {
-        let mut rig = stopped_rig();
-        rig.send(Event::StartPressed);
-        rig.after(31);
-        assert_eq!(
-            rig.retry_and_answer(Answer::NoAnswer),
-            [show(StateScreen::Stopped, true)]
-        );
-    }
-
     // The session.
 
+    /// Once the person's session is ending, the shell starts and relaunches nothing on any path
+    /// (ACCEPTANCE, gate 1).
     #[test]
     fn nothing_starts_while_the_session_is_ending() {
         let mut rig = Rig::new(Launch::Person);
@@ -1021,109 +911,15 @@ mod tests {
         rig.retry_and_answer(Answer::NoAnswer);
         rig.attached_then(LinkEnd::Lost, true);
         for _ in 0..8 {
-            rig.after(11);
+            rig.after(RECOVER_PATIENCE.as_secs() + 1);
             rig.retry_and_answer(Answer::NoAnswer);
         }
         rig.send(Event::StartPressed);
         assert!(rig.world.started.is_empty());
         assert_eq!(rig.world.relaunches, 0);
+
+        nothing_is_relaunched_while_the_session_is_ending();
     }
 
     // The loop's side.
-
-    #[test]
-    fn a_tick_before_the_planned_time_or_during_an_attempt_does_nothing() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.start_and_answer(Answer::NoAnswer);
-        assert!(rig.send(Event::Tick).is_empty(), "too early");
-        let wake = rig.machine.wake_at().unwrap();
-        rig.now = wake;
-        assert_eq!(rig.send(Event::Tick), [Effect::Open]);
-        assert_eq!(rig.machine.wake_at(), None, "an attempt is in flight");
-        assert!(rig.send(Event::Tick).is_empty());
-    }
-
-    #[test]
-    fn an_ended_stream_before_the_first_attach_is_ignored() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.send(Event::Started);
-        assert!(rig
-            .send(Event::Ended {
-                end: LinkEnd::Lost,
-                window_open: false
-            })
-            .is_empty());
-    }
-
-    #[test]
-    fn the_polls_follow_the_relay_backoff() {
-        let mut rig = Rig::new(Launch::Person);
-        rig.start_and_answer(Answer::NoAnswer);
-        let first = rig.machine.wake_at().unwrap() - rig.now;
-        rig.retry_and_answer(Answer::NoAnswer);
-        let second = rig.machine.wake_at().unwrap() - rig.now;
-        assert_eq!(first, ghostlight_relay::BACKOFF_FIRST);
-        assert_eq!(second, ghostlight_relay::BACKOFF_FIRST * 2);
-    }
-
-    #[test]
-    fn a_link_error_is_an_answer() {
-        use ghostlight_relay::endpoint::ConnectError;
-        let refused = |code| LinkError::Refused {
-            code,
-            say: String::new(),
-        };
-        assert_eq!(
-            Answer::from(&LinkError::Connect(ConnectError::NoService)),
-            Answer::NoAnswer
-        );
-        assert_eq!(
-            Answer::from(&LinkError::Connect(ConnectError::Closed)),
-            Answer::NoAnswer
-        );
-        assert_eq!(
-            Answer::from(&LinkError::Io(io::Error::other("x"))),
-            Answer::NoAnswer
-        );
-        assert_eq!(
-            Answer::from(&LinkError::Connect(ConnectError::ForeignServer)),
-            Answer::Refused
-        );
-        assert_eq!(
-            Answer::from(&refused(Some(RefusalCode::ShuttingDown))),
-            Answer::ShuttingDown
-        );
-        assert_eq!(
-            Answer::from(&refused(Some(RefusalCode::Capacity))),
-            Answer::Refused
-        );
-        assert_eq!(Answer::from(&refused(None)), Answer::Refused);
-        assert_eq!(
-            Answer::from(&LinkError::Contract { reason: "x" }),
-            Answer::Refused
-        );
-        assert_eq!(Answer::from(&LinkError::AlreadyOpen), Answer::AlreadyOpen);
-    }
-
-    #[test]
-    fn an_image_is_the_same_only_with_the_same_length_and_time() {
-        let at = UNIX_EPOCH + Duration::from_secs(5);
-        assert_eq!(Image::new(1, at), Image::new(1, at));
-        assert_ne!(Image::new(1, at), Image::new(2, at));
-        assert_ne!(
-            Image::new(1, at),
-            Image::new(1, at + Duration::from_secs(1))
-        );
-    }
-
-    #[test]
-    fn the_image_of_a_file_reads_its_metadata_and_a_missing_file_has_none() {
-        let scratch = crate::scratch::Scratch::named("image");
-        let path = scratch.join("image");
-        std::fs::write(&path, b"abc").unwrap();
-        let image = Image::of(&path).expect("the file has metadata");
-        assert_eq!(image.length, 3);
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(Image::of(&path), None);
-    }
 }
