@@ -180,13 +180,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-03 (Alpine), after core-work. A
 slice's specification is its finding in [sweep-2026-10-20/work.md](sweep-2026-10-20/work.md), read
-with its skeptic's corrections. WORK-15 has landed. WORK-11 is under way: the tier fold and the never-touch word have landed; the
-`audit_requirement` rename and the module doc are next, then the re-export, which is cross-lane.
+with its skeptic's corrections. WORK-15 has landed. WORK-11 is under way: everything in `governance/` has landed. Left: dropping the `AuditSink`
+re-export, which edits four files in three other lanes.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | landed (ddd76f9c, 86013a28, cacb1062) |
-| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | tier fold (ed389024) and never-touch word landed; the rest todo |
+| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | landed in governance (ed389024, 5dcd3eaf and the rename); the re-export todo, cross-lane |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
@@ -220,3 +220,11 @@ WORK-11, the never-touch word: `PolicySetting::NeverTouch`, `PolicyRule::NeverTo
 names the code already used. The persisted words are unchanged: the key
 `content.security.sacred_domains`, the rule word `sacred_host` and the reason `protected_host`.
 `ReasonCode::ProtectedHost` keeps its name, because it also refuses every non-HTTP(S) address.
+
+WORK-11, the rename: `governance::audit` is `governance::audit_requirement`, so the
+audit-availability rule no longer shares a name with `crate::audit`, the writer. The module doc of
+`governance` names what it holds and no longer promises "minimized audit intent". Left: dropping
+`governance`'s re-export of `crate::audit::{AuditSink, JsonlAuditSink}`. Its users are
+`service/mod.rs` (core-service), `work/mod.rs`'s tests (core-work) and `workbench/tests.rs` and
+`workbench/history.rs` (surface), so it lands as one cross-lane commit when those lanes have no
+open slice there.

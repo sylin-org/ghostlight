@@ -238,7 +238,7 @@ impl PolicySetting {
             Self::AuditAvailability => {
                 if value
                     .as_str()
-                    .and_then(super::audit::AuditMode::parse)
+                    .and_then(super::audit_requirement::AuditMode::parse)
                     .is_none()
                 {
                     return field(source, path, "must be keep_working or require_audit");

@@ -258,7 +258,7 @@ pub struct EffectiveAuthority {
     #[serde(skip)]
     pub id: String,
     /// Effective requirement for saving audit receipts, as the snapshot enforces it.
-    pub audit: super::audit::AuditPolicy,
+    pub audit: super::audit_requirement::AuditPolicy,
     /// Which layers are in force.
     pub situation: Situation,
     /// One sentence stating the situation, naming the organization when there is one.
@@ -1315,7 +1315,7 @@ mod tests {
                 if refused.allowed {
                     assert_eq!(
                         view.audit.mode,
-                        crate::governance::audit::AuditMode::KeepWorking
+                        crate::governance::audit_requirement::AuditMode::KeepWorking
                     );
                     continue;
                 }
@@ -1332,7 +1332,7 @@ mod tests {
                 );
                 assert_eq!(
                     view.audit.mode,
-                    crate::governance::audit::AuditMode::RequireAudit
+                    crate::governance::audit_requirement::AuditMode::RequireAudit
                 );
             }
         }

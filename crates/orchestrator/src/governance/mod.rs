@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Authority snapshots, final-boundary admission, runtime controls, and minimized audit intent.
+//! Policy authority: the layers an organization and a person write, the one publication compiled
+//! from them (the snapshot that enforces and the answer people and agents read), final-boundary
+//! admission against that snapshot, the audit-availability requirement, and the person's runtime
+//! controls.
 
-pub mod audit;
+pub mod audit_requirement;
 pub mod documents;
 pub use crate::audit::{AuditSink, JsonlAuditSink};
 pub mod effective;
@@ -398,7 +401,7 @@ pub struct AuthoritySnapshot {
     /// The organization this publication names, resolved once from its carriers.
     organization: Option<effective::OrganizationIdentity>,
     /// The audit requirement, resolved once from the layers.
-    audit: audit::AuditRequirement,
+    audit: audit_requirement::AuditRequirement,
     own_origin: OwnOrigin,
 }
 
@@ -2164,7 +2167,7 @@ fn assemble(
         layers.push(PolicyLayer::new(tier, policy));
     }
     let id = authority_id(&layers, valid);
-    let audit = audit::AuditRequirement::of(&layers);
+    let audit = audit_requirement::AuditRequirement::of(&layers);
 
     AuthoritySnapshot {
         id,
