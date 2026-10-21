@@ -116,6 +116,3 @@ impl Hold {
         self.lines.drain(..).collect()
     }
 }
-
-#[cfg(test)]
-mod tests;

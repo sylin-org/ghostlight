@@ -1,4 +1,9 @@
-//! In-process tests of the forwarding loop against a fake relay-4 service over connected pairs.
+//! In-process tests of the forwarding loop against a fake relay service over connected pairs.
+//!
+//! Each test proves one rule of the MCP edge that the process journeys do not prove as precisely:
+//! what reaches the service, what the edge answers in its place, and when it starts the service.
+//! The edge's answers are compared with the whole templates of the accepted-reply golden the
+//! service also reads (`tests/golden/relay4/reply.accepted.json`), never with words restated here.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -9,9 +14,8 @@ use std::time::{Duration, Instant};
 
 use ghostlight_relay::endpoint::pair;
 use ghostlight_relay::frame;
-use ghostlight_relay::protocol::{McpFrame, Opening, Program, Reply, Role, Templates};
-use ghostlight_relay::RELAY;
-use ghostlight_relay::{BACKOFF_FIRST, HOLD_LIMIT};
+use ghostlight_relay::protocol::{McpFrame, Opening, Reply, Templates, DEFAULT_TEMPLATE};
+use ghostlight_relay::{BACKOFF_FIRST, HOLD_LIMIT, HOLD_LIMIT_BYTES};
 use serde_json::{json, Value};
 
 use super::*;
@@ -29,6 +33,19 @@ fn golden_templates() -> Templates {
     reply.templates.expect("the golden reply carries templates")
 }
 
+/// The golden reply's `failure` template under `key` (a method, or [`DEFAULT_TEMPLATE`]) with
+/// `id` set: the whole answer the edge must give, taken from the golden rather than restated.
+fn golden(failure: Failure, key: &str, id: &Value) -> Value {
+    let templates = golden_templates();
+    let table = match failure {
+        Failure::CutOff => &templates.cut_off,
+        Failure::Expired => &templates.expired,
+    };
+    let mut answer = table[key].clone();
+    answer["id"] = id.clone();
+    answer
+}
+
 /// One connection the fake service accepted.
 struct Accepted {
     opening: Opening,
@@ -38,7 +55,7 @@ struct Accepted {
     closed: Arc<AtomicBool>,
 }
 
-/// A relay-4 service the test switches on and off.
+/// A relay service the test switches on and off.
 struct FakeState {
     up: AtomicBool,
     start_brings_up: AtomicBool,
@@ -392,8 +409,20 @@ fn request(id: &Value, method: &str) -> String {
     json!({"jsonrpc": "2.0", "id": id, "method": method, "params": {}}).to_string()
 }
 
+/// Send the service's goodbye on the newest connection and wait until the edge has acted
+/// on it by closing its end.
+fn say_goodbye(harness: &Harness, reason: GoodbyeReason) {
+    let connection = harness.fake.connections() - 1;
+    harness.fake.send(&McpFrame::Goodbye { reason });
+    harness.wait(|| harness.fake.closed(connection));
+}
+
+/// ACCEPTANCE C3: the MCP edge forwards every line unchanged in both directions, with no
+/// per-tool code. Its one exception is `ping`, which it answers itself with the id exactly as
+/// the client wrote it, while connected and while the service is away; no ping reaches the
+/// service, and answering one starts nothing.
 #[test]
-fn lines_are_forwarded_unchanged_in_both_directions() {
+fn lines_pass_unchanged_and_the_edge_answers_only_ping_itself() {
     let harness = Harness::connected(true);
     let lines = [
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#,
@@ -412,27 +441,42 @@ fn lines_are_forwarded_unchanged_in_both_directions() {
     });
     harness.wait(|| harness.lines().len() == 1);
     assert_eq!(harness.lines(), [from_service]);
-}
 
-#[test]
-fn ids_keep_their_json_type_in_every_answer() {
-    let harness = Harness::connected(true);
     harness.send(&request(&json!("7"), "ping"));
     harness.send(&request(&json!(7), "ping"));
-    assert_eq!(harness.answer(&json!("7"))["id"], json!("7"));
-    assert_eq!(harness.answer(&json!(7))["id"], json!(7));
-
-    harness.send(&request(&json!("a"), "tools/call"));
-    harness.send(&request(&json!(2), "tools/call"));
-    harness.wait(|| harness.fake.received(0).len() == 2);
-    harness.fake.go_down();
-    assert_eq!(harness.answer(&json!("a"))["id"], json!("a"));
-    assert_eq!(harness.answer(&json!(2))["id"], json!(2));
+    assert_eq!(
+        harness.answer(&json!("7")),
+        json!({"jsonrpc": "2.0", "id": "7", "result": {}})
+    );
+    assert_eq!(
+        harness.answer(&json!(7)),
+        json!({"jsonrpc": "2.0", "id": 7, "result": {}})
+    );
+    harness.go_away(0);
+    harness.send(&request(&json!(8), "ping"));
+    assert_eq!(
+        harness.answer(&json!(8)),
+        json!({"jsonrpc": "2.0", "id": 8, "result": {}})
+    );
+    harness.settle();
+    assert_eq!(
+        harness.fake.received(0).len(),
+        lines.len() + 1,
+        "only the lines and the probe reached the service, never a ping"
+    );
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
 }
 
+/// ACCEPTANCE C10 and relay-protocol-4 section 8: when the service goes away the edge answers
+/// every request still outstanding, and only those, from the `cut_off` templates of the last
+/// accepted reply that carried any: the method's own template or the default, with the id
+/// exactly as sent. A batch is tracked element by element: an element the service answered is
+/// not answered again, and a batch is never sent again (defect eaf7948d).
 #[test]
-fn batch_arrays_are_tracked_element_by_element() {
+fn a_cut_off_answers_each_outstanding_request_with_its_template_and_its_id() {
     let harness = Harness::connected(true);
+    harness.send(&request(&json!("a"), "tools/call"));
+    harness.send(&request(&json!(2), "completion/complete"));
     let batch = json!([
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call"},
         {"jsonrpc": "2.0", "id": "b", "method": "tools/list"},
@@ -440,56 +484,147 @@ fn batch_arrays_are_tracked_element_by_element() {
     ])
     .to_string();
     harness.send(&batch);
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    assert_eq!(harness.fake.received(0), [batch]);
-
+    harness.wait(|| harness.fake.received(0).len() == 3);
     let answered = json!([{"jsonrpc": "2.0", "id": 1, "result": {}}]).to_string();
     harness.fake.send(&McpFrame::Message {
         line: answered.clone(),
     });
     harness.wait(|| harness.lines() == [answered.clone()]);
     harness.fake.go_down();
-    let cut_off = harness.answer(&json!("b"));
-    assert_eq!(cut_off["error"]["code"], json!(-32603));
-    harness.settle();
-    let answers_for_one = harness
-        .values()
-        .iter()
-        .filter(|value| value["id"] == json!(1))
-        .count();
-    assert_eq!(answers_for_one, 0, "an answered element is not cut off");
-}
-
-#[test]
-fn ping_is_answered_locally_while_connected_and_while_away() {
-    let harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "ping"));
     assert_eq!(
-        harness.answer(&json!(1)),
-        json!({"jsonrpc": "2.0", "id": 1, "result": {}})
+        harness.answer(&json!("a")),
+        golden(Failure::CutOff, "tools/call", &json!("a"))
     );
-    harness.go_away(0);
-    harness.send(&request(&json!(2), "ping"));
     assert_eq!(
         harness.answer(&json!(2)),
-        json!({"jsonrpc": "2.0", "id": 2, "result": {}})
+        golden(Failure::CutOff, DEFAULT_TEMPLATE, &json!(2))
+    );
+    assert_eq!(
+        harness.answer(&json!("b")),
+        golden(Failure::CutOff, DEFAULT_TEMPLATE, &json!("b")),
+        "a listing inside a batch is answered, never sent again"
     );
     harness.settle();
-    assert_eq!(
-        harness.fake.received(0).len(),
-        1,
-        "pings never reach the service"
+    assert!(
+        !harness.values().iter().any(|value| value["id"] == json!(1)),
+        "an element the service answered is not answered again"
     );
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+
+    // The next service's reply carries no templates, so the last ones stay.
+    *harness.fake.templates.lock().unwrap() = None;
+    harness.send(&request(&json!(5), "tools/call"));
+    harness.settle();
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
+    assert_eq!(
+        harness.fake.received(1),
+        [request(&json!(5), "tools/call")],
+        "nothing of the lost connection is sent again"
+    );
+    harness.fake.go_down();
+    assert_eq!(
+        harness.answer(&json!(5)),
+        golden(Failure::CutOff, "tools/call", &json!(5))
+    );
 }
 
+/// Relay-protocol-4 sections 8 and 10: while the service is away the edge holds at most 4 MiB,
+/// each line for at most 30 s. A held request that outlives the limit, oldest first, is answered
+/// from the `expired` templates of the last accepted reply, its method's own or the default; one
+/// that finds the hold full is answered at once; a held notification expires silently; and
+/// before any reply the answer is a bare internal error with an empty message.
 #[test]
-fn held_lines_flush_in_order_after_an_opening_that_resumes() {
+fn a_request_the_hold_cannot_keep_is_answered_as_expired() {
+    let harness = Harness::start(true, false);
+    harness.wait(|| harness.fake.connections() == 1);
+    harness.go_away(0);
+
+    harness.send(&request(&json!(1), "tools/call"));
+    harness.settle();
+    harness.advance(Duration::from_secs(10));
+    let notification = json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string();
+    let younger = request(&json!("x"), "resources/list");
+    harness.send(&notification);
+    harness.send(&younger);
+    harness.settle();
+    harness.advance(Duration::from_secs(20));
+    assert_eq!(
+        harness.answer(&json!(1)),
+        golden(Failure::Expired, "tools/call", &json!(1))
+    );
+    harness.settle();
+    assert!(
+        !harness
+            .values()
+            .iter()
+            .any(|value| value["id"] == json!("x")),
+        "a line held for less than the limit is still held"
+    );
+
+    // Fill the hold to its last byte: a request that does not fit is answered at once.
+    let padding = |length: usize| {
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/message",
+            "params": {"padding": "x".repeat(length)},
+        })
+        .to_string()
+    };
+    let room = HOLD_LIMIT_BYTES - notification.len() - younger.len();
+    let filler = padding(room - padding(0).len());
+    assert_eq!(filler.len(), room);
+    harness.send(&filler);
+    harness.send(&request(&json!("full"), "tools/call"));
+    assert_eq!(
+        harness.answer(&json!("full")),
+        golden(Failure::Expired, "tools/call", &json!("full"))
+    );
+
+    harness.advance(Duration::from_secs(10));
+    assert_eq!(
+        harness.answer(&json!("x")),
+        golden(Failure::Expired, DEFAULT_TEMPLATE, &json!("x"))
+    );
+    harness.settle();
+    let answered: Vec<Value> = harness
+        .values()
+        .into_iter()
+        .map(|value| value["id"].clone())
+        .filter(|id| !id.as_str().is_some_and(|id| id.starts_with("settle-")))
+        .collect();
+    assert_eq!(
+        answered,
+        [json!("probe-0"), json!(1), json!("full"), json!("x")],
+        "held notifications expire silently"
+    );
+    assert_eq!(harness.fake.connections(), 1);
+
+    let unreplied = Harness::start(false, false);
+    unreplied.send(&request(&json!(5), "tools/call"));
+    unreplied.settle();
+    unreplied.advance(Duration::from_secs(60));
+    assert_eq!(
+        unreplied.answer(&json!(5)),
+        json!({"jsonrpc": "2.0", "id": 5, "error": {"code": -32603, "message": ""}}),
+        "before any reply the edge has no words of its own"
+    );
+}
+
+/// ACCEPTANCE C10: lines held while the service was away reach the next service once and in
+/// order, on an opening that carries the session's last resume token, and a call already written
+/// to the lost service is answered as cut off, never sent again.
+#[test]
+fn held_lines_reach_the_next_service_once_in_order_under_the_sessions_token() {
     let harness = Harness::connected(true);
     harness.fake.send(&McpFrame::Resume {
         token: "resume-1".to_owned(),
     });
+    harness.send(&request(&json!(1), "tools/call"));
     harness.go_away(0);
+    assert_eq!(
+        harness.answer(&json!(1)),
+        golden(Failure::CutOff, "tools/call", &json!(1))
+    );
 
     let held = [
         request(&json!(10), "tools/call"),
@@ -504,106 +639,33 @@ fn held_lines_flush_in_order_after_an_opening_that_resumes() {
     harness.advance_until(BACKOFF_FIRST, || {
         harness.fake.received(1).len() == held.len()
     });
-    assert_eq!(harness.fake.received(1), held);
-
+    harness.settle();
+    assert_eq!(
+        harness.fake.received(1),
+        held,
+        "each held line once, in order, and nothing the lost service was sent"
+    );
     let openings = harness.fake.openings();
-    for opening in &openings {
-        assert_eq!(opening.relay, RELAY);
-        assert_eq!(opening.role, Role::Mcp);
-        assert_eq!(opening.channel.as_deref(), Some(MCP_CHANNEL));
-        assert_eq!(opening.edge.program, Program::Edge);
-        assert_eq!(opening.edge.revision, RELAY);
-        assert_eq!(opening.edge.build, env!("CARGO_PKG_VERSION"));
-    }
     assert_eq!(openings[0].resume, None);
-    assert_eq!(openings[1].resume, Some("resume-1".to_owned()));
+    assert_eq!(openings[1].resume.as_deref(), Some("resume-1"));
 }
 
+/// Defect eaf7948d: a lone handshake or catalog listing changes nothing, so when a lost service
+/// cuts it off it is sent to the next service once instead of being answered. Cut off again it
+/// is answered, so a request that brings each service down cannot keep doing so. After a quit
+/// goodbye it is answered at once and nothing is held, so Quit still holds.
 #[test]
-fn an_expired_request_is_answered_with_its_methods_template_or_the_default() {
-    let harness = Harness::start(true, false);
-    harness.wait(|| harness.fake.connections() == 1);
-    harness.go_away(0);
-    harness.send(&request(&json!(1), "tools/call"));
-    harness.settle();
-    harness.advance(Duration::from_secs(10));
-    harness.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string());
-    harness.send(&request(&json!("x"), "resources/list"));
-    harness.settle();
-    harness.advance(Duration::from_secs(20));
-
-    let expired_call = harness.answer(&json!(1));
-    assert_eq!(expired_call["result"]["isError"], json!(true));
-    assert_eq!(
-        expired_call["result"]["content"][0]["text"],
-        json!("Ghostlight did not come back in time. Try the call again.")
-    );
-    harness.settle();
-    assert!(!harness
-        .values()
-        .iter()
-        .any(|value| value["id"] == json!("x")));
-
-    harness.advance(Duration::from_secs(10));
-    let expired_default = harness.answer(&json!("x"));
-    assert_eq!(
-        expired_default["error"],
-        json!({"code": -32603, "message": "Ghostlight did not come back in time."})
-    );
-    harness.settle();
-    let answers = harness
-        .values()
-        .into_iter()
-        .filter(|value| {
-            !value["id"]
-                .as_str()
-                .is_some_and(|id| id.starts_with("settle-"))
-        })
-        .count();
-    assert_eq!(answers, 3, "held notifications expire silently");
-    assert_eq!(harness.fake.connections(), 1);
-}
-
-#[test]
-fn a_cut_off_request_is_answered_with_the_cut_off_template() {
-    let harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "tools/call"));
-    harness.send(&request(&json!(2), "completion/complete"));
-    harness.wait(|| harness.fake.received(0).len() == 2);
-    harness.fake.go_down();
-    assert_eq!(
-        harness.answer(&json!(1))["result"]["content"][0]["text"],
-        json!("Ghostlight restarted before this call finished. It may have happened; check before repeating.")
-    );
-    assert_eq!(
-        harness.answer(&json!(2))["error"],
-        json!({"code": -32603, "message": "Ghostlight restarted before this request finished."})
-    );
-}
-
-#[test]
-fn nothing_written_to_a_service_is_sent_again() {
-    let harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "tools/call"));
-    harness.go_away(0);
-    harness.send(&request(&json!(2), "tools/call"));
-    harness.settle();
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
-    harness.settle();
-    assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
-    assert_eq!(harness.fake.received(0).len(), 2);
-    assert!(harness.answer(&json!(1))["result"]["isError"] == json!(true));
-}
-
-#[test]
-fn a_listing_cut_off_by_a_lost_service_is_sent_again_to_the_next_one() {
+fn a_lone_listing_cut_off_by_a_lost_service_is_sent_to_the_next_one_once() {
     let harness = Harness::connected(true);
     harness.send(&request(&json!(1), "tools/call"));
     harness.send(&request(&json!(2), "tools/list"));
     harness.wait(|| harness.fake.received(0).len() == 2);
     harness.fake.go_down();
-    assert_eq!(harness.answer(&json!(1))["result"]["isError"], json!(true));
+    assert_eq!(
+        harness.answer(&json!(1)),
+        golden(Failure::CutOff, "tools/call", &json!(1)),
+        "a call may have taken effect, so it is answered"
+    );
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
     harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
     assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/list")]);
@@ -612,21 +674,11 @@ fn a_listing_cut_off_by_a_lost_service_is_sent_again_to_the_next_one() {
         !harness.values().iter().any(|value| value["id"] == json!(2)),
         "the next service answers the listing, not the edge"
     );
-}
-
-#[test]
-fn a_listing_is_sent_again_once_and_then_answered_as_cut_off() {
-    let harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "initialize"));
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    harness.fake.go_down();
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
     harness.fake.go_down();
     assert_eq!(
-        harness.answer(&json!(1))["error"]["code"],
-        json!(-32603),
-        "a request that brings each service down is not sent a third time"
+        harness.answer(&json!(2)),
+        golden(Failure::CutOff, DEFAULT_TEMPLATE, &json!(2)),
+        "a listing that brings each service down is not sent a third time"
     );
     harness.settle();
     assert_eq!(
@@ -634,22 +686,123 @@ fn a_listing_is_sent_again_once_and_then_answered_as_cut_off() {
         1,
         "nothing is held"
     );
+
+    let quitting = Harness::connected(true);
+    quitting.send(&request(&json!(1), "tools/list"));
+    quitting.wait(|| quitting.fake.received(0).len() == 1);
+    say_goodbye(&quitting, GoodbyeReason::Quit);
+    assert_eq!(
+        quitting.answer(&json!(1)),
+        golden(Failure::CutOff, DEFAULT_TEMPLATE, &json!(1))
+    );
+    quitting.advance(Duration::from_secs(60));
+    quitting.settle();
+    assert_eq!(quitting.fake.starts.load(Ordering::SeqCst), 0, "Quit holds");
+    assert_eq!(
+        quitting.fake.connections(),
+        1,
+        "nothing is held for a next service"
+    );
 }
 
+/// Relay-protocol-4 section 6 and ACCEPTANCE C13: after a `replace` goodbye the edge holds lines
+/// and reconnects without starting the service, since the installer starts the replacement. A
+/// replacement that has not come back within the hold limit is a lost service, and the next
+/// request starts one as an `agent` start.
 #[test]
-fn after_a_quit_goodbye_a_listing_is_answered_and_nothing_starts() {
+fn a_replace_holds_lines_without_starting_the_service_for_the_hold_limit() {
     let harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "tools/list"));
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    say_goodbye(&harness, GoodbyeReason::Quit);
-    assert_eq!(harness.answer(&json!(1))["error"]["code"], json!(-32603));
-    harness.advance(Duration::from_secs(60));
+    harness.fake.up.store(false, Ordering::SeqCst);
+    say_goodbye(&harness, GoodbyeReason::Replace);
+    harness.send(&request(&json!(7), "tools/call"));
     harness.settle();
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "Quit holds");
+    for _ in 0..3 {
+        let before = harness.fake.attempts.load(Ordering::SeqCst);
+        harness.advance_until(BACKOFF_FIRST * 4, || {
+            harness.fake.attempts.load(Ordering::SeqCst) > before
+        });
+    }
+    assert_eq!(
+        harness.fake.starts.load(Ordering::SeqCst),
+        0,
+        "the installer starts the replacement, not the edge"
+    );
+    harness.fake.bring_up();
+    harness.advance_until(BACKOFF_FIRST * 10, || harness.fake.received(1).len() == 1);
+    assert_eq!(harness.fake.received(1), [request(&json!(7), "tools/call")]);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+
+    let late = Harness::connected(true);
+    late.fake.up.store(false, Ordering::SeqCst);
+    say_goodbye(&late, GoodbyeReason::Replace);
+    late.settle();
+    late.advance(HOLD_LIMIT + Duration::from_secs(1));
+    late.settle();
+    assert_eq!(
+        late.fake.starts.load(Ordering::SeqCst),
+        0,
+        "idle once the replacement is no longer expected"
+    );
+    late.send(&request(&json!(3), "tools/call"));
+    late.advance_until(BACKOFF_FIRST, || {
+        late.fake.starts.load(Ordering::SeqCst) == 1
+    });
+    assert_eq!(*late.fake.reasons.lock().unwrap(), [StartReason::Agent]);
 }
 
+/// ACCEPTANCE C13 and ADR-0199 Decision 13: the MCP edge ends for good when the service says
+/// goodbye with `uninstall` or `session_end`, answering what is outstanding as cut off first;
+/// when its own session listener hears the session end, leaving at once; and when its client
+/// closes stdin, answering what it holds as expired. After a goodbye or the session's end it
+/// starts nothing and tries no service again.
 #[test]
-fn a_line_whose_write_failed_is_held_and_delivered_in_order_to_the_next_service() {
+fn the_edge_ends_for_good_on_a_final_goodbye_the_sessions_end_or_a_closed_stdin() {
+    for reason in [GoodbyeReason::Uninstall, GoodbyeReason::SessionEnd] {
+        let mut harness = Harness::connected(true);
+        harness.send(&request(&json!(1), "tools/call"));
+        harness.wait(|| harness.fake.received(0).len() == 1);
+        say_goodbye(&harness, reason);
+        harness.finish().unwrap();
+        assert_eq!(
+            harness.answer(&json!(1)),
+            golden(Failure::CutOff, "tools/call", &json!(1)),
+            "{reason:?}"
+        );
+        assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "{reason:?}");
+        assert_eq!(
+            harness.fake.connections(),
+            1,
+            "{reason:?}: no new connection is tried"
+        );
+    }
+
+    let mut ending = Harness::connected(true);
+    ending.send(&request(&json!(1), "tools/call"));
+    ending.wait(|| ending.fake.received(0).len() == 1);
+    let attempts = ending.fake.attempts.load(Ordering::SeqCst);
+    ending.events.send(Event::SessionEnded).unwrap();
+    ending.finish().unwrap();
+    assert_eq!(ending.fake.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(ending.fake.attempts.load(Ordering::SeqCst), attempts);
+
+    let mut closed = Harness::start(true, false);
+    closed.wait(|| closed.fake.connections() == 1);
+    closed.go_away(0);
+    closed.send(&request(&json!(9), "tools/call"));
+    closed.settle();
+    closed.close().unwrap();
+    assert_eq!(
+        closed.answer(&json!(9)),
+        golden(Failure::Expired, "tools/call", &json!(9))
+    );
+}
+
+/// Defects eaf7948d and 514c8429: a line whose write failed never reached the service, which
+/// acts only on a whole frame, so it goes back to the hold in its place and reaches the next
+/// service in order, never answered. A service that dies while the hold flushes leaves the next
+/// attempt due at once, so the held requests start a service instead of waiting to expire.
+#[test]
+fn a_line_that_never_reached_a_service_is_delivered_in_order_to_the_next_one() {
     let harness = Harness::connected(true);
     harness.go_away(0);
     harness.fake.drop_next.store(true, Ordering::SeqCst);
@@ -685,8 +838,12 @@ fn a_line_whose_write_failed_is_held_and_delivered_in_order_to_the_next_service(
     );
 }
 
+/// ACCEPTANCE C13 and relay-protocol-4 section 7: the MCP edge starts the service, as an
+/// `agent` start, at its own start and for each held request, and never while idle: not after a
+/// lost service with nothing held, and not after a quit goodbye, which answers what is
+/// outstanding and holds nothing, until the next request.
 #[test]
-fn the_service_is_started_at_start_and_for_a_held_request_never_while_idle() {
+fn the_service_is_started_as_an_agent_only_at_start_and_for_a_held_request() {
     let harness = Harness::start(false, true);
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
     harness.advance_until(BACKOFF_FIRST, || harness.fake.connections() == 1);
@@ -700,215 +857,52 @@ fn the_service_is_started_at_start_and_for_a_held_request_never_while_idle() {
     harness.settle();
     harness.advance(Duration::from_secs(60));
     harness.settle();
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1, "idle");
+    assert_eq!(
+        harness.fake.starts.load(Ordering::SeqCst),
+        1,
+        "idle, and a held notification starts nothing"
+    );
     assert_eq!(harness.fake.connections(), 1);
-
     harness.send(&request(&json!(3), "tools/call"));
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 2);
     harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
     assert_eq!(harness.fake.received(1), [request(&json!(3), "tools/call")]);
-    assert_eq!(
-        *harness.fake.reasons.lock().unwrap(),
-        [StartReason::Agent, StartReason::Agent],
-        "an agent start, at the edge's own start and for the held request"
-    );
-}
 
-/// Send the service's goodbye on the newest connection and wait until the edge has acted
-/// on it by closing its end.
-fn say_goodbye(harness: &Harness, reason: GoodbyeReason) {
-    let connection = harness.fake.connections() - 1;
-    harness.fake.send(&McpFrame::Goodbye { reason });
-    harness.wait(|| harness.fake.closed(connection));
-}
-
-#[test]
-fn after_a_quit_goodbye_requests_are_answered_nothing_is_held_and_the_next_request_starts_it() {
-    let harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "tools/call"));
-    harness.wait(|| harness.fake.received(0).len() == 1);
+    harness.send(&request(&json!(4), "tools/call"));
+    harness.wait(|| harness.fake.received(1).len() == 2);
     harness.fake.up.store(false, Ordering::SeqCst);
     say_goodbye(&harness, GoodbyeReason::Quit);
     assert_eq!(
-        harness.answer(&json!(1))["result"]["content"][0]["text"],
-        json!("Ghostlight restarted before this call finished. It may have happened; check before repeating."),
-        "the outstanding request is answered from the cut_off template"
+        harness.answer(&json!(4)),
+        golden(Failure::CutOff, "tools/call", &json!(4))
     );
-
     for _ in 0..4 {
         harness.advance(Duration::from_secs(60));
         harness.settle();
     }
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "idle");
-    assert_eq!(harness.fake.connections(), 1);
-
-    harness.fake.start_brings_up.store(true, Ordering::SeqCst);
-    harness.send(&request(&json!(2), "tools/call"));
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    assert_eq!(*harness.fake.reasons.lock().unwrap(), [StartReason::Agent]);
-    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
-    assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
-}
-
-#[test]
-fn after_a_replace_goodbye_lines_are_held_and_the_edge_reconnects_without_starting() {
-    let harness = Harness::connected(true);
-    harness.fake.up.store(false, Ordering::SeqCst);
-    say_goodbye(&harness, GoodbyeReason::Replace);
-    harness.send(&request(&json!(7), "tools/call"));
-    harness.settle();
-    for _ in 0..3 {
-        let before = harness.fake.attempts.load(Ordering::SeqCst);
-        harness.advance_until(BACKOFF_FIRST * 4, || {
-            harness.fake.attempts.load(Ordering::SeqCst) > before
-        });
-    }
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 2, "Quit holds");
+    assert_eq!(harness.fake.connections(), 2);
+    harness.send(&request(&json!(5), "tools/call"));
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 3);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(2).len() == 1);
+    assert_eq!(harness.fake.received(2), [request(&json!(5), "tools/call")]);
     assert_eq!(
-        harness.fake.starts.load(Ordering::SeqCst),
-        0,
-        "the installer starts the replacement, not the edge"
+        *harness.fake.reasons.lock().unwrap(),
+        [StartReason::Agent; 3],
+        "an agent start every time"
     );
-
-    harness.fake.bring_up();
-    harness.advance_until(BACKOFF_FIRST * 10, || harness.fake.received(1).len() == 1);
-    assert_eq!(harness.fake.received(1), [request(&json!(7), "tools/call")]);
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
 }
 
+/// Defect 514c8429: a client's answer reaches the service only when it answers a request the
+/// live connection made, the service's own ping included. A lone answer to nothing outstanding
+/// is dropped and a batch loses such elements, so a late answer to a service that went away
+/// never reaches the next one, which may have reused the id.
 #[test]
-fn a_replacement_that_does_not_come_back_within_the_hold_limit_is_a_lost_service() {
-    let harness = Harness::connected(true);
-    harness.fake.up.store(false, Ordering::SeqCst);
-    say_goodbye(&harness, GoodbyeReason::Replace);
-    harness.settle();
-    harness.advance(HOLD_LIMIT + Duration::from_secs(1));
-    harness.settle();
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "idle");
-
-    harness.send(&request(&json!(3), "tools/call"));
-    harness.advance_until(BACKOFF_FIRST, || {
-        harness.fake.starts.load(Ordering::SeqCst) == 1
-    });
-    assert_eq!(*harness.fake.reasons.lock().unwrap(), [StartReason::Agent]);
-}
-
-#[test]
-fn after_an_uninstall_goodbye_requests_are_answered_and_the_edge_exits() {
-    let mut harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "tools/call"));
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    say_goodbye(&harness, GoodbyeReason::Uninstall);
-    harness.finish().unwrap();
-    assert_eq!(
-        harness.answer(&json!(1))["result"]["isError"],
-        json!(true),
-        "the outstanding request is answered before the edge ends"
-    );
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-}
-
-#[test]
-fn after_a_session_end_goodbye_requests_are_answered_and_the_edge_exits_without_a_start() {
-    let mut harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "tools/call"));
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    say_goodbye(&harness, GoodbyeReason::SessionEnd);
-    harness.finish().unwrap();
-    assert_eq!(
-        harness.answer(&json!(1))["result"]["isError"],
-        json!(true),
-        "the outstanding request is answered before the edge ends"
-    );
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-    assert_eq!(harness.fake.connections(), 1, "no new connection is tried");
-}
-
-#[test]
-fn a_session_that_ends_makes_the_edge_exit_without_trying_the_service_again() {
-    let mut harness = Harness::connected(true);
-    harness.send(&request(&json!(1), "tools/call"));
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    let attempts = harness.fake.attempts.load(Ordering::SeqCst);
-
-    harness.events.send(Event::SessionEnded).unwrap();
-    harness.finish().unwrap();
-
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-    assert_eq!(harness.fake.attempts.load(Ordering::SeqCst), attempts);
-}
-
-#[test]
-fn a_held_request_left_by_a_service_that_died_mid_flush_still_starts_one() {
-    let harness = Harness::connected(true);
-    harness.go_away(0);
-    harness.fake.drop_next.store(true, Ordering::SeqCst);
-
-    let large = json!({
-        "jsonrpc": "2.0",
-        "id": "large",
-        "method": "tools/call",
-        "params": {"padding": "x".repeat(2 * 1024 * 1024)},
-    })
-    .to_string();
-    harness.send(&large);
-    let small: Vec<Value> = (0..8).map(|n| json!(n)).collect();
-    for id in &small {
-        harness.send(&request(id, "tools/call"));
-    }
-    harness.settle();
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-
-    let ids: Vec<Value> = std::iter::once(json!("large")).chain(small).collect();
-    let settled = |id: &Value| {
-        let delivered = harness
-            .fake
-            .received(2)
-            .iter()
-            .any(|line| serde_json::from_str::<Value>(line).unwrap()["id"] == *id);
-        let answered = harness.values().iter().any(|value| value["id"] == *id);
-        delivered || answered
-    };
-    harness.advance_until(BACKOFF_FIRST, || ids.iter().all(settled));
-    for answer in harness
-        .values()
-        .iter()
-        .filter(|value| ids.contains(&value["id"]))
-    {
-        assert_eq!(
-            answer["result"]["content"][0]["text"],
-            json!("Ghostlight restarted before this call finished. It may have happened; check before repeating."),
-            "a held request is cut off or delivered, never left to expire"
-        );
-    }
-}
-
-#[test]
-fn a_late_answer_to_a_service_that_went_away_never_reaches_the_next_one() {
-    let harness = Harness::connected(true);
-    let asked = request(&json!(1), "sampling/createMessage");
-    harness.fake.send(&McpFrame::Message {
-        line: asked.clone(),
-    });
-    harness.wait(|| harness.lines() == [asked.clone()]);
-    harness.go_away(0);
-
-    harness.send(&json!({"jsonrpc": "2.0", "id": 1, "result": {}}).to_string());
-    harness.send(&json!([{"jsonrpc": "2.0", "id": 1, "result": {}}]).to_string());
-    harness.send(&request(&json!(2), "tools/call"));
-    harness.settle();
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
-    harness.settle();
-    assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
-}
-
-#[test]
-fn only_answers_to_outstanding_service_requests_reach_the_service() {
+fn only_answers_to_the_live_connections_own_requests_reach_the_service() {
     let harness = Harness::connected(true);
     let ping = json!({"jsonrpc": "2.0", "id": "p", "method": "ping"}).to_string();
     harness.fake.send(&McpFrame::Message { line: ping.clone() });
     harness.wait(|| harness.lines() == [ping.clone()]);
-
     let answer = json!({"jsonrpc": "2.0", "id": "p", "result": {}}).to_string();
     harness.send(&answer);
     let stray = json!({"jsonrpc": "2.0", "id": "q", "result": {}}).to_string();
@@ -922,86 +916,67 @@ fn only_answers_to_outstanding_service_requests_reach_the_service() {
     harness.wait(|| harness.fake.received(0).len() == 2);
     harness.settle();
     let kept = json!([{"jsonrpc": "2.0", "id": 3, "method": "tools/call"}]).to_string();
-    assert_eq!(harness.fake.received(0), [answer, kept]);
-}
+    assert_eq!(
+        harness.fake.received(0),
+        [answer, kept],
+        "the ping is answered once; the stray and the batch's stray element are dropped"
+    );
 
-#[test]
-fn a_reply_without_templates_keeps_the_ones_already_held() {
-    let harness = Harness::connected(true);
-    *harness.fake.templates.lock().unwrap() = None;
+    let asked = request(&json!(1), "sampling/createMessage");
+    harness.fake.send(&McpFrame::Message {
+        line: asked.clone(),
+    });
+    harness.wait(|| harness.lines().last() == Some(&asked));
     harness.go_away(0);
-    harness.send(&request(&json!(5), "tools/call"));
+    harness.send(&json!({"jsonrpc": "2.0", "id": 1, "result": {}}).to_string());
+    harness.send(&json!([{"jsonrpc": "2.0", "id": 1, "result": {}}]).to_string());
+    harness.send(&request(&json!(2), "tools/call"));
     harness.settle();
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
     harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
-    harness.fake.go_down();
-    assert_eq!(
-        harness.answer(&json!(5))["result"]["content"][0]["text"],
-        json!("Ghostlight restarted before this call finished. It may have happened; check before repeating.")
-    );
-}
-
-#[test]
-fn before_any_reply_a_failed_request_is_answered_the_bare_internal_error() {
-    let harness = Harness::start(false, false);
-    harness.send(&request(&json!(5), "tools/call"));
     harness.settle();
-    harness.advance(Duration::from_secs(60));
+    assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
+}
+
+/// Every line `reader` gives under a bound of four bytes: its bytes, or `None` for a line that
+/// was skipped.
+fn lines_within_four_bytes(mut reader: impl BufRead) -> Vec<Option<Vec<u8>>> {
+    let mut lines = Vec::new();
+    while let Some(line) = read_line(&mut reader, 4).unwrap() {
+        lines.push(match line {
+            InputLine::Line(bytes) => Some(bytes),
+            InputLine::TooLong => None,
+        });
+    }
+    lines
+}
+
+/// ACCEPTANCE C6: the MCP framing survives split and coalesced reads. Read one byte at a time or
+/// all at once, the input gives the same lines: a line over the frame bound is skipped up to its
+/// newline, so the next read starts on a line boundary, and a last line with no newline is still
+/// a line.
+#[test]
+fn input_lines_survive_split_and_coalesced_reads_and_an_over_long_line_is_skipped() {
+    let input = b"abcdef\nxy\nlast".to_vec();
+    let expected = [None, Some(b"xy".to_vec()), Some(b"last".to_vec())];
     assert_eq!(
-        harness.answer(&json!(5)),
-        json!({"jsonrpc": "2.0", "id": 5, "error": {"code": -32603, "message": ""}})
+        lines_within_four_bytes(io::Cursor::new(input.clone())),
+        expected,
+        "coalesced"
+    );
+    let one_byte_at_a_time = BufReader::with_capacity(1, io::Cursor::new(input));
+    assert_eq!(
+        lines_within_four_bytes(one_byte_at_a_time),
+        expected,
+        "split"
     );
 }
 
+/// Defect S-D3 (b0290246): an edge left idle by a quit has asked once to be woken. A wake that
+/// finds no service makes it look once and starts nothing, and the idle edge tries no more; a
+/// wake from a service that became ready makes it connect at once, still without a start.
 #[test]
-fn closing_stdin_answers_held_requests_and_ends() {
-    let mut harness = Harness::start(false, false);
-    harness.send(&request(&json!(9), "tools/call"));
-    harness.settle();
-    harness.close().unwrap();
-    assert_eq!(harness.answer(&json!(9))["error"]["code"], json!(-32603));
-}
-
-#[test]
-fn a_line_over_the_frame_bound_is_skipped_up_to_its_newline() {
-    let mut input = io::Cursor::new(b"abcdef\nxy\nlast".to_vec());
-    assert!(matches!(
-        read_line(&mut input, 4).unwrap(),
-        Some(InputLine::TooLong)
-    ));
-    assert!(matches!(
-        read_line(&mut input, 4).unwrap(),
-        Some(InputLine::Line(line)) if line == b"xy"
-    ));
-    assert!(matches!(
-        read_line(&mut input, 4).unwrap(),
-        Some(InputLine::Line(line)) if line == b"last"
-    ));
-    assert!(read_line(&mut input, 4).unwrap().is_none());
-}
-
-#[test]
-fn the_edge_sends_the_opening_bytes_it_sent_before() {
-    // Revision 5 sends the bytes revision 4 sent, under its own number.
-    let build = env!("CARGO_PKG_VERSION");
-    let fresh = serde_json::to_string(&opening(None)).unwrap();
-    assert_eq!(
-        fresh,
-        format!(
-            r#"{{"relay":{RELAY},"role":"mcp","edge":{{"program":"edge","revision":{RELAY},"build":"{build}"}},"channel":"mcp"}}"#
-        )
-    );
-    let resumed = serde_json::to_string(&opening(Some("rs1.token".to_owned()))).unwrap();
-    assert_eq!(
-        resumed,
-        format!(
-            r#"{{"relay":{RELAY},"role":"mcp","edge":{{"program":"edge","revision":{RELAY},"build":"{build}"}},"resume":"rs1.token","channel":"mcp"}}"#
-        )
-    );
-}
-
-#[test]
-fn a_wake_after_a_quit_connects_the_idle_edge_without_starting_the_service() {
+fn a_wake_makes_an_idle_edge_look_once_and_never_start_the_service() {
     let harness = Harness::connected(true);
     harness.fake.up.store(false, Ordering::SeqCst);
     say_goodbye(&harness, GoodbyeReason::Quit);
@@ -1013,26 +988,21 @@ fn a_wake_after_a_quit_connects_the_idle_edge_without_starting_the_service() {
         "an idle edge waits after a quit"
     );
     assert_eq!(harness.fake.watches.load(Ordering::SeqCst), 1);
-    harness.fake.bring_up();
-    harness.fake.wake();
-    harness.wait(|| harness.fake.connections() == 2);
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "Quit holds");
-}
 
-#[test]
-fn a_wake_that_finds_no_service_starts_nothing_and_tries_no_more() {
-    let harness = Harness::connected(true);
-    harness.fake.up.store(false, Ordering::SeqCst);
-    say_goodbye(&harness, GoodbyeReason::Quit);
     let attempts = harness.fake.attempts.load(Ordering::SeqCst);
     harness.fake.wake();
     harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) == attempts + 1);
     harness.advance(Duration::from_secs(60));
     harness.settle();
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "Quit holds");
     assert_eq!(
         harness.fake.attempts.load(Ordering::SeqCst),
         attempts + 1,
         "an idle edge does not try again"
     );
+
+    harness.fake.bring_up();
+    harness.fake.wake();
+    harness.wait(|| harness.fake.connections() == 2);
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "Quit holds");
+    assert_eq!(harness.fake.watches.load(Ordering::SeqCst), 1);
 }

@@ -98,8 +98,8 @@ pub type Log = fn(LogEvent, &str);
 pub struct Environment {
     /// The service to connect to and start.
     pub service: Arc<dyn Service>,
-    /// The origin of the extension that opened the port, when Chrome named one.
-    pub origin: Option<String>,
+    /// The origin of the extension that opened the port: the first argument Chrome passed.
+    pub origin: String,
     /// How long to look for a first service before telling the browser none is there.
     pub absent_after: Duration,
     /// The diagnostics writer.
@@ -429,7 +429,7 @@ impl Port {
     fn open_stream(&self, hello: &[u8]) -> Option<Connection> {
         let log = self.environment.log;
         let mut opening = Opening::new(Role::Browser, edge());
-        opening.origin = self.environment.origin.clone();
+        opening.origin = Some(self.environment.origin.clone());
         match self.environment.service.connect(&opening) {
             Ok((socket, reply)) if reply.accepted => match self.shared.install(&socket, hello) {
                 Ok(()) => Some(socket),

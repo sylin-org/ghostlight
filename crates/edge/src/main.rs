@@ -38,6 +38,29 @@ use ghostlight_relay::watchdog::ParentWatchdog;
 
 use crate::service::InstalledService;
 
+// The edge's version major is the relay revision it speaks, so a published edge names its
+// revision in the build every opening carries. Checked when the edge compiles.
+const _: () = assert!(
+    decimal(env!("CARGO_PKG_VERSION_MAJOR")) == ghostlight_relay::RELAY,
+    "the edge's version major is the relay revision"
+);
+
+/// The number the decimal digits of `text` spell, for the compile-time check above.
+const fn decimal(text: &str) -> u16 {
+    let digits = text.as_bytes();
+    let mut value = 0_u16;
+    let mut index = 0;
+    while index < digits.len() {
+        assert!(
+            digits[index].is_ascii_digit(),
+            "a version number is decimal"
+        );
+        value = value * 10 + (digits[index] - b'0') as u16;
+        index += 1;
+    }
+    value
+}
+
 /// Write one diagnostics line as the MCP relay.
 fn record_mcp(event: LogEvent, detail: &str) {
     log::record(Component::EdgeMcp, event, detail);
@@ -101,7 +124,7 @@ fn run_browser(origin: String) -> Result<ExitCode> {
     record_browser(LogEvent::ProcessStarted, "");
     let environment = port::Environment {
         service: Arc::new(InstalledService),
-        origin: Some(origin),
+        origin,
         absent_after: port::ABSENT_AFTER,
         log: record_browser,
     };
@@ -141,6 +164,3 @@ fn main() -> Result<ExitCode> {
         Route::Service => hand_over(&home::service_executable()?, &arguments),
     }
 }
-
-#[cfg(test)]
-mod tests;

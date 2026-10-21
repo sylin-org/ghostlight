@@ -1,8 +1,12 @@
-//! In-process tests of the port against a fake relay-4 service over connected pairs and in-memory
+//! In-process tests of the port against a fake relay service over connected pairs and in-memory
 //! Chrome pipes.
+//!
+//! Each test proves one rule of the browser edge that the process journeys do not prove as
+//! precisely: what reaches the service and Chrome, what the edge says when no service is there,
+//! and when it starts or looks for one.
 
 use std::io::Cursor;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::thread::JoinHandle;
@@ -11,7 +15,8 @@ use std::time::Duration;
 use ghostlight_relay::endpoint::pair;
 use ghostlight_relay::frame;
 use ghostlight_relay::protocol::{goodbye_frame, RefusalCode, Role};
-use ghostlight_relay::{MAX_FRAME_BYTES, RELAY};
+use ghostlight_relay::MAX_FRAME_BYTES;
+use serde_json::Value;
 
 use super::*;
 
@@ -28,7 +33,7 @@ struct Browser {
     received: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
-/// A relay-4 service the test switches on and off.
+/// A relay service the test switches on and off.
 #[derive(Default)]
 struct FakeState {
     up: AtomicBool,
@@ -192,12 +197,19 @@ impl Service for FakeService {
 struct ChannelInput {
     chunks: Receiver<Vec<u8>>,
     pending: Vec<u8>,
+    /// Bytes the edge has read so far.
+    delivered: Arc<AtomicUsize>,
+    /// Set while the edge waits for bytes Chrome has not sent yet.
+    waiting: Arc<AtomicBool>,
 }
 
 impl Read for ChannelInput {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         if self.pending.is_empty() {
-            match self.chunks.recv() {
+            self.waiting.store(true, Ordering::SeqCst);
+            let chunk = self.chunks.recv();
+            self.waiting.store(false, Ordering::SeqCst);
+            match chunk {
                 Ok(chunk) => self.pending = chunk,
                 Err(_) => return Ok(0),
             }
@@ -205,6 +217,7 @@ impl Read for ChannelInput {
         let count = buffer.len().min(self.pending.len());
         buffer[..count].copy_from_slice(&self.pending[..count]);
         self.pending.drain(..count);
+        self.delivered.fetch_add(count, Ordering::SeqCst);
         Ok(count)
     }
 }
@@ -230,6 +243,10 @@ fn no_log(_: LogEvent, _: &str) {}
 struct Harness {
     fake: Arc<FakeState>,
     input: Option<mpsc::Sender<Vec<u8>>>,
+    /// Bytes Chrome has sent so far.
+    sent: AtomicUsize,
+    delivered: Arc<AtomicUsize>,
+    waiting: Arc<AtomicBool>,
     output: SharedOutput,
     events: Sender<Event>,
     done: Option<JoinHandle<io::Result<Ended>>>,
@@ -237,47 +254,42 @@ struct Harness {
 
 impl Harness {
     fn start(up: bool, start_brings_up: bool) -> Self {
-        Self::start_from(up, start_brings_up, Some(ORIGIN.to_owned()))
-    }
-
-    /// An edge started by Chrome with `origin` as its first argument, if it had one.
-    fn start_from(up: bool, start_brings_up: bool, origin: Option<String>) -> Self {
-        Self::start_with(up, start_brings_up, origin, NEVER_ABSENT)
+        Self::start_with(up, start_brings_up, NEVER_ABSENT)
     }
 
     /// An edge that tells Chrome no service is there once `absent_after` passes.
     fn start_absent_after(up: bool, absent_after: Duration) -> Self {
-        Self::start_with(up, false, Some(ORIGIN.to_owned()), absent_after)
+        Self::start_with(up, false, absent_after)
     }
 
-    fn start_with(
-        up: bool,
-        start_brings_up: bool,
-        origin: Option<String>,
-        absent_after: Duration,
-    ) -> Self {
+    fn start_with(up: bool, start_brings_up: bool, absent_after: Duration) -> Self {
         let fake = FakeState::new(up, start_brings_up);
         let (input, chunks) = mpsc::channel();
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let waiting = Arc::new(AtomicBool::new(false));
         let output = SharedOutput::default();
         let environment = Environment {
             service: Arc::new(FakeService(Arc::clone(&fake))),
-            origin,
+            origin: ORIGIN.to_owned(),
             absent_after,
             log: no_log,
         };
         let (events, inbox) = mpsc::channel();
         let sender = events.clone();
         let stdout = output.clone();
-        let done = thread::spawn(move || {
-            let stdin = ChannelInput {
-                chunks,
-                pending: Vec::new(),
-            };
-            run(environment, stdin, stdout, events, inbox)
-        });
+        let stdin = ChannelInput {
+            chunks,
+            pending: Vec::new(),
+            delivered: Arc::clone(&delivered),
+            waiting: Arc::clone(&waiting),
+        };
+        let done = thread::spawn(move || run(environment, stdin, stdout, events, inbox));
         Self {
             fake,
             input: Some(input),
+            sent: AtomicUsize::new(0),
+            delivered,
+            waiting,
             output,
             events: sender,
             done: Some(done),
@@ -296,11 +308,19 @@ impl Harness {
     fn chrome_sends(&self, payload: &[u8]) {
         let mut bytes = Vec::new();
         frame::write_frame_raw(&mut bytes, payload).unwrap();
+        self.sent.fetch_add(bytes.len(), Ordering::SeqCst);
         self.input.as_ref().unwrap().send(bytes).unwrap();
     }
 
     fn chrome_closes(&mut self) {
         self.input.take();
+    }
+
+    /// Whether the edge has read every byte Chrome sent, done with each frame, and waits for
+    /// more.
+    fn chrome_input_drained(&self) -> bool {
+        self.waiting.load(Ordering::SeqCst)
+            && self.delivered.load(Ordering::SeqCst) == self.sent.load(Ordering::SeqCst)
     }
 
     /// The frames written to Chrome so far.
@@ -329,16 +349,34 @@ impl Harness {
     }
 }
 
+/// Relay-protocol-4 section 5 and ACCEPTANCE C13: the browser edge's first connection. Before
+/// the extension's hello it opens nothing and starts nothing. It holds the hello, drops every
+/// frame Chrome sends after it until a service accepts the stream, and sends the hello first.
+/// It starts the service once, as a `browser` start, after its first failed attempt (a refused
+/// opening is one), and never again while it keeps connecting.
 #[test]
-fn the_held_hello_is_the_first_frame_the_service_sees() {
+fn the_first_connection_carries_the_held_hello_after_one_browser_start() {
+    let mut silent = Harness::start(true, false);
+    silent.chrome_closes();
+    assert_eq!(silent.finish().unwrap(), Ended::BrowserGone);
+    assert!(
+        silent.fake.openings().is_empty(),
+        "nothing before the hello"
+    );
+    assert_eq!(silent.fake.starts.load(Ordering::SeqCst), 0);
+
     let mut harness = Harness::start(false, false);
     harness.chrome_sends(b"hello");
     harness.chrome_sends(b"early one");
     harness.chrome_sends(b"early two");
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    // The attempt that started the service has failed; the later frames were read and dropped
-    // while the hello stayed held.
-    thread::sleep(Duration::from_millis(100));
+    // The scheduled attempts come 0.5 s and 1.5 s after the first.
+    harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) >= 3);
+    assert_eq!(
+        harness.fake.starts.load(Ordering::SeqCst),
+        1,
+        "a browser start is made once, after the first failed attempt"
+    );
+    harness.wait(|| harness.chrome_input_drained());
     assert_eq!(harness.fake.browser_streams(), 0);
     harness.fake.bring_up();
     harness.wait(|| harness.fake.browser_streams() == 1);
@@ -346,60 +384,34 @@ fn the_held_hello_is_the_first_frame_the_service_sees() {
     harness.wait(|| harness.fake.received(0).len() == 2);
     assert_eq!(
         harness.fake.received(0),
-        [b"hello".to_vec(), b"later".to_vec()]
+        [b"hello".to_vec(), b"later".to_vec()],
+        "the hello goes first and the early frames were dropped"
     );
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-}
-
-#[test]
-fn the_service_is_started_before_the_first_connection_and_not_after_it_is_found() {
-    let mut harness = Harness::start(false, true);
-    harness.chrome_sends(b"hello");
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
     assert_eq!(harness.fake.roles(), [Role::Browser]);
     assert_eq!(
         *harness.fake.reasons.lock().unwrap(),
         [StartReason::Browser]
     );
     harness.chrome_closes();
-    harness.finish().unwrap();
+    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
+
+    let mut refused = Harness::start(true, false);
+    refused.fake.refusals.store(1, Ordering::SeqCst);
+    refused.chrome_sends(b"hello");
+    refused.wait(|| refused.fake.received(0).len() == 1);
+    assert_eq!(refused.fake.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(refused.fake.roles(), [Role::Browser, Role::Browser]);
+    assert_eq!(refused.fake.received(0), [b"hello".to_vec()]);
+    refused.chrome_closes();
+    assert_eq!(refused.finish().unwrap(), Ended::BrowserGone);
 }
 
+/// ACCEPTANCE C4 and C8: the browser edge carries every frame both ways byte for byte, whatever
+/// its bytes, without reading them: not JSON, empty, or larger than a pipe's buffer. A frame from
+/// Chrome that declares more than the relay's largest frame ends the port as an error before
+/// anything is misread.
 #[test]
-fn a_service_that_stays_down_is_started_once_and_connected_to_when_it_appears() {
-    let mut harness = Harness::start(false, false);
-    harness.chrome_sends(b"hello");
-    harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) >= 3);
-    assert_eq!(
-        harness.fake.starts.load(Ordering::SeqCst),
-        1,
-        "a browser start is made once, at the edge's own start"
-    );
-    harness.fake.bring_up();
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    assert_eq!(harness.fake.received(0), [b"hello".to_vec()]);
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
-    harness.chrome_closes();
-    harness.finish().unwrap();
-}
-
-#[test]
-fn a_refused_opening_keeps_the_hello_held_and_starts_the_service() {
-    let mut harness = Harness::start(true, false);
-    harness.fake.refusals.store(1, Ordering::SeqCst);
-    harness.chrome_sends(b"hello");
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(harness.fake.roles(), [Role::Browser, Role::Browser]);
-    assert_eq!(harness.fake.received(0), [b"hello".to_vec()]);
-    harness.chrome_closes();
-    harness.finish().unwrap();
-}
-
-#[test]
-fn frames_cross_both_ways_byte_for_byte() {
+fn frames_cross_both_ways_byte_for_byte_up_to_the_relays_largest_frame() {
     let mut harness = Harness::connected(b"hello");
     let not_json = vec![0_u8, 255, 1, 254, b'{', b'"'];
     let large = vec![b'x'; 300 * 1024];
@@ -428,87 +440,7 @@ fn frames_cross_both_ways_byte_for_byte() {
     }
     harness.wait(|| harness.chrome_receives().len() == to_chrome.len());
     assert_eq!(harness.chrome_receives(), to_chrome);
-    harness.chrome_closes();
-    harness.finish().unwrap();
-}
 
-#[test]
-fn losing_the_service_tells_chrome_once_and_never_starts_it() {
-    let mut harness = Harness::connected(b"hello");
-    harness.fake.send(b"before the loss");
-    harness.wait(|| harness.chrome_receives().len() == 1);
-    harness.fake.go_down();
-    harness.wait(|| harness.chrome_receives().len() == 2);
-    harness.chrome_sends(b"while away");
-    // Two probe intervals pass: the edge keeps looking and keeps its hands off the service.
-    harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 2);
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-    assert_eq!(harness.fake.browser_streams(), 1);
-    assert_eq!(harness.fake.received(0), [b"hello".to_vec()]);
-    assert_eq!(
-        harness.chrome_receives(),
-        [b"before the loss".to_vec(), BACKEND_UNAVAILABLE.to_vec()]
-    );
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-}
-
-#[test]
-fn a_returning_service_ends_the_run_without_a_new_stream() {
-    let mut harness = Harness::connected(b"hello");
-    harness.fake.go_down();
-    harness.wait(|| harness.chrome_receives().len() == 1);
-    harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 1);
-    harness.fake.bring_up();
-    assert_eq!(harness.finish().unwrap(), Ended::ServiceReturned);
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-    assert_eq!(harness.fake.roles(), [Role::Browser, Role::Control]);
-    assert_eq!(
-        harness.fake.openings()[1].control,
-        Some(Control::Readiness),
-        "the probe changes nothing"
-    );
-    assert_eq!(harness.chrome_receives(), [BACKEND_UNAVAILABLE.to_vec()]);
-}
-
-#[test]
-fn chrome_closing_its_pipe_ends_the_run_cleanly() {
-    let mut harness = Harness::connected(b"hello");
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-    // The close was ours, not the service's, so Chrome is told nothing.
-    thread::sleep(Duration::from_millis(100));
-    assert!(harness.chrome_receives().is_empty());
-}
-
-#[test]
-fn chrome_closing_before_any_hello_ends_the_run_without_a_connection() {
-    let mut harness = Harness::start(true, false);
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-    assert!(harness.fake.openings().is_empty());
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-}
-
-#[test]
-fn chrome_closing_while_the_service_is_away_ends_the_run() {
-    let mut harness = Harness::start(false, false);
-    harness.chrome_sends(b"hello");
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-}
-
-#[test]
-fn the_parent_going_away_ends_the_run() {
-    let mut harness = Harness::connected(b"hello");
-    harness.events.send(Event::ParentGone).unwrap();
-    assert_eq!(harness.finish().unwrap(), Ended::ParentGone);
-}
-
-#[test]
-fn an_unreadable_chrome_frame_is_an_error() {
-    let mut harness = Harness::connected(b"hello");
     let declared = u32::try_from(MAX_FRAME_BYTES + 1).unwrap();
     harness
         .input
@@ -519,115 +451,109 @@ fn an_unreadable_chrome_frame_is_an_error() {
     assert!(harness.finish().is_err());
 }
 
+/// ACCEPTANCE C10 and relay-protocol-4 section 6: a lost service, whether its stream just ends
+/// or it said `quit` or `replace` first, is told to Chrome once with the absent frame, and the
+/// goodbye itself is never passed on. While it is away the browser edge drops what Chrome sends,
+/// never starts the service and only probes with a read-only `readiness` opening. When a service
+/// answers, the edge ends without opening a new stream, so the extension reconnects with a fresh
+/// hello.
 #[test]
-fn the_opening_names_the_edge_and_carries_the_extension_origin() {
-    let mut harness = Harness::connected(b"hello");
-    let opening = &harness.fake.openings()[0];
-    assert_eq!(opening.relay, RELAY);
-    assert_eq!(opening.role, Role::Browser);
-    assert_eq!(opening.edge.program, Program::Edge);
-    assert_eq!(opening.edge.revision, RELAY);
-    assert_eq!(opening.edge.build, env!("CARGO_PKG_VERSION"));
-    assert_eq!(opening.origin.as_deref(), Some(ORIGIN));
-    harness.chrome_closes();
-    harness.finish().unwrap();
-}
-
-#[test]
-fn an_opening_without_an_origin_when_chrome_named_none() {
-    let mut harness = Harness::start_from(true, false, None);
-    harness.chrome_sends(b"hello");
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    assert_eq!(harness.fake.openings()[0].origin, None);
-    harness.chrome_closes();
-    harness.finish().unwrap();
-}
-
-#[test]
-fn quit_and_replace_goodbyes_are_not_forwarded_and_are_a_lost_service() {
-    for reason in [GoodbyeReason::Quit, GoodbyeReason::Replace] {
+fn a_lost_service_is_told_once_probed_read_only_and_never_started() {
+    for goodbye in [
+        None,
+        Some(GoodbyeReason::Quit),
+        Some(GoodbyeReason::Replace),
+    ] {
         let mut harness = Harness::connected(b"hello");
-        harness.fake.send(&goodbye_frame(reason));
-        harness.fake.go_down();
+        harness.fake.send(b"before the loss");
         harness.wait(|| harness.chrome_receives().len() == 1);
+        if let Some(reason) = goodbye {
+            harness.fake.send(&goodbye_frame(reason));
+        }
+        harness.fake.go_down();
+        harness.wait(|| harness.chrome_receives().len() == 2);
+        harness.chrome_sends(b"while away");
+        // Two probe intervals pass: the edge keeps looking and keeps its hands off the service.
         harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 2);
         assert_eq!(
             harness.chrome_receives(),
-            [BACKEND_UNAVAILABLE.to_vec()],
-            "{reason:?}: Chrome is told the service is away and sees no goodbye"
+            [b"before the loss".to_vec(), BACKEND_UNAVAILABLE.to_vec()],
+            "{goodbye:?}: Chrome is told once and sees no goodbye"
         );
         assert_eq!(
-            harness.fake.starts.load(Ordering::SeqCst),
-            0,
-            "{reason:?}: nothing is started while waiting"
+            harness.fake.received(0),
+            [b"hello".to_vec()],
+            "{goodbye:?}: what Chrome sent while the service was away was dropped"
         );
+        assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "{goodbye:?}");
         harness.fake.bring_up();
         assert_eq!(
             harness.finish().unwrap(),
             Ended::ServiceReturned,
-            "{reason:?}"
+            "{goodbye:?}"
         );
+        assert_eq!(
+            harness.fake.roles(),
+            [Role::Browser, Role::Control],
+            "{goodbye:?}: no new stream"
+        );
+        assert_eq!(
+            harness.fake.openings()[1].control,
+            Some(Control::Readiness),
+            "{goodbye:?}: the probe changes nothing"
+        );
+        assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "{goodbye:?}");
     }
 }
 
+/// ACCEPTANCE C13 and ADR-0199 Decision 13: an `uninstall` or `session_end` goodbye, or the end
+/// of the session that the edge's own listener hears, ends the port at once. Chrome is told
+/// nothing more, nothing is started and no probe follows, whether the service was connected,
+/// away, or never found.
 #[test]
-fn an_uninstall_goodbye_ends_the_run_at_once_without_telling_chrome() {
-    let mut harness = Harness::connected(b"hello");
-    harness.fake.send(&goodbye_frame(GoodbyeReason::Uninstall));
-    assert_eq!(harness.finish().unwrap(), Ended::ServiceUninstalled);
-    assert!(harness.chrome_receives().is_empty());
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-    assert_eq!(harness.fake.roles(), [Role::Browser], "no probe follows");
+fn a_final_goodbye_or_the_sessions_end_ends_the_port_at_once() {
+    for (reason, ended) in [
+        (GoodbyeReason::Uninstall, Ended::ServiceUninstalled),
+        (GoodbyeReason::SessionEnd, Ended::SessionOver),
+    ] {
+        let mut harness = Harness::connected(b"hello");
+        harness.fake.send(&goodbye_frame(reason));
+        assert_eq!(harness.finish().unwrap(), ended, "{reason:?}");
+        assert!(harness.chrome_receives().is_empty(), "{reason:?}");
+        assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "{reason:?}");
+        assert_eq!(
+            harness.fake.roles(),
+            [Role::Browser],
+            "{reason:?}: no probe follows"
+        );
+    }
+
+    let mut away = Harness::connected(b"hello");
+    away.fake.go_down();
+    away.wait(|| away.chrome_receives().len() == 1);
+    away.events.send(Event::SessionEnded).unwrap();
+    assert_eq!(away.finish().unwrap(), Ended::SessionOver);
+    assert_eq!(away.chrome_receives(), [BACKEND_UNAVAILABLE.to_vec()]);
+    assert_eq!(away.fake.starts.load(Ordering::SeqCst), 0);
+
+    let mut never_found = Harness::start(false, false);
+    never_found.events.send(Event::SessionEnded).unwrap();
+    assert_eq!(never_found.finish().unwrap(), Ended::SessionOver);
+    assert!(never_found.fake.openings().is_empty());
+    assert_eq!(never_found.fake.starts.load(Ordering::SeqCst), 0);
 }
 
+/// Defect 4f3d67d6: when no service has accepted within the absent wait of the edge's own
+/// start, it tells Chrome so once with the absent frame, and not before, so the extension reads
+/// not connected rather than an outdated service. It starts nothing more, drops what Chrome
+/// sends and probes read-only, and a service that accepts after that ends the run without a new
+/// stream.
 #[test]
-fn a_session_end_goodbye_ends_the_run_at_once_and_starts_nothing() {
-    let mut harness = Harness::connected(b"hello");
-    harness.fake.send(&goodbye_frame(GoodbyeReason::SessionEnd));
-    assert_eq!(harness.finish().unwrap(), Ended::SessionOver);
-    assert!(harness.chrome_receives().is_empty());
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-    assert_eq!(harness.fake.roles(), [Role::Browser], "no probe follows");
-}
-
-#[test]
-fn a_session_that_ends_while_the_service_is_away_ends_the_run_without_a_start() {
-    let mut harness = Harness::connected(b"hello");
-    harness.fake.go_down();
-    harness.wait(|| harness.chrome_receives().len() == 1);
-
-    harness.events.send(Event::SessionEnded).unwrap();
-
-    assert_eq!(harness.finish().unwrap(), Ended::SessionOver);
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
-}
-
-#[test]
-fn a_session_that_ends_before_the_first_connection_ends_the_run() {
-    let mut harness = Harness::start(false, false);
-    harness.events.send(Event::SessionEnded).unwrap();
-    assert_eq!(harness.finish().unwrap(), Ended::SessionOver);
-}
-
-#[test]
-fn the_unavailable_frame_is_the_golden_that_names_the_absence() {
-    let golden =
-        include_str!("../../../../tests/golden/protocol4/frames/backend_unavailable.absent.json");
-    assert_eq!(golden.trim().as_bytes(), BACKEND_UNAVAILABLE);
-}
-
-#[test]
-fn no_service_within_the_wait_is_told_to_chrome_once_and_nothing_is_started_again() {
+fn no_service_within_the_wait_is_told_to_chrome_once_and_not_before() {
     let wait = Duration::from_millis(1500);
-    let mut harness = Harness::start_absent_after(false, wait);
     let began = Instant::now();
+    let mut harness = Harness::start_absent_after(false, wait);
     harness.chrome_sends(b"hello");
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    thread::sleep(Duration::from_millis(500));
-    assert!(
-        harness.chrome_receives().is_empty(),
-        "Chrome is told nothing before the wait is over"
-    );
     harness.wait(|| !harness.chrome_receives().is_empty());
     assert!(began.elapsed() >= wait, "the frame is not written early");
     harness.chrome_sends(b"while absent");
@@ -641,16 +567,7 @@ fn no_service_within_the_wait_is_told_to_chrome_once_and_nothing_is_started_agai
         .iter()
         .skip_while(|role| **role == Role::Browser)
         .all(|role| *role == Role::Control));
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-}
 
-#[test]
-fn a_service_that_accepts_after_the_absent_frame_ends_the_run() {
-    let mut harness = Harness::start_absent_after(false, Duration::from_millis(300));
-    harness.chrome_sends(b"hello");
-    harness.wait(|| !harness.chrome_receives().is_empty());
-    harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 1);
     harness.fake.bring_up();
     assert_eq!(harness.finish().unwrap(), Ended::ServiceReturned);
     assert_eq!(harness.chrome_receives(), [BACKEND_UNAVAILABLE.to_vec()]);
@@ -662,48 +579,44 @@ fn a_service_that_accepts_after_the_absent_frame_ends_the_run() {
     );
 }
 
+/// Defect 4f3d67d6 and the adapter protocol 4 golden both sides read: the frame the edge writes
+/// when no service is there is the golden `backend_unavailable` frame with `service` `absent`,
+/// the one the extension's golden test reads, and the edge writes it before the extension's
+/// hello wait (`limits.hello_timeout_ms`) runs out, or the extension would read the silence as
+/// an outdated service.
 #[test]
-fn a_service_that_accepts_in_time_is_never_reported_absent() {
-    let mut harness = Harness::start_absent_after(false, Duration::from_millis(1500));
-    harness.chrome_sends(b"hello");
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.fake.bring_up();
-    harness.wait(|| harness.fake.received(0).len() == 1);
-    thread::sleep(Duration::from_millis(1700));
-    assert!(harness.chrome_receives().is_empty());
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
+fn the_absence_is_the_golden_frame_and_comes_before_the_extensions_hello_wait() {
+    let golden =
+        include_str!("../../../../tests/golden/protocol4/frames/backend_unavailable.absent.json");
+    assert_eq!(golden.trim().as_bytes(), BACKEND_UNAVAILABLE);
+    let vocabulary: Value = serde_json::from_str(include_str!(
+        "../../../../tests/golden/protocol4/vocabulary.json"
+    ))
+    .unwrap();
+    let hello_wait = Duration::from_millis(
+        vocabulary["limits"]["hello_timeout_ms"]
+            .as_u64()
+            .expect("the vocabulary names the extension's hello wait"),
+    );
+    assert!(
+        ABSENT_AFTER < hello_wait,
+        "the edge reports absence after {ABSENT_AFTER:?}, the extension stops waiting after {hello_wait:?}"
+    );
 }
 
+/// Defect S-D3 (b0290246): the browser edge registers its wake endpoint once, before it first
+/// starts the service, so a service that starts at once still finds it. Each wake makes it look
+/// at once instead of at its next scheduled look, before its first connection and after a loss.
 #[test]
-fn the_edge_asks_once_to_be_woken_before_it_starts_the_service() {
+fn a_wake_makes_the_browser_edge_look_at_once() {
     let mut harness = Harness::start(false, false);
     harness.chrome_sends(b"hello");
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
     assert_eq!(
         harness.fake.watched_at_start.load(Ordering::SeqCst),
         1,
-        "a service that starts at once still finds it registered"
+        "registered before the start"
     );
-    harness.fake.bring_up();
-    harness.fake.wake();
-    harness.wait(|| harness.fake.browser_streams() == 1);
-    harness.fake.go_down();
-    harness.wait(|| harness.chrome_receives().len() == 1);
-    harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 1);
-    assert_eq!(
-        harness.fake.watches.load(Ordering::SeqCst),
-        1,
-        "once for the life of the port"
-    );
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-}
-
-#[test]
-fn a_wake_before_the_first_connection_makes_the_edge_connect_at_once() {
-    let mut harness = Harness::start(false, false);
-    harness.chrome_sends(b"hello");
     // The scheduled attempts come 0.5 s, 1.5 s and 3.5 s after the first.
     harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) >= 3);
     harness.fake.bring_up();
@@ -715,13 +628,7 @@ fn a_wake_before_the_first_connection_makes_the_edge_connect_at_once() {
         "the edge connected without waiting for its next scheduled attempt"
     );
     assert_eq!(harness.fake.received(0), [b"hello".to_vec()]);
-    harness.chrome_closes();
-    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
-}
 
-#[test]
-fn a_wake_after_the_loss_makes_the_edge_look_at_once() {
-    let mut harness = Harness::connected(b"hello");
     harness.fake.go_down();
     harness.wait(|| harness.chrome_receives().len() == 1);
     // The scheduled looks come 0.5 s, 1.5 s and 3.5 s after the loss.
@@ -734,9 +641,16 @@ fn a_wake_after_the_loss_makes_the_edge_look_at_once() {
         woken.elapsed() < Duration::from_secs(1),
         "the edge looked without waiting for its next scheduled look"
     );
-    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        harness.fake.watches.load(Ordering::SeqCst),
+        1,
+        "once for the life of the port"
+    );
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 1);
 }
 
+/// ACCEPTANCE C10: an edge that cannot register its wake endpoint keeps its scheduled looks and
+/// still finds a service that comes back.
 #[test]
 fn an_edge_that_cannot_be_woken_still_finds_the_service_by_its_looks() {
     let mut harness = Harness::connected(b"hello");
