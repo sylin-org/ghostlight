@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 124 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 118 |
 | `crates/desktop` | 161 | 20 | moved to the adapter lane (2026-10-21) |
 
 ## Slices
@@ -57,6 +57,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I33 | `cli/deployment.rs`: six tests fold into one, an install report says what happened and shows what needs a person, which also proves finding 2 fixed: `registration_lines` now puts an entry left as it is, one that cannot be changed, the new-terminal line and a container's kept-private lines on standard error, which get.sh and get.ps1 show, instead of standard output, which they discard | 132 | 127 | the install report; finding 2 | landed (this commit) |
 | T-I34 | `cli/diagnostics.rs`: its two tests go: one restated the list of log writers, the other a two-word formatter | 127 | 125 | none here | landed (this commit) |
 | T-I35 | `cli/session_end.rs`: two tests fold into one: a command leaves on the final signal and only serve keeps its own listener | 125 | 124 | ADR-0199 D13 and D14 | landed (this commit) |
+| T-I36 | `agent/mod.rs`: seven tests become one: an agent is named by the catalog and shown as its icon or a glyph the page draws (the glyph-words contract and the symbol rows folded in); the roster-alias restatement goes | 124 | 118 | the agent identity, defect b2ede7d3 | landed (this commit) |
 
 ## Notes
 

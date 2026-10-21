@@ -270,208 +270,190 @@ mod tests {
         )
     }
 
+    /// Protects the agent identity the window shows and defect b2ede7d3: a known agent is its catalog
+    /// row and an unknown one keeps the name it reported, so two unknown agents stay two; a client
+    /// that claims a reserved name is the unknown agent; a catalog agent wears its cached icon, with
+    /// `about`, and otherwise its monogram, as the symbol the page reads; and the page draws every
+    /// glyph the service names, the command line's and the unknown agent's included.
     #[test]
-    fn a_symbol_serializes_as_what_to_show() {
-        assert_eq!(
-            serde_json::to_value(Symbol::Icon {
-                address: "agent-icons/codex?v=0123456789ab".into(),
-                about: None,
-            })
-            .unwrap(),
-            serde_json::json!({ "icon": "agent-icons/codex?v=0123456789ab" })
-        );
-        assert_eq!(
-            serde_json::to_value(Symbol::Icon {
-                address: "agent-icons/zed?v=0123456789ab".into(),
-                about: Some("Icon from the installed Zed app.".into()),
-            })
-            .unwrap(),
-            serde_json::json!({
-                "icon": "agent-icons/zed?v=0123456789ab",
-                "about": "Icon from the installed Zed app.",
-            })
-        );
-        assert_eq!(
-            serde_json::to_value(Symbol::Glyph(Glyph::CommandLine)).unwrap(),
-            serde_json::json!({ "glyph": "command_line" })
-        );
-        assert_eq!(
-            serde_json::to_value(Symbol::Glyph(Glyph::Unknown)).unwrap(),
-            serde_json::json!({ "glyph": "unknown" })
-        );
-    }
-
-    #[test]
-    fn a_roster_agent_wears_its_cached_icon_and_otherwise_its_monogram() {
-        use crate::install::icons::{FoundIcon, IconSourceKind};
-        use std::sync::Arc;
-
-        let found = |app_id, app_name| AgentImage::AppIcon {
-            found: FoundIcon {
-                sha256: "0".repeat(64),
-                app_id,
-                app_name,
-                found_in: IconSourceKind::DesktopEntry,
-            },
-            image: Arc::new(image::ServedImage {
-                media_type: "image/png",
-                bytes: Vec::new(),
-                version: "0123456789ab".into(),
-            }),
-        };
-        assert_eq!(
-            Symbol::image("zed", &found("zed", "Zed")),
-            Symbol::Icon {
-                address: "agent-icons/zed?v=0123456789ab".into(),
-                about: Some("Icon from the installed Zed app.".into()),
-            }
-        );
-        assert_eq!(
-            serde_json::to_value(Symbol::image(
-                "claude-code",
-                &found("claude-desktop", "Claude Desktop"),
-            ))
-            .unwrap(),
-            serde_json::json!({
-                "icon": "agent-icons/claude-code?v=0123456789ab",
-                "about": "Icon from the installed Claude Desktop app.",
-            }),
-            "an icon its family's app gave names that app"
-        );
-        let zed = image::monogram!("zed.svg");
-        let monogram = Symbol::Icon {
-            address: monogram_address("zed", zed),
-            about: None,
-        };
-        assert_eq!(Agent::shown("zed", "Zed", zed, None).symbol, monogram);
-        assert_eq!(
-            serde_json::to_value(&monogram).unwrap(),
-            serde_json::json!({ "icon": monogram_address("zed", zed) }),
-            "a monogram says nothing about where it came from"
-        );
-        assert_eq!(
-            Agent::listed("zed", "Zed", zed).symbol,
-            monogram,
-            "no test publishes a cache, so every agent keeps its monogram"
-        );
-    }
-
-    #[test]
-    fn the_page_draws_every_glyph_the_service_names() {
-        let words = include_str!("../../ui/lib/words.js");
-        let vocabulary = words
-            .lines()
-            .find(|line| line.contains("const GLYPH = "))
-            .expect("the page names the glyphs it draws");
-        for glyph in [Glyph::CommandLine, Glyph::Unknown] {
-            assert!(
-                vocabulary.contains(&format!(": \"{}\"", glyph.word())),
-                "the page does not draw {}",
-                glyph.word()
-            );
-        }
-    }
-
-    #[test]
-    fn the_command_line_and_an_unknown_agent_get_their_glyphs() {
-        for reported in [None, Some("ghostlight call"), Some("codex-mcp-client")] {
-            let agent = Agent::of(reported, IntakeChannel::Cli);
-            assert_eq!(agent, Agent::command_line(), "{reported:?}");
-            assert_eq!(agent.name, "Command line");
-            assert_eq!(agent.symbol, Symbol::Glyph(Glyph::CommandLine));
-        }
-        for unnamed in [None, Some(""), Some("   ")] {
-            let agent = Agent::of(unnamed, IntakeChannel::Mcp);
-            assert_eq!(agent, Agent::unknown(), "{unnamed:?}");
-            assert_eq!(agent.name, "Unknown agent");
-        }
-    }
-
-    #[test]
-    fn a_client_that_claims_a_reserved_name_is_the_unknown_agent() {
-        use crate::provenance::ConnectionEvidence;
-
-        for claimed in [
-            "Command line",
-            "command line",
-            "  COMMAND   LINE ",
-            "CommandLine",
-            "Unknown agent",
-            "unknown agent",
-            " UnknownAgent ",
-            "Earlier session",
-        ] {
-            let agent = Agent::of(Some(claimed), IntakeChannel::Mcp);
-            assert_eq!(agent, Agent::unknown(), "{claimed:?}");
-            assert_ne!(
-                agent.symbol,
-                Symbol::Glyph(Glyph::CommandLine),
-                "{claimed:?}"
-            );
-            let evidence = ConnectionEvidence::claimed(claimed, IntakeChannel::Mcp).details();
-            assert_eq!(evidence.agent, Agent::unknown());
-            assert!(
-                evidence
-                    .explanation
-                    .contains(&format!("\"{}\"", claimed.trim())),
-                "the claim still shows in the trust note: {}",
-                evidence.explanation
-            );
-        }
-        assert_eq!(
-            Agent::of(Some("Command line"), IntakeChannel::Cli),
-            Agent::command_line(),
-            "only the command line's own channel names it"
-        );
-    }
-
-    #[test]
-    fn a_known_agent_is_its_roster_row_and_an_unknown_one_keeps_the_name_it_reported() {
-        let codex = Agent::of(Some("codex-mcp-client"), IntakeChannel::Mcp);
-        assert_eq!(
-            codex,
-            Agent {
-                id: "codex".into(),
-                name: "Codex".into(),
-                symbol: Symbol::Icon {
-                    address: monogram_address("codex", image::monogram!("codex.svg")),
+    fn an_agent_is_named_by_the_catalog_and_shown_as_its_icon_or_a_glyph_the_page_draws() {
+        {
+            assert_eq!(
+                serde_json::to_value(Symbol::Icon {
+                    address: "agent-icons/codex?v=0123456789ab".into(),
                     about: None,
-                },
-                note: None,
-            }
-        );
-        assert_eq!(
-            Agent::of(Some(" Claude-Code "), IntakeChannel::Mcp).id,
-            "claude-code"
-        );
-        assert_eq!(
-            Agent::of(Some("  Some Agent  "), IntakeChannel::Mcp),
-            Agent {
-                id: "unknown:Some Agent".into(),
-                name: "Some Agent".into(),
-                symbol: Symbol::Glyph(Glyph::Unknown),
-                note: None,
-            }
-        );
-        assert_ne!(
-            Agent::of(Some("Some Agent"), IntakeChannel::Mcp).id,
-            Agent::of(Some("Other Agent"), IntakeChannel::Mcp).id,
-            "two agents Ghostlight does not know stay two"
-        );
-    }
+                })
+                .unwrap(),
+                serde_json::json!({ "icon": "agent-icons/codex?v=0123456789ab" })
+            );
+            assert_eq!(
+                serde_json::to_value(Symbol::Icon {
+                    address: "agent-icons/zed?v=0123456789ab".into(),
+                    about: Some("Icon from the installed Zed app.".into()),
+                })
+                .unwrap(),
+                serde_json::json!({
+                    "icon": "agent-icons/zed?v=0123456789ab",
+                    "about": "Icon from the installed Zed app.",
+                })
+            );
+            assert_eq!(
+                serde_json::to_value(Symbol::Glyph(Glyph::CommandLine)).unwrap(),
+                serde_json::json!({ "glyph": "command_line" })
+            );
+            assert_eq!(
+                serde_json::to_value(Symbol::Glyph(Glyph::Unknown)).unwrap(),
+                serde_json::json!({ "glyph": "unknown" })
+            );
+        }
+        {
+            use crate::install::icons::{FoundIcon, IconSourceKind};
+            use std::sync::Arc;
 
-    #[test]
-    fn every_host_of_one_agent_names_one_agent() {
-        let cline = Agent::of(Some("cline"), IntakeChannel::Mcp);
-        assert_eq!(cline.id, "cline");
-        assert_eq!(cline.name, "Cline");
-        for host in [
-            "cline-cli",
-            "cline-vscode",
-            "cline-cursor",
-            "cline-windsurf",
-        ] {
-            assert_eq!(Agent::of(Some(host), IntakeChannel::Mcp), cline, "{host}");
+            let found = |app_id, app_name| AgentImage::AppIcon {
+                found: FoundIcon {
+                    sha256: "0".repeat(64),
+                    app_id,
+                    app_name,
+                    found_in: IconSourceKind::DesktopEntry,
+                },
+                image: Arc::new(image::ServedImage {
+                    media_type: "image/png",
+                    bytes: Vec::new(),
+                    version: "0123456789ab".into(),
+                }),
+            };
+            assert_eq!(
+                Symbol::image("zed", &found("zed", "Zed")),
+                Symbol::Icon {
+                    address: "agent-icons/zed?v=0123456789ab".into(),
+                    about: Some("Icon from the installed Zed app.".into()),
+                }
+            );
+            assert_eq!(
+                serde_json::to_value(Symbol::image(
+                    "claude-code",
+                    &found("claude-desktop", "Claude Desktop"),
+                ))
+                .unwrap(),
+                serde_json::json!({
+                    "icon": "agent-icons/claude-code?v=0123456789ab",
+                    "about": "Icon from the installed Claude Desktop app.",
+                }),
+                "an icon its family's app gave names that app"
+            );
+            let zed = image::monogram!("zed.svg");
+            let monogram = Symbol::Icon {
+                address: monogram_address("zed", zed),
+                about: None,
+            };
+            assert_eq!(Agent::shown("zed", "Zed", zed, None).symbol, monogram);
+            assert_eq!(
+                serde_json::to_value(&monogram).unwrap(),
+                serde_json::json!({ "icon": monogram_address("zed", zed) }),
+                "a monogram says nothing about where it came from"
+            );
+            assert_eq!(
+                Agent::listed("zed", "Zed", zed).symbol,
+                monogram,
+                "no test publishes a cache, so every agent keeps its monogram"
+            );
+        }
+        {
+            let words = include_str!("../../ui/lib/words.js");
+            let vocabulary = words
+                .lines()
+                .find(|line| line.contains("const GLYPH = "))
+                .expect("the page names the glyphs it draws");
+            for glyph in [Glyph::CommandLine, Glyph::Unknown] {
+                assert!(
+                    vocabulary.contains(&format!(": \"{}\"", glyph.word())),
+                    "the page does not draw {}",
+                    glyph.word()
+                );
+            }
+        }
+        {
+            for reported in [None, Some("ghostlight call"), Some("codex-mcp-client")] {
+                let agent = Agent::of(reported, IntakeChannel::Cli);
+                assert_eq!(agent, Agent::command_line(), "{reported:?}");
+                assert_eq!(agent.name, "Command line");
+                assert_eq!(agent.symbol, Symbol::Glyph(Glyph::CommandLine));
+            }
+            for unnamed in [None, Some(""), Some("   ")] {
+                let agent = Agent::of(unnamed, IntakeChannel::Mcp);
+                assert_eq!(agent, Agent::unknown(), "{unnamed:?}");
+                assert_eq!(agent.name, "Unknown agent");
+            }
+        }
+        {
+            use crate::provenance::ConnectionEvidence;
+
+            for claimed in [
+                "Command line",
+                "command line",
+                "  COMMAND   LINE ",
+                "CommandLine",
+                "Unknown agent",
+                "unknown agent",
+                " UnknownAgent ",
+                "Earlier session",
+            ] {
+                let agent = Agent::of(Some(claimed), IntakeChannel::Mcp);
+                assert_eq!(agent, Agent::unknown(), "{claimed:?}");
+                assert_ne!(
+                    agent.symbol,
+                    Symbol::Glyph(Glyph::CommandLine),
+                    "{claimed:?}"
+                );
+                let evidence = ConnectionEvidence::claimed(claimed, IntakeChannel::Mcp).details();
+                assert_eq!(evidence.agent, Agent::unknown());
+                assert!(
+                    evidence
+                        .explanation
+                        .contains(&format!("\"{}\"", claimed.trim())),
+                    "the claim still shows in the trust note: {}",
+                    evidence.explanation
+                );
+            }
+            assert_eq!(
+                Agent::of(Some("Command line"), IntakeChannel::Cli),
+                Agent::command_line(),
+                "only the command line's own channel names it"
+            );
+        }
+        {
+            let codex = Agent::of(Some("codex-mcp-client"), IntakeChannel::Mcp);
+            assert_eq!(
+                codex,
+                Agent {
+                    id: "codex".into(),
+                    name: "Codex".into(),
+                    symbol: Symbol::Icon {
+                        address: monogram_address("codex", image::monogram!("codex.svg")),
+                        about: None,
+                    },
+                    note: None,
+                }
+            );
+            assert_eq!(
+                Agent::of(Some(" Claude-Code "), IntakeChannel::Mcp).id,
+                "claude-code"
+            );
+            assert_eq!(
+                Agent::of(Some("  Some Agent  "), IntakeChannel::Mcp),
+                Agent {
+                    id: "unknown:Some Agent".into(),
+                    name: "Some Agent".into(),
+                    symbol: Symbol::Glyph(Glyph::Unknown),
+                    note: None,
+                }
+            );
+            assert_ne!(
+                Agent::of(Some("Some Agent"), IntakeChannel::Mcp).id,
+                Agent::of(Some("Other Agent"), IntakeChannel::Mcp).id,
+                "two agents Ghostlight does not know stay two"
+            );
         }
     }
 }
