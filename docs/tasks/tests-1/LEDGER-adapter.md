@@ -19,7 +19,7 @@ goldens are contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 24 (20 once the coordinator cuts its 5 Windows-only tests to 1) |
+| `crates/desktop` | 161 | 20 | 20 |
 
 ## Slices
 
@@ -60,6 +60,10 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | D11 | `crates/desktop/src/machine.rs`: the recover rule joins the stream-end table | 5 | 4 | promise 3, defect 1 | landed (this commit) |
 
 ## Notes
+
+- D12 (the coordinator, on Windows, 2026-10-21, db2e4471): `tray.rs`'s two Windows-only icon-size
+  tests become cases of `each_tray_state_has_its_own_icon_at_the_hosts_size`, and `tests/loads.rs`
+  keeps only `the_window_image_loads_and_reaches_main` (a537043b). `crates/desktop` ends at 20.
 
 - The page assets' plan (2026-10-21), from a read-only classification of
   `protocol4/assets/tests/content.test.js` (252) and `world.test.js` (23) at a48c7968, for when the
