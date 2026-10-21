@@ -26,6 +26,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::language::deployment as words;
+
 /// Every file this installation owns under the user data directory, as
 /// `(path relative to that directory, contents)`.
 const ASSETS: &[(&str, &str)] = &[
@@ -291,17 +293,7 @@ fn apply_uninstall(context: &UserAssetContext) -> Result<UserAssetActionResult, 
 }
 
 fn detail_for(state: UserAssetState, directory: &Path) -> String {
-    match state {
-        UserAssetState::Current => format!(
-            "Manual pages and shell completions are installed under {}.",
-            directory.display()
-        ),
-        UserAssetState::Missing => format!(
-            "Manual pages or shell completions are absent or out of date under {}.",
-            directory.display()
-        ),
-        _ => String::new(),
-    }
+    words::user_assets_detail(state, directory)
 }
 
 fn is_symlink(path: &Path) -> Result<bool, UserAssetError> {
@@ -330,7 +322,7 @@ fn read_optional(path: &Path) -> Result<Option<String>, UserAssetError> {
 #[derive(Debug, Error)]
 pub enum UserAssetError {
     /// A product-owned location could not be read.
-    #[error("could not read {path}: {source}")]
+    #[error("{}", words::location_unreadable(.path, .source))]
     Read {
         /// The location involved.
         path: PathBuf,
@@ -338,7 +330,7 @@ pub enum UserAssetError {
         source: io::Error,
     },
     /// A product-owned location could not be written.
-    #[error("could not write {path}: {source}")]
+    #[error("{}", words::location_unwritable(.path, .source))]
     Write {
         /// The location involved.
         path: PathBuf,

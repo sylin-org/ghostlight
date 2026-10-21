@@ -33,6 +33,7 @@ use thiserror::Error;
 
 use super::container::{AppContainer, Residence};
 use super::user_path::{self, PathValue, UserPathStore};
+use crate::language::deployment as words;
 
 /// The command name a person types.
 const COMMAND_NAME: &str = "ghostlight";
@@ -552,38 +553,18 @@ fn create_symlink(_target: &Path, link: &Path) -> Result<(), CommandPathError> {
 }
 
 fn not_applicable_detail(context: &CommandPathContext) -> String {
-    if context.system_package() {
-        "The system package already provides the ghostlight command.".to_owned()
-    } else {
-        "This platform does not use a per-user command entry.".to_owned()
-    }
+    words::command_path_not_applicable(context.system_package()).to_owned()
 }
 
 fn detail_for(state: CommandPathState, link: &Path, executable: &Path) -> String {
-    match state {
-        CommandPathState::NotApplicable | CommandPathState::PrivateView => String::new(),
-        CommandPathState::Missing => format!(
-            "No ghostlight command entry exists. Run it directly at {}.",
-            executable.display()
-        ),
-        CommandPathState::Current => {
-            format!("The ghostlight command runs from {}.", link.display())
-        }
-        CommandPathState::Updatable => {
-            "The ghostlight command entry points at an older installed version.".to_owned()
-        }
-        CommandPathState::NeedsAttention => format!(
-            "Something not owned by Ghostlight occupies {}; it was left untouched.",
-            link.display()
-        ),
-    }
+    words::command_path_detail(state, link, executable)
 }
 
 /// Failures while inspecting or changing the per-user command entry.
 #[derive(Debug, Error)]
 pub enum CommandPathError {
     /// A product-owned location could not be read.
-    #[error("could not read {path}: {source}")]
+    #[error("{}", words::location_unreadable(.path, .source))]
     Read {
         /// The location involved.
         path: PathBuf,
@@ -591,7 +572,7 @@ pub enum CommandPathError {
         source: io::Error,
     },
     /// A product-owned location could not be written.
-    #[error("could not write {path}: {source}")]
+    #[error("{}", words::location_unwritable(.path, .source))]
     Write {
         /// The location involved.
         path: PathBuf,

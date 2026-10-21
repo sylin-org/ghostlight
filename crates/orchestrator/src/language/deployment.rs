@@ -9,8 +9,10 @@
 //! was observed, one state is said with one word wherever it is printed, and the supported browser
 //! families are named from the one browser table.
 
+use std::io;
 use std::path::Path;
 
+use crate::install::browser_package::BrowserPackage;
 use crate::install::command_path::{CommandPathReport, CommandPathState, OwnedEntry};
 use crate::install::container::{
     checking_command, finishing_command, removing_command, AppContainer,
@@ -1235,6 +1237,258 @@ pub fn diagnostics_line(layer: &str, used: u64, directory: Option<&str>) -> Stri
 
 /// What `doctor --fix` says before it repairs.
 pub const APPLYING_REPAIRS: &str = "Applying ownership-safe repairs.";
+
+/// A product-owned location could not be read, for the system's `source`.
+#[must_use]
+pub fn location_unreadable(path: &Path, source: &io::Error) -> String {
+    format!("could not read {}: {source}", path.display())
+}
+
+/// A product-owned location could not be written, for the system's `source`.
+#[must_use]
+pub fn location_unwritable(path: &Path, source: &io::Error) -> String {
+    format!("could not write {}: {source}", path.display())
+}
+
+/// What a browser's native-host registration in `state` means.
+#[must_use]
+pub fn native_host_state_detail(state: NativeHostState) -> &'static str {
+    match state {
+        NativeHostState::Missing => "Ghostlight is not registered with this browser.",
+        NativeHostState::Current => {
+            "This browser is registered to start this installation of Ghostlight."
+        }
+        NativeHostState::Updatable => "A Ghostlight-owned registration points at older details.",
+        NativeHostState::OwnedElsewhere => {
+            "A Ghostlight-owned registration belongs to another installation."
+        }
+        NativeHostState::NeedsAttention => {
+            "Malformed or foreign state was found and will not be changed."
+        }
+    }
+}
+
+/// The installation at `location` owns a browser's registration; `exists` says whether it is
+/// still there.
+#[must_use]
+pub fn native_host_owned_by(location: &str, exists: bool) -> String {
+    if exists {
+        format!("Another Ghostlight installation at {location} owns this registration.")
+    } else {
+        format!("A removed Ghostlight installation at {location} still owns this registration.")
+    }
+}
+
+/// The edge a browser registration would name is missing.
+#[must_use]
+pub fn native_host_edge_missing(path: &Path) -> String {
+    format!("the Ghostlight program is missing: {}", path.display())
+}
+
+/// A native-host registration file could not be read.
+#[must_use]
+pub fn native_host_unreadable(path: &Path, source: &io::Error) -> String {
+    format!(
+        "could not read native-host state at {}: {source}",
+        path.display()
+    )
+}
+
+/// A native-host registration file could not be written or removed.
+#[must_use]
+pub fn native_host_unwritable(path: &Path, source: &io::Error) -> String {
+    format!(
+        "could not update native-host state at {}: {source}",
+        path.display()
+    )
+}
+
+/// The native-host manifest could not be encoded.
+#[must_use]
+pub fn native_host_manifest_unencodable(error: &serde_json::Error) -> String {
+    format!("could not encode the native-host manifest: {error}")
+}
+
+/// The per-user browser registration in the Windows registry could not be changed.
+#[must_use]
+pub fn native_host_registry_failed(detail: &str) -> String {
+    format!("could not update the per-user browser registration: {detail}")
+}
+
+/// A build without the Windows registry was asked to change it.
+pub const NATIVE_HOST_REGISTRY_UNSUPPORTED: &str =
+    "Windows registry access is unavailable on this operating system";
+
+/// A manifest Ghostlight does not own sits where Ghostlight's would go.
+#[must_use]
+pub fn native_host_foreign_manifest(path: &Path) -> String {
+    format!(
+        "a foreign manifest was left untouched at {}",
+        path.display()
+    )
+}
+
+/// Recovery found `browser`'s registration no longer owned and stale, so it changed nothing.
+#[must_use]
+pub fn native_host_repair_unavailable(browser: &str) -> String {
+    format!(
+        "browser '{browser}' is not an owned stale registration; automatic recovery left it \
+         unchanged"
+    )
+}
+
+/// A registration completed without reaching its exact current state.
+pub const NATIVE_HOST_UNVERIFIED: &str =
+    "native-host registration did not reach the expected current state";
+
+/// What a browser named `name` installed as `package` means for connecting to Ghostlight.
+#[must_use]
+pub fn browser_package_detail(name: &str, package: BrowserPackage) -> String {
+    match package {
+        BrowserPackage::Native => {
+            format!("A native {name} package can start Ghostlight.")
+        }
+        BrowserPackage::Snap => format!(
+            "{name} is installed as a Snap. Its sandbox cannot connect to Ghostlight; install a \
+             supported native browser package."
+        ),
+        BrowserPackage::Flatpak => format!(
+            "{name} is installed as a Flatpak. Its sandbox cannot connect to Ghostlight; install a \
+             supported native browser package."
+        ),
+        BrowserPackage::MultipleSandboxes => format!(
+            "{name} is installed as Snap and Flatpak packages. Neither sandbox can start \
+             Ghostlight; install a supported native browser package."
+        ),
+        BrowserPackage::NotDetected => format!("No supported {name} installation was detected."),
+        BrowserPackage::NotChecked => {
+            "Browser package provenance is not checked on this operating system.".into()
+        }
+    }
+}
+
+/// Why the command entry does not apply here: a system package provides the command, or the
+/// platform has no per-user entry.
+#[must_use]
+pub fn command_path_not_applicable(system_package: bool) -> &'static str {
+    if system_package {
+        "The system package already provides the ghostlight command."
+    } else {
+        "This platform does not use a per-user command entry."
+    }
+}
+
+/// What the command entry at `link` in `state` means, for the edge at `executable`.
+#[must_use]
+pub fn command_path_detail(state: CommandPathState, link: &Path, executable: &Path) -> String {
+    match state {
+        CommandPathState::NotApplicable | CommandPathState::PrivateView => String::new(),
+        CommandPathState::Missing => format!(
+            "No ghostlight command entry exists. Run it directly at {}.",
+            executable.display()
+        ),
+        CommandPathState::Current => {
+            format!("The ghostlight command runs from {}.", link.display())
+        }
+        CommandPathState::Updatable => {
+            "The ghostlight command entry points at an older installed version.".to_owned()
+        }
+        CommandPathState::NeedsAttention => format!(
+            "Something not owned by Ghostlight occupies {}; it was left untouched.",
+            link.display()
+        ),
+    }
+}
+
+/// What the manual pages and shell completions under `directory` in `state` mean.
+#[must_use]
+pub fn user_assets_detail(state: UserAssetState, directory: &Path) -> String {
+    match state {
+        UserAssetState::Current => format!(
+            "Manual pages and shell completions are installed under {}.",
+            directory.display()
+        ),
+        UserAssetState::Missing => format!(
+            "Manual pages or shell completions are absent or out of date under {}.",
+            directory.display()
+        ),
+        _ => String::new(),
+    }
+}
+
+/// The Linux desktop integration at `path` could not be read.
+#[must_use]
+pub fn desktop_integration_unreadable(path: &Path, source: &io::Error) -> String {
+    format!(
+        "could not read desktop integration at {}: {source}",
+        path.display()
+    )
+}
+
+/// The Linux desktop integration at `path` could not be changed.
+#[must_use]
+pub fn desktop_integration_unwritable(path: &Path, source: &io::Error) -> String {
+    format!(
+        "could not update desktop integration at {}: {source}",
+        path.display()
+    )
+}
+
+/// Desktop integration Ghostlight does not own sits at one of its two paths.
+#[must_use]
+pub fn desktop_integration_foreign(desktop_entry: &Path, icon: &Path) -> String {
+    format!(
+        "foreign desktop integration was left untouched at {} or {}",
+        desktop_entry.display(),
+        icon.display()
+    )
+}
+
+/// A desktop-integration write completed without reaching its exact current state.
+pub const DESKTOP_INTEGRATION_UNVERIFIED: &str =
+    "desktop integration did not reach its exact current state";
+
+/// The entry rule refuses a serve from anywhere but the installed service.
+pub const SERVE_FROM_ELSEWHERE: &str = "only the installed Ghostlight service can serve";
+
+/// What the Windows Start-menu entries' failure is reported under.
+const WINDOWS_ENTRIES_FAILURE: &str = "Start menu";
+
+/// The Windows Start-menu entries could not be checked or written, for `error`.
+#[must_use]
+pub fn windows_entries_failed(error: &dyn std::fmt::Display) -> String {
+    format!("{WINDOWS_ENTRIES_FAILURE}: {error}")
+}
+
+/// The browsers' registrations could not be reconciled, for `error`.
+#[must_use]
+pub fn browser_connections_failed(error: &dyn std::fmt::Display) -> String {
+    format!("Browser connection: {error}")
+}
+
+/// The name of browser `name`'s registration, as a reconcile names what it kept private.
+#[must_use]
+pub fn browser_connection_name(name: &str) -> String {
+    format!("{name} browser connection")
+}
+
+/// The MCP clients could not be reconciled, for `error`.
+#[must_use]
+pub fn mcp_clients_failed(error: &dyn std::fmt::Display) -> String {
+    format!("MCP clients: {error}")
+}
+
+/// The name of the client `label`'s entry, as a reconcile names what it kept private.
+#[must_use]
+pub fn mcp_client_name(label: &str) -> String {
+    format!("{label} MCP client")
+}
+
+/// What a Check of the client `label` says.
+#[must_use]
+pub fn harness_checked(label: &str) -> String {
+    format!("{label} was checked without changing configuration.")
+}
 
 #[cfg(test)]
 mod tests {

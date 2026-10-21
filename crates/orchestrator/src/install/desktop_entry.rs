@@ -310,7 +310,7 @@ fn remove_file(path: &Path) -> Result<(), DesktopIntegrationError> {
 #[derive(Debug, Error)]
 pub enum DesktopIntegrationError {
     /// An owned location could not be read.
-    #[error("could not read desktop integration at {path}: {source}")]
+    #[error("{}", words::desktop_integration_unreadable(.path, .source))]
     Read {
         /// File that could not be read.
         path: PathBuf,
@@ -318,7 +318,7 @@ pub enum DesktopIntegrationError {
         source: io::Error,
     },
     /// An owned location could not be changed.
-    #[error("could not update desktop integration at {path}: {source}")]
+    #[error("{}", words::desktop_integration_unwritable(.path, .source))]
     Write {
         /// File that could not be changed.
         path: PathBuf,
@@ -326,7 +326,7 @@ pub enum DesktopIntegrationError {
         source: io::Error,
     },
     /// Foreign state occupies one of the two exact product paths.
-    #[error("foreign desktop integration was left untouched at {desktop_entry} or {icon}")]
+    #[error("{}", words::desktop_integration_foreign(.desktop_entry, .icon))]
     ForeignState {
         /// Desktop entry location.
         desktop_entry: PathBuf,
@@ -334,7 +334,7 @@ pub enum DesktopIntegrationError {
         icon: PathBuf,
     },
     /// A completed write did not produce the expected state.
-    #[error("desktop integration did not reach its exact current state")]
+    #[error("{}", words::DESKTOP_INTEGRATION_UNVERIFIED)]
     VerificationFailed,
 }
 

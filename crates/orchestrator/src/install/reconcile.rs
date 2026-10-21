@@ -280,14 +280,10 @@ impl Registrations {
     }
 }
 
-/// What a failure of the Start-menu shortcut or the installed-apps entry is prefixed with in the
-/// reports.
-const WINDOWS_ENTRIES_FAILURE: &str = "Start menu";
-
 /// How the reports word `error`, which stopped the Windows entries from being read or written.
 #[must_use]
 pub fn windows_entries_failure(error: &io::Error) -> String {
-    format!("{WINDOWS_ENTRIES_FAILURE}: {error}")
+    words::windows_entries_failed(error)
 }
 
 /// Whether this process may change native-host registrations: always for a real home, and under
@@ -303,7 +299,9 @@ fn reconcile_native_hosts(hosts: &NativeHostRegistry, report: &mut ReconcileRepo
     let before = match hosts.check() {
         Ok(before) => before,
         Err(error) => {
-            report.failures.push(format!("Browser connection: {error}"));
+            report
+                .failures
+                .push(words::browser_connections_failed(&error));
             return;
         }
     };
@@ -333,10 +331,12 @@ fn reconcile_native_hosts(hosts: &NativeHostRegistry, report: &mut ReconcileRepo
                 result
                     .private
                     .iter()
-                    .map(|name| format!("{name} browser connection")),
+                    .map(|name| words::browser_connection_name(name)),
             );
         }
-        Err(error) => report.failures.push(format!("Browser connection: {error}")),
+        Err(error) => report
+            .failures
+            .push(words::browser_connections_failed(&error)),
     }
 }
 
@@ -347,7 +347,7 @@ fn reconcile_clients(clients: &HarnessRegistry, report: &mut ReconcileReport) {
     let summaries = match clients.refresh() {
         Ok(summaries) => summaries,
         Err(error) => {
-            report.failures.push(format!("MCP clients: {error}"));
+            report.failures.push(words::mcp_clients_failed(&error));
             return;
         }
     };
@@ -355,7 +355,7 @@ fn reconcile_clients(clients: &HarnessRegistry, report: &mut ReconcileReport) {
         match summary.state {
             HarnessState::Updatable if summary.private_view => report
                 .kept_private
-                .push(format!("{} MCP client", summary.label)),
+                .push(words::mcp_client_name(&summary.label)),
             HarnessState::Updatable => match clients.apply(&summary.id, HarnessAction::Install) {
                 Ok(_) => report.clients_rewritten.push(summary.label),
                 Err(error) => report.failures.push(format!("{}: {error}", summary.label)),

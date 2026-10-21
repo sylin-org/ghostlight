@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::language::deployment as words;
+
 /// Package form of one supported browser installation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -112,24 +114,7 @@ pub(crate) fn inspect(context: &BrowserPackageContext, spec: BrowserPackageSpec)
 }
 
 pub(crate) fn detail(name: &str, package: BrowserPackage) -> String {
-    match package {
-        BrowserPackage::Native => {
-            format!("A native {name} package can start Ghostlight.")
-        }
-        BrowserPackage::Snap => format!(
-            "{name} is installed as a Snap. Its sandbox cannot connect to Ghostlight; install a supported native browser package."
-        ),
-        BrowserPackage::Flatpak => format!(
-            "{name} is installed as a Flatpak. Its sandbox cannot connect to Ghostlight; install a supported native browser package."
-        ),
-        BrowserPackage::MultipleSandboxes => format!(
-            "{name} is installed as Snap and Flatpak packages. Neither sandbox can start Ghostlight; install a supported native browser package."
-        ),
-        BrowserPackage::NotDetected => format!("No supported {name} installation was detected."),
-        BrowserPackage::NotChecked => {
-            "Browser package provenance is not checked on this operating system.".into()
-        }
-    }
+    words::browser_package_detail(name, package)
 }
 
 pub(crate) fn native_executable_path(

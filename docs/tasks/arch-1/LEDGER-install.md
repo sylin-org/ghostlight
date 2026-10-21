@@ -436,7 +436,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | landed (this commit); see Notes, second sweep |
 | INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | landed (this commit); see Notes, second sweep |
 | INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | landed (this commit) |
-| INST-9 | refactor(install): the install's sentences move to `language/deployment.rs` | - | INST-9; some reach the agent, so model-visible text stays byte-equal | todo |
+| INST-9 | refactor(install): the install's sentences move to `language/deployment.rs` | - | INST-9; some reach the agent, so model-visible text stays byte-equal | landed (this commit) |
 | INST-8 | refactor(install): `inspect` reads its state once | - | INST-8 | todo |
 | INST-6 | refactor(install): one `edit` for every dialect | INST-8 | INST-6 | todo |
 | INST-7 | refactor(install): each dialect names its keys once | INST-6 | INST-7 | todo |

@@ -211,10 +211,7 @@ impl HarnessRegistry {
         let result = match action {
             HarnessAction::Check => HarnessActionResult {
                 changed: false,
-                message: format!(
-                    "{} was checked without changing configuration.",
-                    definition.label
-                ),
+                message: words::harness_checked(&definition.label),
                 summary: inspect(&self.inner.context, &definition),
             },
             HarnessAction::Install => apply_install(&self.inner.context, &definition)?,

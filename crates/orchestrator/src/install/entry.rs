@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use super::record::Standing;
+use crate::language::deployment as words;
 
 /// What a process was started to do, as far as the entry rule cares.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -69,7 +70,7 @@ pub enum Entry {
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum Refusal {
     /// Only the installed service serves, so there is one service per user by construction.
-    #[error("only the installed Ghostlight service can serve")]
+    #[error("{}", words::SERVE_FROM_ELSEWHERE)]
     ServeFromElsewhere,
 }
 

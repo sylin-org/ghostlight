@@ -1278,19 +1278,7 @@ fn remove_retired_firefox_registration(
 }
 
 fn state_detail(state: NativeHostState) -> &'static str {
-    match state {
-        NativeHostState::Missing => "Ghostlight is not registered with this browser.",
-        NativeHostState::Current => {
-            "This browser is registered to start this installation of Ghostlight."
-        }
-        NativeHostState::Updatable => "A Ghostlight-owned registration points at older details.",
-        NativeHostState::OwnedElsewhere => {
-            "A Ghostlight-owned registration belongs to another installation."
-        }
-        NativeHostState::NeedsAttention => {
-            "Malformed or foreign state was found and will not be changed."
-        }
-    }
+    words::native_host_state_detail(state)
 }
 
 /// Name the installation that owns a cross-tree registration, and say when that installation
@@ -1306,11 +1294,7 @@ fn owned_elsewhere_detail(
         || connector.display().to_string(),
         |dir| dir.display().to_string(),
     );
-    if registration_io.path_exists(connector) {
-        format!("Another Ghostlight installation at {location} owns this registration.")
-    } else {
-        format!("A removed Ghostlight installation at {location} still owns this registration.")
-    }
+    words::native_host_owned_by(&location, registration_io.path_exists(connector))
 }
 
 /// The one Windows manifest every browser's registry value names: `home/manifests`.
@@ -1423,10 +1407,10 @@ pub enum NativeHostError {
     #[error("{}", words::unknown_browser(.0))]
     UnknownBrowser(String),
     /// The packaged sibling Ghostlight edge is unavailable.
-    #[error("the Ghostlight program is missing: {0}")]
+    #[error("{}", words::native_host_edge_missing(.0))]
     ConnectorMissing(PathBuf),
     /// A registration file could not be read.
-    #[error("could not read native-host state at {path}: {source}")]
+    #[error("{}", words::native_host_unreadable(.path, .source))]
     Read {
         /// File that could not be read.
         path: PathBuf,
@@ -1434,7 +1418,7 @@ pub enum NativeHostError {
         source: io::Error,
     },
     /// A registration file could not be written or removed.
-    #[error("could not update native-host state at {path}: {source}")]
+    #[error("{}", words::native_host_unwritable(.path, .source))]
     Write {
         /// File that could not be changed.
         path: PathBuf,
@@ -1442,24 +1426,22 @@ pub enum NativeHostError {
         source: io::Error,
     },
     /// The manifest could not be encoded.
-    #[error("could not encode the native-host manifest: {0}")]
+    #[error("{}", words::native_host_manifest_unencodable(.0))]
     Serialize(serde_json::Error),
     /// Windows registry access failed.
-    #[error("could not update the per-user browser registration: {0}")]
+    #[error("{}", words::native_host_registry_failed(.0))]
     Registry(String),
     /// A non-Windows build was asked to touch the Windows registry.
-    #[error("Windows registry access is unavailable on this operating system")]
+    #[error("{}", words::NATIVE_HOST_REGISTRY_UNSUPPORTED)]
     UnsupportedRegistry,
     /// A foreign manifest occupies the current product location.
-    #[error("a foreign manifest was left untouched at {0}")]
+    #[error("{}", words::native_host_foreign_manifest(.0))]
     ForeignManifest(PathBuf),
     /// Recovery revalidation no longer proves that the named state is owned and stale.
-    #[error(
-        "browser '{0}' is not an owned stale registration; automatic recovery left it unchanged"
-    )]
+    #[error("{}", words::native_host_repair_unavailable(.0))]
     OwnedRepairUnavailable(String),
     /// An action completed without reaching the required exact state.
-    #[error("native-host registration did not reach the expected current state")]
+    #[error("{}", words::NATIVE_HOST_UNVERIFIED)]
     VerificationFailed,
     /// The change would reach only the private view of the app container this process runs in.
     #[error("{0}")]
