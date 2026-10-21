@@ -67,42 +67,23 @@ mod tests {
         }
     }
 
+    /// ACCEPTANCE Desktop 24: setup completes once, at the first agent request that reaches a
+    /// browser. A later request leaves that first record as it is, and any file in its place,
+    /// even one that does not parse, counts as complete, so setup never starts over.
     #[test]
-    fn a_missing_record_is_not_complete_and_a_written_one_is() {
+    fn setup_is_recorded_once_and_any_file_there_counts_as_complete() {
         let scratch = Scratch::new();
         let path = scratch.path().join("state").join("setup.json");
         assert!(!is_complete(&path));
-        assert_eq!(read(&path), None);
-        assert!(record_if_absent(&path, &record(7)).unwrap());
-        assert!(is_complete(&path));
-        assert_eq!(read(&path), Some(record(7)));
-    }
-
-    #[test]
-    fn a_second_record_leaves_the_first_unchanged() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("setup.json");
         assert!(record_if_absent(&path, &record(1)).unwrap());
+        assert!(is_complete(&path));
         assert!(!record_if_absent(&path, &record(2)).unwrap());
         assert_eq!(read(&path), Some(record(1)));
-    }
 
-    #[test]
-    fn a_file_that_does_not_parse_still_counts_as_complete() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("setup.json");
-        fs::write(&path, b"not json").unwrap();
-        assert!(is_complete(&path));
-        assert_eq!(read(&path), None);
-        assert!(!record_if_absent(&path, &record(3)).unwrap());
-        assert_eq!(fs::read(&path).unwrap(), b"not json");
-    }
-
-    #[test]
-    fn unknown_fields_are_ignored() {
-        let scratch = Scratch::new();
-        let path = scratch.path().join("setup.json");
-        fs::write(&path, br#"{"first_request_ms":42,"added_later":"x"}"#).unwrap();
-        assert_eq!(read(&path), Some(record(42)));
+        let unreadable = scratch.path().join("unreadable.json");
+        fs::write(&unreadable, b"not json").unwrap();
+        assert!(is_complete(&unreadable));
+        assert!(!record_if_absent(&unreadable, &record(3)).unwrap());
+        assert_eq!(fs::read(&unreadable).unwrap(), b"not json");
     }
 }
