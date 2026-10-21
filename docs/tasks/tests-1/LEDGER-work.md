@@ -18,7 +18,7 @@ added there in the commit that deletes it. `governance/` moved to the language l
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 373 | 55 | 191 |
+| `work/` and `workspace/` | 373 | 55 | 146 |
 | `governance/` | 136 | 40 | moved to the language lane (2026-10-21) |
 
 ## Slices
@@ -44,7 +44,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | W13 | `tests/availability.rs`: 31 tests are four (waited for or started again; no browser waits only while one returns; the store only while it helps, with S-D7; binding and W-D5); `attach_later`'s sleeps are gone: an `ArrivesWhenAwaited` port runs the arrival when the call starts waiting; the written-record row moves to findings; the other record tests were findings' rows already | 278 | 251 | promise 4 (Contract 17, 19, 20; ADR-0196 D12; S-D7; W-D5) | landed (b87b6d05, ecc7b349) |
 | W14 | `tests/protocol4.rs`: 28 tests are four (a failure's true effect; dialogs; a fill's answer, holding the language lane's two K13 rows; what the service asks the page), each old test a scoped block with its assertions unchanged | 251 | 227 | contract 1, promise 3 (ADR-0158 5; c2df20e2, 925d573c, 3e80fb91, 8256f32d) | landed (0cf15f1e) |
 | W15 | `tests/rebound.rs`: nine tests are one, each a scoped block | 227 | 219 | promise 1 (ADR-0198 D17; 3466718c, 259241ad) | landed (3a7cccf8) |
-| W16 | `tests/tabs.rs`: 33 tests and configured_authority's b9c2da60 landing test are six (reuse, group title, same-document route, which tab a call means, a held tab's landing decision, a close on its own), each old test a scoped block; the ownership refusal sits in the which-tab test rather than K13 | 219 | 191 | promise 6 (BJ 2, 25; Ext 8; Exec 6; Gov 9, 14; ADR-0196 D9; ADR-0203 D2.4, D5.5) | landed |
+| W16 | `tests/tabs.rs`: 33 tests and configured_authority's b9c2da60 landing test are six (reuse, group title, same-document route, which tab a call means, a held tab's landing decision, a close on its own), each old test a scoped block; the ownership refusal sits in the which-tab test rather than K13 | 219 | 191 | promise 6 (BJ 2, 25; Ext 8; Exec 6; Gov 9, 14; ADR-0196 D9; ADR-0203 D2.4, D5.5) | landed (c4b22f1d) |
+| W17 | `workspace/tests.rs`: 50 tests are five (a busy workspace waits; a session outlives its connections; one handle per control per document; a binding across a gap is pending and inert, the store half of restarts.rs, kept here because its helpers are the store's; a tab let go of is reused only as kept and a closed one leaves nothing), each a scoped block; `acquire_until`'s 20 ms sleep goes, either order must acquire | 191 | 146 | promise 5 (ADR-0106; Contract 19; ADR-0203 D1; c78d4bd3, 10fc554a, d80b64c3, 7bd0bf20) | landed |
 
 ## Notes
 
