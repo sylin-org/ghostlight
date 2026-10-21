@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 pub const DEFAULT_TEMPLATE: &str = "default";
 
 /// JSON-RPC internal error code, used when there is no template.
-pub const INTERNAL_ERROR_CODE: i64 = -32603;
+const INTERNAL_ERROR_CODE: i64 = -32603;
 
 /// Which failure the edge is reporting.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,8 +56,7 @@ impl Templates {
 /// Fill a template with a request id. The id keeps its JSON type: a number stays a number.
 ///
 /// A template that is not a JSON object cannot carry an id, so it yields the bare error instead.
-#[must_use]
-pub fn fill(template: &Value, id: &Value) -> Value {
+fn fill(template: &Value, id: &Value) -> Value {
     match template {
         Value::Object(fields) => {
             let mut response = fields.clone();
@@ -69,8 +68,7 @@ pub fn fill(template: &Value, id: &Value) -> Value {
 }
 
 /// A JSON-RPC internal error with an empty message: the answer when no template exists.
-#[must_use]
-pub fn bare_error(id: &Value) -> Value {
+fn bare_error(id: &Value) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,

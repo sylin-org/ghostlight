@@ -97,7 +97,7 @@ pub fn diagnostics_dir() -> io::Result<PathBuf> {
 
 /// The canonical form of `path`, spelled the way a person writes it.
 ///
-/// This is [`std::fs::canonicalize`] followed by [`without_verbatim_prefix`]. On Windows the
+/// This is [`std::fs::canonicalize`] followed by `without_verbatim_prefix`. On Windows the
 /// standard call returns a verbatim path (`\\?\C:\...`), which never compares equal to the
 /// same path written by hand; two canonical paths from this function do compare equal when they
 /// name the same place.
@@ -121,7 +121,7 @@ const VERBATIM_UNC: &str = "UNC\\";
 /// `\\?\C:\x` becomes `C:\x` and `\\?\UNC\server\share\x` becomes
 /// `\\server\share\x`. Every other path is returned unchanged, including other verbatim forms
 /// (a volume name, a device path) and a path whose text is not valid UTF-8.
-pub fn without_verbatim_prefix(path: &Path) -> PathBuf {
+fn without_verbatim_prefix(path: &Path) -> PathBuf {
     let Some(text) = path.to_str() else {
         return path.to_path_buf();
     };

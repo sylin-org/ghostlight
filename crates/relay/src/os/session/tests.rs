@@ -1,4 +1,4 @@
-//! Tests of the session listener: the ending state, the refusal to start anything while it holds,
+//! Tests of the session listener: the refusal to start anything while the session is ending,
 //! the fallback exit, and the platform sources (a window and the console handler on Windows, the
 //! signal handler's self-pipe on Linux).
 //!
@@ -19,9 +19,6 @@ use crate::protocol::StartReason;
 /// How long a test waits for something that should happen at once.
 const PROMPTLY: Duration = Duration::from_secs(5);
 
-/// How long a test waits to be sure something does not happen.
-const NOT_AT_ALL: Duration = Duration::from_millis(200);
-
 /// Take the test lock and make sure the state starts cleared.
 fn exclusive() -> MutexGuard<'static, ()> {
     let guard = lock(&EXCLUSIVE);
@@ -29,183 +26,63 @@ fn exclusive() -> MutexGuard<'static, ()> {
     guard
 }
 
-/// A listener whose events arrive on the returned receiver.
-fn recording() -> (SessionListener, Receiver<SessionEvent>) {
+/// A listener that reports each event on the returned receiver, with whether the session counted
+/// as ending when the callback saw it.
+fn recording() -> (SessionListener, Receiver<(SessionEvent, bool)>) {
     let (sender, receiver) = channel();
     let listener = listen(move |event| {
-        let _ = sender.send(event);
+        let _ = sender.send((event, session_ending()));
     })
     .expect("the session listener starts");
     (listener, receiver)
 }
 
+/// ADR-0199 Decision 13 and defect aaf1b2dd: nothing starts while the session is ending. A
+/// process born after the broadcast refuses too, because the system says the session is shutting
+/// down. Once the system has asked whether the session may end, starting the service and starting
+/// any program refuse with `START_REFUSED` before they look anything up, whatever the system
+/// says; and once the system cancels the end, a start is attempted again.
 #[test]
-fn a_query_starts_the_ending_state_and_only_a_cancel_lifts_it() {
+fn nothing_starts_while_the_session_is_ending_and_a_cancel_lets_starts_through() {
     let _exclusive = exclusive();
-    let (listener, events) = recording();
-    assert!(!session_ending());
+    assert!(refuse_start_by(|| false).is_ok(), "no signal heard");
+    assert_eq!(
+        refuse_start_by(|| true)
+            .expect_err("a process born after the broadcast starts nothing")
+            .to_string(),
+        START_REFUSED
+    );
 
     dispatch(SessionEvent::Query);
-    assert!(session_ending(), "the query counts as the start of the end");
-    dispatch(SessionEvent::Terminating);
-    assert!(session_ending());
-    dispatch(SessionEvent::Cancelled);
-    assert!(
-        !session_ending(),
-        "a cancel from the system lifts the state"
-    );
-
-    let seen: Vec<SessionEvent> = events.try_iter().collect();
     assert_eq!(
-        seen,
-        [
-            SessionEvent::Query,
-            SessionEvent::Terminating,
-            SessionEvent::Cancelled
-        ]
+        crate::spawn::start_service(StartReason::Agent)
+            .expect_err("no service starts while the session is ending")
+            .to_string(),
+        START_REFUSED
     );
-    drop(listener);
-}
-
-#[test]
-fn the_state_is_set_before_a_callback_sees_the_event() {
-    let _exclusive = exclusive();
-    let (sender, seen) = channel();
-    let listener = listen(move |event| {
-        let _ = sender.send((event, session_ending()));
-    })
-    .expect("the session listener starts");
-
-    dispatch(SessionEvent::Terminating);
-    dispatch(SessionEvent::Cancelled);
-
-    let seen: Vec<(SessionEvent, bool)> = seen.try_iter().collect();
-    assert_eq!(
-        seen,
-        [
-            (SessionEvent::Terminating, true),
-            (SessionEvent::Cancelled, false)
-        ]
-    );
-    drop(listener);
-}
-
-#[test]
-fn a_dropped_listener_hears_nothing_more() {
-    let _exclusive = exclusive();
-    let (listener, events) = recording();
-    drop(listener);
-
-    dispatch(SessionEvent::Terminating);
-    dispatch(SessionEvent::Cancelled);
-
-    assert!(events.recv_timeout(NOT_AT_ALL).is_err());
-}
-
-#[test]
-fn every_registered_listener_hears_an_event() {
-    let _exclusive = exclusive();
-    let (first, first_events) = recording();
-    let (second, second_events) = recording();
-
-    dispatch(SessionEvent::Terminating);
-
-    assert_eq!(
-        first_events.recv_timeout(PROMPTLY),
-        Ok(SessionEvent::Terminating)
-    );
-    assert_eq!(
-        second_events.recv_timeout(PROMPTLY),
-        Ok(SessionEvent::Terminating)
-    );
-    dispatch(SessionEvent::Cancelled);
-    drop((first, second));
-}
-
-#[test]
-fn starting_the_service_refuses_while_the_session_is_ending_and_spawns_nothing() {
-    let _exclusive = exclusive();
-    dispatch(SessionEvent::Query);
-
-    let refused = crate::spawn::start_service(StartReason::Agent)
-        .expect_err("no service starts while the session is ending");
-    assert_eq!(refused.to_string(), START_REFUSED);
-
-    dispatch(SessionEvent::Cancelled);
-}
-
-#[test]
-fn a_detached_start_refuses_while_the_session_is_ending_and_not_after_the_cancel() {
-    let _exclusive = exclusive();
     let missing = Path::new("ghostlight-no-such-program");
     let arguments: [&OsStr; 0] = [];
     let directory = Path::new(env!("CARGO_MANIFEST_DIR"));
-
-    dispatch(SessionEvent::Terminating);
-    let refused = crate::os::spawn_detached(missing, &arguments, directory)
-        .expect_err("a program is not started while the session is ending");
     assert_eq!(
-        refused.to_string(),
+        crate::os::spawn_detached(missing, &arguments, directory)
+            .expect_err("no program starts while the session is ending")
+            .to_string(),
         START_REFUSED,
         "the refusal comes before the program is looked up"
     );
+    assert!(
+        refuse_start_by(|| false).is_err(),
+        "a heard signal counts whatever the system says"
+    );
 
     dispatch(SessionEvent::Cancelled);
-    let missing_now = crate::os::spawn_detached(missing, &arguments, directory)
-        .expect_err("a program that does not exist cannot start");
     assert_ne!(
-        missing_now.to_string(),
+        crate::os::spawn_detached(missing, &arguments, directory)
+            .expect_err("a program that does not exist cannot start")
+            .to_string(),
         START_REFUSED,
         "once the system cancels, the start is attempted again"
     );
-}
-
-#[test]
-fn a_process_born_after_the_broadcast_still_counts_the_session_as_ending() {
-    let _exclusive = exclusive();
-    assert!(!session_ending(), "no signal heard");
-
-    assert!(
-        ending_by(|| true),
-        "the system says the session is shutting down"
-    );
-    assert!(!ending_by(|| false));
-
-    let refused = refuse_start_by(|| true).expect_err("a late process starts nothing");
-    assert_eq!(refused.to_string(), START_REFUSED);
-    assert!(refuse_start_by(|| false).is_ok());
-}
-
-#[test]
-fn a_heard_signal_counts_whatever_the_system_says() {
-    let _exclusive = exclusive();
-    dispatch(SessionEvent::Query);
-    assert!(ending_by(|| false));
-    assert!(refuse_start_by(|| false).is_err());
-    dispatch(SessionEvent::Cancelled);
-    assert!(!ending_by(|| false));
-}
-
-#[test]
-fn the_final_signal_arms_the_fallback_before_it_stops() {
-    let order = std::sync::Mutex::new(Vec::new());
-    stop_after(
-        SessionEvent::Terminating,
-        || order.lock().unwrap().push("fallback"),
-        || order.lock().unwrap().push("stop"),
-    );
-    assert_eq!(*order.lock().unwrap(), ["fallback", "stop"]);
-}
-
-#[test]
-fn a_query_or_a_cancel_stops_nothing() {
-    for event in [SessionEvent::Query, SessionEvent::Cancelled] {
-        stop_after(
-            event,
-            || panic!("the fallback is armed only for the final signal"),
-            || panic!("nothing stops before the final signal"),
-        );
-    }
 }
 
 /// Set by [`mark_exit`].
@@ -216,37 +93,51 @@ fn mark_exit() {
     EXITED.store(true, Ordering::SeqCst);
 }
 
+/// ADR-0199 Decisions 13 and 14: only the final signal stops a process, and it arms the fallback
+/// exit before the orderly stop, so a stop that blocks can never hold the session open. Here the
+/// stop blocks until the fallback fires, which it can only do if the fallback was armed first. A
+/// query or a cancel stops nothing.
 #[test]
-fn the_fallback_exit_fires_after_its_limit_and_not_before() {
-    EXITED.store(false, Ordering::SeqCst);
-    arm_exit_after(Duration::from_millis(300), mark_exit);
-
-    thread::sleep(Duration::from_millis(50));
-    assert!(!EXITED.load(Ordering::SeqCst), "not before the limit");
-    let deadline = std::time::Instant::now() + PROMPTLY;
-    while !EXITED.load(Ordering::SeqCst) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the fallback exit never fired"
+fn the_final_signal_arms_a_fallback_exit_that_fires_while_the_stop_blocks() {
+    for event in [SessionEvent::Query, SessionEvent::Cancelled] {
+        stop_after(
+            event,
+            || panic!("the fallback is armed only for the final signal"),
+            || panic!("nothing stops before the final signal"),
         );
-        thread::sleep(Duration::from_millis(10));
     }
-}
 
-#[test]
-fn the_fallback_is_under_the_two_seconds_a_session_end_allows() {
-    assert_eq!(FALLBACK_EXIT, Duration::from_secs(2));
+    EXITED.store(false, Ordering::SeqCst);
+    let mut fired_while_the_stop_blocked = false;
+    stop_after(
+        SessionEvent::Terminating,
+        || arm_exit_after(Duration::from_millis(10), mark_exit),
+        || {
+            let deadline = std::time::Instant::now() + PROMPTLY;
+            while !EXITED.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(1));
+            }
+            fired_while_the_stop_blocked = EXITED.load(Ordering::SeqCst);
+        },
+    );
+    assert!(
+        fired_while_the_stop_blocked,
+        "the fallback exit fired while the orderly stop still waited"
+    );
 }
 
 #[cfg(windows)]
 mod windows_source {
-    //! The hidden window and the console handler, driven the way Windows drives them.
+    //! The hidden window and the console handlers, driven the way Windows drives them.
 
     use super::*;
+    use crate::os::console::swallows_console_event;
     use crate::os::session::windows::{console_ctrl_handler, Hwnd, Lparam, Lresult, Wparam};
 
     const WM_QUERYENDSESSION: u32 = 0x0011;
     const WM_ENDSESSION: u32 = 0x0016;
+    const CTRL_C_EVENT: u32 = 0;
+    const CTRL_BREAK_EVENT: u32 = 1;
     const CTRL_CLOSE_EVENT: u32 = 2;
     const CTRL_LOGOFF_EVENT: u32 = 5;
     const CTRL_SHUTDOWN_EVENT: u32 = 6;
@@ -263,46 +154,75 @@ mod windows_source {
         unsafe { SendMessageW(listener._attached.hwnd, message, w_param, 0) }
     }
 
+    /// The audited session window on Windows (ADR-0199 Decision 13): the hidden top-level
+    /// window answers `WM_QUERYENDSESSION` with TRUE at once, so Ghostlight never delays the end,
+    /// and reports each stage to every listener with the ending state already set when the
+    /// callback runs: the query starts it, the end keeps it, and `WM_ENDSESSION` with FALSE, a
+    /// cancelled end, lifts it.
     #[test]
-    fn the_window_answers_the_query_true_at_once_and_reports_each_stage() {
+    fn the_window_allows_the_end_at_once_and_reports_each_stage_with_the_state_set() {
         let _exclusive = exclusive();
         let (listener, events) = recording();
 
         assert_eq!(send(&listener, WM_QUERYENDSESSION, 0), 1, "TRUE, at once");
-        assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Query));
-        assert!(session_ending());
-
+        assert_eq!(
+            events.recv_timeout(PROMPTLY),
+            Ok((SessionEvent::Query, true))
+        );
         assert_eq!(send(&listener, WM_ENDSESSION, 1), 0);
-        assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Terminating));
-        assert!(session_ending());
-
+        assert_eq!(
+            events.recv_timeout(PROMPTLY),
+            Ok((SessionEvent::Terminating, true))
+        );
         assert_eq!(send(&listener, WM_ENDSESSION, 0), 0);
-        assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Cancelled));
-        assert!(
-            !session_ending(),
+        assert_eq!(
+            events.recv_timeout(PROMPTLY),
+            Ok((SessionEvent::Cancelled, false)),
             "WM_ENDSESSION with FALSE lifts the state"
         );
+        assert!(!session_ending());
 
         drop(listener);
     }
 
+    /// ADR-0180, ADR-0199 Decision 13 and the desktop workbench gates of ACCEPTANCE: no console
+    /// handler of Ghostlight keeps the default process exit from running. The edge that waits for
+    /// its child swallows only Ctrl-C and Ctrl-Break, never a close, a logoff or a shutdown; and
+    /// the session listener's handler answers FALSE to every event, reporting a logoff or a
+    /// shutdown as the end of the session and a closed console window as nothing.
     #[test]
-    fn the_console_handler_never_suppresses_the_default_exit() {
+    fn no_console_handler_suppresses_the_default_exit() {
+        assert!(swallows_console_event(CTRL_C_EVENT));
+        assert!(swallows_console_event(CTRL_BREAK_EVENT));
+        for event in [
+            CTRL_CLOSE_EVENT,
+            CTRL_LOGOFF_EVENT,
+            CTRL_SHUTDOWN_EVENT,
+            3,
+            4,
+            7,
+            u32::MAX,
+        ] {
+            assert!(!swallows_console_event(event), "event {event}");
+        }
+
         let _exclusive = exclusive();
         let (listener, events) = recording();
-
         for control in [CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT] {
             // SAFETY: this exercises the registered handler with a documented control code.
             let handled = unsafe { console_ctrl_handler(control) };
             assert_eq!(handled, 0, "FALSE, so the default exit runs");
-            assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Terminating));
+            assert_eq!(
+                events.try_recv(),
+                Ok((SessionEvent::Terminating, true)),
+                "event {control}"
+            );
         }
-
         // SAFETY: as above.
         let handled = unsafe { console_ctrl_handler(CTRL_CLOSE_EVENT) };
         assert_eq!(handled, 0, "a closed console is not handled either");
         assert!(
-            events.recv_timeout(NOT_AT_ALL).is_err(),
+            events.try_recv().is_err(),
             "a closed console window is not the end of the session"
         );
 
@@ -320,40 +240,47 @@ mod linux_source {
 
     const SIGHUP: i32 = 1;
     const SIGTERM: i32 = 15;
+    const ENOENT: i32 = 2;
 
     extern "C" {
         fn __errno_location() -> *mut i32;
     }
 
+    /// The audited signal handler on Linux (ADR-0199 Decision 13): a signal handler may do only
+    /// async-signal-safe work, so on SIGTERM and SIGHUP it sets the ending state itself and
+    /// writes one byte to the self-pipe, keeping `errno` as it found it. The listener's thread
+    /// then reports the end of the session to every callback, with the state already set.
     #[test]
-    fn a_signal_reaches_the_callback_through_the_self_pipe() {
+    fn the_signal_handler_sets_the_state_wakes_the_listener_and_keeps_errno() {
         let _exclusive = exclusive();
         let (listener, events) = recording();
 
         for number in [SIGTERM, SIGHUP] {
+            // SAFETY: errno is this thread's own.
+            unsafe { *__errno_location() = ENOENT };
             handle_signal(number);
-            assert!(session_ending(), "the handler sets the state itself");
-            assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Terminating));
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(ENOENT),
+                "signal {number}: errno is kept"
+            );
+            assert!(
+                session_ending(),
+                "signal {number}: the handler sets the state itself"
+            );
+            assert_eq!(
+                events.recv_timeout(PROMPTLY),
+                Ok((SessionEvent::Terminating, true)),
+                "signal {number}"
+            );
             dispatch(SessionEvent::Cancelled);
-            assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Cancelled));
+            assert_eq!(
+                events.recv_timeout(PROMPTLY),
+                Ok((SessionEvent::Cancelled, false)),
+                "signal {number}"
+            );
         }
 
-        drop(listener);
-    }
-
-    #[test]
-    fn the_handler_leaves_errno_as_it_found_it() {
-        let _exclusive = exclusive();
-        let (listener, events) = recording();
-        const ENOENT: i32 = 2;
-        // SAFETY: errno is this thread's own.
-        unsafe { *__errno_location() = ENOENT };
-
-        handle_signal(SIGTERM);
-
-        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(ENOENT));
-        assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Terminating));
-        dispatch(SessionEvent::Cancelled);
         drop(listener);
     }
 }

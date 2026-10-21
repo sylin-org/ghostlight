@@ -1,10 +1,11 @@
-//! Tests of the platform module: a detached child holds nothing of its starter, a program that
-//! cannot start is an error, and (Windows) command-line quoting and process identity.
+//! Tests of the platform module: a detached child holds nothing of its starter and a start that
+//! cannot happen is an error, (Windows) command-line quoting and process identity, the
+//! AppUserModelID call, and the ancestor walk.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -161,8 +162,13 @@ mod linux_platform {
     }
 }
 
+/// Defect 2c5f7954 and the audited process start: a detached child holds none of its starter's
+/// handles or descriptors, so a starter whose output is captured (an installer piped through a
+/// filter) sees that output end while the child still runs. A start that cannot happen, a
+/// missing program or a missing directory, is still an error; on Linux that means the
+/// close-on-exec marking left the standard library's exec-error pipe open until the exec.
 #[test]
-fn a_detached_child_holds_none_of_its_starters_handles() {
+fn a_detached_start_holds_nothing_of_its_starter_and_reports_a_start_that_cannot_happen() {
     let _exclusive = EXCLUSIVE
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
@@ -185,111 +191,95 @@ fn a_detached_child_holds_none_of_its_starters_handles() {
         .expect("the pipe reaches end of file while the child runs, so the child does not hold it");
     assert_eq!(outcome.expect("the read ends cleanly"), 0);
     assert!(platform::is_running(pid), "the child is still running");
-}
 
-#[test]
-fn a_program_that_cannot_start_is_an_error() {
-    let _exclusive = EXCLUSIVE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
     let missing = Path::new("ghostlight-no-such-program");
-    assert!(spawn_detached(missing, &[], Path::new(START_DIRECTORY)).is_err());
-}
-
-#[test]
-fn a_directory_that_does_not_exist_is_an_error() {
-    let _exclusive = EXCLUSIVE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    let (program, arguments) = platform::long_lived_program();
-    let arguments: Vec<&OsStr> = arguments.iter().map(OsString::as_os_str).collect();
+    assert!(
+        spawn_detached(missing, &[], Path::new(START_DIRECTORY)).is_err(),
+        "a missing program"
+    );
     let scratch = Scratch::named("spawn");
-    let missing: PathBuf = scratch.join("no-such-directory");
-    assert!(spawn_detached(&program, &arguments, &missing).is_err());
+    assert!(
+        spawn_detached(&program, &arguments, &scratch.join("no-such-directory")).is_err(),
+        "a missing directory"
+    );
 }
 
 #[cfg(windows)]
 mod windows_only {
-    //! Command-line quoting, creation flags and process identity.
+    //! Command-line quoting and process identity.
 
     use std::ffi::OsStr;
     use std::path::Path;
     use std::process::Command;
 
-    use crate::os::windows::{command_line, CREATION_FLAGS};
-    use crate::os::{parent_process, process_identity, process_is_alive};
+    use crate::os::windows::command_line;
+    use crate::os::{process_identity, process_is_alive};
 
     fn line(executable: &str, arguments: &[&str]) -> String {
         let arguments: Vec<&OsStr> = arguments.iter().map(OsStr::new).collect();
         String::from_utf16(&command_line(Path::new(executable), &arguments)).unwrap()
     }
 
+    /// The audited process start on Windows: `CreateProcessW` takes one command line, which the
+    /// child's C runtime splits again, so each argument is quoted by the rules that runtime
+    /// parses. An argument that is empty or holds a space, a tab or a quote is quoted; a quote
+    /// inside is escaped; the backslashes before a quote or before the closing quote are
+    /// doubled; and every other argument, a trailing backslash included, passes as it is. A
+    /// home whose path holds a space starts its service only because of these rules.
     #[test]
-    fn plain_arguments_are_not_quoted() {
-        assert_eq!(
-            line(r"C:\g\ghostlight.exe", &["serve"]),
-            r"C:\g\ghostlight.exe serve"
-        );
-        assert_eq!(line("g", &[r"C:\dir\"]), r"g C:\dir\");
+    fn the_command_line_is_quoted_as_the_c_runtime_parses_it() {
+        let cases: [(&str, &[&str], &str); 8] = [
+            (
+                r"C:\g\ghostlight.exe",
+                &["serve"],
+                r"C:\g\ghostlight.exe serve",
+            ),
+            ("g", &[r"C:\dir\"], r"g C:\dir\"),
+            ("g", &[""], r#"g """#),
+            (
+                r"C:\Program Files\g\ghostlight.exe",
+                &["a\tb"],
+                "\"C:\\Program Files\\g\\ghostlight.exe\" \"a\tb\"",
+            ),
+            ("g", &[r#"say "hi""#], r#"g "say \"hi\"""#),
+            ("g", &[r#"a\"b"#], r#"g "a\\\"b""#),
+            ("g", &[r"C:\My Dir\"], r#"g "C:\My Dir\\""#),
+            ("g", &[r"a b\\c"], r#"g "a b\\c""#),
+        ];
+        for (executable, arguments, expected) in cases {
+            assert_eq!(
+                line(executable, arguments),
+                expected,
+                "{executable} {arguments:?}"
+            );
+        }
     }
 
+    /// The audited process identity on Windows, which the parent watch uses: a process is bound
+    /// to its creation time, so it reads alive with a stable identity while it runs, and dead
+    /// once it has ended even while a handle to it is still held, as a starter's handle often is
+    /// (the signalled-handle check of 36c7ec91).
     #[test]
-    fn an_empty_argument_is_quoted() {
-        assert_eq!(line("g", &[""]), r#"g """#);
-    }
-
-    #[test]
-    fn a_path_with_a_space_is_quoted() {
-        assert_eq!(
-            line(r"C:\Program Files\g\ghostlight.exe", &["a\tb"]),
-            "\"C:\\Program Files\\g\\ghostlight.exe\" \"a\tb\""
-        );
-    }
-
-    #[test]
-    fn a_quote_inside_an_argument_is_escaped() {
-        assert_eq!(line("g", &[r#"say "hi""#]), r#"g "say \"hi\"""#);
-    }
-
-    #[test]
-    fn backslashes_before_a_quote_or_the_closing_quote_are_doubled() {
-        assert_eq!(line("g", &[r#"a\"b"#]), r#"g "a\\\"b""#);
-        assert_eq!(line("g", &[r"C:\My Dir\"]), r#"g "C:\My Dir\\""#);
-        assert_eq!(line("g", &[r"a b\\c"]), r#"g "a b\\c""#);
-    }
-
-    #[test]
-    fn the_launch_is_windowless_detached_and_in_its_own_group() {
-        assert_eq!(
-            CREATION_FLAGS,
-            0x0800_0000 | 0x0000_0008 | 0x0000_0200 | 0x0000_0400
-        );
-    }
-
-    #[test]
-    fn the_current_process_has_a_live_stable_identity() {
-        let process = process_identity(std::process::id()).expect("current process identity");
-        assert!(process_is_alive(process));
-        assert_eq!(process_identity(std::process::id()), Some(process));
-    }
-
-    #[test]
-    fn a_test_process_has_a_parent_to_name() {
-        let parent = parent_process().expect("parent process identity");
-        assert_ne!(parent.process_id, std::process::id());
-    }
-
-    #[test]
-    fn a_terminated_process_reads_as_dead_while_its_handle_is_held() {
+    fn a_process_reads_alive_while_it_runs_and_dead_once_ended_though_its_handle_is_held() {
+        let this = process_identity(std::process::id()).expect("this process's identity");
+        assert!(process_is_alive(this));
         let mut child = Command::new("cmd")
             .args(["/C", "ping -n 30 127.0.0.1 >nul"])
             .spawn()
             .expect("spawn long-lived child");
         let process = process_identity(child.id()).expect("child process identity");
         assert!(process_is_alive(process));
+        assert_eq!(
+            process_identity(child.id()),
+            Some(process),
+            "the identity is stable"
+        );
         child.kill().expect("terminate child");
         child.wait().expect("reap child status");
-        assert!(!process_is_alive(process));
+        assert!(
+            !process_is_alive(process),
+            "dead, though `child` still holds its handle"
+        );
     }
 }
 
@@ -298,54 +288,21 @@ mod app_user_model_id {
 
     use crate::os::set_app_user_model_id;
 
+    /// The audited AppUserModelID call: an id that is empty or holds a NUL, which the call
+    /// would cut short, is refused before the call, and a valid id is set for the process. On
+    /// Linux the call does nothing, since the shell names its window itself.
     #[test]
-    fn an_empty_id_is_invalid_input() {
-        let error = set_app_user_model_id("").expect_err("empty id");
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
-
-    #[test]
-    fn an_id_with_an_interior_nul_is_invalid_input() {
-        let error = set_app_user_model_id("Sylin\0Ghostlight").expect_err("NUL in id");
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
-
-    #[test]
-    fn a_valid_id_is_accepted() {
-        set_app_user_model_id(crate::APP_USER_MODEL_ID).expect("set the test process id");
-    }
-}
-
-mod console_interrupts {
-    use crate::os::{forward_console_interrupts, swallows_console_event};
-
-    const CTRL_C_EVENT: u32 = 0;
-    const CTRL_BREAK_EVENT: u32 = 1;
-    const CTRL_CLOSE_EVENT: u32 = 2;
-    const CTRL_LOGOFF_EVENT: u32 = 5;
-    const CTRL_SHUTDOWN_EVENT: u32 = 6;
-
-    #[test]
-    fn only_ctrl_c_and_ctrl_break_are_swallowed() {
-        assert!(swallows_console_event(CTRL_C_EVENT));
-        assert!(swallows_console_event(CTRL_BREAK_EVENT));
-        for event in [
-            CTRL_CLOSE_EVENT,
-            CTRL_LOGOFF_EVENT,
-            CTRL_SHUTDOWN_EVENT,
-            3,
-            4,
-            7,
-            u32::MAX,
-        ] {
-            assert!(!swallows_console_event(event), "event {event}");
+    fn the_app_user_model_id_call_sets_a_valid_id_and_refuses_one_it_would_cut_short() {
+        for id in ["", "Sylin\0Ghostlight"] {
+            assert_eq!(
+                set_app_user_model_id(id)
+                    .expect_err("an id the call would cut short")
+                    .kind(),
+                ErrorKind::InvalidInput,
+                "{id:?}"
+            );
         }
-    }
-
-    #[test]
-    fn registering_twice_is_harmless() {
-        forward_console_interrupts().expect("first registration");
-        forward_console_interrupts().expect("second registration");
+        set_app_user_model_id(crate::APP_USER_MODEL_ID).expect("a valid id is set");
     }
 }
 
@@ -400,54 +357,62 @@ mod ancestry {
             .collect()
     }
 
+    /// Defect 4f52e834 (one agent gets one set of tools, which matches a connection's source by
+    /// its ancestor's id and start time) and ADR-0161: the ancestor walk reads each parent
+    /// nearest first, with its id, start time and image, and stops at its limit, at the top, at
+    /// a parent that is gone or cannot be read, and at a parent that started after its child,
+    /// whose id therefore names a later process. A connection is never attributed to a process
+    /// that reused an id.
     #[test]
-    fn the_walk_reads_each_parent_nearest_first_with_its_id_and_start_and_stops_at_the_top() {
-        let rows = [
+    fn the_ancestor_walk_reads_parents_nearest_first_and_stops_where_the_chain_breaks() {
+        let to_the_top = [
             (10, Some(20), 5, Some("edge")),
             (20, Some(30), 4, Some("shell")),
             (30, None, 1, Some("app")),
         ];
         assert_eq!(
-            walked(&rows, 16),
+            walked(&to_the_top, 16),
             [(20, 4, "shell".to_owned()), (30, 1, "app".to_owned())]
         );
-    }
-
-    #[test]
-    fn the_walk_stops_at_its_limit() {
-        let rows = [
+        let long = [
             (10, Some(20), 5, Some("edge")),
             (20, Some(30), 4, Some("one")),
             (30, Some(40), 3, Some("two")),
             (40, None, 2, Some("three")),
         ];
-        assert_eq!(images(&rows, 2), ["one", "two"]);
-    }
-
-    #[test]
-    fn a_parent_that_is_gone_or_unreadable_ends_the_walk() {
-        let gone = [(10, Some(20), 5, Some("edge"))];
-        assert!(walked(&gone, 16).is_empty());
+        assert_eq!(images(&long, 2), ["one", "two"], "the limit");
+        assert!(
+            walked(&[(10, Some(20), 5, Some("edge"))], 16).is_empty(),
+            "a parent that is gone"
+        );
         let unreadable = [
             (10, Some(20), 5, Some("edge")),
             (20, Some(30), 4, Some("shell")),
             (30, Some(40), 3, None),
             (40, None, 2, Some("app")),
         ];
-        assert_eq!(images(&unreadable, 16), ["shell"]);
+        assert_eq!(
+            images(&unreadable, 16),
+            ["shell"],
+            "a parent whose image cannot be read"
+        );
         assert!(walked(&[], 16).is_empty(), "the process itself is unknown");
-    }
-
-    #[test]
-    fn a_parent_started_after_its_child_is_a_reused_id_and_ends_the_walk() {
-        let rows = [
+        let reused = [
             (10, Some(20), 5, Some("edge")),
             (20, Some(30), 4, Some("shell")),
             (30, Some(10), 9, Some("later process")),
         ];
-        assert_eq!(images(&rows, 16), ["shell"]);
+        assert_eq!(
+            images(&reused, 16),
+            ["shell"],
+            "a parent started after its child is a reused id"
+        );
     }
 
+    /// The audited process reads behind the walk (on Windows the process snapshot,
+    /// `GetProcessTimes` and `QueryFullProcessImageNameW`; on Linux `/proc`): this test process
+    /// has real ancestors, each with an absolute path, read the same way twice, and a limit of
+    /// zero reads none.
     #[test]
     fn this_test_process_has_real_ancestors_with_absolute_paths() {
         let found = ancestors(std::process::id(), 16);

@@ -1,5 +1,5 @@
-//! Tests of the relay endpoint: names, the connection type over a connected pair, and a real
-//! listener on a temporary home.
+//! Tests of the relay endpoint: the connection type over a connected pair, and a real listener
+//! on a temporary home. On Windows these drive the audited named-pipe calls of `crate::os`.
 
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -45,307 +45,122 @@ fn within_patience<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static)
         .expect("the work finishes in time")
 }
 
+/// Defect 5917fbd4 and the endpoint's audited pipe and peer calls: the first bind owns the
+/// endpoint of a home, so a second is refused. The listener admits each client to an end of its
+/// own, a client that connected before the accept included, and keeps serving after a client
+/// that connected and left before it was accepted (on Windows the pipe then reports
+/// ERROR_NO_DATA, which ended the listener before the fix). The accepted end, and each clone of
+/// it, knows the process the operating system says connected; a connecting end and a pair know
+/// none.
 #[test]
-fn fnv1a32_matches_its_published_vectors() {
-    assert_eq!(fnv1a32(b""), 0x811c_9dc5);
-    assert_eq!(fnv1a32(b"a"), 0xe40c_292c);
-    assert_eq!(fnv1a32(b"foobar"), 0xbf9c_f968);
-}
-
-#[test]
-fn a_pipe_name_carries_the_user_and_the_hash_of_the_lowercased_home() {
-    let endpoint = Endpoint::named_pipe(
-        "S-1-5-21-1-2-3-1001",
-        Path::new(r"C:\Users\Person\.ghostlight"),
-    );
-    assert_eq!(
-        endpoint,
-        Endpoint::NamedPipe(r"\\.\pipe\ghostlight-S-1-5-21-1-2-3-1001-e4c35116".to_owned())
-    );
-    assert_eq!(
-        endpoint.to_string(),
-        r"\\.\pipe\ghostlight-S-1-5-21-1-2-3-1001-e4c35116"
-    );
-}
-
-#[test]
-fn homes_that_differ_only_in_case_share_a_name_and_other_homes_do_not() {
-    let upper = Endpoint::named_pipe("S-1", Path::new(r"C:\USERS\PERSON\.GHOSTLIGHT"));
-    let lower = Endpoint::named_pipe("S-1", Path::new(r"c:\users\person\.ghostlight"));
-    let other = Endpoint::named_pipe("S-1", Path::new(r"c:\users\other\.ghostlight"));
-    assert_eq!(upper, lower);
-    assert_ne!(lower, other);
-}
-
-#[test]
-fn the_socket_endpoint_is_the_relay_socket_in_the_run_directory() {
-    let home = Path::new("/home/person/.ghostlight");
-    let expected = home.join("run").join("relay.sock");
-    assert_eq!(
-        Endpoint::unix_socket(home),
-        Endpoint::UnixSocket(expected.clone())
-    );
-    assert_eq!(
-        Endpoint::unix_socket(home).to_string(),
-        expected.display().to_string()
-    );
-}
-
-#[test]
-fn frames_cross_a_pair_in_both_directions() {
-    let (mut left, mut right) = pair().unwrap();
-    write_frame(&mut left, &json!({"from": "left"})).unwrap();
-    write_frame(&mut right, &json!({"from": "right"})).unwrap();
-    let at_right: Value = read_frame(&mut right).unwrap().unwrap();
-    let at_left: Value = read_frame(&mut left).unwrap().unwrap();
-    assert_eq!(at_right, json!({"from": "left"}));
-    assert_eq!(at_left, json!({"from": "right"}));
-}
-
-#[test]
-fn cloned_ends_read_and_write_at_the_same_time() {
-    const FRAMES: u64 = 200;
-    let (left, right) = pair().unwrap();
-    let mut left_writer = left.try_clone().unwrap();
-    let mut right_writer = right.try_clone().unwrap();
-    let (mut left_reader, mut right_reader) = (left, right);
-
-    let to_right = thread::spawn(move || {
-        for n in 0..FRAMES {
-            write_frame(&mut left_writer, &json!({"to": "right", "n": n})).unwrap();
-        }
-    });
-    let to_left = thread::spawn(move || {
-        for n in 0..FRAMES {
-            write_frame(&mut right_writer, &json!({"to": "left", "n": n})).unwrap();
-        }
-    });
-    let at_left = thread::spawn(move || {
-        for n in 0..FRAMES {
-            let frame: Value = read_frame(&mut left_reader).unwrap().unwrap();
-            assert_eq!(frame, json!({"to": "left", "n": n}));
-        }
-    });
-    for n in 0..FRAMES {
-        let frame: Value = read_frame(&mut right_reader).unwrap().unwrap();
-        assert_eq!(frame, json!({"to": "right", "n": n}));
-    }
-    to_right.join().unwrap();
-    to_left.join().unwrap();
-    at_left.join().unwrap();
-}
-
-#[test]
-fn a_frame_larger_than_the_pipe_buffer_crosses_while_the_peer_reads() {
-    let (mut left, mut right) = pair().unwrap();
-    let payload = "x".repeat(1024 * 1024);
-    let expected = payload.clone();
-    let writer = thread::spawn(move || write_frame(&mut left, &json!({"data": payload})).unwrap());
-    let frame: Value = within_patience(move || read_frame(&mut right).unwrap().unwrap());
-    assert_eq!(frame["data"], json!(expected));
-    writer.join().unwrap();
-}
-
-#[test]
-fn an_idle_read_times_out_and_a_later_frame_still_arrives() {
-    let (mut left, mut right) = pair().unwrap();
-    left.set_read_timeout(Some(Duration::from_millis(100)))
-        .unwrap();
-    let started = Instant::now();
-    let failure = left.read(&mut [0_u8; 8]).unwrap_err();
-    assert_eq!(failure.kind(), io::ErrorKind::TimedOut);
-    assert!(started.elapsed() >= Duration::from_millis(90));
-
-    write_frame(&mut right, &json!({"later": true})).unwrap();
-    let frame: Value = read_frame(&mut left).unwrap().unwrap();
-    assert_eq!(frame, json!({"later": true}));
-}
-
-#[test]
-fn a_timeout_set_on_one_clone_applies_to_the_other() {
-    let (left, _right) = pair().unwrap();
-    let mut other = left.try_clone().unwrap();
-    left.set_read_timeout(Some(Duration::from_millis(50)))
-        .unwrap();
-    let failure = other.read(&mut [0_u8; 8]).unwrap_err();
-    assert_eq!(failure.kind(), io::ErrorKind::TimedOut);
-}
-
-#[test]
-fn a_zero_timeout_is_refused() {
-    let (left, _right) = pair().unwrap();
-    let failure = left.set_read_timeout(Some(Duration::ZERO)).unwrap_err();
-    assert_eq!(failure.kind(), io::ErrorKind::InvalidInput);
-    let failure = left.set_write_timeout(Some(Duration::ZERO)).unwrap_err();
-    assert_eq!(failure.kind(), io::ErrorKind::InvalidInput);
-}
-
-#[test]
-fn shutdown_from_another_thread_ends_a_blocked_read() {
-    let (left, _right) = pair().unwrap();
-    let stopper = left.try_clone().unwrap();
-    let reader = thread::spawn(move || {
-        let mut left = left;
-        left.read(&mut [0_u8; 8])
-    });
-    thread::sleep(Duration::from_millis(150));
-    stopper.shutdown();
-    let outcome = within_patience(move || reader.join().unwrap());
-    assert_eq!(outcome.unwrap(), 0);
-}
-
-#[test]
-fn after_shutdown_reads_end_and_writes_fail_on_every_clone() {
-    let (left, _right) = pair().unwrap();
-    let mut clone = left.try_clone().unwrap();
-    left.shutdown();
-    assert_eq!(clone.read(&mut [0_u8; 8]).unwrap(), 0);
-    let failure = clone.write(b"late").unwrap_err();
-    assert_eq!(failure.kind(), io::ErrorKind::BrokenPipe);
-    left.shutdown();
-}
-
-#[test]
-fn shutdown_ends_the_stream_for_the_peer() {
-    let (left, mut right) = pair().unwrap();
-    left.shutdown();
-    let outcome = within_patience(move || right.read(&mut [0_u8; 8]));
-    assert_eq!(outcome.unwrap(), 0);
-}
-
-#[test]
-fn bytes_written_before_one_end_is_dropped_are_still_read() {
-    let (mut left, mut right) = pair().unwrap();
-    write_frame(&mut left, &json!({"goodbye": "quit"})).unwrap();
-    drop(left);
-    let frame: Value = read_frame(&mut right).unwrap().unwrap();
-    assert_eq!(frame, json!({"goodbye": "quit"}));
-    assert!(read_frame::<Value>(&mut right).unwrap().is_none());
-}
-
-#[test]
-fn a_write_to_a_dropped_peer_fails() {
-    let (mut left, right) = pair().unwrap();
-    drop(right);
-    let failure = within_patience(move || loop {
-        if let Err(failure) = left.write_all(&[0_u8; 4096]) {
-            break failure;
-        }
-    });
-    assert!(matches!(
-        failure.kind(),
-        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
-    ));
-}
-
-#[test]
-fn a_second_first_bind_on_the_same_home_is_refused() {
-    let home = TempHome::new();
-    let _first = Listener::bind_first(home.path()).unwrap();
-    let failure = Listener::bind_first(home.path()).unwrap_err();
-    assert_eq!(failure.kind(), io::ErrorKind::AddrInUse);
-}
-
-#[test]
-fn a_connection_reaches_the_listener_and_the_server_end_reads_what_the_client_wrote() {
+fn the_first_bind_owns_the_endpoint_and_admits_each_client_to_an_end_of_its_own() {
     let home = TempHome::new();
     let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
-    let accepting = Arc::clone(&listener);
-    let server = thread::spawn(move || {
-        let mut server_end = accepting.accept().unwrap();
-        let frame: Value = read_frame(&mut server_end).unwrap().unwrap();
-        write_frame(&mut server_end, &json!({"echo": frame})).unwrap();
+    assert_eq!(
+        Listener::bind_first(home.path()).unwrap_err().kind(),
+        io::ErrorKind::AddrInUse,
+        "the first bind owns the endpoint"
+    );
+
+    let mut early = home.connect().unwrap();
+    write_frame(&mut early, &json!({"n": 0})).unwrap();
+    let server_end = listener.accept().unwrap();
+    assert_eq!(server_end.peer_process_id(), Some(std::process::id()));
+    assert_eq!(
+        server_end.try_clone().unwrap().peer_process_id(),
+        Some(std::process::id())
+    );
+    assert_eq!(early.peer_process_id(), None);
+    let (first, second) = pair().unwrap();
+    assert_eq!(
+        (first.peer_process_id(), second.peer_process_id()),
+        (None, None)
+    );
+    let frame: Value = within_patience(move || {
+        let mut server_end = server_end;
+        read_frame(&mut server_end).unwrap().unwrap()
     });
+    assert_eq!(
+        frame,
+        json!({"n": 0}),
+        "a client that connected before the accept is served"
+    );
 
-    let mut client = home.connect().unwrap();
-    write_frame(&mut client, &json!({"hello": "service"})).unwrap();
-    let reply: Value = within_patience(move || read_frame(&mut client).unwrap().unwrap());
-    assert_eq!(reply, json!({"echo": {"hello": "service"}}));
-    server.join().unwrap();
-}
-
-#[test]
-fn a_client_that_connects_before_accept_is_still_served() {
-    let home = TempHome::new();
-    let listener = Listener::bind_first(home.path()).unwrap();
-    let mut client = home.connect().unwrap();
-    write_frame(&mut client, &json!({"early": true})).unwrap();
-    let mut server_end = listener.accept().unwrap();
-    let frame: Value = within_patience(move || read_frame(&mut server_end).unwrap().unwrap());
-    assert_eq!(frame, json!({"early": true}));
-}
-
-#[test]
-fn a_client_that_connects_and_closes_does_not_stop_the_listener_serving_the_next() {
-    let home = TempHome::new();
-    let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
-    let accepting = Arc::clone(&listener);
-    let server = thread::spawn(move || loop {
-        let mut server_end = accepting.accept().unwrap();
-        if let Some(frame) = read_frame::<Value>(&mut server_end).unwrap() {
-            break frame;
-        }
-    });
-
+    // Connect and leave before the listener takes the waiting instance, then serve the next.
     drop(home.connect().unwrap());
-    let mut client = home.connect().unwrap();
-    write_frame(&mut client, &json!({"after": "a probe"})).unwrap();
-    let frame = within_patience(move || server.join().unwrap());
-    assert_eq!(frame, json!({"after": "a probe"}));
-}
-
-#[test]
-fn several_clients_each_get_their_own_server_end() {
-    let home = TempHome::new();
-    let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
     let accepting = Arc::clone(&listener);
     let server = thread::spawn(move || {
         let mut seen = Vec::new();
-        for _ in 0..3 {
-            let mut server_end = accepting.accept().unwrap();
-            let frame: Value = read_frame(&mut server_end).unwrap().unwrap();
-            seen.push(frame["n"].as_u64().unwrap());
+        while seen.len() < 2 {
+            let mut end = accepting.accept().unwrap();
+            if let Some(frame) = read_frame::<Value>(&mut end).unwrap() {
+                seen.push(frame["n"].as_u64().unwrap());
+            }
         }
         seen.sort_unstable();
         seen
     });
     let mut clients = Vec::new();
-    for n in 0..3_u64 {
+    for n in 1..=2_u64 {
         let mut client = home.connect().unwrap();
         write_frame(&mut client, &json!({"n": n})).unwrap();
         clients.push(client);
     }
     assert_eq!(
         within_patience(move || server.join().unwrap()),
-        vec![0, 1, 2]
+        [1, 2],
+        "each later client gets an end of its own"
     );
 }
 
+/// The endpoint's audited cancel and stop calls (on Windows `CancelIoEx` and the listener's
+/// stop event): a shutdown from any thread ends a blocked read or accept, however far it got,
+/// and holds for every clone. Later reads end, writes fail, a second shutdown is harmless, later
+/// accepts fail, and the peer sees the end of the stream.
 #[test]
-fn connecting_with_nothing_bound_finds_no_service() {
-    let home = TempHome::new();
-    assert!(matches!(home.connect(), Err(ConnectError::NoService)));
-}
+fn a_shutdown_from_any_thread_ends_the_stream_for_every_clone_and_the_peer() {
+    let (left, mut right) = pair().unwrap();
+    let stopper = left.try_clone().unwrap();
+    let (sent, read) = mpsc::channel();
+    thread::spawn(move || {
+        let mut left = left;
+        let _ = sent.send(left.read(&mut [0_u8; 8]));
+    });
+    stopper.shutdown();
+    assert_eq!(
+        read.recv_timeout(PATIENCE).expect("the read ends").unwrap(),
+        0,
+        "a read on another thread ends, before or during its wait"
+    );
+    let mut clone = stopper.try_clone().unwrap();
+    assert_eq!(clone.read(&mut [0_u8; 8]).unwrap(), 0);
+    assert_eq!(
+        clone.write(b"late").unwrap_err().kind(),
+        io::ErrorKind::BrokenPipe
+    );
+    stopper.shutdown();
+    assert_eq!(
+        within_patience(move || right.read(&mut [0_u8; 8])).unwrap(),
+        0,
+        "the peer sees the end of the stream"
+    );
 
-#[test]
-fn connecting_after_the_listener_is_gone_finds_no_service() {
-    let home = TempHome::new();
-    drop(Listener::bind_first(home.path()).unwrap());
-    assert!(matches!(home.connect(), Err(ConnectError::NoService)));
-}
-
-#[test]
-fn shutdown_wakes_a_blocked_accept_and_later_accepts_fail() {
     let home = TempHome::new();
     let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
     let accepting = Arc::clone(&listener);
-    let waiter = thread::spawn(move || accepting.accept().map(|_| ()));
-    thread::sleep(Duration::from_millis(150));
+    let (sent, accepted) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sent.send(accepting.accept().map(|_| ()));
+    });
     listener.shutdown();
-    let outcome = within_patience(move || waiter.join().unwrap());
     assert_eq!(
-        outcome.unwrap_err().kind(),
-        io::ErrorKind::ConnectionAborted
+        accepted
+            .recv_timeout(PATIENCE)
+            .expect("the accept ends")
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::ConnectionAborted,
+        "an accept on another thread ends, before or during its wait"
     );
     assert_eq!(
         listener.accept().map(|_| ()).unwrap_err().kind(),
@@ -353,73 +168,85 @@ fn shutdown_wakes_a_blocked_accept_and_later_accepts_fail() {
     );
 }
 
+/// Relay-protocol-4 section 6: the service writes its goodbye and then closes the stream, so a
+/// frame written just before an end is dropped or shut down still reaches the peer, and only
+/// then does the peer see the end of the stream.
+#[test]
+fn a_frame_written_before_the_close_still_arrives() {
+    for shut_down in [false, true] {
+        let (mut left, mut right) = pair().unwrap();
+        write_frame(&mut left, &json!({"goodbye": "quit"})).unwrap();
+        if shut_down {
+            left.shutdown();
+        } else {
+            drop(left);
+        }
+        let (frame, then) = within_patience(move || {
+            let frame: Value = read_frame(&mut right).unwrap().unwrap();
+            (frame, read_frame::<Value>(&mut right).unwrap())
+        });
+        assert_eq!(frame, json!({"goodbye": "quit"}), "shut down: {shut_down}");
+        assert!(then.is_none(), "shut down: {shut_down}");
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
-    //! The run directory and socket modes, and the refusal of an untrusted run directory.
+    //! The run and wake directories and their sockets, which only the user may reach.
 
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::wake::{wake_all, Waiting, Wakes};
 
     fn mode(path: &Path) -> u32 {
         fs::metadata(path).unwrap().permissions().mode() & 0o777
     }
 
+    /// Relay-protocol-4 sections 1, 2 and 11: on Linux the run directory and the wake directory
+    /// below it are the user's alone (0700, and an existing run directory that was open is
+    /// tightened), and each socket is the owner's (0600). A client refuses an endpoint whose
+    /// directory is open to group or other, since another account could have placed the socket,
+    /// and a ready service leaves such a wake endpoint alone.
     #[test]
-    fn the_run_directory_is_private_and_the_socket_is_owner_only() {
+    fn the_run_and_wake_directories_are_private_and_a_client_refuses_an_open_one() {
         let home = TempHome::new();
-        let _listener = Listener::bind_first(home.path()).unwrap();
-        let run = home.path().join("run");
-        assert_eq!(mode(&run), 0o700);
-        assert_eq!(mode(&run.join("relay.sock")), 0o600);
-    }
-
-    #[test]
-    fn an_open_run_directory_is_tightened_when_binding() {
-        let home = TempHome::new();
-        let run = home.path().join("run");
+        let run = home.path().join(RUN_DIRECTORY_NAME);
         fs::create_dir(&run).unwrap();
         fs::set_permissions(&run, fs::Permissions::from_mode(0o755)).unwrap();
         let _listener = Listener::bind_first(home.path()).unwrap();
-        assert_eq!(mode(&run), 0o700);
-    }
+        assert_eq!(mode(&run), 0o700, "an open run directory is tightened");
+        assert_eq!(mode(&run.join(RELAY_SOCKET_NAME)), 0o600);
+        let _waiting = Waiting::register(home.path()).unwrap();
+        let wake = wake_directory(home.path());
+        assert_eq!(mode(&wake), 0o700);
+        let socket = fs::read_dir(&wake)
+            .unwrap()
+            .flatten()
+            .next()
+            .expect("one registration")
+            .path();
+        assert_eq!(mode(&socket), 0o600);
 
-    #[test]
-    fn a_socket_file_nobody_listens_on_is_replaced() {
-        let home = TempHome::new();
-        drop(Listener::bind_first(home.path()).unwrap());
-        assert!(home.path().join("run").join("relay.sock").exists());
-        let _listener = Listener::bind_first(home.path()).unwrap();
+        for open in [0o750, 0o705] {
+            fs::set_permissions(&run, fs::Permissions::from_mode(open)).unwrap();
+            assert!(
+                matches!(home.connect(), Err(ConnectError::ForeignServer)),
+                "{open:o}"
+            );
+        }
+        fs::set_permissions(&run, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&wake, fs::Permissions::from_mode(0o750)).unwrap();
+        let id = socket.file_name().unwrap().to_str().unwrap().to_owned();
+        assert!(matches!(
+            connect_wake(home.path(), &id, Instant::now() + PATIENCE),
+            Err(ConnectError::ForeignServer)
+        ));
+        assert_eq!(wake_all(home.path()), Wakes::default());
+        assert!(
+            socket.exists(),
+            "a ready service removes no endpoint it cannot trust"
+        );
     }
-
-    #[test]
-    fn a_run_directory_open_to_group_or_other_makes_connect_refuse() {
-        let home = TempHome::new();
-        let _listener = Listener::bind_first(home.path()).unwrap();
-        let run = home.path().join("run");
-        fs::set_permissions(&run, fs::Permissions::from_mode(0o750)).unwrap();
-        assert!(matches!(home.connect(), Err(ConnectError::ForeignServer)));
-        fs::set_permissions(&run, fs::Permissions::from_mode(0o705)).unwrap();
-        assert!(matches!(home.connect(), Err(ConnectError::ForeignServer)));
-    }
-}
-
-#[test]
-fn an_accepted_connection_knows_its_peer_process_and_the_connecting_end_does_not() {
-    let home = TempHome::new();
-    let listener = Listener::bind_first(home.path()).unwrap();
-    let client = home.connect().unwrap();
-    let server_end = listener.accept().unwrap();
-    assert_eq!(server_end.peer_process_id(), Some(std::process::id()));
-    assert_eq!(
-        server_end.try_clone().unwrap().peer_process_id(),
-        Some(std::process::id())
-    );
-    assert_eq!(client.peer_process_id(), None);
-    let (first, second) = pair().unwrap();
-    assert_eq!(
-        (first.peer_process_id(), second.peer_process_id()),
-        (None, None)
-    );
 }

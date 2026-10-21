@@ -10,15 +10,15 @@ T1, T2 and T3 landed on 2026-10-21. The area holds 69 tests, its budget of 60 an
 granted from the reserve: `service/mod.rs` 30, the rest of `service/` 7, and intake, browser outside
 the adapter, presentation, audit and the top-level files 32. T4 cut `crates/edge` to its budget of
 20 the same day, under ADR-0203's amendment of 2026-10-21, which lifts Decision 13's lock inside the
-unpublished relay revision 5. Next: T5, `crates/relay` (157 tests, budget 35, planned at 31), then
-the defects S-D8 and S-D9 in the edge (arch-1 core-service), then the guard.
+unpublished relay revision 5. T5 cut `crates/relay` to 31. Next: S-D8 in the edge (arch-1 core-service), the desktop crate's
+Windows-only cut, then the guard. S-D9 waits until after 2.0.1 (the owner, 2026-10-21).
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `service/`, `intake/`, `browser/` outside `browser/adapter/`, `presentation/`, `audit/`, top-level files, `crates/orchestrator/tests` | 396 | 69 (60, and 9 from the reserve) | 69 |
-| `crates/relay` | 157 | 35 | 157 |
+| `crates/relay` | 157 | 35 | 31 |
 | `crates/edge` | 66 | 20 | 20 |
 
 ## Slices
@@ -32,9 +32,18 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T2 | test(intake, browser, audit): the rest of the area outside `service/` keeps 32 | 211 | 32 | 17 promise, 7 contract, 8 defect | landed (c8dbb1af) |
 | T3 | test(service): `service/`'s other modules keep the 8 that are a rule's last proof | 52 | 8 | 7 promise, 1 defect | landed (this commit) |
 | T4 | test(edge): `crates/edge` keeps the 20 tests that are a forwarding rule's last proof | 66 | 20 | 13 promise, 6 defect, 1 contract | landed (this commit) |
+| T5 | test(relay): `crates/relay` keeps the 31 tests that are a rule's last proof | 157 | 31 | 9 promise, 9 contract, 6 defect, 7 unsafe | landed (this commit) |
 | G | test(guards): the Rust test ceiling, `tests/guards/test-budget.test.mjs` (ADR-0204 Decision 4) | - | - | - | todo, after every area is under its budget |
 
 ## Notes
+
+- T5: the watchdog's tests go (the edge-parent journey proves the parent watch on both systems), and
+  the template, word and endpoint-name unit tests fold into golden4, which still pins every relay4
+  fixture. Product folds: `IdentitySource` and `ParentWatchdog::watch` fold into `start`; `fill`,
+  `bare_error` and `INTERNAL_ERROR_CODE` turn private to `templates.rs`; `without_verbatim_prefix`
+  and `swallows_console_event` narrow; the version check and the FALLBACK_EXIT bound are compile-time
+  assertions. The fixed sleeps in the shutdown, console and fallback tests go. Test code went from
+  2,971 lines to 2,190.
 
 - T4: the hold's unit tests fold into the forwarding tests, and the 4 MiB hold bound is now proven
   through the loop (a request that finds the hold full is answered as expired at once). Answers are

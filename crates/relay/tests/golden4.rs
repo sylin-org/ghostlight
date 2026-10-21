@@ -103,8 +103,10 @@ fn edge(program: Program) -> Edge {
     }
 }
 
+/// The contract both sides read: every frozen relay 4 frame, each opening, both replies, each
+/// `mcp` frame and the control result, decodes to what it says and encodes back to itself.
 #[test]
-fn opening_fixtures_round_trip() {
+fn every_relay_4_frame_round_trips_and_says_what_it_should() {
     let mcp: Opening = assert_round_trip("opening.mcp.json");
     assert_eq!(mcp.relay, FIXTURE_REVISION);
     assert_eq!(mcp.role, Role::Mcp);
@@ -161,10 +163,7 @@ fn opening_fixtures_round_trip() {
     let command: Opening = assert_round_trip("opening.command.json");
     assert_eq!(command.role, Role::Command);
     assert_eq!(command.reason, Some(StartReason::Command));
-}
 
-#[test]
-fn reply_fixtures_round_trip() {
     let accepted: Reply = assert_round_trip("reply.accepted.json");
     assert!(accepted.accepted);
     assert_eq!(accepted.service.as_deref(), Some("2.0.0"));
@@ -184,10 +183,7 @@ fn reply_fixtures_round_trip() {
     assert_eq!(refused.code, Some(RefusalCode::Unsupported));
     assert!(refused.say.is_some());
     assert_eq!(refused.templates, None);
-}
 
-#[test]
-fn mcp_and_control_fixtures_round_trip() {
     let message: McpFrame = assert_round_trip("mcp.message.json");
     assert!(matches!(message, McpFrame::Message { .. }));
     let resume: McpFrame = assert_round_trip("mcp.resume.json");
@@ -213,40 +209,9 @@ fn mcp_and_control_fixtures_round_trip() {
     );
 }
 
-#[test]
-fn the_browser_goodbye_is_the_exact_frame_text() {
-    let text = fixture_bytes("browser.goodbye.txt");
-    assert_eq!(goodbye_frame(GoodbyeReason::Replace), text);
-    assert_eq!(goodbye_in(&text), Some(GoodbyeReason::Replace));
-    for reason in [
-        GoodbyeReason::Quit,
-        GoodbyeReason::Replace,
-        GoodbyeReason::Uninstall,
-        GoodbyeReason::SessionEnd,
-    ] {
-        assert_eq!(goodbye_in(&goodbye_frame(reason)), Some(reason));
-    }
-    assert_eq!(
-        goodbye_in(&fixture_bytes(
-            "tolerance/browser.goodbye.unknown_reason.txt"
-        )),
-        Some(GoodbyeReason::Unknown)
-    );
-}
-
-#[test]
-fn no_adapter_frame_is_a_goodbye() {
-    let frames = golden_dir().join("protocol4").join("frames");
-    let mut seen = 0;
-    for entry in fs::read_dir(&frames).unwrap() {
-        let path = entry.unwrap().path();
-        let bytes = fs::read(&path).unwrap();
-        assert_eq!(goodbye_in(&bytes), None, "{}", path.display());
-        seen += 1;
-    }
-    assert!(seen > 0, "no adapter frames found");
-}
-
+/// Relay-protocol-4 section 9: readers tolerate what a later revision may send. One fixture per
+/// rule: a field this revision does not know is ignored, and every closed word it does not know
+/// decodes to its `Unknown`.
 #[test]
 fn tolerance_fixtures_decode() {
     let expected: Opening = assert_decodes("opening.mcp.json");
@@ -295,8 +260,72 @@ fn tolerance_fixtures_decode() {
     );
 }
 
+/// Relay-protocol-4 section 6 and ACCEPTANCE C8: on a browser stream a goodbye is the exact text
+/// of the fixture, and the relay recognizes it without parsing anything else. Only a frame that
+/// starts with the fixed prefix and ends the reason with a quote is read; no adapter frame of
+/// the protocol 4 golden reads as one, nor does any near miss; and a reason this revision does
+/// not know is `Unknown`.
 #[test]
-fn constants_equal_the_vocabulary() {
+fn only_the_fixed_goodbye_text_reads_as_a_goodbye() {
+    let text = fixture_bytes("browser.goodbye.txt");
+    assert_eq!(goodbye_frame(GoodbyeReason::Replace), text);
+    assert_eq!(goodbye_in(&text), Some(GoodbyeReason::Replace));
+    for reason in [
+        GoodbyeReason::Quit,
+        GoodbyeReason::Replace,
+        GoodbyeReason::Uninstall,
+        GoodbyeReason::SessionEnd,
+    ] {
+        assert_eq!(goodbye_in(&goodbye_frame(reason)), Some(reason));
+    }
+    assert_eq!(
+        goodbye_in(&fixture_bytes(
+            "tolerance/browser.goodbye.unknown_reason.txt"
+        )),
+        Some(GoodbyeReason::Unknown)
+    );
+    assert_eq!(
+        goodbye_in(br#"{"goodbye":"quit","later":1}"#),
+        Some(GoodbyeReason::Quit),
+        "a later field after the reason"
+    );
+
+    let frames = golden_dir().join("protocol4").join("frames");
+    let mut seen = 0;
+    for entry in fs::read_dir(&frames).unwrap() {
+        let path = entry.unwrap().path();
+        let bytes = fs::read(&path).unwrap();
+        assert_eq!(goodbye_in(&bytes), None, "{}", path.display());
+        seen += 1;
+    }
+    assert!(seen > 0, "no adapter frames found");
+
+    let near_misses: [&[u8]; 8] = [
+        b"",
+        b"{}",
+        br#"{"kind":"heartbeat"}"#,
+        br#"{"kind":"notice","goodbye":"quit"}"#,
+        br#"{ "goodbye": "quit" }"#,
+        br#"{"goodbye":"quit"#,
+        br#"{"goodbye":"quit" "#,
+        b"{\"goodbye\":\"\xff\"}",
+    ];
+    for frame in near_misses {
+        assert_eq!(
+            goodbye_in(frame),
+            None,
+            "{}",
+            String::from_utf8_lossy(frame)
+        );
+    }
+}
+
+/// The contract both sides read: the crate's bounds, file names and closed words are the
+/// vocabulary's. Each word serializes as its name there, `as_str` (which the `serve --reason`
+/// argument and the browser goodbye use) spells the same name, and only the six start reasons
+/// parse, so `unknown` is never a reason a starter can give.
+#[test]
+fn the_crates_bounds_names_and_closed_words_are_the_vocabularys() {
     let vocabulary = fixture("vocabulary.json");
     assert_eq!(vocabulary["relay"], json!(FIXTURE_REVISION));
     assert_eq!(vocabulary["frame"]["max_bytes"], json!(MAX_FRAME_BYTES));
@@ -319,17 +348,11 @@ fn constants_equal_the_vocabulary() {
         vocabulary["test_home_variable"],
         json!(home::TEST_HOME_VARIABLE)
     );
-
     let files = &vocabulary["files"];
     assert_eq!(files["home_directory"], json!(home::HOME_DIRECTORY_NAME));
     assert_eq!(files["run_directory"], json!(home::RUN_DIRECTORY_NAME));
     assert_eq!(files["relay_socket"], json!(home::RELAY_SOCKET_NAME));
     assert_eq!(files["service_lock"], json!(home::SERVICE_LOCK_NAME));
-}
-
-#[test]
-fn closed_name_lists_equal_the_vocabulary() {
-    let vocabulary = fixture("vocabulary.json");
 
     let roles = [
         Role::Mcp,
@@ -350,9 +373,15 @@ fn closed_name_lists_equal_the_vocabulary() {
     ];
     assert_eq!(wire_names(&starts), names(&vocabulary, "start_reasons"));
     for reason in starts {
+        assert_eq!(
+            json!(reason.as_str()),
+            serde_json::to_value(reason).unwrap()
+        );
         assert_eq!(StartReason::parse(reason.as_str()), Some(reason));
     }
-    assert_eq!(StartReason::parse("scheduled"), None);
+    for word in ["scheduled", "unknown", "Agent", ""] {
+        assert_eq!(StartReason::parse(word), None, "{word:?}");
+    }
 
     let goodbyes = [
         GoodbyeReason::Quit,
@@ -362,6 +391,10 @@ fn closed_name_lists_equal_the_vocabulary() {
     ];
     assert_eq!(wire_names(&goodbyes), names(&vocabulary, "goodbye_reasons"));
     for reason in goodbyes {
+        assert_eq!(
+            json!(reason.as_str()),
+            serde_json::to_value(reason).unwrap()
+        );
         assert_eq!(GoodbyeReason::parse(reason.as_str()), reason);
     }
 
@@ -417,13 +450,21 @@ fn closed_name_lists_equal_the_vocabulary() {
     );
 }
 
+/// Relay-protocol-4 section 1, the contract the journeys' own endpoint code reads too: the pipe
+/// name is the vocabulary's prefix, the user's SID and the FNV-1a hash of the home with only
+/// ASCII letters lowercased, as the worked example shows, with the hash's offset basis and
+/// prime the vocabulary names; and the Unix socket is the relay socket in the run directory.
 #[test]
-fn the_worked_endpoint_name_is_the_one_the_code_derives() {
+fn the_endpoint_names_are_the_ones_the_vocabulary_derives() {
     let vocabulary = fixture("vocabulary.json");
     let windows = &vocabulary["endpoint"]["windows"];
+    let number = |key: &str| u32::try_from(windows[key].as_u64().unwrap()).unwrap();
+    let (basis, prime) = (number("fnv1a32_offset_basis"), number("fnv1a32_prime"));
+    assert_eq!(fnv1a32(b""), basis);
+    assert_eq!(fnv1a32(b"a"), (basis ^ u32::from(b'a')).wrapping_mul(prime));
+
     let example = &windows["example"];
     let home = Path::new(example["home"].as_str().unwrap());
-
     assert_eq!(
         example["lowercased_home"],
         json!(home.to_str().unwrap().to_ascii_lowercase())
@@ -432,6 +473,16 @@ fn the_worked_endpoint_name_is_the_one_the_code_derives() {
     assert_eq!(example["fnv1a32"], json!(hash));
     assert_eq!(example["home_hash"], json!(format!("{hash:08x}")));
     assert_eq!(home_hash(home), example["home_hash"].as_str().unwrap());
+    let accented = Path::new("C:\\Users\\\u{c4}da\\.ghostlight");
+    assert_eq!(
+        home_hash(accented),
+        home_hash(Path::new("c:\\users\\\u{c4}da\\.ghostlight"))
+    );
+    assert_ne!(
+        home_hash(accented),
+        home_hash(Path::new("C:\\Users\\\u{e4}da\\.ghostlight")),
+        "only ASCII letters are lowercased"
+    );
 
     let sid = example["user_sid"].as_str().unwrap();
     let name = example["name"].as_str().unwrap();
@@ -447,15 +498,14 @@ fn the_worked_endpoint_name_is_the_one_the_code_derives() {
         Endpoint::named_pipe(sid, home),
         Endpoint::NamedPipe(name.to_owned())
     );
-}
 
-#[test]
-fn the_unix_endpoint_is_the_socket_under_the_run_directory() {
-    let vocabulary = fixture("vocabulary.json");
     let files = &vocabulary["files"];
-    let home = Path::new("/home/ada/.ghostlight");
-    let expected = home
+    let unix_home = Path::new("/home/ada/.ghostlight");
+    let socket = unix_home
         .join(files["run_directory"].as_str().unwrap())
         .join(files["relay_socket"].as_str().unwrap());
-    assert_eq!(Endpoint::unix_socket(home), Endpoint::UnixSocket(expected));
+    assert_eq!(
+        Endpoint::unix_socket(unix_home),
+        Endpoint::UnixSocket(socket)
+    );
 }

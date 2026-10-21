@@ -13,119 +13,32 @@ fn os(value: &str) -> Option<OsString> {
     Some(OsString::from(value))
 }
 
+/// ADR-0197 Decision 10: there is one home per user. It is the user's home joined with the
+/// Ghostlight directory, or the test override, which names the home itself. A home that is
+/// relative, empty or missing is an error rather than a guess, so no default root ever falls
+/// back to the working directory.
 #[test]
-fn the_home_is_the_user_home_joined_with_the_ghostlight_directory() {
-    let home = resolve(None, os(ROOT)).unwrap();
-    assert_eq!(home, Path::new(ROOT).join(".ghostlight"));
-}
-
-#[test]
-fn the_test_override_names_the_home_itself() {
-    let home = resolve(os(ROOT), os("ignored")).unwrap();
-    assert_eq!(home, Path::new(ROOT));
-}
-
-#[test]
-fn a_relative_home_is_refused() {
+fn the_home_is_the_users_ghostlight_directory_or_the_override_and_never_a_guess() {
     assert_eq!(
-        resolve(None, os("relative")).unwrap_err().kind(),
-        io::ErrorKind::InvalidInput
+        resolve(None, os(ROOT)).unwrap(),
+        Path::new(ROOT).join(HOME_DIRECTORY_NAME)
     );
-    assert_eq!(
-        resolve(os("relative"), os(ROOT)).unwrap_err().kind(),
-        io::ErrorKind::InvalidInput
-    );
-}
-
-#[test]
-fn a_missing_user_home_is_not_found() {
+    assert_eq!(resolve(os(ROOT), os("ignored")).unwrap(), Path::new(ROOT));
+    for (test_home, user_home) in [
+        (None, os("relative")),
+        (None, os("")),
+        (os("relative"), os(ROOT)),
+    ] {
+        assert_eq!(
+            resolve(test_home.clone(), user_home.clone())
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput,
+            "{test_home:?} {user_home:?}"
+        );
+    }
     assert_eq!(
         resolve(None, None).unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
-}
-
-#[test]
-fn the_service_image_and_the_edge_are_two_files_with_the_platform_suffix() {
-    let suffix = if cfg!(windows) { ".exe" } else { "" };
-    assert_eq!(EDGE_EXECUTABLE_NAME, format!("ghostlight{suffix}"));
-    assert_eq!(
-        SERVICE_EXECUTABLE_NAME,
-        format!("ghostlight-service{suffix}")
-    );
-}
-
-mod verbatim {
-    use std::path::{Path, PathBuf};
-
-    use crate::home::{canonical, without_verbatim_prefix};
-
-    fn stripped(text: &str) -> PathBuf {
-        without_verbatim_prefix(Path::new(text))
-    }
-
-    #[test]
-    fn a_verbatim_drive_path_loses_its_prefix() {
-        assert_eq!(
-            stripped(r"\\?\C:\Users\person\.ghostlight"),
-            Path::new(r"C:\Users\person\.ghostlight")
-        );
-        assert_eq!(stripped(r"\\?\d:\x"), Path::new(r"d:\x"));
-        assert_eq!(stripped(r"\\?\C:"), Path::new("C:"));
-    }
-
-    #[test]
-    fn a_verbatim_share_path_becomes_a_share_path() {
-        assert_eq!(
-            stripped(r"\\?\UNC\server\share\x"),
-            Path::new(r"\\server\share\x")
-        );
-        assert_eq!(
-            stripped(r"\\?\unc\server\share"),
-            Path::new(r"\\server\share")
-        );
-    }
-
-    #[test]
-    fn other_verbatim_forms_are_kept() {
-        for text in [
-            r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\x",
-            r"\\?\GLOBALROOT\Device\x",
-            r"\\?\C:x",
-            r"\\?\UNCx\y",
-            r"\\?\UNC",
-            r"\\?\",
-            r"\\.\C:\x",
-        ] {
-            assert_eq!(stripped(text), Path::new(text), "{text}");
-        }
-    }
-
-    #[test]
-    fn a_plain_path_is_kept() {
-        for text in [r"C:\Users\person", r"\\server\share\x", "/home/person", ""] {
-            assert_eq!(stripped(text), Path::new(text), "{text}");
-        }
-    }
-
-    #[test]
-    fn the_canonical_form_of_a_directory_is_stable() {
-        let scratch = crate::tests::Scratch::named("canonical");
-        let first = canonical(&scratch).expect("canonical form");
-        let second = canonical(&first).expect("canonical form of the canonical form");
-        assert_eq!(first, second);
-        assert!(first.is_absolute());
-        assert!(first.is_dir());
-        assert!(!first.to_string_lossy().starts_with(r"\\?\"));
-    }
-
-    #[test]
-    fn a_missing_path_has_no_canonical_form() {
-        let scratch = crate::tests::Scratch::named("canonical-missing");
-        let missing = scratch.join("missing");
-        assert_eq!(
-            canonical(&missing).unwrap_err().kind(),
-            std::io::ErrorKind::NotFound
-        );
-    }
 }

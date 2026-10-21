@@ -15,12 +15,6 @@ use std::fs;
 /// How often the watchdog checks the parent.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Something that can say whether the process it identifies is still running.
-pub trait IdentitySource: Send + 'static {
-    /// Whether the identified process is still running.
-    fn is_alive(&self) -> bool;
-}
-
 /// A watch on the parent process, stopped when dropped.
 ///
 /// The callback runs once, on the watchdog thread, when the parent is gone. Dropping the
@@ -38,20 +32,11 @@ impl ParentWatchdog {
     #[must_use]
     pub fn start(on_parent_gone: impl FnOnce() + Send + 'static) -> Option<Self> {
         let parent = ParentProcess::capture()?;
-        Some(Self::watch(parent, POLL_INTERVAL, on_parent_gone))
-    }
-
-    /// Watch `source` every `interval` and call `on_parent_gone` once when it is not alive.
-    fn watch(
-        source: impl IdentitySource,
-        interval: Duration,
-        on_parent_gone: impl FnOnce() + Send + 'static,
-    ) -> Self {
         let (stop, stopped) = mpsc::channel::<()>();
         thread::spawn(move || loop {
-            match stopped.recv_timeout(interval) {
+            match stopped.recv_timeout(POLL_INTERVAL) {
                 Err(RecvTimeoutError::Timeout) => {
-                    if !source.is_alive() {
+                    if !parent.is_alive() {
                         on_parent_gone();
                         return;
                     }
@@ -59,7 +44,7 @@ impl ParentWatchdog {
                 Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
             }
         });
-        Self { stop: Some(stop) }
+        Some(Self { stop: Some(stop) })
     }
 }
 
@@ -97,10 +82,9 @@ impl ParentProcess {
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         None
     }
-}
 
-impl IdentitySource for ParentProcess {
-    fn is_alive(&self) -> bool {
+    /// Whether the captured process is still this process's running parent.
+    pub fn is_alive(&self) -> bool {
         #[cfg(target_os = "windows")]
         {
             crate::os::process_is_alive(crate::os::ProcessIdentity {
@@ -153,6 +137,3 @@ fn read_stat(process: &str) -> Option<ProcessStat> {
         created: fields.get(19)?.parse().ok()?,
     })
 }
-
-#[cfg(test)]
-mod tests;

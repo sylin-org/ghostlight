@@ -45,6 +45,13 @@ use windows as platform;
 /// this long whatever the orderly stop is doing.
 pub const FALLBACK_EXIT: Duration = Duration::from_secs(2);
 
+// The final signal ends the exact process within two seconds (ACCEPTANCE, desktop workbench
+// gates; ADR-0180), so the fallback may wait no longer than that.
+const _: () = assert!(
+    FALLBACK_EXIT.as_millis() <= 2_000,
+    "the fallback exit fires within the two seconds a session end allows"
+);
+
 /// Why a program is not started while the session is ending.
 pub const START_REFUSED: &str = "the session is ending, so no program is started";
 

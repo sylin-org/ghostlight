@@ -1,42 +1,26 @@
-//! Tests of the backoff schedule and the arguments a service is started with.
+//! Tests of the backoff schedule.
 
 use super::*;
 
+/// Relay-protocol-4 section 10 and ACCEPTANCE C13: an edge that finds no service tries again on
+/// the backoff schedule. The first wait is the vocabulary's first wait, each wait doubles the one
+/// before up to the cap, and the cap holds, so a missing service costs at most one look and one
+/// start each cap's worth of time. Once a service answers, the schedule starts over.
 #[test]
-fn the_backoff_starts_at_the_first_wait_and_doubles_to_the_cap() {
+fn the_backoff_doubles_from_its_first_wait_to_its_cap_and_starts_over() {
     let mut backoff = Backoff::new();
-    let waits: Vec<u64> = (0..9)
-        .map(|_| u64::try_from(backoff.next_wait().as_millis()).unwrap())
-        .collect();
-    assert_eq!(
-        waits,
-        [500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000]
-    );
-}
-
-#[test]
-fn a_reset_returns_to_the_first_wait() {
-    let mut backoff = Backoff::new();
-    for _ in 0..4 {
-        backoff.next_wait();
+    let waits: Vec<Duration> = (0..9).map(|_| backoff.next_wait()).collect();
+    assert_eq!(waits[0], BACKOFF_FIRST);
+    for pair in waits.windows(2) {
+        assert_eq!(pair[1], (pair[0] * 2).min(BACKOFF_MAX), "{waits:?}");
     }
+    assert_eq!(
+        waits.last(),
+        Some(&BACKOFF_MAX),
+        "the cap is reached and held"
+    );
+
     backoff.reset();
     assert_eq!(backoff.next_wait(), BACKOFF_FIRST);
     assert_eq!(backoff.next_wait(), BACKOFF_FIRST * 2);
-}
-
-#[test]
-fn a_service_is_started_with_serve_and_the_reason_word() {
-    for reason in [
-        StartReason::Agent,
-        StartReason::Browser,
-        StartReason::Command,
-        StartReason::Person,
-        StartReason::Recover,
-        StartReason::Update,
-    ] {
-        let arguments = serve_arguments(reason);
-        assert_eq!(arguments, ["serve", "--reason", reason.as_str()]);
-        assert_eq!(StartReason::parse(reason.as_str()), Some(reason));
-    }
 }

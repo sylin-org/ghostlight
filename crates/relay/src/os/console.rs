@@ -11,13 +11,17 @@
 use std::io;
 
 /// `CTRL_C_EVENT`.
+#[cfg(windows)]
 const CTRL_C_EVENT: u32 = 0;
 
 /// `CTRL_BREAK_EVENT`.
+#[cfg(windows)]
 const CTRL_BREAK_EVENT: u32 = 1;
 
-/// Whether the edge swallows the console event `event`: Ctrl-C and Ctrl-Break only.
-pub fn swallows_console_event(event: u32) -> bool {
+/// Whether the edge swallows the console event `event`: Ctrl-C and Ctrl-Break only, never a
+/// close, a logoff or a shutdown, whose default exit must run.
+#[cfg(windows)]
+pub(super) fn swallows_console_event(event: u32) -> bool {
     event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT
 }
 

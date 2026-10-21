@@ -25,20 +25,20 @@ fn vocabulary(revision: &str) -> Value {
     serde_json::from_slice(&bytes).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
+/// The contract both sides read, ADR-0199's amendment of 2026-10-20: revision 5's vocabulary is
+/// revision 4's with the wake endpoints added and nothing else changed, and the crate speaks
+/// it: its revision, the wake directory, the id length, the pipe infix and the wake deadline are
+/// the ones the vocabulary names.
 #[test]
-fn revision_5_adds_only_the_wake_to_revision_4() {
+fn revision_5_is_revision_4_with_the_wake_and_the_crate_speaks_it() {
     let mut expected = vocabulary("relay4");
     let five = vocabulary("relay5");
     expected["relay"] = json!(5);
     expected["files"]["wake_directory"] = five["files"]["wake_directory"].clone();
     expected["endpoint"]["wake"] = five["endpoint"]["wake"].clone();
     expected["wake_deadline_ms"] = five["wake_deadline_ms"].clone();
-    assert_eq!(five, expected);
-}
+    assert_eq!(five, expected, "revision 5 adds only the wake");
 
-#[test]
-fn constants_equal_the_revision_5_vocabulary() {
-    let five = vocabulary("relay5");
     assert_eq!(five["relay"], json!(RELAY));
     assert_eq!(five["files"]["wake_directory"], json!(WAKE_DIRECTORY_NAME));
     assert_eq!(five["endpoint"]["wake"]["id_length"], json!(ID_LENGTH));

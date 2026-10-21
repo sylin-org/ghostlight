@@ -35,9 +35,7 @@ mod templates;
 #[cfg(test)]
 mod tests;
 
-pub use templates::{
-    bare_error, failure_response, fill, Failure, Templates, DEFAULT_TEMPLATE, INTERNAL_ERROR_CODE,
-};
+pub use templates::{failure_response, Failure, Templates, DEFAULT_TEMPLATE};
 
 /// The fixed start of the goodbye frame a service writes on a browser stream.
 const GOODBYE_PREFIX: &str = r#"{"goodbye":""#;

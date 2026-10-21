@@ -39,94 +39,70 @@ fn installed(values: &[&str]) -> Route {
     run(PathBuf::from(BIN).join(EDGE), values)
 }
 
+/// ADR-0199 Decision 2, frozen with the relay: an edge that does not run from `<home>/bin` under
+/// the edge's file name is a carrier of the service image beside it, whatever its arguments; the
+/// file name compares ASCII case-insensitively on Windows and exactly elsewhere. An installed
+/// edge reads only its first argument: exactly `mcp` is the MCP relay, a Chrome extension origin
+/// is the browser relay, and anything else, a near miss included, runs the service image.
 #[test]
-fn no_arguments_run_the_service_image() {
-    assert_eq!(installed(&[]), Route::Service);
-}
-
-#[test]
-fn the_mcp_verb_runs_the_connector_with_or_without_more_arguments() {
-    assert_eq!(installed(&["mcp"]), Route::Mcp);
-    assert_eq!(installed(&["mcp", "--verbose"]), Route::Mcp);
-}
-
-#[test]
-fn the_mcp_verb_is_case_sensitive() {
-    assert_eq!(installed(&["MCP"]), Route::Service);
-    assert_eq!(installed(&["Mcp"]), Route::Service);
-}
-
-#[test]
-fn an_extension_origin_runs_the_browser_connector() {
-    let expected = Route::Browser {
+fn the_route_reads_where_the_edge_runs_and_then_only_its_first_argument() {
+    let browser = Route::Browser {
         origin: EXTENSION.to_owned(),
     };
-    assert_eq!(installed(&[EXTENSION]), expected);
-    assert_eq!(installed(&[EXTENSION, "--parent-window=0"]), expected);
-}
+    let cases: [(&[&str], Route); 15] = [
+        (&[], Route::Service),
+        (&["mcp"], Route::Mcp),
+        (&["mcp", "--verbose"], Route::Mcp),
+        (&["mcp", EXTENSION], Route::Mcp),
+        (&["MCP"], Route::Service),
+        (&["Mcp"], Route::Service),
+        (&[EXTENSION], browser.clone()),
+        (&[EXTENSION, "--parent-window=0"], browser),
+        (&["chrome-extension:abc"], Route::Service),
+        (&["chrome-extension"], Route::Service),
+        (&["moz-extension://abc/"], Route::Service),
+        (&["--chrome-extension://abc/"], Route::Service),
+        (&["serve", "mcp"], Route::Service),
+        (&["serve", EXTENSION], Route::Service),
+        (&["status", "--json"], Route::Service),
+    ];
+    for (arguments, expected) in cases {
+        assert_eq!(installed(arguments), expected, "{arguments:?}");
+    }
 
-#[test]
-fn a_near_miss_of_the_origin_runs_the_service_image() {
-    assert_eq!(installed(&["chrome-extension:abc"]), Route::Service);
-    assert_eq!(installed(&["chrome-extension"]), Route::Service);
-    assert_eq!(installed(&["moz-extension://abc/"]), Route::Service);
-    assert_eq!(installed(&["--chrome-extension://abc/"]), Route::Service);
-}
-
-#[test]
-fn only_the_first_argument_selects_the_route() {
-    assert_eq!(installed(&["serve", "mcp"]), Route::Service);
-    assert_eq!(installed(&["serve", EXTENSION]), Route::Service);
-    assert_eq!(installed(&["mcp", EXTENSION]), Route::Mcp);
-}
-
-#[test]
-fn an_unknown_verb_runs_the_service_image() {
-    assert_eq!(installed(&["status", "--json"]), Route::Service);
-}
-
-#[test]
-fn a_copy_outside_the_bin_directory_is_a_carrier() {
-    for values in [&[][..], &["mcp"], &[EXTENSION], &["status"]] {
+    for arguments in [&[][..], &["mcp"], &[EXTENSION], &["status"]] {
         assert_eq!(
-            run(PathBuf::from(ELSEWHERE).join(EDGE), values),
+            run(PathBuf::from(ELSEWHERE).join(EDGE), arguments),
             Route::Carrier {
                 directory: PathBuf::from(ELSEWHERE)
-            }
+            },
+            "{arguments:?}"
         );
     }
-}
-
-#[test]
-fn another_file_name_in_the_bin_directory_is_a_carrier() {
     assert_eq!(
         run(PathBuf::from(BIN).join("renamed"), &["mcp"]),
         Route::Carrier {
             directory: PathBuf::from(BIN)
-        }
+        },
+        "another file name in bin"
     );
-}
-
-#[test]
-fn a_subdirectory_of_the_bin_directory_is_a_carrier() {
-    let directory = PathBuf::from(BIN).join("old");
-    assert_eq!(run(directory.join(EDGE), &[]), Route::Carrier { directory });
-}
-
-#[cfg(windows)]
-#[test]
-fn the_file_name_ignores_ascii_case_on_windows() {
+    let old = PathBuf::from(BIN).join("old");
     assert_eq!(
-        run(PathBuf::from(BIN).join("GHOSTLIGHT-EDGE.EXE"), &["mcp"]),
-        Route::Mcp
+        run(old.join(EDGE), &[]),
+        Route::Carrier { directory: old },
+        "a directory below bin"
     );
-}
-
-#[cfg(not(windows))]
-#[test]
-fn the_file_name_is_exact_off_windows() {
-    assert!(matches!(
-        run(PathBuf::from(BIN).join("GHOSTLIGHT-EDGE"), &[]),
-        Route::Carrier { .. }
-    ));
+    let shouted = run(PathBuf::from(BIN).join(EDGE.to_ascii_uppercase()), &["mcp"]);
+    if cfg!(windows) {
+        assert_eq!(
+            shouted,
+            Route::Mcp,
+            "the file name ignores ASCII case on Windows"
+        );
+    } else {
+        assert!(
+            matches!(shouted, Route::Carrier { .. }),
+            "the file name is exact elsewhere"
+        );
+    }
 }

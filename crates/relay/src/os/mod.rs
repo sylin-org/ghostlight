@@ -66,7 +66,7 @@ pub use windows::{
 };
 
 pub use app_id::set_app_user_model_id;
-pub use console::{forward_console_interrupts, swallows_console_event};
+pub use console::forward_console_interrupts;
 
 #[cfg(test)]
 mod tests;

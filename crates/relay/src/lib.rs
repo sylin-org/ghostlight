@@ -62,5 +62,28 @@ pub const BACKOFF_MAX: Duration = Duration::from_millis(30_000);
 /// client has to complete the opening exchange.
 pub const OPENING_DEADLINE: Duration = Duration::from_millis(5_000);
 
+// The crate version major is the relay revision, so a published edge names its revision.
+// Checked when the crate compiles.
+const _: () = assert!(
+    decimal(env!("CARGO_PKG_VERSION_MAJOR")) == RELAY,
+    "the relay crate's version major is the relay revision"
+);
+
+/// The number the decimal digits of `text` spell, for the compile-time check above.
+const fn decimal(text: &str) -> u16 {
+    let digits = text.as_bytes();
+    let mut value = 0_u16;
+    let mut index = 0;
+    while index < digits.len() {
+        assert!(
+            digits[index].is_ascii_digit(),
+            "a version number is decimal"
+        );
+        value = value * 10 + (digits[index] - b'0') as u16;
+        index += 1;
+    }
+    value
+}
+
 #[cfg(test)]
 mod tests;

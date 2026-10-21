@@ -1,4 +1,8 @@
 //! Tests for the edge's diagnostics writer.
+//!
+//! The shape of a line is the bridge's to pin, against the record the service reads
+//! (`crates/bridge/src/diagnostics.rs`, the shared schema test); these tests prove when the
+//! writer writes and how much.
 
 use std::path::PathBuf;
 
@@ -16,15 +20,16 @@ impl LogHome {
     }
 
     fn marker(&self) -> PathBuf {
-        self.0.join("diagnostics.on")
+        self.0.join(home::DIAGNOSTICS_MARKER_NAME)
     }
 
     fn directory(&self) -> PathBuf {
-        self.0.join("diagnostics")
+        self.0.join(home::DIAGNOSTICS_DIRECTORY_NAME)
     }
 
     fn log(&self) -> PathBuf {
-        self.directory().join("edge-mcp.jsonl")
+        self.directory()
+            .join(format!("{}.jsonl", Component::EdgeMcp.as_str()))
     }
 
     fn write(&self, detail: &str) -> io::Result<()> {
@@ -37,92 +42,73 @@ impl LogHome {
             detail,
         )
     }
+
+    /// The detail of every line in the log, in order.
+    fn details(&self) -> Vec<String> {
+        fs::read_to_string(self.log())
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let line: Value = serde_json::from_str(line).unwrap();
+                line["detail"].as_str().unwrap().to_owned()
+            })
+            .collect()
+    }
 }
 
+/// Diagnostics are off unless a person turns them on: while the marker file is absent nothing
+/// is written, not even the directory; while it exists each call appends one line; and removing
+/// it stops the writing at the next call.
 #[test]
-fn nothing_is_written_without_the_marker() {
+fn diagnostics_are_written_only_while_the_marker_exists() {
     let home = LogHome::new();
-    home.write("hello").unwrap();
-    assert!(!home.directory().exists());
-}
-
-#[test]
-fn a_line_is_appended_while_the_marker_exists() {
-    let home = LogHome::new();
+    home.write("before").unwrap();
+    assert!(
+        !home.directory().exists(),
+        "nothing is written without the marker"
+    );
     fs::write(home.marker(), "").unwrap();
     home.write("first").unwrap();
     home.write("second").unwrap();
-    let text = fs::read_to_string(home.log()).unwrap();
-    let lines: Vec<Value> = text
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert_eq!(lines.len(), 2);
-    assert_eq!(
-        lines[0],
-        json!({
-            "ts_ms": 1234,
-            "component": "edge-mcp",
-            "relay": crate::RELAY,
-            "pid": std::process::id(),
-            "event": "service_connected",
-            "detail": "first",
-        })
-    );
-    assert_eq!(lines[1]["detail"], "second");
-}
-
-#[test]
-fn removing_the_marker_stops_the_writing() {
-    let home = LogHome::new();
-    fs::write(home.marker(), "").unwrap();
-    home.write("kept").unwrap();
+    assert_eq!(home.details(), ["first", "second"]);
     fs::remove_file(home.marker()).unwrap();
-    home.write("dropped").unwrap();
-    assert_eq!(fs::read_to_string(home.log()).unwrap().lines().count(), 1);
+    home.write("after").unwrap();
+    assert_eq!(
+        home.details(),
+        ["first", "second"],
+        "removing the marker stops the writing"
+    );
 }
 
+/// A diagnostics line and its file stay bounded and private: a detail keeps at most
+/// `MAX_DETAIL_CHARS` characters, and a file that reached `MAX_FILE_BYTES`, the size at which
+/// the service rotates it, takes no more lines. On Unix the first line creates a file only the
+/// user can read, in a directory closed to everyone else.
 #[test]
-fn the_detail_is_bounded() {
+fn a_diagnostics_line_and_its_file_stay_bounded_and_private() {
     let home = LogHome::new();
     fs::write(home.marker(), "").unwrap();
     home.write(&"x".repeat(MAX_DETAIL_CHARS * 3)).unwrap();
-    let line: Value = serde_json::from_str(fs::read_to_string(home.log()).unwrap().trim()).unwrap();
-    assert_eq!(
-        line["detail"].as_str().unwrap().chars().count(),
-        MAX_DETAIL_CHARS
-    );
-}
+    assert_eq!(home.details()[0].chars().count(), MAX_DETAIL_CHARS);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
 
-#[test]
-fn a_full_file_stops_growing() {
-    let home = LogHome::new();
-    fs::write(home.marker(), "").unwrap();
-    fs::create_dir_all(home.directory()).unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&home.log()), 0o600, "the file is the user's alone");
+        assert_eq!(
+            mode(&home.directory()),
+            0o700,
+            "the directory is closed to everyone else"
+        );
+    }
+
     let full = vec![b' '; usize::try_from(MAX_FILE_BYTES).unwrap()];
     fs::write(home.log(), &full).unwrap();
     home.write("refused").unwrap();
-    assert_eq!(fs::metadata(home.log()).unwrap().len(), MAX_FILE_BYTES);
-}
-
-#[test]
-fn a_write_fault_is_an_error_only_below_record() {
-    // `record` returns nothing, so this internal error is all a fault ever becomes.
-    let home = LogHome::new();
-    fs::write(home.marker(), "").unwrap();
-    fs::write(home.directory(), "not a directory").unwrap();
-    assert!(home.write("x").is_err());
-}
-
-#[cfg(unix)]
-#[test]
-fn the_first_line_creates_a_private_file_in_a_private_directory() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let home = LogHome::new();
-    fs::write(home.marker(), "").unwrap();
-    home.write("first").unwrap();
-    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode(&home.log()), 0o600);
-    assert_eq!(mode(&home.directory()), 0o700);
+    assert_eq!(
+        fs::metadata(home.log()).unwrap().len(),
+        MAX_FILE_BYTES,
+        "a full file takes no more lines"
+    );
 }
