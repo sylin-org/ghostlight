@@ -447,8 +447,8 @@ one. With `reuse:"domain"`, the open first reuses a tab Ghostlight opened on the
 and a released session of the same agent left open, in the same browser, with no page loaded in it
 since the release. Same agent means the agent the opener's claim names: every command-line session
 is the command line, a claim the catalog knows is that agent, and any other claim is an unknown
-agent under its claimed name. The reused tab goes back into the caller's `Ghostlight - <agent name>`
-group. A tab another agent released is never reused, and the open creates a fresh tab. A client that
+agent under its claimed name. The reused tab goes back into the caller's group, the one titled with
+the ghost emoji (U+1F47B) and the agent's name. A tab another agent released is never reused, and the open creates a fresh tab. A client that
 claims no name reuses no kept tab, and no one reuses its tabs. The claim is a courtesy between
 well-behaved clients, never authority (ADR-0203 Decision 9). A released tab stays open only when the
 person's preserve-tabs setting kept it, so with that setting off nothing is reused. An exact URL

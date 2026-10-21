@@ -257,10 +257,11 @@ Open **Integrations** and confirm your client reads Connected. Then ask it:
 > used. Do not click, type, submit, or change the page after it opens.
 
 The browser should create or reuse one blue group named for your agent as the Ghostlight window
-names it, such as `Ghostlight - Claude Code`. A new first group opens in a dedicated normal window
-rather than disrupting the user's active window. After an update from an earlier build, each agent
-gets one new group; the old one goes once it is idle, and a group Chromium already saved keeps its
-old title until you remove it.
+names it: a ghost emoji followed by the agent's name, such as Claude Code. A new first group opens
+in a dedicated normal window rather than disrupting the user's active window. After an update from
+2.0.0, each agent keeps its group: the extension renames `Ghostlight - Claude Code` to the ghost
+form instead of opening a second group. A group from an older build gets a new group beside it and
+goes once it is idle, and a group Chromium already saved keeps its old title until you remove it.
 
 ## Recovery
 

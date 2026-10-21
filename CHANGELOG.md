@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   older than 2.0.1 does not report it; the next step still says what accept answers with.
 - Every `browser_tabs` and `browser_window` action says what it does: focus, close and resize
   had no description.
+- A tab group Ghostlight opens is named with a ghost emoji and the agent's name, instead of
+  `Ghostlight - Claude Code`, so the agent's name comes first in the tab strip. A group an earlier
+  version named is renamed in place, not duplicated.
 - The Claude Desktop bundle (`.mcpb`) ships with this release too, instead of ending with 2.0.0,
   so a person who installs Ghostlight through it gets every fix.
 

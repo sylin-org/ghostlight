@@ -60,17 +60,20 @@ pub enum Claimed<'a> {
     Unkept,
 }
 
-/// The words every tab group Ghostlight names begins with. The popup reads the agent's name after
-/// them.
-const GROUP_TITLE_PREFIX: &str = "Ghostlight - ";
+/// What every tab group Ghostlight names begins with: the ghost emoji (U+1F47B) and a space. The
+/// popup reads the agent's name after it (ADR-0098 amendment of 2026-10-21). Chrome's group label
+/// takes only text and a color, so the ghost is the one mark of Ghostlight it can carry. 2.0.0 wrote
+/// "Ghostlight - " instead; the extension renames a group it finds under that prefix
+/// (`legacy_group_title_prefixes` in the protocol 4 vocabulary), so each agent keeps one group.
+pub(crate) const GROUP_TITLE_PREFIX: &str = "\u{1F47B} ";
 
 /// The longest agent name a tab group's title carries, in characters.
 const GROUP_TITLE_AGENT_CHARS: usize = 80;
 
-/// The title of the browser tab group a workspace's tabs sit in: `Ghostlight - ` and the name of
-/// the `agent` that opened the workspace, as the window names it ([`details`]), such as
-/// "Ghostlight - Claude Code", "Ghostlight - Command line" and, for an opener nothing names,
-/// "Ghostlight - Unknown agent".
+/// The title of the browser tab group a workspace's tabs sit in: [`GROUP_TITLE_PREFIX`] and the
+/// name of the `agent` that opened the workspace, as the window names it ([`details`]), such as the
+/// ghost and "Claude Code", the ghost and "Command line" and, for an opener nothing names, the
+/// ghost and "Unknown agent".
 ///
 /// It depends on that one name (ADR-0066, ADR-0203 Decision 9), so every session of one agent
 /// shares one group, and a later connection to the same workspace renames nothing.
@@ -638,16 +641,16 @@ mod tests {
     }
 
     #[test]
-    fn a_group_title_is_the_agents_name_after_ghostlight() {
+    fn a_group_title_is_the_agents_name_after_the_ghost() {
         assert_eq!(
             group_title(&Agent::of(Some("claude-code"), IntakeChannel::Mcp)),
-            "Ghostlight - Claude Code"
+            "\u{1F47B} Claude Code"
         );
         assert_eq!(
             group_title(&Agent::command_line()),
-            "Ghostlight - Command line"
+            "\u{1F47B} Command line"
         );
-        assert_eq!(group_title(&Agent::unknown()), "Ghostlight - Unknown agent");
+        assert_eq!(group_title(&Agent::unknown()), "\u{1F47B} Unknown agent");
         let long = Agent::of(Some(&"n".repeat(100)), IntakeChannel::Mcp);
         assert_eq!(
             group_title(&long),

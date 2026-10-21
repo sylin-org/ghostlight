@@ -11,7 +11,8 @@ Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
 adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15,
-EXT-9, EXT-10, EXT-11, C18, P-D2 and EXT-5 have landed. Next: EXT-6 (each module exports its own
+EXT-9, EXT-10, EXT-11, C18, P-D2 and EXT-5 have landed, and so has P-D3, the owner's group title
+(the coordinator, 2026-10-21). Next: EXT-6 (each module exports its own
 handler spec through one `handler()`), then EXT-12, then B-final. B-final regenerates the freeze
 record from the release workflow's candidate zip, not a test-02 package, and stops there: the
 store cancel and resubmission are the owner's call. Parked 2026-10-21 for the night with nothing
@@ -90,7 +91,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18, P-D2 and EXT-5 have landed; EXT-6 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18, P-D2, EXT-5 and P-D3 have landed; EXT-6 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -108,6 +109,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | EXT-14 | refactor(extension): `withLease` and `withHidden` | - | EXT-14 | landed (this commit) |
 | EXT-12 | refactor(extension): the native link moves into `lib/link.js` | EXT-5, EXT-7, EXT-10 | EXT-12 | todo |
 | EXT-15 | docs(extension): module docs, and the README lists every file | - | EXT-15; the README is not packaged | landed (this commit) |
+| P-D3 | feat(extension): a group's title is the ghost and the agent's name, and a 2.0.0 group is retitled | - | the owner's request of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `language/provenance.rs` | landed (this commit) |
 | B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | todo |
 
 ### Notes (second sweep)
@@ -306,3 +308,20 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   tables (steps, clips, ops, destinations) are outside the finding. The cancelled sentence keeps
   its three copies; a receipt-text table is a later slice. Later, additive (P-D2's note): a request
   deadline field. The freeze record is regenerated (a test-02 package line).
+- P-D3, the owner's request of 2026-10-21: the ghost emoji (U+1F47B) replaces `Ghostlight - ` in a
+  group's title (ADR-0098 amendment of 2026-10-21). `vocabulary.json` gains two keys and changes
+  none: `group_title_prefix`, which the service's `GROUP_TITLE_PREFIX` pins, and
+  `legacy_group_title_prefixes`, which only the extension reads. `protocol.legacyGroupTitles` gives
+  the titles 2.0.0 gave the same agent's group. `tabs.js` retitles the lowest-id one when no group
+  carries the current title and merges any other into the current group, and never retitles a
+  group with another title. `notice.js` names the popup's agent through `protocol.groupAgentName`
+  after either prefix. The `open_tab` fixtures carry the ghost title, so the extension's group
+  tests run on it and only the legacy tests use the old one. The freeze record is regenerated from a
+  local package; B-final takes it from the release workflow's candidate. Owed: the tab strip on the
+  four test machines, the Alpine one first, for the emoji font.
+- Found while doing P-D3, not fixed by it: the extension refuses a `group_title` longer than 120
+  UTF-16 code units (`tabs.js`), while the service cuts the agent's name at 80 characters
+  (`provenance.rs`). A claimed name whose kept characters take more than 117 code units, which
+  takes characters outside the Basic Multilingual Plane such as emoji, makes a title the extension
+  refuses, so that agent can open no tab. It predates P-D3, which shortens the prefix from 13 units
+  to 3. The coordinator takes it next.

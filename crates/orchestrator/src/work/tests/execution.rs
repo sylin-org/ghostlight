@@ -2319,7 +2319,7 @@ fn open_read_close_is_one_truthful_result_per_call() {
     assert!(matches!(
         &calls[0],
         BrowserCommand::OpenTab { url, group_title, .. }
-            if url == "https://example.com" && group_title == "Ghostlight - test"
+            if url == "https://example.com" && group_title == "\u{1F47B} test"
     ));
     assert!(matches!(
         &calls[1],

@@ -568,6 +568,10 @@ fn the_constants_and_limits_equal_the_vocabulary() {
     assert_eq!(vocabulary["protocol"], wire::PROTOCOL);
     assert_eq!(vocabulary["world_name"], wire::WORLD_NAME);
     assert_eq!(vocabulary["platform"], wire::PLATFORM);
+    assert_eq!(
+        vocabulary["group_title_prefix"],
+        crate::language::provenance::GROUP_TITLE_PREFIX
+    );
     assert_eq!(limits["direct_frame_bytes"], wire::DIRECT_FRAME_BYTES);
     assert_eq!(limits["max_world_calls"], wire::MAX_WORLD_CALLS);
     assert_eq!(limits["max_input_steps"], wire::MAX_INPUT_STEPS);

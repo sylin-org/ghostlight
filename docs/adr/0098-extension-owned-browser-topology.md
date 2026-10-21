@@ -9,6 +9,9 @@ Correction, 2026-10-13: that ADR-0186 amendment is an unpublished trial and is n
 Tab reuse is decided by the service from released Ghostlight tabs only (ADR-0196 Decision 9); the
 extension never picks a tab to adopt.
 
+Amended 2026-10-21: a group's title is the ghost emoji and the agent's name, and the extension
+retitles a group 2.0.0 named `Ghostlight - <agent>` (amendment below).
+
 Date: 2026-08-05
 
 Supersedes: ADR-0085 Decisions 2-4, ADR-0090's stale native-window recovery, and
@@ -126,3 +129,40 @@ objects; the service continues enforcing the same logical ownership.
 - The service loses its native-window registry, private result metadata, and stale-pin retry.
 - The extension loses window-qualified workspace keys and asynchronous grouping reconciliation.
 - The public MCP schemas and process count do not change.
+
+## Amendment (2026-10-21): the ghost names the group
+
+The owner asked whether the ghost emoji should replace the `Ghostlight - ` prefix and approved it
+after a UX review. A group's title is now the ghost emoji (U+1F47B), a space and the agent's name as
+the Ghostlight window names it. Decision 2's `groupTitle` example shows the form 2.0.0 sent; nothing
+else in the envelope changes.
+
+The review:
+
+- A group's name sits in a small chip in the tab strip. `Ghostlight - ` spent thirteen characters
+  there on the product before the agent's name, which is what tells two groups apart. The ghost and
+  its space take two, and the agent comes first.
+- A tab group's only settable properties are its title, one of nine colors, and whether it is
+  collapsed. There is no icon and no separate accessible name, so the mascot cannot be drawn there,
+  and a screen reader announces the title. It reads the emoji as "ghost", which still says whose
+  group it is.
+- The ghost needs an emoji font. Most desktops ship one. A system without one shows a placeholder
+  box before the agent's name, and the name still reads. The four test machines look at the tab
+  strip before the release; the Alpine one is the likeliest to lack the font.
+- The color stays blue.
+
+The mechanics:
+
+- The prefix is the protocol 4 vocabulary's `group_title_prefix`, pinned by the service's golden
+  test and the extension's. The service composes the title in `language/provenance.rs`.
+- The vocabulary's `legacy_group_title_prefixes` keeps `Ghostlight - `. When no group carries the
+  current title, the extension retitles the lowest-id group that carries the agent's old title, and
+  it merges any other such group into the current one. A person who updates keeps one group per
+  agent. A group with any other title is never retitled.
+- The popup names the agent after either prefix. An updated extension beside a 2.0.0 service, which
+  still sends the old title, keeps the old groups and names their agents.
+- A 2.0.0 extension beside an updated service opens the ghost group next to the old one and shows
+  the whole title in its popup. When the extension updates, the agent's next open merges the two.
+- The packaged `lib/notice.js`, `lib/protocol.js` and `lib/tabs.js` change, and the freeze golden is
+  regenerated (ADR-0200 Decision 16). The owner withdrew the 2.0.1 store candidate before this
+  change, so the next candidate carries it.

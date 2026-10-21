@@ -629,8 +629,9 @@ connection's evidence as its opener for its whole life, and the session card, th
 counts, Integrations in use, the tab-group title, the ownership refusal and released-tab reuse all
 read the opener. When the workspace opens, the opener's agent is read once, as
 `language::provenance` names it for the window, together with its reuse key (ADR-0203 Decision 9).
-The group title is `Ghostlight - ` and that agent's name, such as `Ghostlight - Claude Code`,
-`Ghostlight - Command line`, or `Ghostlight - Unknown agent` for an opener nothing names. A
+The group title is the ghost emoji (U+1F47B), a space and that agent's name, such as
+`<ghost> Claude Code`, `<ghost> Command line`, or `<ghost> Unknown agent` for an opener nothing
+names, where `<ghost>` stands for the emoji (ADR-0098 amendment of 2026-10-21). A
 command-line workspace outlives its connections (ADR-0106), so it cannot be named from the current
 ones. A later connection to the same workspace is listed beside the others and renames nothing.
 The client's claim is one bounded value (`provenance::bounded_claim`: control and direction text
@@ -710,8 +711,7 @@ cleanup runs keeps the tab out. Default reuse (`reuse:"domain"`) adopts only fro
 reuse key, under the aggregate lock, exact URL first and then lowest id, checks it against the live
 tab list, adds it to the workspace, and sends `AdoptTab` with that exact tab id and the workspace's
 group title. The kept tab left its group when its session ended (ADR-0201), so the adopt puts it
-back in `Ghostlight - <agent name>` as it loads the page, unless the person put it in a group of
-their own. The reuse key is the agent the opener's claim names on its channel (`Agent::of(claim,
+back in the agent's group as it loads the page, unless the person put it in a group of their own. The reuse key is the agent the opener's claim names on its channel (`Agent::of(claim,
 channel).id`): every command-line session shares the command line's, a claim the catalog knows gives
 that agent's catalog id, and any other claim an unknown agent under its claimed name. A claim that
 names no agent gives no key, so that session reuses no kept tab and no one reuses its tabs. The
@@ -1274,9 +1274,13 @@ regenerates the record in the same commit. Once a store submission is staged, ch
 file means resubmitting, which is the owner's call (ADR-0200 Decision 16).
 
 Workspace tab grouping is browser mechanism. `OpenTab` carries the governed URL, the owning
-workspace already present on every browser request, and the presentation-only exact title
-`Ghostlight - <agent name>`, the name of the agent that opened the workspace as the window names it
-(see Workspace). The adapter
+workspace already present on every browser request, and the presentation-only exact title: the
+ghost emoji, a space and the name of the agent that opened the workspace as the window names it
+(see Workspace). The prefix is the protocol 4 vocabulary's `group_title_prefix`. 2.0.0 titled the
+group `Ghostlight - <agent name>`, which the vocabulary keeps in `legacy_group_title_prefixes`:
+when no group carries the current title, the adapter retitles the lowest-id group with the agent's
+old title, and it merges any other one into the current group, so an update leaves one group per
+agent. A group with any other title is never retitled. The adapter
 resolves placement before opening: it reuses one browser-wide exact-title group wherever that group
 currently resides, otherwise reuses a window containing another Ghostlight group, otherwise creates
 a dedicated normal window containing the requested URL. Destination resolution is serialized so

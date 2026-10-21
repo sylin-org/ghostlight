@@ -199,10 +199,10 @@ The unpacked extension is a complete local product surface, not an invisible rel
   default-on local choice to preserve controlled tabs. It owns only adapter-local presentation,
   diagnostics, and physical safety preferences. Authority and policy never move into the
   extension.
-- Controlled tabs use one browser-wide blue exact-title group named
-  `Ghostlight - <agent name>`, for the agent that opened the session as the Ghostlight window
-  names it: `Ghostlight - Claude Code`, `Ghostlight - Command line`, or `Ghostlight - Unknown
-  agent` for an opener nothing names. New work reuses that group wherever the user placed it.
+- Controlled tabs use one browser-wide blue exact-title group named with the ghost emoji
+  (U+1F47B) and the agent that opened the session as the Ghostlight window names it: the ghost and
+  `Claude Code`, `Command line`, or `Unknown agent` for an opener nothing names. New work reuses
+  that group wherever the user placed it.
   When no
   Ghostlight group exists, the adapter creates a dedicated normal browser window instead of
   inserting work into the user's active window. Moves between windows preserve ownership. An

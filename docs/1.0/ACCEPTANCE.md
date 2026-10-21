@@ -394,7 +394,7 @@ workbench shows waiting becoming running once.
     a fresh tab. A page commit or a close since the release removes it from reuse, and after a
     browser disconnect it is reused only where the returning browser still shows it at its
     release address. A tab released by a `ghostlight call` session is not reused by a Claude Code
-    session, which gets a fresh tab in its own `Ghostlight - Claude Code` group, while the next
+    session, which gets a fresh tab in its own Claude Code group, while the next
     `ghostlight call` session still reuses it. A client that claims no name reuses no kept tab,
     and a claimless client that Claude Code started does not reuse a Claude Code tab. Chrome's
     tab 5 and Edge's tab 5 are different tabs, and a workspace refusal found after the browser
@@ -462,9 +462,10 @@ workbench shows waiting becoming running once.
    effects-on, captions-off, diagnostics-off, and preserve-tabs-on defaults under local keys.
    Preserve tabs is a final physical interlock: it can refuse model-driven close but cannot edit,
    import, expand, or override authority. Human browser closure remains available.
-8. Each exact `Ghostlight - <agent name>` title, named for the agent that opened the workspace as
-   the window names it, has one canonical blue group across normal
-   browser windows. A new tab is created directly in that group's window. With no Ghostlight group,
+8. Each exact group title, the ghost emoji (U+1F47B) and the name of the agent that opened the
+   workspace as the window names it, has one canonical blue group across normal browser windows.
+   A group 2.0.0 titled `Ghostlight - <agent name>` becomes that group or joins it, never a second
+   one beside it. A new tab is created directly in that group's window. With no Ghostlight group,
    the first URL opens in a dedicated normal window; no tab is inserted into the user's active
    window and no blank tab is exposed. Concurrent opens cannot create duplicate groups. An opener
    does not grant ownership: child tabs and popups are not automatically adopted, grouped, or

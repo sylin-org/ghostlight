@@ -169,7 +169,7 @@ fn a_released_ghostlight_tab_is_reused_by_the_next_session_on_its_host() {
         matches!(
             &calls[1],
             BrowserCommand::AdoptTab { tab_id: 7, url, group_title, focus_window: true }
-                if url == "https://example.com/b" && group_title == "Ghostlight - test"
+                if url == "https://example.com/b" && group_title == "\u{1F47B} test"
         ),
         "the service names the exact tab it chose and puts it back in the group: {calls:?}"
     );
@@ -296,7 +296,7 @@ fn a_released_tab_the_person_took_back_or_closed_is_not_reused() {
 fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_it() {
     let (executor, browser, workspaces, _, _) = fixture();
     // A script client opens example.com and exits. Preserve-tabs keeps its tab open, out of the
-    // "Ghostlight - ghostlight call" group (ADR-0201).
+    // "ghostlight call" group (ADR-0201).
     let scripts = workspaces.admit("ghostlight call".into(), IntakeChannel::Mcp);
     open_at(&executor, &browser, &scripts, 7, "https://example.com/a");
     let scripts_again = later_session_of(&workspaces, &scripts);
@@ -322,7 +322,7 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
         matches!(
             &calls[0],
             BrowserCommand::OpenTab { group_title, .. }
-                if group_title == "Ghostlight - Claude Code"
+                if group_title == "\u{1F47B} Claude Code"
         ),
         "{calls:?}"
     );
@@ -351,7 +351,7 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
         matches!(
             &calls[1],
             BrowserCommand::AdoptTab { tab_id: 7, url, group_title, .. }
-                if url == "https://example.com/c" && group_title == "Ghostlight - ghostlight call"
+                if url == "https://example.com/c" && group_title == "\u{1F47B} ghostlight call"
         ),
         "{calls:?}"
     );
@@ -385,7 +385,7 @@ fn a_group_is_titled_for_the_agent_the_window_names() {
         );
         assert_eq!(
             opened_group(&calls),
-            format!("Ghostlight - {window}"),
+            format!("\u{1F47B} {window}"),
             "{claim:?} {source:?}"
         );
     }
@@ -402,7 +402,7 @@ fn a_group_is_titled_for_the_agent_the_window_names() {
         24,
         "https://example.com/",
     );
-    assert_eq!(opened_group(&calls), "Ghostlight - Command line");
+    assert_eq!(opened_group(&calls), "\u{1F47B} Command line");
 }
 
 #[test]
@@ -410,13 +410,13 @@ fn an_opener_the_catalog_cannot_name_is_titled_unknown_agent() {
     let (executor, browser, workspaces, _, _) = fixture();
     let by_program = session_of(&workspaces, IntakeChannel::Mcp, None, None);
     let calls = open_fresh(&executor, &browser, &by_program, 20, "https://example.com/");
-    assert_eq!(opened_group(&calls), "Ghostlight - Unknown agent");
+    assert_eq!(opened_group(&calls), "\u{1F47B} Unknown agent");
     for (tab_id, unnamed) in [(21, ""), (22, "  "), (23, "Unknown agent")] {
         let unseen = workspaces.admit(unnamed.into(), IntakeChannel::Mcp);
         let calls = open_fresh(&executor, &browser, &unseen, tab_id, "https://example.org/");
         assert_eq!(
             opened_group(&calls),
-            "Ghostlight - Unknown agent",
+            "\u{1F47B} Unknown agent",
             "{unnamed:?}"
         );
     }
@@ -462,7 +462,7 @@ fn a_claimless_client_started_by_claude_code_reuses_no_claude_code_tab() {
     let claimless = session_of(&workspaces, IntakeChannel::Mcp, None, Some("claude-code"));
     let calls = open_fresh(&executor, &browser, &claimless, 12, "https://example.com/b");
     assert_eq!(calls.len(), 1, "{calls:?}");
-    assert_eq!(opened_group(&calls), "Ghostlight - Claude Code");
+    assert_eq!(opened_group(&calls), "\u{1F47B} Claude Code");
 
     // The kept tab still waits for a session whose client claims Claude Code.
     let before = browser.calls().len();
@@ -477,7 +477,7 @@ fn a_claimless_client_started_by_claude_code_reuses_no_claude_code_tab() {
     assert_eq!(reused.facts["reused"], true, "{}", reused.summary);
     assert_eq!(
         opened_group(&browser.calls()[before..]),
-        "Ghostlight - Claude Code"
+        "\u{1F47B} Claude Code"
     );
 }
 
@@ -516,7 +516,7 @@ fn a_command_line_session_reuses_a_tab_another_command_line_session_kept() {
         matches!(
             &calls[..],
             [BrowserCommand::ListTabs, BrowserCommand::AdoptTab { tab_id: 7, group_title, .. }]
-                if group_title == "Ghostlight - Command line"
+                if group_title == "\u{1F47B} Command line"
         ),
         "{calls:?}"
     );
@@ -543,7 +543,7 @@ fn a_tab_a_command_line_session_kept_is_not_reused_by_claude_code() {
         "https://example.com/b",
     );
     assert_eq!(calls.len(), 1, "{calls:?}");
-    assert_eq!(opened_group(&calls), "Ghostlight - Claude Code");
+    assert_eq!(opened_group(&calls), "\u{1F47B} Claude Code");
 }
 
 #[test]

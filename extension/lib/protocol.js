@@ -55,6 +55,8 @@
     recording_stop_reasons: ["document_boundary", "explicit", "hard_timeout", "memory_limit", "browser_detached", "runtime_held",
       "service_disconnected", "frame_too_large"],
     unknown_dialog_type: "unknown",
+    group_title_prefix: "\u{1F47B} ",
+    legacy_group_title_prefixes: ["Ghostlight - "],
     chunk_limits: { chunk_payload_bytes: 524288, transfer_max_bytes: 8388608, transfer_max_chunks: 64 },
     limits: {
       direct_frame_bytes: 786432,
@@ -96,6 +98,25 @@
     return Object.assign(new Error(message), { code });
   }
 
+  // A tab group the service names is titled with `group_title_prefix` and its agent's name. Earlier
+  // releases used the prefixes in `legacy_group_title_prefixes` (2.0.0 wrote
+  // "Ghostlight - <agent>"), so a group found under one is the same agent's group.
+
+  /** The agent a group title names: the title without the current or a retired prefix, or the title as it is. */
+  function groupAgentName(title) {
+    for (const prefix of [vocabulary.group_title_prefix, ...vocabulary.legacy_group_title_prefixes]) {
+      if (title.startsWith(prefix)) return title.slice(prefix.length);
+    }
+    return title;
+  }
+
+  /** The titles earlier releases gave the group the current title `title` names; none for any other title. */
+  function legacyGroupTitles(title) {
+    if (!title.startsWith(vocabulary.group_title_prefix)) return [];
+    const agent = title.slice(vocabulary.group_title_prefix.length);
+    return vocabulary.legacy_group_title_prefixes.map((prefix) => `${prefix}${agent}`);
+  }
+
   /**
    * The failure for work that needs a renderer a JavaScript dialog is blocking: the receipt code
    * `dialog_open` with its one message. Anything that would wait on the page throws it at once.
@@ -109,6 +130,8 @@
     isKnown,
     failure,
     dialogOpen,
+    groupAgentName,
+    legacyGroupTitles,
     DIALOG_OPEN_MESSAGE,
     FRAME: named(Object.values(vocabulary.frame_kinds).flat()),
     EVENT: named(vocabulary.events),

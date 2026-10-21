@@ -2,14 +2,14 @@
 (function installGhostlightNotice(root, factory) {
   const node = typeof module !== "undefined" && module.exports;
   const api = factory(node
-    ? { shared: require("./shared.js") }
-    : { shared: root.GhostlightShared });
+    ? { shared: require("./shared.js"), protocol: require("./protocol.js") }
+    : { shared: root.GhostlightShared, protocol: root.GhostlightProtocol });
   root.GhostlightNotice = api;
   if (node) module.exports = api;
 })(globalThis, function createGhostlightNoticeApi(deps) {
   "use strict";
 
-  const { shared } = deps;
+  const { shared, protocol } = deps;
 
   // A notice is the service's one-way presentation of what Ghostlight is doing: a spinner, a
   // target ring, a completion mark, a block. It is rendered by the page code in the tab's own world;
@@ -20,7 +20,6 @@
 
   const SIGNAL = Object.freeze({ COMPLETION: "completion", DENIAL: "denial" });
   const QUIET_ACTIVITY = "quiet";
-  const GROUP_PREFIX = /^Ghostlight - /;
   const DEFAULT_CLIENT_LABEL = "MCP client";
   const PHASE_CHARS = 80;
   const ACTIVITY_LIMIT = 8;
@@ -86,7 +85,7 @@
       } else {
         activity.set(signal.invocation, {
           invocation: signal.invocation,
-          client_label: groupTitle.replace(GROUP_PREFIX, "") || DEFAULT_CLIENT_LABEL,
+          client_label: protocol.groupAgentName(groupTitle) || DEFAULT_CLIENT_LABEL,
           label: activityName(signal),
           phase: shared.bounded(signal.phase, PHASE_CHARS)
         });

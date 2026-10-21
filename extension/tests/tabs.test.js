@@ -3,13 +3,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const Tabs = require("../lib/tabs.js");
+const protocol = require("../lib/protocol.js");
 const state = require("../lib/state.js");
 const { fakeChrome, wire } = require("./p4-fakes.js");
 const { golden, goldenArgs, execute, fakeBrowser } = require("./p4-chrome.js");
 
 const WINDOW = 1;
 const OTHER_WINDOW = 2;
-const TITLE = "Ghostlight - Research";
+const TITLE = `${protocol.vocabulary.group_title_prefix}Research`;
+const LEGACY_TITLE = `${protocol.vocabulary.legacy_group_title_prefixes[0]}Research`;
 const KEY = "workspace_9a2c";
 const HANDLERS = ["listTabs", "openTab", "navigate", "focusTab", "closeTab", "setZoom", "resizeWindow"];
 
@@ -621,4 +623,41 @@ test("close_tab on a missing tab is tab_missing with nothing dispatched", async 
   assert.equal(result.failure, expected.failure);
   assert.equal(result.message, expected.message);
   assert.equal(result.dispatched, expected.dispatched);
+});
+
+test("a group an earlier release titled for the same agent is retitled and reused, not duplicated", async () => {
+  const { tabs, chrome } = setup({
+    browser: {
+      tabs: [tab({ id: 1, groupId: 9 })],
+      groups: [{ id: 9, windowId: WINDOW, title: LEGACY_TITLE }]
+    }
+  });
+  const result = await execute(tabs.openTab, goldenArgs("open_tab"));
+  assert.deepEqual(chrome.groupList.map((group) => [group.id, group.title]), [[9, TITLE]]);
+  assert.equal(chrome.tabList.find((item) => item.id === result.ok.tab.tab_id).groupId, 9);
+});
+
+test("a group under the current title absorbs the same agent's group from an earlier release", async () => {
+  const { tabs, chrome } = setup({
+    browser: {
+      tabs: [tab({ id: 1, groupId: 9 }), tab({ id: 2, groupId: 12 })],
+      groups: [{ id: 9, windowId: WINDOW, title: LEGACY_TITLE }, { id: 12, windowId: WINDOW, title: TITLE }]
+    }
+  });
+  const result = await execute(tabs.openTab, goldenArgs("open_tab"));
+  assert.deepEqual(chrome.groupList.map((group) => [group.id, group.title]), [[12, TITLE]]);
+  assert.deepEqual(chrome.tabList.filter((item) => item.groupId === 12).map((item) => item.id).sort((a, b) => a - b),
+    [1, 2, result.ok.tab.tab_id].sort((a, b) => a - b));
+});
+
+test("a group someone else titled is never retitled", async () => {
+  const { tabs, chrome } = setup({
+    browser: {
+      tabs: [tab({ id: 1, groupId: 9 })],
+      groups: [{ id: 9, windowId: WINDOW, title: "Research" }]
+    }
+  });
+  await execute(tabs.openTab, goldenArgs("open_tab"));
+  assert.equal(chrome.groupList.find((group) => group.id === 9).title, "Research");
+  assert.ok(chrome.groupList.some((group) => group.id !== 9 && group.title === TITLE));
 });

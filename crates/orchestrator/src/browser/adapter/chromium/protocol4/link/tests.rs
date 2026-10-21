@@ -24,7 +24,7 @@ use crate::sync::lock;
 use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
-const GROUP_TITLE: &str = "Ghostlight - Claude Code";
+const GROUP_TITLE: &str = "\u{1F47B} Claude Code";
 const PATIENCE: Duration = Duration::from_secs(30);
 
 fn port(script: Script) -> (RelayBrowserPort, FakeExtension) {
@@ -140,7 +140,7 @@ fn rows() -> Vec<Row> {
                 focus_window: true,
             },
             primitive: json!({"name": "open_tab", "args": {"url": example,
-                "group_key": "g_0308773300b3c6a8", "group_title": GROUP_TITLE,
+                "group_key": "g_ac9879c3b8d67871", "group_title": GROUP_TITLE,
                 "focus_window": true, "ready_timeout_ms": 8000}}),
             receipt: effect(json!({"tab": tab(example), "adopted": false}), &[example]),
             outcome: BrowserOutcome::TabOpened {
@@ -156,7 +156,7 @@ fn rows() -> Vec<Row> {
                 focus_window: false,
             },
             primitive: json!({"name": "open_tab", "args": {"url": example,
-                "group_key": "g_0308773300b3c6a8", "group_title": GROUP_TITLE,
+                "group_key": "g_ac9879c3b8d67871", "group_title": GROUP_TITLE,
                 "adopt_tab_id": 12, "focus_window": false, "ready_timeout_ms": 8000}}),
             receipt: effect(json!({"tab": tab(example), "adopted": true}), &[example]),
             outcome: BrowserOutcome::TabOpened {
@@ -345,7 +345,7 @@ fn each_browser_native_row_sends_its_primitive_and_maps_its_outcome() {
 
 #[test]
 fn the_group_key_is_the_digest_prefix_of_the_group_title() {
-    assert_eq!(group_key(GROUP_TITLE), "g_0308773300b3c6a8");
+    assert_eq!(group_key(GROUP_TITLE), "g_ac9879c3b8d67871");
 }
 
 #[test]

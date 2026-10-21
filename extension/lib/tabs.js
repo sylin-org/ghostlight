@@ -135,10 +135,12 @@
 
     // One group per title is the invariant, and history can leave duplicates behind (a restart
     // between creating and titling a group). Chromium removes a group when its last tab leaves, so
-    // merging is: move every tab of each same-title duplicate into the canonical group.
+    // merging is: move every tab of each same-title duplicate into the canonical group. A group an
+    // earlier release titled for the same agent is a duplicate too.
     async function mergeDuplicates(title, canonical) {
+      const titles = [title, ...protocol.legacyGroupTitles(title)];
       const duplicates = (await chromeApi.tabGroups.query({}))
-        .filter((group) => group.title === title && group.id !== canonical.id)
+        .filter((group) => titles.includes(group.title) && group.id !== canonical.id)
         .sort(byGroupId);
       for (const duplicate of duplicates) {
         try {
@@ -149,8 +151,19 @@
       }
     }
 
+    // The lowest-id group an earlier release titled for the agent the current title `title` names,
+    // retitled to `title`, so the person keeps one group per agent across the update.
+    async function renamedLegacyGroup(live, title) {
+      const legacy = protocol.legacyGroupTitles(title);
+      const group = live.filter((candidate) => legacy.includes(candidate.title)).sort(byGroupId)[0];
+      if (!group) return undefined;
+      await chromeApi.tabGroups.update(group.id, { title });
+      return { ...group, title };
+    }
+
     // The group for a key: the stored group when it still carries the title, else the lowest-id group
-    // with exactly that title (which repairs the mapping after an extension reload).
+    // with exactly that title (which repairs the mapping after an extension reload), else a group an
+    // earlier release titled for the same agent, retitled.
     async function canonicalGroup(key, title) {
       const entry = groups.get(key);
       if (entry) {
@@ -163,11 +176,12 @@
         } catch (_error) { /* a stale id falls through to the title search */ }
         groups.delete(key);
       }
-      const exact = (await chromeApi.tabGroups.query({})).filter((group) => group.title === title).sort(byGroupId)[0];
-      if (!exact) return undefined;
-      groups.set(key, { groupId: exact.id, title });
-      await mergeDuplicates(title, exact);
-      return exact;
+      const live = await chromeApi.tabGroups.query({});
+      const found = live.filter((group) => group.title === title).sort(byGroupId)[0] ?? await renamedLegacyGroup(live, title);
+      if (!found) return undefined;
+      groups.set(key, { groupId: found.id, title });
+      await mergeDuplicates(title, found);
+      return found;
     }
 
     // The window of any group this adapter keeps, so a new group lands beside the others.

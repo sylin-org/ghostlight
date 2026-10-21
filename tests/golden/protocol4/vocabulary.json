@@ -76,6 +76,8 @@
   "runtime_states": ["active","held","ended","disconnected"],
   "recording_stop_reasons": ["document_boundary","explicit","hard_timeout","memory_limit","browser_detached","runtime_held","service_disconnected","frame_too_large"],
   "unknown_dialog_type": "unknown",
+  "group_title_prefix": "\ud83d\udc7b ",
+  "legacy_group_title_prefixes": ["Ghostlight - "],
   "chunk_limits": {"chunk_payload_bytes": 524288, "transfer_max_bytes": 8388608, "transfer_max_chunks": 64},
   "world_message_kinds": [
     "read_text",

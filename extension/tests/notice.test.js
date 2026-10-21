@@ -3,6 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const Notice = require("../lib/notice.js");
+const protocol = require("../lib/protocol.js");
 const Queue = require("../lib/presentation-queue.js");
 const World = require("../lib/world.js");
 const { TOP, TOP_LOADER, fakeChrome, assets, wire } = require("./p4-fakes.js");
@@ -11,7 +12,8 @@ const { golden, fakeBrowser } = require("./p4-chrome.js");
 const TAB = 12;
 const WINDOW = 1;
 const GROUP = 5;
-const TITLE = "Ghostlight - Research";
+const TITLE = `${protocol.vocabulary.group_title_prefix}Research`;
+const LEGACY_TITLE = `${protocol.vocabulary.legacy_group_title_prefixes[0]}Research`;
 
 function denial(overrides = {}) {
   return { invocation: "inv_4e9a", signal: "denial", activity: "click", phase: "Blocked", detail: "Not allowed", locator: "locator_a1b2c3d4_8", ...overrides };
@@ -217,4 +219,11 @@ test("a notice with no usable tab or signal is ignored", async () => {
   assert.equal(await notice.deliver({ tab_id: TAB }), false);
   assert.equal(await notice.deliver(), false);
   assert.deepEqual(presented, []);
+});
+
+test("the activity list names the agent of a group an earlier release titled", async () => {
+  const { notice, browser } = await setup();
+  browser.groupList[0].title = LEGACY_TITLE;
+  await notice.deliver({ tab_id: TAB, signal: { invocation: "inv_1", signal: "progress", activity: "click", phase: "p" } });
+  assert.equal(notice.activityList()[0].client_label, "Research");
 });

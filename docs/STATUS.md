@@ -232,6 +232,12 @@ Now:
   of 2026-10-21; `taskkill /T` on leo-desktop-02 now leaves both running). P-D2: an extension
   command the service cancelled while it waited no longer runs late, which had opened tabs and a
   window after a held dialog cleared (f5c01ca6).
+- The owner's live test of 2026-10-21 added two changes. L-D6: a script that threw tells the agent
+  what it threw, bounded, and the audit keeps only that it threw (28ea74b3). P-D3: a tab group's
+  title is the ghost emoji and the agent's name instead of `Ghostlight - `, and the extension
+  retitles a group 2.0.0 named rather than opening a second one (ADR-0098 amendment of
+  2026-10-21). P-D3 changes three packaged extension files, so the next candidate carries it.
+  Owed: the tab strip on the four test machines, the Alpine one first, for the emoji font.
 - Second sweep state after that night. core-language and adapter are done, and so is the policy
   lane. package: EXT-6, EXT-12 and B-final are next. core-work: W-D4 is next: after a Quit, closing
   a handle the Quit released says "That tab was already closed." while the tab stays open.
