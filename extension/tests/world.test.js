@@ -218,6 +218,28 @@ test("a dialog that opens during a call answers dialog_open, started; a known di
   await lifecycle.detachAll();
 });
 
+test("a dialog that opens while a world is set up answers dialog_open, not started", async () => {
+  const { chrome, lifecycle, world } = await ready();
+  chrome.handlers["Runtime.evaluate"] = () => {
+    lifecycle.openDialog(TAB, { type: "alert" });
+    return { result: { objectId: `global:${TOP}` } };
+  };
+  const result = await world.callPrimitive(callArgs([box]), effects(), "p4_12");
+  assert.equal(result.answers[0].code, "dialog_open");
+  assert.equal(result.answers[0].started, false);
+  assert.equal(chrome.calls.filter((call) => call.params.functionDeclaration === World.SHIMS.CALL).length, 0,
+    "the message never reached the page");
+  await lifecycle.detachAll();
+});
+
+test("mapCallError keeps the call code of a coded failure, and reads any other code as text", () => {
+  const coded = (code) => Object.assign(new Error("coded"), { code });
+  assert.deepEqual(World.mapCallError(coded("dialog_open")), { code: "dialog_open", started: true, dropHandle: false });
+  assert.deepEqual(World.mapCallError(coded("session_lost")), { code: "session_lost", started: true, dropHandle: false });
+  assert.deepEqual(World.mapCallError(coded("tab_missing")), { code: "other", started: true, dropHandle: false });
+  assert.deepEqual(World.mapCallError(coded(-32000)), { code: "other", started: true, dropHandle: false });
+});
+
 test("ambient facts are not sent to the worlds of a tab a dialog blocks", async () => {
   const { chrome, lifecycle, world } = await ready();
   await lifecycle.retain(TAB);

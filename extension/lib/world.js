@@ -96,12 +96,18 @@
     return Object.assign(new Error(message ?? code), { callCode: code, started });
   }
 
+  const CALL_CODES = new Set(Object.values(CALL));
+
   /**
    * Maps an error raised while calling a world to `{ code, started, dropHandle }` through the closed
-   * CALL_ERRORS table. A coded call failure keeps its own code; anything else is `other`, started.
+   * CALL_ERRORS table. A call failure keeps its own code and start. A coded failure from
+   * `sessions.failure` (such as the `dialog_open` a frame check throws) keeps its code when that
+   * code is also a call failure, and counts as started like any failure that does not say;
+   * anything else is `other`, started.
    */
   function mapCallError(error) {
     if (error?.callCode) return { code: error.callCode, started: Boolean(error.started), dropHandle: false };
+    if (CALL_CODES.has(error?.code)) return { code: error.code, started: true, dropHandle: false };
     const text = String(error?.message ?? error);
     const known = CALL_ERRORS.find((entry) => entry.pattern.test(text));
     if (known) return { code: known.code, started: known.started, dropHandle: known.dropHandle };
