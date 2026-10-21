@@ -24,7 +24,7 @@
 mod tile;
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::install::icons::{sha256_hex, version_of, CachedIcon, FoundIcon, IconCache, IconKind};
 use crate::language::agent_icon::icon_from;
@@ -147,7 +147,7 @@ fn app_image(cache: &IconCache, agent_id: &str, sha256: &str) -> Option<Arc<Serv
 }
 
 fn app_images() -> MutexGuard<'static, BTreeMap<String, Arc<ServedImage>>> {
-    APP_IMAGES.lock().unwrap_or_else(PoisonError::into_inner)
+    crate::sync::lock(&APP_IMAGES)
 }
 
 /// An agent's image as the window serves it.

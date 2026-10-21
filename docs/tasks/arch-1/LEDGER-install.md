@@ -423,7 +423,7 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
 | SERV-13 | refactor(cli): install and uninstall run as two flows that collect, then print | - | SERV-13 as corrected; the printed order stays | todo |
 | SERV-11c | refactor(cli): one name per meaning in `cli/` | SERV-13 | SERV-11's CLI half | todo |
 | EXT-2 | refactor(win-peer): the user's SID comes from relay | - | EXT-2 | todo |
-| I-lock | refactor(install): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |
+| I-lock | refactor(install): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (this commit) |
 
 ### Notes, second sweep
 

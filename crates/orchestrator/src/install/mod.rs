@@ -35,7 +35,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use ghostlight_relay::route::MCP_ARGUMENT;
@@ -49,6 +49,7 @@ use toml_edit::{value, Array, DocumentMut, Item, Table};
 use crate::agent::image::{monogram, Monogram};
 use crate::agent::Agent;
 use crate::language::deployment as words;
+use crate::sync::lock;
 
 use container::{AppContainer, Residence};
 use icons::{AgentIconSources, IconSource, KnownFolder, ProgramPlace};
@@ -3206,12 +3207,6 @@ fn executable_name(name: &str, windows: bool) -> String {
     } else {
         name.into()
     }
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Safe harness registration failure.

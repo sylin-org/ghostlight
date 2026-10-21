@@ -41,7 +41,8 @@ use sha2::{Digest, Sha256};
 use super::apps::is_wrapper;
 use super::packaged::{is_family_of, PACKAGES_DIRECTORY};
 use super::record::atomic_replace;
-use super::{lock, user_dirs, HOME_VARIABLE, USER_PROFILE_VARIABLE};
+use super::{user_dirs, HOME_VARIABLE, USER_PROFILE_VARIABLE};
+use crate::sync::lock;
 
 /// The longest a look at every agent's sources takes before it stops; agents it did not reach
 /// keep what was cached for them.
