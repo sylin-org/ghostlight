@@ -13,15 +13,15 @@ ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (
 (`geometry/tests.rs`), A7 (`locator.rs`), A8
 (`scope/tests.rs`), A9 (`tree/tests.rs`),
 A10 (`merge/tests.rs`), A11 (`link/tests.rs`), A12 (`connection/tests.rs`), A13
-(`golden.rs`), A14 (`translate/script.rs`), A15 (`translate/tests/forms.rs`) and
-A16 (`translate/tests/points.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+(`golden.rs`), A14 (`translate/script.rs`), A15 (`translate/tests/forms.rs`) ,
+A16 (`translate/tests/points.rs`) and A17 (`translate/tests/interaction.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 104 |
+| `browser/adapter/` | 337 | 55 | 70 |
 
 ## Slices
 
@@ -45,7 +45,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A13 | `protocol4/golden.rs`: the goldens both sides read, one test per contract | 19 | 4 | contract 4 | landed (2a3a574e) |
 | A14 | `protocol4/translate/script.rs`: which scripts `browser_execute` awaits | 2 | 1 | contract 1 | landed (4de312d7) |
 | A15 | `protocol4/translate/tests/forms.rs`: a fill's order, its refusals and its partial outcomes | 20 | 3 | promise 2, defect 1 | landed (1a4ccfed) |
-| A16 | `protocol4/translate/tests/points.rs`: where a point or a target may land | 22 | 3 | promise 2, defect 1 | landed (this commit) |
+| A16 | `protocol4/translate/tests/points.rs`: where a point or a target may land | 22 | 3 | promise 2, defect 1 | landed (f64971b8) |
+| A17 | `protocol4/translate/tests/interaction.rs` (and `world`'s removed lookup): input refusals, unknown effects, capture and scripts | 37 + 1 | 4 | promise 3, defect 1 | landed (this commit) |
 
 ## Notes
 
@@ -180,6 +181,17 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   export's attach call the golden pins, and the mid-drag dialog, which interaction's mid-input
   dialog case proves. Scope's admission test regains the rows A8 left to this slice: a point needs
   routing on a page with a frame the scope cannot read, and an open page routes none.
+- A17: kept four, running their cases as named functions: a refusal before any input names its
+  cause and sends nothing (executor 6), with the removed control's lookup offered only when the
+  service reads it whole (a new case through the translator that replaces `world`'s decoder test,
+  as A3 planned); a failure after dispatched input leaves the effect unknown, and a dialog the
+  click opened is success (executor 4); a capture refuses a hidden tab first (efe54caf) and
+  settles within the job's budget; and a script runs at most once, with L-D6's thrown script as a
+  case (28ea74b3). Cut: click, hover and scroll geometry (points' nested-frames test proves the
+  placement), guarded-call shapes `tests.rs` and the goldens prove, a modified key `keys` proves,
+  region captures (a clip that restates its input, and staleness of a read-only image), the upload
+  tests (the link's chunked request proves the chunking), and two script cases of the scanner
+  `script.rs` proves.
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden

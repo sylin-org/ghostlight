@@ -1,23 +1,16 @@
 //! Pointer, keyboard, capture, upload and script work against a scripted protocol-4 extension.
 
-use base64::Engine as _;
 use serde_json::{json, Value};
 
 use super::super::super::geometry;
-use super::super::super::keys;
-use super::super::super::wire::{CaptureClip, InputStep, Point};
+use super::super::super::wire::{CaptureClip, InputStep};
 use super::*;
-use crate::browser::adapter::{
-    CaptureScope, PhysicalFile, PhysicalRectangle, ScriptForm, ViewportGeometry,
-};
-use crate::browser::adapter::{
-    PhysicalClick, PhysicalPressKey, PhysicalScroll, PhysicalTypeFocused, PhysicalTypeText,
-};
+use crate::browser::adapter::{CaptureScope, PhysicalRectangle, ScriptForm, ViewportGeometry};
+use crate::browser::adapter::{PhysicalClick, PhysicalPressKey, PhysicalTypeFocused};
 use crate::language::page_refusal::PageRefusal;
-use crate::language::{PointerButton, ScrollAmount, ScrollDirection};
+use crate::language::PointerButton;
 
 const NESTED: &str = "C:c1:locator_a1_1";
-const TOP_LOCATOR: &str = "T:t1:locator_a1_2";
 /// The preparation budget the authority hands a capture in these tests, in milliseconds.
 const SETTLE_MS: u64 = 300;
 
@@ -221,97 +214,6 @@ pub(super) fn expected_view() -> ViewportGeometry {
     }
 }
 
-#[test]
-fn a_click_goes_to_the_targets_centre_in_the_top_viewport() {
-    let (port, fake) = rig(page(), finished);
-    let (observation, result) =
-        unwrap_scoped(call(&port, scoped(all_open(), activate(NESTED))).unwrap());
-    let BrowserOutcome::Activated {
-        tab,
-        subject,
-        committed_urls,
-    } = result
-    else {
-        panic!("an activation");
-    };
-    assert_eq!(tab.tab_id, 12);
-    assert_eq!(subject.unwrap().name, "Save");
-    assert!(committed_urls.is_empty());
-    assert_eq!(observation.visited, ["C.c1"]);
-    let calls = calls_seen(&fake);
-    assert_eq!(calls[0].mode, wire::CallMode::Sequence);
-    assert_eq!(frames_of(&calls[0]), ["C", "T"]);
-    assert_eq!(kinds(&calls[0]), ["activate", "owner_box"]);
-    assert_eq!(calls[0].calls[1].owner_of.as_deref(), Some("C"));
-    assert!(calls[0].guard.is_some());
-    let inputs = inputs_seen(&fake);
-    assert_eq!(inputs.len(), 1);
-    assert_eq!(
-        inputs[0].steps,
-        keys::click(
-            Point { x: 130.0, y: 75.0 },
-            keys::mouse_button(PointerButton::Primary),
-            1,
-            0
-        ),
-        "the middle of the rectangle, shifted by the owner's content box"
-    );
-    assert_eq!(inputs[0].settle_ms, 250);
-    assert!(inputs[0].precondition.is_none());
-    assert!(inputs[0].guard.is_some());
-    assert_eq!(
-        primitives_seen(&fake),
-        ["call", "input", "list_tabs"],
-        "a scope names its tree, so no inventory is read"
-    );
-}
-
-#[test]
-fn a_click_in_the_top_document_needs_no_owner_box() {
-    let (port, fake) = rig(page(), finished);
-    call(&port, scoped(all_open(), activate(TOP_LOCATOR))).unwrap();
-    let calls = calls_seen(&fake);
-    assert_eq!(kinds(&calls[0]), ["activate"]);
-    assert_eq!(
-        inputs_seen(&fake)[0].steps,
-        keys::click(
-            Point { x: 30.0, y: 25.0 },
-            keys::mouse_button(PointerButton::Primary),
-            1,
-            0
-        )
-    );
-}
-
-#[test]
-fn a_modified_click_holds_its_modifiers() {
-    let (port, fake) = rig(page(), finished);
-    call(
-        &port,
-        scoped(
-            all_open(),
-            BrowserCommand::Activate(PhysicalClick {
-                tab_id: 12,
-                locator: TOP_LOCATOR.into(),
-                button: PointerButton::Primary,
-                click_count: 2,
-                modifiers: vec!["Shift".into()],
-            }),
-        ),
-    )
-    .unwrap();
-    assert_eq!(
-        inputs_seen(&fake)[0].steps,
-        keys::click(
-            Point { x: 30.0, y: 25.0 },
-            keys::mouse_button(PointerButton::Primary),
-            2,
-            keys::modifier_mask(&["Shift"])
-        )
-    );
-}
-
-#[test]
 fn a_dialog_during_a_click_is_success() {
     let (port, _fake) = rig(page(), |_| {
         Out::Effect(json!({"completed_steps": 2,
@@ -321,6 +223,12 @@ fn a_dialog_during_a_click_is_success() {
     assert!(matches!(result, BrowserOutcome::Activated { .. }));
 }
 
+/// A refusal before any input names its own cause and sends nothing: a click whose preparation
+/// failed, a click on a removed control (which offers the page's lookup bound to its document only
+/// when the service reads it whole), and a key press or text whose control lost the focus, went
+/// stale, moved or is not a text control; text typed into the focused control is typed only in the
+/// first document that holds the focus, and a key press without a handle needs the bound subject
+/// to hold it (ACCEPTANCE, executor and truth gates 6 and document boundary evidence 1).
 #[test]
 fn a_preparation_failure_is_its_own_refusal_and_sends_no_input() {
     for code in ["stale_locator", "not_visible", "disabled"] {
@@ -337,11 +245,19 @@ fn a_preparation_failure_is_its_own_refusal_and_sends_no_input() {
         assert_eq!(error, expected, "{code}");
         assert!(inputs_seen(&fake).is_empty());
     }
+
+    a_click_on_a_removed_control_returns_the_page_lookup_bound_to_its_document();
+    a_click_on_a_removed_control_offers_no_lookup_it_cannot_read_whole();
+    a_key_press_without_a_locator_requires_the_bound_subject_to_hold_the_focus();
+    a_lost_focus_refuses_the_key_press_with_nothing_sent();
+    a_stale_locator_refuses_the_key_press_with_nothing_sent();
+    a_focus_that_moved_refuses_the_text_with_nothing_sent();
+    typing_into_the_focused_control_clears_and_types_only_in_the_first_focused_document();
+    typing_with_no_focused_text_control_fails_before_anything_is_sent();
 }
 
 /// The lookup a page makes in a failing click is bound to the document of the locator that
 /// went stale, so its candidates are handles the service can act on.
-#[test]
 fn a_click_on_a_removed_control_returns_the_page_lookup_bound_to_its_document() {
     let (port, fake) = rig(
         Box::new(|call| {
@@ -386,6 +302,39 @@ fn a_click_on_a_removed_control_returns_the_page_lookup_bound_to_its_document() 
     assert!(inputs_seen(&fake).is_empty(), "nothing was sent");
 }
 
+fn a_click_on_a_removed_control_offers_no_lookup_it_cannot_read_whole() {
+    for detail in [
+        json!({"stale": "removed"}),
+        json!({"stale": "removed", "matched": "many"}),
+        json!({"stale": "removed", "matched": 1,
+            "candidates": [{"target": {"unheard_of": 1}, "same": true}]}),
+        json!({"stale": "unknown", "matched": 1, "same_count": 1}),
+    ] {
+        let answer = detail.clone();
+        let (port, fake) = rig(
+            Box::new(move |call| {
+                call.calls
+                    .iter()
+                    .map(|_| {
+                        json!({"status": "returned", "envelope": {"ok": false, "error": {
+                            "code": "stale_locator", "message": "stale browser locator",
+                            "detail": answer.clone()}}})
+                    })
+                    .collect()
+            }),
+            finished,
+        );
+        let error = call(&port, scoped(all_open(), activate(NESTED))).unwrap_err();
+        assert!(
+            matches!(error, BrowserError::StaleLocator { lookup: None, .. }),
+            "{detail}: {error:?}"
+        );
+        assert!(inputs_seen(&fake).is_empty(), "{detail}: nothing was sent");
+    }
+}
+
+/// Once input was dispatched, a failure leaves the effect unknown and never reads as no effect,
+/// while a dialog the click itself opened is success (ACCEPTANCE, executor and truth gates 4).
 #[test]
 fn a_failure_after_the_click_has_an_unknown_effect() {
     for dispatched in [true, false] {
@@ -407,137 +356,11 @@ fn a_failure_after_the_click_has_an_unknown_effect() {
         )),
         "input that stopped short of its last step may have landed in part"
     );
+
+    a_dialog_during_a_click_is_success();
+    a_dialog_while_typing_leaves_the_effect_unknown();
 }
 
-#[test]
-fn a_hover_moves_the_pointer_to_the_targets_centre() {
-    let (port, fake) = rig(page(), finished);
-    let result = unscoped(
-        call(
-            &port,
-            scoped(
-                all_open(),
-                BrowserCommand::Hover {
-                    tab_id: 12,
-                    locator: NESTED.into(),
-                },
-            ),
-        )
-        .unwrap(),
-    );
-    assert!(matches!(
-        result,
-        BrowserOutcome::Hovered {
-            tab_id: 12,
-            subject: Some(_)
-        }
-    ));
-    let calls = calls_seen(&fake);
-    assert_eq!(kinds(&calls[0]), ["hover", "owner_box"]);
-    let inputs = inputs_seen(&fake);
-    assert_eq!(inputs[0].steps, keys::hover(Point { x: 130.0, y: 75.0 }));
-    assert_eq!(inputs[0].settle_ms, 0);
-}
-
-#[test]
-fn a_scroll_in_a_nested_document_reports_the_top_documents_offset() {
-    let scroll = |locator: Option<&str>| {
-        BrowserCommand::Scroll(PhysicalScroll {
-            tab_id: 12,
-            locator: locator.map(Into::into),
-            direction: Some(ScrollDirection::Down),
-            amount: Some(ScrollAmount::Page),
-        })
-    };
-    let (port, fake) = rig(page(), |_| Out::Value(Value::Null));
-    let nested = unscoped(call(&port, scoped(all_open(), scroll(Some(NESTED)))).unwrap());
-    assert_eq!(
-        nested,
-        BrowserOutcome::Scrolled {
-            tab_id: 12,
-            x: 5.0,
-            y: 900.0,
-            subject: None
-        }
-    );
-    let page_scroll = unscoped(call(&port, scoped(all_open(), scroll(None))).unwrap());
-    assert_eq!(
-        page_scroll,
-        BrowserOutcome::Scrolled {
-            tab_id: 12,
-            x: 0.0,
-            y: 40.0,
-            subject: None
-        }
-    );
-    let calls = calls_seen(&fake);
-    assert_eq!(kinds(&calls[0]), ["scroll", "scroll_offset"]);
-    assert_eq!(frames_of(&calls[0]), ["C", "T"]);
-    assert_eq!(kinds(&calls[1]), ["scroll"]);
-    assert_eq!(frames_of(&calls[1]), ["T"]);
-}
-
-#[test]
-fn typing_into_a_control_is_one_guarded_call_to_its_document() {
-    let (port, fake) = rig(page(), |_| Out::Value(Value::Null));
-    let result = unscoped(
-        call(
-            &port,
-            scoped(
-                all_open(),
-                BrowserCommand::TypeText(PhysicalTypeText {
-                    tab_id: 12,
-                    locator: NESTED.into(),
-                    text: "h\u{e9}llo".into(),
-                    clear_first: true,
-                    allow_credentials: false,
-                }),
-            ),
-        )
-        .unwrap(),
-    );
-    let BrowserOutcome::Typed {
-        character_count,
-        subject,
-        ..
-    } = result
-    else {
-        panic!("typed text");
-    };
-    assert_eq!(character_count, 5);
-    assert_eq!(subject.unwrap().role, "textbox");
-    let calls = calls_seen(&fake);
-    assert_eq!(calls.len(), 1);
-    assert_eq!(frames_of(&calls[0]), ["C"]);
-    assert_eq!(calls[0].calls[0].message["clear_first"], true);
-    assert!(calls[0].guard.is_some());
-    assert!(inputs_seen(&fake).is_empty());
-}
-
-#[test]
-fn a_key_press_with_a_locator_focuses_the_control_first() {
-    let (port, fake) = rig(page(), |_| {
-        Out::Effect(
-            json!({"completed_steps": 2, "precondition": returned(json!({
-            "focused": true, "subject": {"role": "textbox", "name": "Email"}}))}),
-        )
-    });
-    let result =
-        unscoped(call(&port, scoped(all_open(), press(Some(NESTED), "Enter", &[]))).unwrap());
-    let BrowserOutcome::KeyPressed { key, subject, .. } = result else {
-        panic!("a key press");
-    };
-    assert_eq!(key, "Enter");
-    assert_eq!(subject.unwrap().name, "Email");
-    let input = &inputs_seen(&fake)[0];
-    let precondition = input.precondition.as_ref().unwrap();
-    assert_eq!(precondition.message["kind"], "focus");
-    assert_eq!(precondition.frame.as_ref().unwrap().frame_id, "C");
-    assert_eq!(input.steps, keys::press("Enter", 0));
-    assert!(input.guard.is_some());
-}
-
-#[test]
 fn a_key_press_without_a_locator_requires_the_bound_subject_to_hold_the_focus() {
     let (port, fake) = rig(page(), finished);
     let mut bound = all_open();
@@ -555,38 +378,12 @@ fn a_key_press_without_a_locator_requires_the_bound_subject_to_hold_the_focus() 
     );
 }
 
-#[test]
-fn a_modified_key_drops_its_text() {
-    let (port, fake) = rig(page(), finished);
-    for modifiers in [
-        &[][..],
-        &["Control"][..],
-        &["Alt"][..],
-        &["Meta"][..],
-        &["Shift"][..],
-    ] {
-        call(&port, scoped(all_open(), press(None, "a", modifiers))).unwrap();
-    }
-    let texts: Vec<Option<String>> = inputs_seen(&fake)
-        .iter()
-        .map(|input| match &input.steps[0] {
-            InputStep::Key { text, .. } => text.clone(),
-            other => panic!("a key event, not {other:?}"),
-        })
-        .collect();
-    assert_eq!(
-        texts,
-        [Some("a".into()), None, None, None, Some("a".into()),]
-    );
-}
-
 /// An input the extension reports as the real one does for a refused precondition: the receipt
 /// says it dispatched, because the precondition answered, but no step was sent.
 fn precondition_refused(code: &'static str) -> impl Fn(&wire::Primitive) -> Out + Send + 'static {
     move |_| Out::Effect(json!({"completed_steps": 0, "precondition": refused(code)}))
 }
 
-#[test]
 fn a_lost_focus_refuses_the_key_press_with_nothing_sent() {
     let (port, _fake) = rig(page(), precondition_refused("focus_lost"));
     let mut bound = all_open();
@@ -595,7 +392,6 @@ fn a_lost_focus_refuses_the_key_press_with_nothing_sent() {
     assert_eq!(error, BrowserError::primitive("focus_lost"));
 }
 
-#[test]
 fn a_stale_locator_refuses_the_key_press_with_nothing_sent() {
     let (port, _fake) = rig(page(), move |_| {
         Out::Effect(json!({"completed_steps": 0, "precondition": {
@@ -611,7 +407,6 @@ fn a_stale_locator_refuses_the_key_press_with_nothing_sent() {
     assert_eq!(error, BrowserError::stale(StaleReason::Removed));
 }
 
-#[test]
 fn a_focus_that_moved_refuses_the_text_with_nothing_sent() {
     let (port, _fake) = rig(
         focus_held_by(&["C"]),
@@ -640,7 +435,6 @@ fn focus_held_by(holders: &'static [&'static str]) -> Calls {
     })
 }
 
-#[test]
 fn typing_into_the_focused_control_clears_and_types_only_in_the_first_focused_document() {
     let (port, fake) = rig(focus_held_by(&["C", "D"]), finished);
     let result = unscoped(call(&port, scoped(all_open(), type_focused(true))).unwrap());
@@ -677,26 +471,6 @@ fn typing_into_the_focused_control_clears_and_types_only_in_the_first_focused_do
     assert!(input.guard.is_some());
 }
 
-#[test]
-fn typing_into_the_focused_control_without_clearing_sends_only_the_text() {
-    let (port, fake) = rig(focus_held_by(&["T"]), finished);
-    call(&port, scoped(all_open(), type_focused(false))).unwrap();
-    assert_eq!(calls_seen(&fake).len(), 1);
-    let input = &inputs_seen(&fake)[0];
-    assert_eq!(
-        input
-            .precondition
-            .as_ref()
-            .unwrap()
-            .frame
-            .as_ref()
-            .unwrap()
-            .frame_id,
-        "T"
-    );
-}
-
-#[test]
 fn typing_with_no_focused_text_control_fails_before_anything_is_sent() {
     let (port, fake) = rig(focus_held_by(&[]), finished);
     let error = call(&port, scoped(all_open(), type_focused(true))).unwrap_err();
@@ -705,7 +479,6 @@ fn typing_with_no_focused_text_control_fails_before_anything_is_sent() {
     assert_eq!(calls_seen(&fake).len(), 1, "nothing was cleared");
 }
 
-#[test]
 fn a_dialog_while_typing_leaves_the_effect_unknown() {
     let (port, _fake) = rig(focus_held_by(&["T"]), |_| {
         Out::Effect(
@@ -719,7 +492,6 @@ fn a_dialog_while_typing_leaves_the_effect_unknown() {
     ));
 }
 
-#[test]
 fn a_viewport_capture_is_one_primitive_after_a_best_effort_settle() {
     let (port, fake) = rig(page(), |_| Out::Value(captured(view())));
     let result = call(
@@ -761,7 +533,6 @@ fn a_viewport_capture_is_one_primitive_after_a_best_effort_settle() {
     assert_eq!(captures[0].budget, geometry::ordinary_budget());
 }
 
-#[test]
 fn a_capture_goes_on_when_the_settle_fails_and_skips_it_when_asked() {
     let (port, fake) = rig(
         Box::new(|call| {
@@ -792,41 +563,6 @@ fn a_capture_goes_on_when_the_settle_fails_and_skips_it_when_asked() {
     assert_eq!(captures_seen(&fake)[0].clip, CaptureClip::FullPage);
 }
 
-#[test]
-fn a_target_capture_clips_to_the_target_placed_in_the_top_viewport() {
-    let (port, fake) = rig(page(), |_| Out::Value(captured(view())));
-    let result = call(
-        &port,
-        BrowserCommand::Screenshot {
-            tab_id: 12,
-            locator: Some(NESTED.into()),
-            full_page: false,
-            settle_ms: SETTLE_MS,
-        },
-    )
-    .unwrap();
-    let BrowserOutcome::Screenshot { viewport, .. } = result else {
-        panic!("a screenshot");
-    };
-    assert_eq!(viewport.scope, CaptureScope::Target);
-    let calls = calls_seen(&fake);
-    assert_eq!(calls.len(), 1);
-    assert_eq!(kinds(&calls[0]), ["observe", "box", "owner_box"]);
-    assert_eq!(frames_of(&calls[0]), ["top", "C", "T"]);
-    assert!(calls[0].guard.is_none());
-    assert_eq!(
-        captures_seen(&fake)[0].clip,
-        CaptureClip::ViewportRect {
-            left: 110.0,
-            top: 70.0,
-            width: 40.0,
-            height: 10.0
-        },
-        "the target's rectangle moved by the embedding document's content box"
-    );
-}
-
-#[test]
 fn a_target_screenshot_under_one_second_still_measures() {
     let (port, fake) = rig(page(), |_| Out::Value(captured(view())));
     let cancelled = AtomicBool::new(false);
@@ -864,37 +600,9 @@ fn region() -> PhysicalRectangle {
     }
 }
 
-#[test]
-fn a_region_capture_magnifies_the_page_rectangle_of_the_view_it_was_chosen_on() {
-    let (port, fake) = rig(page(), |_| Out::Value(captured(view())));
-    let result = call(
-        &port,
-        BrowserCommand::ScreenshotRegion {
-            tab_id: 12,
-            region: region(),
-            expected_viewport: expected_view(),
-            settle_ms: 0,
-        },
-    )
-    .unwrap();
-    let BrowserOutcome::Screenshot { viewport, .. } = result else {
-        panic!("a screenshot");
-    };
-    assert_eq!(viewport.scope, CaptureScope::Region);
-    let captures = captures_seen(&fake);
-    assert_eq!(
-        captures[0].clip,
-        CaptureClip::PageRect {
-            x: 10.0,
-            y: 20.0,
-            width: 30.0,
-            height: 40.0
-        }
-    );
-    assert_eq!(captures[0].budget, geometry::region_budget());
-    assert_eq!(primitives_seen(&fake), ["list_tabs", "capture"]);
-}
-
+/// A capture refuses a tab its window does not show before capturing anything (commit
+/// efe54caf); otherwise it settles at best within the job's budget, goes on when the settle fails,
+/// skips it when asked, and measures a target within its deadline (ADR-0195).
 #[test]
 fn a_tab_its_window_does_not_show_is_refused_before_any_capture() {
     let (port, fake) = port_with(Box::new(|correlation, primitive| {
@@ -926,106 +634,10 @@ fn a_tab_its_window_does_not_show_is_refused_before_any_capture() {
         ["list_tabs", "list_tabs"],
         "no settle and no capture waits for a frame the browser will not draw"
     );
-}
 
-#[test]
-fn a_region_capture_of_a_moved_view_is_stale_and_drops_the_image() {
-    for moved in [
-        json!({"visual_page_y": 5}),
-        json!({"zoom": 1.5}),
-        json!({"device_scale": 2}),
-        json!({"visual_css_width": 790}),
-    ] {
-        let mut facts = view();
-        facts
-            .as_object_mut()
-            .unwrap()
-            .extend(moved.as_object().unwrap().clone());
-        let (port, _fake) = rig(page(), move |_| Out::Value(captured(facts.clone())));
-        assert_eq!(
-            call(
-                &port,
-                BrowserCommand::ScreenshotRegion {
-                    tab_id: 12,
-                    region: region(),
-                    expected_viewport: expected_view(),
-                    settle_ms: SETTLE_MS,
-                },
-            ),
-            Err(BrowserError::StaleView),
-            "{moved}"
-        );
-    }
-    let mut nearly = view();
-    nearly["visual_page_y"] = json!(0.5);
-    let (port, _fake) = rig(page(), move |_| Out::Value(captured(nearly.clone())));
-    assert!(call(
-        &port,
-        BrowserCommand::ScreenshotRegion {
-            tab_id: 12,
-            region: region(),
-            expected_viewport: expected_view(),
-            settle_ms: SETTLE_MS,
-        },
-    )
-    .is_ok());
-}
-
-fn file(bytes: usize) -> PhysicalFile {
-    PhysicalFile {
-        name: "report.bin".into(),
-        media_type: "application/octet-stream".into(),
-        data: base64::engine::general_purpose::STANDARD.encode(vec![7_u8; bytes]),
-        size: bytes as u64,
-    }
-}
-
-fn upload(files: Vec<PhysicalFile>) -> BrowserCommand {
-    BrowserCommand::UploadFiles {
-        tab_id: 12,
-        locator: NESTED.into(),
-        files,
-    }
-}
-
-#[test]
-fn an_upload_is_one_guarded_call_to_the_inputs_document() {
-    let (port, fake) = rig(page(), |_| Out::Value(Value::Null));
-    let result = unscoped(call(&port, scoped(all_open(), upload(vec![file(9)]))).unwrap());
-    assert_eq!(
-        result,
-        BrowserOutcome::FilesUploaded {
-            tab_id: 12,
-            uploaded_count: 1,
-            uploaded_bytes: 9,
-            subject: Some(crate::browser::adapter::PhysicalActionSubject {
-                role: "button".into(),
-                name: "Choose file".into(),
-                rebound: false,
-            }),
-        }
-    );
-    let calls = calls_seen(&fake);
-    assert_eq!(frames_of(&calls[0]), ["C"]);
-    assert!(calls[0].guard.is_some());
-    assert!(fake.wait(|_| true).of_kind("command_chunk").is_empty());
-}
-
-#[test]
-fn an_upload_over_the_direct_frame_size_travels_in_chunks() {
-    let (port, fake) = rig(page(), |_| Out::Value(Value::Null));
-    let bytes = wire::DIRECT_FRAME_BYTES;
-    let result = unscoped(call(&port, scoped(all_open(), upload(vec![file(bytes)]))).unwrap());
-    assert!(matches!(result, BrowserOutcome::FilesUploaded { .. }));
-    let seen = fake.wait(|seen| !seen.of_kind("command_chunk").is_empty());
-    assert!(seen.of_kind("command_chunk").len() > 1);
-    drop(seen);
-    let calls = calls_seen(&fake);
-    assert_eq!(
-        calls[0].calls[0].message["files"][0]["size"],
-        u64::try_from(bytes).unwrap(),
-        "the extension reassembled the whole request"
-    );
+    a_viewport_capture_is_one_primitive_after_a_best_effort_settle();
+    a_capture_goes_on_when_the_settle_fails_and_skips_it_when_asked();
+    a_target_screenshot_under_one_second_still_measures();
 }
 
 fn evaluate(script: &str) -> BrowserCommand {
@@ -1047,35 +659,6 @@ fn evaluated_seen(fake: &FakeExtension) -> Vec<wire::EvaluateMain> {
         .collect()
 }
 
-#[test]
-fn a_script_runs_in_the_main_world_with_the_scope_guard() {
-    let (port, fake) = rig(page(), |_| {
-        Out::Effect(json!({"value": "42", "truncated": false, "exception": null}))
-    });
-    let result = unscoped(call(&port, scoped(all_open(), evaluate("6 * 7"))).unwrap());
-    let BrowserOutcome::ScriptEvaluated {
-        tab,
-        value,
-        truncated,
-        ..
-    } = result
-    else {
-        panic!("a script result");
-    };
-    assert_eq!((tab.tab_id, value.as_str(), truncated), (12, "42", false));
-    let evaluated = evaluated_seen(&fake);
-    assert_eq!(
-        evaluated[0].script,
-        "await (
-6 * 7
-)",
-        "a script that is one expression is sent awaited"
-    );
-    assert_eq!(evaluated[0].max_result_chars, 100);
-    assert_eq!(evaluated[0].settle_ms, 100);
-    assert!(evaluated[0].guard.is_some());
-}
-
 /// The scripts the extension was asked to evaluate, in order.
 fn scripts_seen(fake: &FakeExtension) -> Vec<String> {
     evaluated_seen(fake)
@@ -1095,7 +678,6 @@ fn script_form(outcome: BrowserOutcome) -> (String, ScriptForm) {
     }
 }
 
-#[test]
 fn an_awaited_expression_is_sent_once_and_its_value_returned() {
     let (port, fake) = rig(page(), |_| Out::Effect(script_value("42")));
     let outcome = call(
@@ -1115,7 +697,6 @@ new Promise(r => setTimeout(() => r(42), 50))
     );
 }
 
-#[test]
 fn a_refusal_before_dispatch_sends_the_original_once_and_returns_its_answer() {
     let (port, fake) = rig(page(), |primitive| match primitive {
         wire::Primitive::EvaluateMain(evaluate) if evaluate.script.starts_with("await (") => {
@@ -1136,7 +717,6 @@ a, b
     );
 }
 
-#[test]
 fn the_original_scripts_own_refusal_is_what_the_agent_sees() {
     let (port, fake) = rig(page(), |_| Out::Fail(wire::Failure::InvalidRequest, false));
     let error = call(&port, scoped(all_open(), evaluate("x y"))).unwrap_err();
@@ -1152,6 +732,10 @@ x y
     );
 }
 
+/// `browser_execute` runs a script at most once: an awaited expression is sent once and its
+/// value returned, only a refusal before dispatch sends the original again, the original's own
+/// refusal is what the agent sees, and a script that threw may already have acted (L-D6, commit
+/// 28ea74b3; ACCEPTANCE, browser job journeys 14).
 #[test]
 fn nothing_but_a_refusal_before_dispatch_sends_a_script_again() {
     let failures = [
@@ -1187,39 +771,13 @@ f()
         ))
     );
     assert_eq!(scripts_seen(&fake).len(), 1);
+
+    an_awaited_expression_is_sent_once_and_its_value_returned();
+    a_refusal_before_dispatch_sends_the_original_once_and_returns_its_answer();
+    the_original_scripts_own_refusal_is_what_the_agent_sees();
+    a_script_that_threw_may_already_have_acted();
 }
 
-#[test]
-fn a_script_that_is_not_one_expression_is_sent_as_written() {
-    for script in [
-        "return 1",
-        "let a = 1; a",
-        "{a: 1}",
-        "a / b",
-        "f(
-",
-    ] {
-        let (port, fake) = rig(page(), |_| Out::Effect(script_value("1")));
-        let outcome = call(&port, scoped(all_open(), evaluate(script))).unwrap();
-        assert_eq!(script_form(outcome).1, ScriptForm::AsWritten, "{script:?}");
-        assert_eq!(scripts_seen(&fake), [script]);
-    }
-}
-
-#[test]
-fn a_wrap_longer_than_a_script_may_be_is_skipped() {
-    let longest = "x".repeat(crate::language::SCRIPT_MAX_CHARS);
-    let (port, fake) = rig(page(), |_| Out::Effect(script_value("1")));
-    let outcome = call(&port, scoped(all_open(), evaluate(&longest))).unwrap();
-    assert_eq!(script_form(outcome).1, ScriptForm::AsWritten);
-    assert_eq!(scripts_seen(&fake), [longest]);
-
-    let fits = "x".repeat(crate::language::SCRIPT_MAX_CHARS - 10);
-    let outcome = call(&port, scoped(all_open(), evaluate(&fits))).unwrap();
-    assert_eq!(script_form(outcome).1, ScriptForm::Awaited);
-}
-
-#[test]
 fn a_script_that_threw_may_already_have_acted() {
     let (port, _fake) = rig(page(), |_| {
         Out::Effect(json!({"value": "", "truncated": false,
