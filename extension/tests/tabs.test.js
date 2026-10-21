@@ -354,8 +354,10 @@ test("open_tab polls until the tab is complete", async () => {
 });
 
 test("a cancel during the ready wait ends it with cancelled and dispatched stays true", async () => {
-  const { tabs, chrome } = setup({ cancelled: ["c1"], browser: { tabs: [tab({ id: 1 })] } });
+  const cancelled = [];
+  const { tabs, chrome } = setup({ cancelled, browser: { tabs: [tab({ id: 1 })] } });
   chrome.tabs.create = async (properties) => {
+    cancelled.push("c1");
     chrome.tabList.push({ id: 77, windowId: properties.windowId, url: properties.url, title: "", status: "loading", active: true, groupId: -1 });
     return { ...chrome.tabList.at(-1) };
   };
@@ -364,6 +366,14 @@ test("a cancel during the ready wait ends it with cancelled and dispatched stays
   const result = await execute(tabs.openTab, goldenArgs("open_tab"), "c1");
   assert.equal(result.failure, "cancelled");
   assert.equal(result.dispatched, true);
+});
+
+test("an open cancelled before its turn creates nothing and dispatches nothing", async () => {
+  const { tabs, chrome } = setup({ cancelled: ["c1"], browser: { tabs: [tab({ id: 1 })] } });
+  const result = await execute(tabs.openTab, goldenArgs("open_tab"), "c1");
+  assert.equal(result.failure, "cancelled");
+  assert.equal(result.dispatched, false);
+  assert.deepEqual([...chrome.named("tabs.create"), ...chrome.named("windows.create")], []);
 });
 
 // ---- navigate ---------------------------------------------------------------------------------

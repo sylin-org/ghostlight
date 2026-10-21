@@ -300,6 +300,78 @@ test("a cancel that arrives while the primitive runs reaches the loops and the w
   assert.equal(parts.primitives.isCancelled("busy"), false);
 });
 
+// Lets every pending promise chain run, as the other cancel tests do.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+// Holds the first tab or window Chromium is asked to create until `hold` opens, and counts every
+// request to create one.
+function stallCreation(browser, hold) {
+  const openings = [];
+  for (const api of [browser.tabs, browser.windows]) {
+    const create = api.create;
+    api.create = async (properties) => {
+      openings.push(properties);
+      if (openings.length === 1) await hold.promise;
+      return create.call(api, properties);
+    };
+  }
+  return openings;
+}
+
+test("a tab cancelled while it waits behind another open is never created", async () => {
+  const parts = rig();
+  const hold = gate();
+  const openings = stallCreation(parts.browser, hold);
+  const args = golden("requests/open_tab").primitive.args;
+  const first = parts.primitives.run("first", request("open_tab", args));
+  await settle();
+  const late = parts.primitives.run("late", request("open_tab", args));
+  await settle();
+  parts.primitives.cancel("late");
+  hold.open();
+  await Promise.all([first, late]);
+  assert.equal(openings.length, 1, "only the first open reached Chromium");
+  const receipt = parts.frames.find((frame) => frame.correlation === "late");
+  assert.equal(receipt.failure, "cancelled");
+  assert.equal(receipt.dispatched, false);
+});
+
+test("a tab adoption cancelled while it waits behind an open never moves or loads the tab", async () => {
+  const parts = rig();
+  const hold = gate();
+  stallCreation(parts.browser, hold);
+  const args = golden("requests/open_tab").primitive.args;
+  const first = parts.primitives.run("first", request("open_tab", args));
+  await settle();
+  const late = parts.primitives.run("late", request("open_tab", { ...golden("requests/open_tab.adopt").primitive.args, adopt_tab_id: TAB }));
+  await settle();
+  parts.primitives.cancel("late");
+  const updatesBefore = parts.browser.named("tabs.update").length;
+  hold.open();
+  await Promise.all([first, late]);
+  assert.equal(parts.browser.named("tabs.update").length, updatesBefore, "the adopted tab was not loaded late");
+  const receipt = parts.frames.find((frame) => frame.correlation === "late");
+  assert.equal(receipt.failure, "cancelled");
+  assert.equal(receipt.dispatched, false);
+});
+
+test("a navigate cancelled while it waits for custody of its tab never loads the page", async () => {
+  const parts = rig();
+  const hold = gate();
+  parts.hook.manage = async function manage(id) {
+    this.calls.push(id);
+    await hold.promise;
+  };
+  const running = parts.primitives.run("late", request("navigate", golden("requests/navigate.url").primitive.args));
+  await settle();
+  parts.primitives.cancel("late");
+  hold.open();
+  await running;
+  assert.deepEqual(parts.browser.named("tabs.update"), []);
+  assert.equal(parts.frames[0].failure, "cancelled");
+  assert.equal(parts.frames[0].dispatched, false);
+});
+
 test("losing the port cancels what is in flight and drops its receipt", async () => {
   const hold = gate();
   const seen = [];

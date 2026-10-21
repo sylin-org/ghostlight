@@ -106,9 +106,20 @@
 
     // ---- groups -------------------------------------------------------------------------------
 
-    // Group changes run one at a time, so two opens for one key never create two groups.
-    function serialized(task) {
-      const result = queue.then(task, task);
+    // A request the service cancelled ends before its next effect.
+    function refuseCancelled(correlation) {
+      if (isCancelled(correlation)) throw sessions.failure(FAILURE.CANCELLED, "The request was cancelled.");
+    }
+
+    // Group changes run one at a time, so two opens for one key never create two groups. A request
+    // the service cancelled while it waited for its turn ends when the turn comes, before it touches
+    // the browser.
+    function serialized(task, correlation) {
+      const turn = () => {
+        refuseCancelled(correlation);
+        return task();
+      };
+      const result = queue.then(turn, turn);
       queue = result.catch(() => {});
       return result;
     }
@@ -198,7 +209,7 @@
       return tab;
     }
 
-    async function createGroupedTab(args, fx) {
+    async function createGroupedTab(args, fx, correlation) {
       return serialized(async () => {
         await loadGroups();
         const group = await canonicalGroup(args.group_key, args.group_title);
@@ -216,7 +227,7 @@
         await placeInGroup(tab.id, args.group_key, args.group_title, group);
         if (args.focus_window && windowId !== undefined) await chromeApi.windows.update(tab.windowId, { focused: true });
         return tab;
-      });
+      }, correlation);
     }
 
     function inOwnGroup(tab) {
@@ -225,14 +236,15 @@
 
     // A tab the person put in a group of their own stays where they put it; any other tab joins the
     // key's group.
-    async function adoptGroupedTab(tabId, args) {
+    async function adoptGroupedTab(tabId, args, fx, correlation) {
       return serialized(async () => {
+        fx.dispatched = true;
         await loadGroups();
         const group = await canonicalGroup(args.group_key, args.group_title);
         const tab = await chromeApi.tabs.get(tabId);
         if (Number.isInteger(tab.groupId) && tab.groupId !== NO_GROUP && tab.groupId !== group?.id && !inOwnGroup(tab)) return tab;
         return placeInGroup(tabId, args.group_key, args.group_title, group);
-      });
+      }, correlation);
     }
 
     // Takes a kept tab out of the adapter's group; a tab the person put in a group of their own stays.
@@ -260,7 +272,7 @@
     async function waitForReady(tabId, timeoutMs, correlation) {
       const deadline = now() + timeoutMs;
       for (;;) {
-        if (isCancelled(correlation)) throw sessions.failure(FAILURE.CANCELLED, "The request was cancelled.");
+        refuseCancelled(correlation);
         const tab = await requireTab(tabId);
         if (tab.status === STATUS_COMPLETE) return tab;
         if (tab.status !== STATUS_LOADING && (tab.url || tab.pendingUrl)) return tab;
@@ -322,13 +334,12 @@
         if (args.adopt_tab_id !== undefined) {
           const existing = await requireTab(args.adopt_tab_id);
           fx.watch(existing.id);
-          fx.dispatched = true;
-          const placed = await adoptGroupedTab(existing.id, args);
+          const placed = await adoptGroupedTab(existing.id, args, fx, correlation);
           await chromeApi.tabs.update(existing.id, args.url ? { url: args.url, active: true } : { active: true });
           if (args.focus_window) await chromeApi.windows.update(placed.windowId, { focused: true });
           tab = existing;
         } else {
-          tab = await createGroupedTab(args, fx);
+          tab = await createGroupedTab(args, fx, correlation);
         }
         await controlled.manage(tab.id);
         const ready = await waitForReady(tab.id, args.ready_timeout_ms, correlation);

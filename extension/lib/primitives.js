@@ -437,12 +437,20 @@
       }
     }
 
+    // A request the service cancelled ends before its effect, however long it waited for its turn.
+    function refuseCancelled(correlation) {
+      if (cancellations.isCancelled(correlation)) throw sessions.failure(CODE.CANCELLED, "The request was cancelled.");
+    }
+
     async function execute(correlation, spec, request) {
       const fx = openEffects();
       try {
         validated(spec, request);
-        if (cancellations.isCancelled(correlation)) throw sessions.failure(CODE.CANCELLED, "The request was cancelled.");
-        if (spec.addresses(request)) await controlled.manage(spec.tabOf(request));
+        refuseCancelled(correlation);
+        if (spec.addresses(request)) {
+          await controlled.manage(spec.tabOf(request));
+          refuseCancelled(correlation);
+        }
         const ok = await spec.run(request, fx, correlation);
         return { ok, ...(await fx.facts()) };
       } catch (error) {

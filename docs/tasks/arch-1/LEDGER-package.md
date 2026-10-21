@@ -10,7 +10,7 @@ B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbou
 Notes). B1 rides in the same candidate as C21, or neither does.
 
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
-adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11 and C18 have landed; EXT-5 is next.
+adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18 and P-D2 have landed; EXT-5 is next.
 
 ## Slices
 
@@ -85,12 +85,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11 and C18 have landed; EXT-5 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18 and P-D2 have landed; EXT-5 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | P-D1 | fix(extension): a dialog that opens during world setup reads `dialog_open` | - | EXT-9 as corrected | landed (this commit) |
 | C18 | refactor(presentation): one table of activity and denial words, with the crossing names pinned | - | ADR-0203 C18, moved from core-service; SURF-4's label half; EXT-5's pins | landed (this commit) |
+| P-D2 | fix(extension): a command the service cancelled while it waited never runs late | - | the coordinator, from leo-desktop-02's 2.0.0 stall | landed (this commit) |
 | EXT-5 | refactor(extension): `protocol.js` names its words and owns `failure`, and the vocabulary gains the missing words under new keys | C18 | EXT-5 as corrected | todo |
 | EXT-6 | refactor(extension): each module exports its own handler spec through one `handler()` | EXT-5 | EXT-6 | todo |
 | EXT-7 | refactor(extension): one `buffers.settle(reason)` for every boundary | - | EXT-7 | landed (this commit) |
@@ -259,3 +260,23 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   language table. The asset id is regenerated on purpose (`tests/golden/protocol4/assets.sha256`).
   Also corrected: the asset-set export list in `docs/design/adapter-protocol-4.md` and the wire
   comment on `NoticeSignal.label`.
+- P-D2 (a defect, found on leo-desktop-02's store 2.0.0: four `browser_navigate new_tab` calls
+  stalled behind a held bell prompt, answered unknown at their deadline, and then all ran when
+  the prompt closed, opening tabs and a window nobody wanted any more): the service does send
+  `cancel` at the deadline (`link.rs`), but the extension looked at it once, in `execute` before
+  custody, and in the ready wait. A command that passed that check and then waited ran its effect
+  when its turn came. Two waits had no check after them: `controlled.manage`, which queues behind
+  a stalled attach, and the `serialized` chain of `tabs.js` that every open and adoption takes. Now
+  `execute` looks again after custody, and `serialized` looks when a request's turn comes,
+  before it touches the browser. An adoption's `dispatched` is set in its turn, as a new tab's
+  already was. The cancelled sentence keeps its three copies (`primitives.js`, `tabs.js`,
+  `world.js`); EXT-5's failure builder in `protocol.js` is where it becomes one. Left: a cancel is
+  best effort (`Link::cancel` leaves a writer busy with another transfer alone), and a request
+  carries no deadline the extension could check without one, which would be a protocol change.
+  Proofs in `primitives.test.js`: "a tab cancelled while it waits behind another open is never
+  created", "a tab adoption cancelled while it waits behind an open never moves or loads the tab"
+  and "a navigate cancelled while it waits for custody of its tab never loads the page", each
+  failing before the fix; in `tabs.test.js`, "an open cancelled before its turn creates nothing and
+  dispatches nothing". "a cancel during the ready wait ends it with cancelled and dispatched stays
+  true" now cancels once the tab exists, the moment it names. The freeze record is regenerated
+  (a test-02 package line, like the others before B-final).
