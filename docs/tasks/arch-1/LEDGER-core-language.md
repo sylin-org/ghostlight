@@ -38,7 +38,7 @@ In order. "After" names what a slice waits for.
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed (b5135a14) |
 | L-D6 | fix(language): a script that threw tells the agent what it threw | - | the owner's live test of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `browser/`, `protocol4/translate/script.rs` and `work/mod.rs` | landed (28ea74b3) |
-| L-D7 | fix(language): a field a nested object does not advertise is refused, not dropped | - | found by tests-1 (the rewritten gate-2 control in `self_check/catalog.rs`), 2026-10-21 (Notes); approved by the coordinator | landed (this commit) |
+| L-D7 | fix(language): a field a nested object does not advertise is refused, not dropped | - | found by tests-1 (the rewritten gate-2 control in `self_check/catalog.rs`), 2026-10-21 (Notes); approved by the coordinator | landed (1bbf9e0e) |
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b 1b693758) |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed (5c65614a) |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
