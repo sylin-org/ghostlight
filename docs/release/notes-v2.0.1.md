@@ -17,7 +17,7 @@ on Windows, `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` on Linux, or
   control pauses or releases that tab. The tab catches up when its dialog closes, and the dialog
   can still be read and answered meanwhile. With the 2.0.0 extension, if agents stop getting
   answers from the browser after this update, answer or cancel the dialog that is open on the page,
-  and work resumes.
+  and work resumes. The dialog may show only once you switch back to its tab.
 - **Back and forward** (extension 2.0.1). `browser_history` back and forward go to the previous or
   next page of the tab's history, even when the agent moved between pages with
   `browser_navigate` alone. With no page that way, the call says so and sends nothing.
