@@ -11,13 +11,43 @@ impl AuditSink for UnwritableAudit {
     }
 }
 
-#[test]
-fn audit_failure_preserves_success_unknown_effects_and_default_continuation() {
-    let (mut executor, browser, _, workspace, _) = fixture();
+/// The executor with every audit write failing, under the policy's audit requirement.
+fn unsaved_history(
+    require_audit: bool,
+) -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    crate::workspace::WorkspaceId,
+    Option<Scratch>,
+) {
+    let policy = require_audit.then(|| {
+        let path = temporary_policy("require-audit");
+        fs::write(
+            &path,
+            all_open_policy_with(
+                r#"[{"key":"audit.availability","value":"require_audit","level":"mandatory"}]"#,
+            ),
+        )
+        .unwrap();
+        path
+    });
+    let governance = GovernanceFacade::new(policy.as_ref().map(|path| path.to_path_buf()));
+    let (mut executor, browser, _, workspace, _) = fixture_with_governance(governance);
     executor.audit = Arc::new(crate::audit::AuditRecorder::new(
         Arc::new(UnwritableAudit),
         executor.workbench.clone(),
     ));
+    (executor, browser, workspace, policy)
+}
+
+/// ADR-0159 Decisions 1 and 2. When history cannot be saved, Keep working (the default) keeps
+/// every outcome as it was and says so, and never leaks the storage error. Require audit refuses
+/// the next browser work, a later flow step included, keeps the effects already made, rechecks at
+/// the last moment before dispatch, and leaves `policy_explain` and the person's Pause working.
+#[test]
+fn an_audit_failure_keeps_the_outcome_and_require_audit_refuses_later_work() {
+    // Keep working.
+    let (executor, browser, workspace, _policy) = unsaved_history(false);
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com"),
         committed_urls: vec!["https://example.com".into()],
@@ -35,7 +65,9 @@ fn audit_failure_preserves_success_unknown_effects_and_default_continuation() {
         result.history_storage,
         crate::language::audit_health::Storage::Unconfirmed
     );
-    assert!(result.summary.ends_with("History could not be saved."));
+    assert!(result
+        .summary
+        .ends_with(crate::language::audit_health::HISTORY_UNSAVED));
     browser.push(Err(BrowserError::DisconnectedAfterDispatch));
     let result = executor.execute(
         &workspace,
@@ -46,28 +78,12 @@ fn audit_failure_preserves_success_unknown_effects_and_default_continuation() {
     assert_eq!(result.effect, Effect::Unknown);
     assert_eq!(result.status, Status::Unknown);
     assert!(!result.repeat_safe);
-    assert!(browser.calls().len() >= 2);
     assert!(!serde_json::to_string(&result)
         .unwrap()
         .contains("PRIVATE_STORAGE_ERROR"));
-}
 
-#[test]
-fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
-    let policy = temporary_policy("require-audit");
-    fs::write(
-        &policy,
-        all_open_policy_with(
-            r#"[{"key":"audit.availability","value":"require_audit","level":"mandatory"}]"#,
-        ),
-    )
-    .unwrap();
-    let (mut executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
-    executor.audit = Arc::new(crate::audit::AuditRecorder::new(
-        Arc::new(UnwritableAudit),
-        executor.workbench.clone(),
-    ));
+    // Require audit.
+    let (executor, browser, workspace, _policy) = unsaved_history(true);
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com"),
         committed_urls: vec!["https://example.com".into()],
@@ -130,24 +146,10 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
         executor.governance.runtime_state(),
         crate::browser::adapter::RuntimeControlState::Held
     );
-}
 
-#[test]
-fn audit_health_is_rechecked_after_an_earlier_admission() {
-    let policy = temporary_policy("audit-dispatch");
-    fs::write(
-        &policy,
-        all_open_policy_with(
-            r#"[{"key":"audit.availability","value":"require_audit","level":"mandatory"}]"#,
-        ),
-    )
-    .unwrap();
-    let (mut executor, _, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
-    executor.audit = Arc::new(crate::audit::AuditRecorder::new(
-        Arc::new(UnwritableAudit),
-        executor.workbench.clone(),
-    ));
+    // Admitted earlier, refused at the last moment: storage that fails between admission and
+    // dispatch stops the dispatch too.
+    let (executor, _, workspace, _policy) = unsaved_history(true);
     let publication = executor.governance.published();
     let snapshot = publication.snapshot();
     let cancellation = CancellationToken::default();
