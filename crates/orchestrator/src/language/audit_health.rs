@@ -138,8 +138,11 @@ impl AuditHealth {
 #[cfg(test)]
 mod tests {
     use super::{qualify_children, AuditHealth, Storage, CHILDREN_UNSAVED, HISTORY_UNSAVED};
+    use crate::language::coverage::{qualify, Coverage};
     use crate::language::outcome::SUMMARY_MAX_CHARS;
 
+    /// Defect L-D3 (09d78bd9): one unreadable history entry is counted in the singular, more in
+    /// the plural, and none adds nothing. The literals are the defect's grammar.
     #[test]
     fn skipped_history_entries_are_counted_in_number() {
         let detail = |unreadable_entries| {
@@ -160,23 +163,45 @@ mod tests {
         assert_eq!(detail(0), "History is saving.");
     }
 
+    /// A way a summary takes its note.
+    type Qualify<'a> = &'a dyn Fn(&str) -> String;
+
+    /// Defect L-D2 (69e58321): a summary that takes a closed note (the coverage qualification,
+    /// the history note, the step-history note) stays within `SUMMARY_MAX_CHARS`, reaches it
+    /// exactly when the summary already fills it, and keeps the whole note; a summary that needs
+    /// no note is unchanged.
     #[test]
-    fn a_storage_note_fills_the_summary_bound_to_the_character() {
-        for length in [SUMMARY_MAX_CHARS, 600] {
-            let summary = "s".repeat(length);
-            for (qualified, note) in [
-                (Storage::Unconfirmed.qualify(&summary), HISTORY_UNSAVED),
-                (qualify_children(&summary, 2), CHILDREN_UNSAVED),
-            ] {
-                assert_eq!(qualified.chars().count(), SUMMARY_MAX_CHARS, "{note}");
-                assert!(qualified.ends_with(&format!(" {note}")), "{note}");
+    fn every_note_fits_the_summary_bound_to_the_character() {
+        let limited = Coverage {
+            excluded_documents: 1,
+            unavailable_documents: 1,
+            limited_by_size: true,
+            ..Coverage::default()
+        };
+        let coverage_note = limited.qualification();
+        let notes: [(Qualify, &str); 3] = [
+            (&|summary| qualify(summary, &limited), &coverage_note),
+            (
+                &|summary| Storage::Unconfirmed.qualify(summary),
+                HISTORY_UNSAVED,
+            ),
+            (&|summary| qualify_children(summary, 2), CHILDREN_UNSAVED),
+        ];
+        for (qualified, note) in notes {
+            let room = SUMMARY_MAX_CHARS - note.chars().count() - 1;
+            for length in [0, 10, room, SUMMARY_MAX_CHARS, 600] {
+                let summary = qualified(&"s".repeat(length));
+                let count = summary.chars().count();
+                assert!(count <= SUMMARY_MAX_CHARS, "{note} at {length}");
+                assert!(summary.ends_with(&format!(" {note}")), "{note} at {length}");
+                if length >= SUMMARY_MAX_CHARS {
+                    assert_eq!(count, SUMMARY_MAX_CHARS, "{note} at {length}");
+                }
             }
+            assert_eq!(qualified("Done."), format!("Done. {note}"));
         }
         assert_eq!(Storage::Saved.qualify("Done."), "Done.");
         assert_eq!(qualify_children("Done.", 0), "Done.");
-        assert_eq!(
-            Storage::Unconfirmed.qualify("Done."),
-            "Done. History could not be saved."
-        );
+        assert_eq!(qualify("Done.", &Coverage::default()), "Done.");
     }
 }
