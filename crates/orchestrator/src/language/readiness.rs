@@ -244,195 +244,22 @@ mod tests {
     /// What a request on no connected browser would start.
     const STARTS: Option<&str> = Some("Google Chrome");
 
-    /// The module order, ACCEPTANCE D18, ADR-0187 Decision 4 (amended 2026-10-18) and ADR-0202
-    /// Decision 22a: an ended session, then a pause, then a policy that refuses every agent that
-    /// could ask, then no browser Ghostlight could start, then an invalid policy, missing history,
-    /// running work, and otherwise Ready.
-    #[test]
-    fn the_answer_follows_the_documented_precedence() {
-        let none = ReadinessFacts::default();
-        let cases = [
-            ("nothing connected", none, Readiness::NotConnected),
-            (
-                "a pause without a browser",
-                ReadinessFacts {
-                    paused: true,
-                    ..none
-                },
-                Readiness::Paused,
-            ),
-            (
-                "an ended session and a pause",
-                ReadinessFacts {
-                    session_ended: true,
-                    paused: true,
-                    ..none
-                },
-                Readiness::SessionEnded,
-            ),
-            (
-                "no browser over policy, history and work",
-                ReadinessFacts {
-                    authority_invalid: true,
-                    audit_required_unavailable: true,
-                    working: true,
-                    ..none
-                },
-                Readiness::NotConnected,
-            ),
-            (
-                "a browser that starts on request",
-                ReadinessFacts {
-                    starts: STARTS,
-                    ..none
-                },
-                Readiness::Ready,
-            ),
-            (
-                "an invalid policy over a browser that would start",
-                ReadinessFacts {
-                    starts: STARTS,
-                    authority_invalid: true,
-                    ..none
-                },
-                Readiness::PolicyInvalid,
-            ),
-            ("connected and idle", connected(), Readiness::Ready),
-            (
-                "running work",
-                ReadinessFacts {
-                    working: true,
-                    ..connected()
-                },
-                Readiness::Working,
-            ),
-            (
-                "missing history over running work",
-                ReadinessFacts {
-                    audit_required_unavailable: true,
-                    working: true,
-                    ..connected()
-                },
-                Readiness::HistoryUnavailable,
-            ),
-            (
-                "an invalid policy",
-                ReadinessFacts {
-                    authority_invalid: true,
-                    ..connected()
-                },
-                Readiness::PolicyInvalid,
-            ),
-            (
-                "an invalid policy over history and work",
-                ReadinessFacts {
-                    authority_invalid: true,
-                    audit_required_unavailable: true,
-                    working: true,
-                    ..connected()
-                },
-                Readiness::PolicyInvalid,
-            ),
-            (
-                "an ended session over an invalid policy",
-                ReadinessFacts {
-                    authority_invalid: true,
-                    session_ended: true,
-                    ..connected()
-                },
-                Readiness::SessionEnded,
-            ),
-            (
-                "a pause over an invalid policy",
-                ReadinessFacts {
-                    authority_invalid: true,
-                    paused: true,
-                    ..connected()
-                },
-                Readiness::Paused,
-            ),
-            (
-                "every connected agent on the channel turned off",
-                ReadinessFacts {
-                    channels_off: MCP_OFF,
-                    agents_on_mcp: true,
-                    ..connected()
-                },
-                Readiness::TurnedOff,
-            ),
-            (
-                "another connected agent can still work",
-                ReadinessFacts {
-                    channels_off: MCP_OFF,
-                    agents_on_mcp: true,
-                    agents_on_cli: true,
-                    ..connected()
-                },
-                Readiness::Ready,
-            ),
-            (
-                "work from the channel still on",
-                ReadinessFacts {
-                    channels_off: MCP_OFF,
-                    agents_on_mcp: true,
-                    agents_on_cli: true,
-                    working: true,
-                    ..connected()
-                },
-                Readiness::Working,
-            ),
-            (
-                "one channel off and no agent connected",
-                ReadinessFacts {
-                    channels_off: MCP_OFF,
-                    ..connected()
-                },
-                Readiness::Ready,
-            ),
-            (
-                "both channels off",
-                ReadinessFacts {
-                    channels_off: BOTH_OFF,
-                    ..connected()
-                },
-                Readiness::TurnedOff,
-            ),
-            (
-                "both channels off without a browser",
-                ReadinessFacts {
-                    channels_off: BOTH_OFF,
-                    agents_on_cli: true,
-                    ..none
-                },
-                Readiness::TurnedOff,
-            ),
-            (
-                "a pause over both channels off",
-                ReadinessFacts {
-                    channels_off: BOTH_OFF,
-                    paused: true,
-                    ..connected()
-                },
-                Readiness::Paused,
-            ),
-        ];
-        for (case, facts, expected) in cases {
-            assert_eq!(resolve(&facts), expected, "{case}");
-        }
-    }
+    /// What the band says for "a browser starts when an agent asks".
+    const STARTS_CHROME: &str = "Starts Google Chrome when an agent asks.";
 
-    /// ADR-0187 Decision 4 and ADR-0202 Decision 22a (842ef606): a Ready with no browser names the
-    /// browser that starts, a Ready with one channel off says which agents can work, Turned off
-    /// names whose policy turned which work off, in the held tone, and an invalid policy is said in
-    /// the attention tone (ACCEPTANCE D18).
+    /// What the band says while MCP agents are turned off and command-line agents can work.
+    const MCP_OFF_READY: &str = "MCP agents are turned off; command-line agents can work.";
+
+    /// ACCEPTANCE D17 and D18, ADR-0187 Decision 4 (amended 2026-10-18) and ADR-0202 Decision 22a
+    /// (842ef606): one answer, its word and its sentence, for one set of facts. The word follows
+    /// the module order: an ended session, then a pause, then a policy that refuses every agent
+    /// that could ask, then no browser Ghostlight could start, then an invalid policy, missing
+    /// history, running work, and otherwise Ready. The sentence names the browser that starts,
+    /// says which agents can work while one channel is off, and names whose policy turned which
+    /// work off; Turned off is said in the held tone and an invalid policy in the attention tone.
     #[test]
-    fn the_sentence_says_what_the_answer_means() {
-        const STARTS_CHROME: &str = "Starts Google Chrome when an agent asks.";
-        const MCP_OFF_READY: &str = "MCP agents are turned off; command-line agents can work.";
-        let starts = ReadinessFacts {
-            starts: STARTS,
-            ..ReadinessFacts::default()
-        };
+    fn the_answer_and_its_sentence_follow_the_documented_precedence() {
+        let none = ReadinessFacts::default();
         let mcp_off = ReadinessFacts {
             channels_off: MCP_OFF,
             agents_on_mcp: true,
@@ -449,23 +276,145 @@ mod tests {
             ..connected()
         };
         let cases = [
-            ("a browser starts", starts, STARTS_CHROME.to_owned()),
+            ("nothing connected", none, Readiness::NotConnected, None),
+            (
+                "a pause without a browser",
+                ReadinessFacts {
+                    paused: true,
+                    ..none
+                },
+                Readiness::Paused,
+                None,
+            ),
+            (
+                "an ended session and a pause",
+                ReadinessFacts {
+                    session_ended: true,
+                    paused: true,
+                    ..none
+                },
+                Readiness::SessionEnded,
+                None,
+            ),
+            (
+                "no browser over policy, history and work",
+                ReadinessFacts {
+                    authority_invalid: true,
+                    audit_required_unavailable: true,
+                    working: true,
+                    ..none
+                },
+                Readiness::NotConnected,
+                None,
+            ),
+            (
+                "a browser that starts on request",
+                ReadinessFacts {
+                    starts: STARTS,
+                    ..none
+                },
+                Readiness::Ready,
+                Some(STARTS_CHROME.to_owned()),
+            ),
             (
                 "a connected browser names none that starts",
                 ReadinessFacts {
-                    browser_connected: true,
-                    ..starts
-                },
-                Readiness::Ready.detail().to_owned(),
-            ),
-            ("one channel off", mcp_off, MCP_OFF_READY.to_owned()),
-            (
-                "one channel off and no agent connected",
-                ReadinessFacts {
-                    channels_off: MCP_OFF,
+                    starts: STARTS,
                     ..connected()
                 },
-                MCP_OFF_READY.to_owned(),
+                Readiness::Ready,
+                Some(Readiness::Ready.detail().to_owned()),
+            ),
+            (
+                "an invalid policy over a browser that would start",
+                ReadinessFacts {
+                    starts: STARTS,
+                    authority_invalid: true,
+                    ..none
+                },
+                Readiness::PolicyInvalid,
+                None,
+            ),
+            ("connected and idle", connected(), Readiness::Ready, None),
+            (
+                "running work",
+                ReadinessFacts {
+                    working: true,
+                    ..connected()
+                },
+                Readiness::Working,
+                None,
+            ),
+            (
+                "missing history over running work",
+                ReadinessFacts {
+                    audit_required_unavailable: true,
+                    working: true,
+                    ..connected()
+                },
+                Readiness::HistoryUnavailable,
+                None,
+            ),
+            (
+                "an invalid policy",
+                ReadinessFacts {
+                    authority_invalid: true,
+                    ..connected()
+                },
+                Readiness::PolicyInvalid,
+                None,
+            ),
+            (
+                "an invalid policy over history and work",
+                ReadinessFacts {
+                    authority_invalid: true,
+                    audit_required_unavailable: true,
+                    working: true,
+                    ..connected()
+                },
+                Readiness::PolicyInvalid,
+                None,
+            ),
+            (
+                "an ended session over an invalid policy",
+                ReadinessFacts {
+                    authority_invalid: true,
+                    session_ended: true,
+                    ..connected()
+                },
+                Readiness::SessionEnded,
+                None,
+            ),
+            (
+                "a pause over an invalid policy",
+                ReadinessFacts {
+                    authority_invalid: true,
+                    paused: true,
+                    ..connected()
+                },
+                Readiness::Paused,
+                None,
+            ),
+            (
+                "every connected agent on the channel turned off by the person",
+                ReadinessFacts {
+                    agents_on_cli: false,
+                    ..mcp_off
+                },
+                Readiness::TurnedOff,
+                MCP_OFF.said(),
+            ),
+            (
+                "every connected agent on the channel turned off by the organization",
+                organization,
+                Readiness::TurnedOff,
+                organization.channels_off.said(),
+            ),
+            (
+                "another connected agent can still work",
+                mcp_off,
+                Readiness::Ready,
+                Some(MCP_OFF_READY.to_owned()),
             ),
             (
                 "a browser starts and one channel is off",
@@ -474,20 +423,26 @@ mod tests {
                     starts: STARTS,
                     ..mcp_off
                 },
-                format!("{STARTS_CHROME} {MCP_OFF_READY}"),
+                Readiness::Ready,
+                Some(format!("{STARTS_CHROME} {MCP_OFF_READY}")),
             ),
             (
-                "the person's policy turned one channel off",
+                "work from the channel still on",
                 ReadinessFacts {
-                    agents_on_cli: false,
+                    working: true,
                     ..mcp_off
                 },
-                MCP_OFF.said().unwrap(),
+                Readiness::Working,
+                None,
             ),
             (
-                "the organization's policy turned one channel off",
-                organization,
-                organization.channels_off.said().unwrap(),
+                "one channel off and no agent connected",
+                ReadinessFacts {
+                    channels_off: MCP_OFF,
+                    ..connected()
+                },
+                Readiness::Ready,
+                Some(MCP_OFF_READY.to_owned()),
             ),
             (
                 "both channels off",
@@ -495,18 +450,41 @@ mod tests {
                     channels_off: BOTH_OFF,
                     ..connected()
                 },
-                BOTH_OFF.said().unwrap(),
+                Readiness::TurnedOff,
+                BOTH_OFF.said(),
             ),
             (
-                "nothing connected",
-                ReadinessFacts::default(),
-                Readiness::NotConnected.detail().to_owned(),
+                "both channels off without a browser",
+                ReadinessFacts {
+                    channels_off: BOTH_OFF,
+                    agents_on_cli: true,
+                    ..none
+                },
+                Readiness::TurnedOff,
+                None,
+            ),
+            (
+                "a pause over both channels off",
+                ReadinessFacts {
+                    channels_off: BOTH_OFF,
+                    paused: true,
+                    ..connected()
+                },
+                Readiness::Paused,
+                None,
             ),
         ];
-        for (case, facts, expected) in cases {
-            assert_eq!(explain(resolve(&facts), &facts), expected, "{case}");
+        for (case, facts, expected, detail) in cases {
+            let answer = resolve(&facts);
+            assert_eq!(answer, expected, "{case}");
+            if let Some(detail) = detail {
+                assert_eq!(explain(answer, &facts), detail, "{case}");
+            }
+            match answer {
+                Readiness::TurnedOff => assert_eq!(answer.tone(), "held", "{case}"),
+                Readiness::PolicyInvalid => assert_eq!(answer.tone(), "attention", "{case}"),
+                _ => {}
+            }
         }
-        assert_eq!(Readiness::TurnedOff.tone(), "held");
-        assert_eq!(Readiness::PolicyInvalid.tone(), "attention");
     }
 }
