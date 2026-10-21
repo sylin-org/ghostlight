@@ -10,9 +10,29 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-Every slice of core-language's own has landed. Two core-service slices moved here on
-2026-10-21, then SERV-12: SERV-6 and SERV-12 have landed; BROW-2 waits for test-03's C16. A slice's hash is filled in by
-the next slice's commit, since a rebase before the push changes it.
+State on 2026-10-21: every slice of core-language's own has landed, and so have the moved
+SERV-6 and SERV-12. Two pieces remain, both editing `work/mod.rs`, so both wait for test-03's
+C16 (LEDGER-core-work.md):
+
+1. BROW-2 (sweep `browser.md`): delete `RecoveryDecision::Launch`, which nothing constructs, and
+   the two `unreachable!` arms in `work/mod.rs` that match it; have recovery's `decide`,
+   `decide_browser` and `start_plan` return the phase directly, so `phase_from_plan` and its
+   unreachable both-false arm go; add `From<RecoveryWaitError> for BrowserError` for the mapping
+   `work/mod.rs` writes twice. `browser/recovery.rs` is the coordinator's, `work/mod.rs`
+   test-03's; ask test-03 for a hold first.
+2. With it, drop the unused second element of `language::outcome::workspace_refusal`'s
+   `(Refusal, &'static str)`: since C12b-2 the result writes `refusal.reason()`, and `work/`
+   reads only `.0` (test-03's note).
+
+Then push green and stop: the owner's plan for the night ends there. If C16 has not landed when
+test-03 parks, park instead and tell the coordinator. How this lane works: build in
+`.target-lane-arch-core-language`; before each commit run fmt, workspace clippy (check its exit
+code, not a piped tail), `cargo test -p ghostlight-service` and
+`scripts/check-repository-integrity.ps1`; commit by path with `-s`; `git pull --rebase origin dev`,
+retest when the rebase brought code, push; after a defect fix or a milestone, deploy with
+`pwsh scripts/dev-loop.ps1 -TargetDirectory .target-lane-arch-core-language` and run a fresh
+`claude -p --model haiku` agent on the desk bell. A slice's hash is filled in by the next slice's
+commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -41,7 +61,7 @@ In order. "After" names what a slice waits for.
 | LANG-12b | refactor(cli): the command line reads the machine, and language/ does no I/O | LANG-12 | LANG-12's environment part, given by the coordinator; cross-lane into `cli/` | landed (e91c5518) |
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | landed (6f37117f) |
 | SERV-6 | refactor(cli): the command line reads the service's own vocabulary | - | SERV-6 with its skeptic's correction, moved from core-service; cross-lane into `cli/` and `intake/mcp.rs` | landed (15b38451) |
-| SERV-12 | refactor(diagnostics): one typed record, written by the service and read by `diagnostics show`, with the edge's line pinned | - | SERV-12 with its skeptic's correction, moved from core-service; cross-lane into `crates/bridge`, `cli/diagnostics.rs` and `crates/relay/src/log.rs` (coordinator's go) | landed |
+| SERV-12 | refactor(diagnostics): one typed record, written by the service and read by `diagnostics show`, with the edge's line pinned | - | SERV-12 with its skeptic's correction, moved from core-service; cross-lane into `crates/bridge`, `cli/diagnostics.rs` and `crates/relay/src/log.rs` (coordinator's go) | landed (40e4ff71) |
 | BROW-2 | refactor(browser): the dead recovery decisions go | test-03's C16 | BROW-2, moved from core-service; cross-lane into `browser/recovery.rs` and `work/mod.rs` | todo |
 
 ## Notes
