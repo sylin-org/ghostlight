@@ -107,7 +107,7 @@ impl AuthoritySnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{assemble, manifest, AuthorityTier, OwnOrigin};
+    use super::super::{assemble, manifest, OwnOrigin, PolicyAuthor};
     use super::*;
 
     fn choosing(mode: &str) -> manifest::Manifest {
@@ -121,8 +121,8 @@ mod tests {
     ) -> AuthoritySnapshot {
         assemble(
             [
-                (organization, AuthorityTier::Managed),
-                (user, AuthorityTier::User),
+                (organization, PolicyAuthor::Organization),
+                (user, PolicyAuthor::User),
             ],
             None,
             None,

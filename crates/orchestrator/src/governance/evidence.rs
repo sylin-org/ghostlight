@@ -18,13 +18,13 @@ pub struct LayerEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::governance::{manifest, AuthorityTier, GovernanceFacade, PolicyLayer};
+    use crate::governance::{manifest, GovernanceFacade, PolicyAuthor, PolicyLayer};
     use crate::intake::session::IntakeChannel;
 
     #[test]
     fn positive_evidence_preserves_ordered_grants_and_every_layer() {
         let mut snapshot = GovernanceFacade::new(None).snapshot().as_ref().clone();
-        for tier in [AuthorityTier::Managed, AuthorityTier::User] {
+        for tier in [PolicyAuthor::Organization, PolicyAuthor::User] {
             snapshot.layers.push(PolicyLayer::new(tier, manifest::parse(r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#, "test").unwrap()));
         }
         let requirements = CapabilitySet::READ.union(CapabilitySet::WRITE);
@@ -68,7 +68,7 @@ mod tests {
             "Allowed without configured policy."
         );
         snapshot.layers.push(PolicyLayer::new(
-            AuthorityTier::User,
+            PolicyAuthor::User,
             manifest::parse(
                 r#"{"schema":4,"name":"test","version":"1","grants":[]}"#,
                 "test",
@@ -178,7 +178,7 @@ impl AuthoritySnapshot {
                     grants
                 };
                 LayerEvidence {
-                    tier: layer.tier.as_str().into(),
+                    tier: super::tier_word(layer.tier).into(),
                     grants: indices
                         .into_iter()
                         .filter_map(|index| layer.manifest.grants.get(usize::from(index)))

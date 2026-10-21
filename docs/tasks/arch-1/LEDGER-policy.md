@@ -180,12 +180,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-03 (Alpine), after core-work. A
 slice's specification is its finding in [sweep-2026-10-20/work.md](sweep-2026-10-20/work.md), read
-with its skeptic's corrections. WORK-15 has landed. Next: WORK-11.
+with its skeptic's corrections. WORK-15 has landed. WORK-11 is under way: the tier fold has landed; the never-touch word, the
+`audit_requirement` rename and the module doc are next, then the re-export, which is cross-lane.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | landed (ddd76f9c, 86013a28 and `layer_denial`) |
-| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | todo |
+| WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | landed (ddd76f9c, 86013a28, cacb1062) |
+| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | tier fold landed; the rest todo |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
@@ -207,3 +208,9 @@ place `Decision::policy` and `denial_bytes` are written. It derives the layer's 
 the deciding grant's id itself; a layer the snapshot does not hold digests the snapshot's id, the
 tab-close fallback, which no other site can reach. `every_policy_refusal_keeps_its_denial_id` pins
 the six persisted ids, captured from the code before the change.
+
+WORK-11, the tier fold: `AuthorityTier` folds into `PolicyAuthor`, which had the same two cases,
+as the skeptic corrected (`LayerKind` has a third, `Ghostlight`, that no layer can be). Its
+persisted words come from one `tier_word`, beside `MANAGED_TIER` and the new `USER_TIER`, and stay
+`managed` and `user` in audit records and the authority id. `channel_refusal`'s hand-written match
+goes.

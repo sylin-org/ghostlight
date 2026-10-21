@@ -16,8 +16,8 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use super::{
-    host_pattern, manifest, AuthoritySnapshot, AuthorityTier, Capability, CapabilitySet,
-    ManagedPolicyFreshness, ManagedPolicyPassport,
+    host_pattern, manifest, AuthoritySnapshot, Capability, CapabilitySet, ManagedPolicyFreshness,
+    ManagedPolicyPassport,
 };
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::PolicyAuthor;
@@ -512,7 +512,7 @@ fn capability_line(
             // Every layer allows it somewhere, but only on never-touch hosts, so the never-touch
             // list is what refuses it: its author is named and credited.
             (None, Some(never)) => {
-                let kinds = |tiers: &[AuthorityTier]| {
+                let kinds = |tiers: &[PolicyAuthor]| {
                     tiers
                         .iter()
                         .map(|tier| layer_kind(*tier))
@@ -566,10 +566,10 @@ fn with_switches(mut decided_by: Vec<LayerKind>, switched: ChannelsOff<'_>) -> V
 }
 
 /// The layer kind a person reads for one authority tier.
-pub(super) const fn layer_kind(tier: AuthorityTier) -> LayerKind {
+pub(super) const fn layer_kind(tier: PolicyAuthor) -> LayerKind {
     match tier {
-        AuthorityTier::Managed => LayerKind::Organization,
-        AuthorityTier::User => LayerKind::User,
+        PolicyAuthor::Organization => LayerKind::Organization,
+        PolicyAuthor::User => LayerKind::User,
     }
 }
 
@@ -631,8 +631,11 @@ fn note(
     {
         return Some(RuleNote::Unreachable);
     }
-    let admitted =
-        ceiling?.layer_admits_within(AuthorityTier::Managed, grant.allowed_set(), &grant.hosts)?;
+    let admitted = ceiling?.layer_admits_within(
+        PolicyAuthor::Organization,
+        grant.allowed_set(),
+        &grant.hosts,
+    )?;
     (!admitted && !grant.hosts.allow.is_empty()).then_some(RuleNote::NoEffect)
 }
 
@@ -674,8 +677,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::governance::{
-        assemble, manifest, AuthoringError, AuthoritySnapshot, AuthorityTier, Capability,
-        CapabilitySet, ManagedPolicyPassport, OwnOrigin,
+        assemble, manifest, AuthoringError, AuthoritySnapshot, Capability, CapabilitySet,
+        ManagedPolicyPassport, OwnOrigin,
     };
     use crate::language::capability_map;
     use crate::language::catalog_for;
@@ -709,8 +712,8 @@ mod tests {
     ) -> Arc<AuthoritySnapshot> {
         Arc::new(assemble(
             [
-                (organization.cloned(), AuthorityTier::Managed),
-                (user.cloned(), AuthorityTier::User),
+                (organization.cloned(), PolicyAuthor::Organization),
+                (user.cloned(), PolicyAuthor::User),
             ],
             OrganizationIdentity::resolve(
                 None,
@@ -1318,11 +1321,15 @@ mod tests {
                 }
                 let (tier, _) = fixture.snapshot.attribution(refused).expect("attributed");
                 let named = match view.audit.source {
-                    Some(LayerKind::Organization) => AuthorityTier::Managed,
-                    Some(LayerKind::User) => AuthorityTier::User,
+                    Some(LayerKind::Organization) => PolicyAuthor::Organization,
+                    Some(LayerKind::User) => PolicyAuthor::User,
                     other => panic!("no layer named: {other:?}"),
                 };
-                assert_eq!(tier, named.as_str(), "{organization:?} {user:?}");
+                assert_eq!(
+                    tier,
+                    super::super::tier_word(named),
+                    "{organization:?} {user:?}"
+                );
                 assert_eq!(
                     view.audit.mode,
                     crate::governance::audit::AuditMode::RequireAudit

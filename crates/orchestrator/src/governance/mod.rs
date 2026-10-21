@@ -47,6 +47,9 @@ const RUNTIME_END: u8 = 2;
 /// The tier word a record's `policy_tier` gives the organization's layer, in audit and history.
 pub const MANAGED_TIER: &str = "managed";
 
+/// The persisted tier word of the person's own layer.
+const USER_TIER: &str = "user";
+
 /// One independent governed browser capability fact.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -442,25 +445,18 @@ fn is_loopback_v4(address: Ipv4Addr) -> bool {
     address.is_loopback() || address == Ipv4Addr::UNSPECIFIED
 }
 
-/// Where one policy layer sits in the tighten-only authority order.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AuthorityTier {
-    Managed,
-    User,
-}
-
-impl AuthorityTier {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Managed => MANAGED_TIER,
-            Self::User => "user",
-        }
+/// The persisted word for the layer `author` writes, in audit records and the authority id. The
+/// organization's layer is the managed tier.
+const fn tier_word(author: PolicyAuthor) -> &'static str {
+    match author {
+        PolicyAuthor::Organization => MANAGED_TIER,
+        PolicyAuthor::User => USER_TIER,
     }
 }
 
 #[derive(Clone, Debug)]
 struct PolicyLayer {
-    tier: AuthorityTier,
+    tier: PolicyAuthor,
     manifest: manifest::Manifest,
     /// The destinations this layer marks never-touch, as authored, for the boundaries a person is
     /// shown.
@@ -474,7 +470,7 @@ struct PolicyLayer {
 impl PolicyLayer {
     /// The layer `manifest` authors at `tier`, with the never-touch list its settings hold and
     /// every host pattern parsed once.
-    fn new(tier: AuthorityTier, manifest: manifest::Manifest) -> Self {
+    fn new(tier: PolicyAuthor, manifest: manifest::Manifest) -> Self {
         let never_touch = manifest
             .string_array_setting(PolicySetting::SacredDomains)
             .unwrap_or_default();
@@ -548,11 +544,7 @@ impl AuthoritySnapshot {
             .find(|(_, layer)| layer.manifest.boolean_setting(setting) == Some(false))?;
         let decision =
             self.layer_denial(ReasonCode::ChannelDenied, index, None, PolicyRule::Channel);
-        let author = match layer.tier {
-            AuthorityTier::Managed => PolicyAuthor::Organization,
-            AuthorityTier::User => PolicyAuthor::User,
-        };
-        Some((decision, author))
+        Some((decision, layer.tier))
     }
 
     /// The channel switches this authority turns off, read through [`Self::channel_refusal`], the
@@ -904,7 +896,7 @@ impl AuthoritySnapshot {
     /// ceiling refuses, or `None` when the snapshot has no such layer.
     fn layer_admits_within(
         &self,
-        tier: AuthorityTier,
+        tier: PolicyAuthor,
         requirements: CapabilitySet,
         within: &manifest::HostRules,
     ) -> Option<bool> {
@@ -990,7 +982,7 @@ impl AuthoritySnapshot {
             .grant
             .and_then(|index| layer.manifest.grants.get(usize::from(index)))
             .map(|grant| grant.id.as_str());
-        Some((layer.tier.as_str(), grant))
+        Some((tier_word(layer.tier), grant))
     }
 }
 
@@ -1000,10 +992,10 @@ struct Reach {
     /// How widely it is admitted, and which way the rules point.
     state: effective::CapabilityState,
     /// The layers that refuse it on some host no ceiling refuses, in authority order.
-    narrowed_by: Vec<AuthorityTier>,
+    narrowed_by: Vec<PolicyAuthor>,
     /// The layers that admit it on no host even on their own, never-touch hosts included, in
     /// authority order.
-    nowhere: Vec<AuthorityTier>,
+    nowhere: Vec<PolicyAuthor>,
     /// When nothing admits it, the never-touch hosts that keep it off, if any.
     never_touched: Option<NeverTouched>,
 }
@@ -1023,9 +1015,9 @@ impl Reach {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NeverTouched {
     /// The layers whose sites, on their own or shared, are all never-touch, in authority order.
-    allowed_by: Vec<AuthorityTier>,
+    allowed_by: Vec<PolicyAuthor>,
     /// The layers whose never-touch lists hold those sites, in authority order.
-    marked_by: Vec<AuthorityTier>,
+    marked_by: Vec<PolicyAuthor>,
 }
 
 /// How the layers would decide one never-touch probe host if its never-touch entry were gone.
@@ -1404,8 +1396,8 @@ impl Publication {
         let valid = sources.authority_valid();
         let snapshot = Arc::new(assemble(
             [
-                (managed.clone(), AuthorityTier::Managed),
-                (sources.user.active.clone(), AuthorityTier::User),
+                (managed.clone(), PolicyAuthor::Organization),
+                (sources.user.active.clone(), PolicyAuthor::User),
             ],
             sources.managed_organization(),
             managed_sequence,
@@ -2071,8 +2063,8 @@ impl GovernanceFacade {
         Ok(Candidate {
             snapshot: assemble(
                 [
-                    (published.managed.clone(), AuthorityTier::Managed),
-                    (Some(candidate), AuthorityTier::User),
+                    (published.managed.clone(), PolicyAuthor::Organization),
+                    (Some(candidate), PolicyAuthor::User),
                 ],
                 published.snapshot.organization().cloned(),
                 published.managed_sequence,
@@ -2149,7 +2141,7 @@ impl GovernanceFacade {
 
 /// Fold resolved policy layers into one immutable snapshot.
 fn assemble(
-    sources: [(Option<manifest::Manifest>, AuthorityTier); 2],
+    sources: [(Option<manifest::Manifest>, PolicyAuthor); 2],
     organization: Option<effective::OrganizationIdentity>,
     managed_sequence: Option<u64>,
     valid: bool,
@@ -2233,7 +2225,7 @@ fn authority_id(layers: &[PolicyLayer], valid: bool) -> String {
     let mut identity = String::new();
     identity.push_str(if valid { "valid\n" } else { "invalid\n" });
     for layer in layers {
-        identity.push_str(layer.tier.as_str());
+        identity.push_str(tier_word(layer.tier));
         identity.push(':');
         identity.push_str(&layer.manifest.hash);
         identity.push('\n');
