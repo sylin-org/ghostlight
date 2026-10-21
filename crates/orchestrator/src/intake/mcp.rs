@@ -390,7 +390,7 @@ impl McpSession {
     pub fn render(&mut self, response: ServiceResponse) -> Vec<Value> {
         match response {
             ServiceResponse::Catalog { tools } => self.render_catalog(tools),
-            ServiceResponse::CatalogChanged { .. } if self.phase == Phase::Ready => {
+            ServiceResponse::CatalogChanged if self.phase == Phase::Ready => {
                 vec![list_changed()]
             }
             ServiceResponse::Result {

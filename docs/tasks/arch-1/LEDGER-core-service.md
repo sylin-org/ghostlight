@@ -32,7 +32,7 @@ In order. "After" names what a slice waits for.
 | S-D7 | fix(browser): a browser with no Ghostlight extension reads as the missing extension, with the step to add it | - | found on leo-desktop-02 and by test-01, 2026-10-21 (Notes); done by test-01, cross-lane into `work/` and `install/browser_profiles.rs` under test-03's and test-04's holds | landed (this commit) |
 | S-D8 | fix(edge): a browser frame over the relay bound ends nothing | tests-1 T4 | test-02's answer to the coordinator's question, 2026-10-21 (Notes) | landed (this commit) |
 | S-D9 | fix(edge): a client line over the relay bound is answered, in the service's words | S-D8 | the coordinator's relay and edge classification, 2026-10-21 (Notes) | blocked (after 2.0.1, the owner, 2026-10-21) |
-| C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
+| C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | landed (this commit); no new test: diagnostics wording, ADR-0204 keeps the ceiling for promises |
 | BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
 | C3c | refactor(browser): one browser start, recorded in the launch guard | C3b, BROW-2 | ADR-0203 C3c, moved from core | todo |

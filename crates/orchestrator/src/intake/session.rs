@@ -191,13 +191,8 @@ pub enum ServiceResponse {
         /// Tool definitions the service owns.
         tools: Vec<ToolDefinition>,
     },
-    /// Policy changed the catalog after this session was given one.
-    CatalogChanged {
-        /// Monotonic generation within this session.
-        generation: u64,
-        /// The fresh complete catalog.
-        tools: Vec<ToolDefinition>,
-    },
+    /// Policy changed the catalog after this session was given one; the client asks for it again.
+    CatalogChanged,
     /// One finished invocation.
     Result {
         /// The id given to `Invoke`.

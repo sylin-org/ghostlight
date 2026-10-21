@@ -122,7 +122,7 @@ use lock::ServiceLock;
 /// It names the workbench by address only. The bearer is not an input, so it cannot appear.
 fn published_detail(endpoint: Option<&str>, workbench: Option<&WorkbenchAddress>) -> String {
     format!(
-        "desktop_ready=true endpoint={} relay={} workbench={}",
+        "endpoint={} relay={} workbench={}",
         endpoint.unwrap_or_default(),
         ghostlight_relay::RELAY,
         workbench.map_or("", WorkbenchAddress::url)
@@ -224,7 +224,8 @@ struct Bound {
     thread: JoinHandle<()>,
 }
 
-/// Another authority owns this runtime; a competing explicit Open may await its presentation.
+/// Another service holds this home's service lock and stays, so this start gives way to it: the
+/// caller reaches that service by its endpoint ([`lifetime::lock_wait`]).
 #[derive(Debug, thiserror::Error)]
 #[error("another Ghostlight orchestrator already owns this runtime")]
 pub struct AuthorityAlreadyRunning;
@@ -1149,45 +1150,52 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
     match judgement {
         Judgement::Drop => {}
         Judgement::Refuse(refusal) => listener::refuse(&connection, refusal),
-        Judgement::Admit(opening) => match opening.role {
-            Role::Browser => {
-                // Only the opening is held here; the port counts the stream while it lives.
-                let Some(_opening) = intake.streams.admit() else {
-                    return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
-                };
-                if listener::accept(&connection, &intake.accepted(Role::Browser)).is_ok() {
-                    // The first frame on the stream is the extension's own hello.
-                    let _ = intake.browser.attach(connection);
-                    intake.workbench.refresh_live_parts();
+        Judgement::Admit(opening) => {
+            match opening.role {
+                Role::Browser => {
+                    // Only the opening is held here; the port counts the stream while it lives.
+                    let Some(_opening) = intake.streams.admit() else {
+                        return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
+                    };
+                    if listener::accept(&connection, &intake.accepted(Role::Browser)).is_ok() {
+                        // The first frame on the stream is the extension's own hello.
+                        let _ = intake.browser.attach(connection);
+                        intake.workbench.refresh_live_parts();
+                    }
+                }
+                Role::Control => {
+                    let Some(_stream) = intake.streams.admit() else {
+                        return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
+                    };
+                    serve_control(connection, opening.control, intake);
+                }
+                Role::Mcp => {
+                    let Some(_stream) = intake.streams.admit() else {
+                        return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
+                    };
+                    if let Err(error) = serve_mcp(connection, intake, &opening) {
+                        intake.diagnostics.sink().emit(
+                        ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
+                        ghostlight_bridge::diagnostics::Level::Warn,
+                        None,
+                        &format!("the session ended after an invalid or interrupted exchange: {error}"),
+                    );
+                    }
+                }
+                Role::Desktop => {
+                    let Some(_stream) = intake.streams.admit() else {
+                        return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
+                    };
+                    // A shell that goes away abruptly or sends a frame this build cannot read ends
+                    // its own stream and nothing else.
+                    let view = ShellView::from_channel(opening.channel.as_deref());
+                    let _ = serve_desktop(connection, intake, view);
+                }
+                Role::Command | Role::Unknown => {
+                    listener::refuse(&connection, OpeningRefusal::Unsupported);
                 }
             }
-            Role::Control => {
-                let Some(_stream) = intake.streams.admit() else {
-                    return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
-                };
-                serve_control(connection, opening.control, intake);
-            }
-            Role::Mcp => {
-                let Some(_stream) = intake.streams.admit() else {
-                    return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
-                };
-                if serve_mcp(connection, intake, &opening).is_err() {
-                    eprintln!("MCP session ended after an invalid or interrupted exchange.");
-                }
-            }
-            Role::Desktop => {
-                let Some(_stream) = intake.streams.admit() else {
-                    return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
-                };
-                // A shell that goes away abruptly or sends a frame this build cannot read ends
-                // its own stream and nothing else.
-                let view = ShellView::from_channel(opening.channel.as_deref());
-                let _ = serve_desktop(connection, intake, view);
-            }
-            Role::Command | Role::Unknown => {
-                listener::refuse(&connection, OpeningRefusal::Unsupported);
-            }
-        },
+        }
     }
 }
 
@@ -1981,7 +1989,6 @@ impl LiveSession {
         thread::Builder::new()
             .name("ghostlight-session-watch".into())
             .spawn(move || {
-                let mut generation = 1_u64;
                 while !stop.load(Ordering::SeqCst) {
                     if !queue.wait_idle_or_timeout(Duration::from_secs(1)) {
                         break;
@@ -1995,9 +2002,8 @@ impl LiveSession {
                         intake.browser_port.as_ref(),
                         &workspace,
                     );
-                    if let Some(tools) = advertised.changed_by(&governance.snapshot()) {
-                        generation = generation.wrapping_add(1);
-                        wire.render(ServiceResponse::CatalogChanged { generation, tools });
+                    if advertised.changed_by(&governance.snapshot()).is_some() {
+                        wire.render(ServiceResponse::CatalogChanged);
                     }
                 }
             })
@@ -2117,7 +2123,11 @@ impl LiveSession {
             ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
             ghostlight_bridge::diagnostics::Level::Info,
             None,
-            self.workspace.as_str(),
+            self.connection
+                .attribution()
+                .connection_id
+                .as_deref()
+                .unwrap_or_default(),
         );
         intake.workbench.refresh_live_parts();
     }
