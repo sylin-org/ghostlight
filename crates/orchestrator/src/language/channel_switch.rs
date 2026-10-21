@@ -76,8 +76,8 @@ impl ChannelsOff<'_> {
             (Some(mcp), Some(cli)) if mcp == cli => Some(format!(
                 "{} turns off work from {} and {}.",
                 whose(mcp, self.organization),
-                from(IntakeChannel::Mcp),
-                from(IntakeChannel::Cli)
+                work_from(IntakeChannel::Mcp),
+                work_from(IntakeChannel::Cli)
             )),
             (Some(mcp), Some(cli)) => Some(format!(
                 "{} {}",
@@ -139,7 +139,7 @@ pub fn refused(channel: IntakeChannel, author: PolicyAuthor, organization: Optio
     format!(
         "{} turns off work from {}.",
         whose(author, organization),
-        from(channel)
+        work_from(channel)
     )
 }
 
@@ -153,7 +153,7 @@ fn whose(author: PolicyAuthor, organization: Option<&str>) -> String {
 }
 
 /// The work a channel carries, as the end of "turns off work from".
-const fn from(channel: IntakeChannel) -> &'static str {
+pub(super) const fn work_from(channel: IntakeChannel) -> &'static str {
     match channel {
         IntakeChannel::Mcp => "MCP agents",
         IntakeChannel::Cli => "the command line",

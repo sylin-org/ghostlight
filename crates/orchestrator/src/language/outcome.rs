@@ -746,13 +746,13 @@ impl Outcome {
                 format!("Went {direction} to {}.", place(host, "the previous page"))
             }
             Self::PageReloaded { host } => {
-                format!("Reloaded {}.", place(host, "the page"))
+                format!("Reloaded {}.", on_page(host))
             }
             Self::TabClosed => "Closed the controlled tab.".into(),
             Self::TextRead { words, host } => format!(
                 "Read {} from {}.",
                 counted(*words, "word", "words"),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::TargetsListed {
                 noun: TargetNoun::Match,
@@ -762,7 +762,7 @@ impl Outcome {
             } => format!(
                 "Found {} on {}.",
                 counted(*count, "match", "matches"),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::TargetsListed {
                 noun: TargetNoun::Control,
@@ -772,7 +772,7 @@ impl Outcome {
             } => format!(
                 "Found {} on {}.",
                 counted(*count, "control", "controls"),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::TargetsListed {
                 noun: TargetNoun::Item,
@@ -782,7 +782,7 @@ impl Outcome {
             } => format!(
                 "Found {} on {}.",
                 counted(*count, "item", "items"),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::Captured {
                 scope,
@@ -801,7 +801,7 @@ impl Outcome {
                 format!(
                     "Clicked {} on {}.",
                     subject.noun_phrase(),
-                    place(host, "the page")
+                    on_page(host)
                 )
             }
             Self::PointClicked {
@@ -812,7 +812,7 @@ impl Outcome {
                 format!(
                     "Clicked {} on {}.",
                     subject.noun_phrase(),
-                    place(host, "the page")
+                    on_page(host)
                 )
             }
             Self::PointClicked {
@@ -821,18 +821,18 @@ impl Outcome {
                 y,
                 subject: None,
             } => {
-                format!("Clicked at {x},{y} on {}.", place(host, "the page"))
+                format!("Clicked at {x},{y} on {}.", on_page(host))
             }
             Self::PageScrolled { host, direction } => {
-                format!("Scrolled {direction} on {}.", place(host, "the page"))
+                format!("Scrolled {direction} on {}.", on_page(host))
             }
             Self::TargetRevealed { host, subject } => format!(
                 "Scrolled {} into view on {}.",
                 subject.noun_phrase(),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::ZoomSet { percent, host } => {
-                format!("Set zoom to {percent}% on {}.", place(host, "the page"))
+                format!("Set zoom to {percent}% on {}.", on_page(host))
             }
             Self::WindowResized { width, height } => {
                 format!("Resized the browser window to {width}x{height}.")
@@ -843,12 +843,12 @@ impl Outcome {
             } => format!(
                 "Hovered {} on {}.",
                 subject.noun_phrase(),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::Hovered {
                 host,
                 subject: None,
-            } => format!("Hovered a point on {}.", place(host, "the page")),
+            } => format!("Hovered a point on {}.", on_page(host)),
             Self::FormFilled {
                 fields,
                 submitted,
@@ -860,7 +860,7 @@ impl Outcome {
                 let mut summary = format!(
                     "Filled {} on {}",
                     counted(*fields, "field", "fields"),
-                    place(host, "the page")
+                    on_page(host)
                 );
                 if *submitted {
                     summary.push_str(" and submitted the form");
@@ -881,7 +881,7 @@ impl Outcome {
                 "Typed {} into {} on {}.",
                 counted(*characters, "character", "characters"),
                 subject.noun_phrase(),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::KeyboardSent {
                 host,
@@ -891,9 +891,9 @@ impl Outcome {
                 Some(subject) => format!(
                     "Pressed {key} in {} on {}.",
                     subject.noun_phrase(),
-                    place(host, "the page")
+                    on_page(host)
                 ),
-                None => format!("Pressed {key} on {}.", place(host, "the page")),
+                None => format!("Pressed {key} on {}.", on_page(host)),
             },
             Self::KeyboardSent {
                 host,
@@ -903,9 +903,9 @@ impl Outcome {
                 Some(subject) => format!(
                     "Pressed a key in {} on {}.",
                     subject.noun_phrase(),
-                    place(host, "the page")
+                    on_page(host)
                 ),
-                None => format!("Pressed a key on {}.", place(host, "the page")),
+                None => format!("Pressed a key on {}.", on_page(host)),
             },
             // Both ends landing on one named control is a drag inside it, such as a slider or a
             // canvas, and "onto itself" would misdescribe it.
@@ -916,7 +916,7 @@ impl Outcome {
             } if source.names_same_control(destination) && source.label.is_some() => format!(
                 "Dragged across {} on {}.",
                 source.noun_phrase(),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::Dragged {
                 host,
@@ -926,11 +926,11 @@ impl Outcome {
                 "Dragged {} onto {} on {}.",
                 source.noun_phrase(),
                 destination.noun_phrase(),
-                place(host, "the page")
+                on_page(host)
             ),
             Self::Dragged { host, .. } => format!(
                 "Dragged one point to another on {}.",
-                place(host, "the page")
+                on_page(host)
             ),
             Self::FilesUploaded {
                 count,
@@ -941,16 +941,16 @@ impl Outcome {
                     "Uploaded {} through {} on {}.",
                     counted(*count, "file", "files"),
                     subject.noun_phrase(),
-                    place(host, "the page")
+                    on_page(host)
                 ),
                 None => format!(
                     "Uploaded {} to {}.",
                     counted(*count, "file", "files"),
-                    place(host, "the page")
+                    on_page(host)
                 ),
             },
             Self::ScriptEvaluated { host, .. } => {
-                format!("Executed JavaScript on {}.", place(host, "the page"))
+                format!("Executed JavaScript on {}.", on_page(host))
             }
             Self::Waited {
                 condition,
@@ -980,10 +980,10 @@ impl Outcome {
                 } else {
                     counted(*count, "observation", "observations")
                 },
-                place(host, "the page")
+                on_page(host)
             ),
             Self::RecordingStarted { host } => {
-                format!("Started recording {}.", place(host, "the page"))
+                format!("Started recording {}.", on_page(host))
             }
             Self::RecordingObserved {
                 frames,
@@ -2613,6 +2613,11 @@ fn place<'a>(host: &'a Option<String>, fallback: &'static str) -> &'a str {
     host.as_deref().unwrap_or(fallback)
 }
 
+/// The page's host, or "the page" when its address has none.
+fn on_page(host: &Option<String>) -> &str {
+    place(host, "the page")
+}
+
 /// Name what authority refused and where, instead of that authority refused.
 ///
 /// "Authority blocked the browser job" is true of every denial there is, which makes it useless
@@ -2660,10 +2665,7 @@ fn channel_off(channel: IntakeChannel, author: PolicyAuthor) -> String {
         PolicyAuthor::Organization => "the organization's",
         PolicyAuthor::User => "the user's",
     };
-    let from = match channel {
-        IntakeChannel::Mcp => "MCP agents",
-        IntakeChannel::Cli => "the command line",
-    };
+    let from = super::channel_switch::work_from(channel);
     format!("Blocked: {whose} Ghostlight policy turns off work from {from}.")
 }
 
@@ -2677,7 +2679,7 @@ fn waited(
     satisfied: bool,
     host: &Option<String>,
 ) -> String {
-    let location = place(host, "the page");
+    let location = on_page(host);
     let (subject, arrived, missing) = match condition {
         WaitCondition::LoadReady => (None, "finished loading", "never finished loading"),
         WaitCondition::TextPresent => (Some("Text"), "appeared", "never appeared"),

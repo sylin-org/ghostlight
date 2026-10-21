@@ -61,6 +61,12 @@ use bounds::{
 pub use bounds::{DEFAULT_DOCUMENT_DEPTH, MAX_INSPECT_ITEMS, SCRIPT_MAX_CHARS};
 pub(crate) use bounds::{DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS};
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
+/// The refusal of region work that names no view.
+const NEEDS_VIEW: &str =
+    "region work needs a current view handle: take a screenshot, then pass its view with these coordinates";
+/// The refusal of a window resize that leaves out a dimension.
+const RESIZE_NEEDS_SIZE: &str =
+    "action resize needs width and height: the outer window size in pixels";
 
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
 ///
@@ -1441,18 +1447,12 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
                     }
                 }
                 "resize" => {
-                    let width = value.width.ok_or_else(|| {
-                        LanguageError::Invalid(
-                            "action resize needs width and height: the outer window size in pixels"
-                                .into(),
-                        )
-                    })?;
-                    let height = value.height.ok_or_else(|| {
-                        LanguageError::Invalid(
-                            "action resize needs width and height: the outer window size in pixels"
-                                .into(),
-                        )
-                    })?;
+                    let width = value
+                        .width
+                        .ok_or_else(|| LanguageError::Invalid(RESIZE_NEEDS_SIZE.into()))?;
+                    let height = value
+                        .height
+                        .ok_or_else(|| LanguageError::Invalid(RESIZE_NEEDS_SIZE.into()))?;
                     validate_within(width as usize, WINDOW_WIDTH, "width")?;
                     validate_within(height as usize, WINDOW_HEIGHT, "height")?;
                     if value.percent.is_some() {
@@ -1907,7 +1907,7 @@ fn validate_screenshot(value: &TakeScreenshot) -> Result<(), LanguageError> {
             value
                 .view
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
+                .ok_or_else(|| LanguageError::Invalid(NEEDS_VIEW.into()))?,
             HandleKind::View,
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
@@ -2029,7 +2029,7 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
             value
                 .view
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
+                .ok_or_else(|| LanguageError::Invalid(NEEDS_VIEW.into()))?,
             HandleKind::View,
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
@@ -2154,7 +2154,7 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
             value
                 .view
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
+                .ok_or_else(|| LanguageError::Invalid(NEEDS_VIEW.into()))?,
             HandleKind::View,
         )?;
         for (name, coordinate) in [
@@ -2230,7 +2230,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
             value
                 .view
                 .as_deref()
-                .ok_or_else(|| LanguageError::Invalid("region work needs a current view handle: take a screenshot, then pass its view with these coordinates".into()))?,
+                .ok_or_else(|| LanguageError::Invalid(NEEDS_VIEW.into()))?,
             HandleKind::View,
         )?;
         for (name, coordinate) in [("x", value.x), ("y", value.y)] {
@@ -2404,9 +2404,7 @@ fn validate_condition(
         WaitCondition::LoadReady | WaitCondition::SelectorPresent => Ok(()),
         WaitCondition::VisualSettle => {
             if value.is_some() {
-                return Err(LanguageError::Invalid(format!(
-                    "{name} does not accept value"
-                )));
+                return Err(refuses_value(name));
             }
             if let Some(target) = target {
                 validate_handle(target, HandleKind::Target)?;
@@ -2430,14 +2428,17 @@ fn validate_condition(
                 target.ok_or_else(|| LanguageError::Invalid(format!("{name} requires target")))?;
             validate_handle(target, HandleKind::Target)?;
             if value.is_some() {
-                Err(LanguageError::Invalid(format!(
-                    "{name} does not accept value"
-                )))
+                Err(refuses_value(name))
             } else {
                 Ok(())
             }
         }
     }
+}
+
+/// The refusal of a wait condition given a value it does not take.
+fn refuses_value(condition: &str) -> LanguageError {
+    LanguageError::Invalid(format!("{condition} does not accept value"))
 }
 
 fn validate_url(value: &str) -> Result<(), LanguageError> {
