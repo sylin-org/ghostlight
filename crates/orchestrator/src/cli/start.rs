@@ -265,227 +265,227 @@ mod tests {
         arguments.iter().map(OsString::from).collect()
     }
 
+    /// Protects ACCEPTANCE contract gate 14, the entry rule: only the installed service serves and
+    /// runs its own commands, and the edge's verbs go to the installed edge from any image. A carrier
+    /// installs when nothing, an older release or a damaged image is installed and then hands over to
+    /// the installed copy; it hands over without installing to the same or a newer service and to any
+    /// development build, naming the way back when that build is gone; and inspection and call help
+    /// run where they are and install nothing.
     #[test]
-    fn a_carrier_runs_the_installed_service_when_the_installation_is_a_development_build() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        let installed = home.installed();
-        // Older, same and newer than the carrier: none of them is installed over.
-        for version in ["0.0.1", env!("CARGO_PKG_VERSION"), "999.0.0"] {
-            home.record_in(version, Channel::Development);
-            let (result, calls) = home.start(&carrier, &["call", "--catalog"]);
-            assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT), "{version}");
-            assert_eq!(
-                calls,
-                vec![Call::Run(installed.clone(), os(&["call", "--catalog"]))],
-                "{version}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_carrier_names_the_way_back_when_the_development_build_it_would_run_is_gone() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        home.installed();
-        home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
-        fs::remove_file(home.layout.service_executable()).unwrap();
-        for arguments in [&["call", "--catalog"][..], &["open"]] {
-            let (result, calls) = home.start(&carrier, arguments);
-            let error = result.unwrap_err();
-            let missing = error
-                .downcast_ref::<DevelopmentExecutableMissing>()
-                .unwrap_or_else(|| panic!("{error}"));
-            assert_eq!(missing.0, home.layout.service_executable());
-            assert!(error.to_string().contains("deployment install --restore"));
-            assert!(calls.is_empty(), "{arguments:?}");
-        }
-        let edge_missing = home.start(&carrier, &["mcp"]).0.unwrap_err();
-        assert!(edge_missing.is::<DevelopmentExecutableMissing>());
-    }
-
-    #[test]
-    fn a_carrier_installs_over_an_older_release_but_not_an_older_development_build() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        home.installed();
-        home.record("0.0.1");
-        let (_, calls) = home.start(&carrier, &["open"]);
-        assert_eq!(calls[0], Call::Install(home.layout.bin()));
-        home.record_in("0.0.1", Channel::Development);
-        let (_, calls) = home.start(&carrier, &["open"]);
-        assert!(!calls.iter().any(|call| matches!(call, Call::Install(_))));
-    }
-
-    #[test]
-    fn only_the_installed_service_serves_whatever_the_channel() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        let installed = home.installed();
-        home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
-        let (result, calls) = home.start(&carrier, &["serve", "--reason", "agent"]);
-        assert!(result.unwrap_err().is::<entry::Refusal>());
-        assert!(calls.is_empty());
-        let (result, calls) = home.start(&installed, &["serve", "--reason", "agent"]);
-        assert_eq!(
-            result.unwrap(),
-            Start::Dispatch(LaunchMode::Serve(ServeStart {
-                reason: StartReason::Agent,
-                relaunched: false
-            }))
-        );
-        assert!(calls.is_empty());
-    }
-
-    #[test]
-    fn call_help_runs_where_it_is_and_installs_nothing() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        for arguments in [&["call", "--help"][..], &["call", "-h"]] {
-            let (result, calls) = home.start(&carrier, arguments);
-            assert_eq!(result.unwrap(), Start::Dispatch(LaunchMode::CallHelp));
-            assert!(calls.is_empty(), "{arguments:?}");
-        }
-    }
-
-    #[test]
-    fn a_carrier_installs_when_nothing_is_installed_and_then_runs_the_installed_service() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        let (result, calls) = home.start(&carrier, &["open"]);
-        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
-        assert_eq!(
-            calls,
-            vec![
-                Call::Install(home.layout.bin()),
-                Call::Run(home.layout.service_executable(), os(&["open"])),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_carrier_installs_over_an_older_service_and_hands_over_to_the_same_one() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        let installed = home.installed();
-        home.record("0.0.1");
-        let (result, calls) = home.start(&carrier, &["install"]);
-        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
-        assert_eq!(calls[0], Call::Install(home.layout.bin()));
-        home.record(env!("CARGO_PKG_VERSION"));
-        let (result, calls) = home.start(&carrier, &["install"]);
-        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
-        assert_eq!(calls, vec![Call::Run(installed, os(&["install"]))]);
-    }
-
-    #[test]
-    fn a_carrier_older_than_the_installed_service_hands_over_without_installing() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        let installed = home.installed();
-        home.record("999.0.0");
-        let (result, calls) = home.start(&carrier, &["open"]);
-        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
-        assert_eq!(calls, vec![Call::Run(installed, os(&["open"]))]);
-    }
-
-    #[test]
-    fn the_edges_verbs_go_to_the_installed_edge_from_any_service_image() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        let installed = home.installed();
-        let edge = home.edge();
-        home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
-        for arguments in [
-            &["mcp"][..],
-            &["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"],
-            &[
-                "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
-                "--parent-window=4",
-            ],
-        ] {
-            for current in [&carrier, &installed] {
-                let (result, calls) = home.start(current, arguments);
-                assert_eq!(
-                    result.unwrap(),
-                    Start::Exit(FORWARDED_EXIT),
-                    "{arguments:?}"
-                );
+    fn the_entry_rule_runs_the_installed_copy_and_a_carrier_installs_only_forward() {
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            let installed = home.installed();
+            // Older, same and newer than the carrier: none of them is installed over.
+            for version in ["0.0.1", env!("CARGO_PKG_VERSION"), "999.0.0"] {
+                home.record_in(version, Channel::Development);
+                let (result, calls) = home.start(&carrier, &["call", "--catalog"]);
+                assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT), "{version}");
                 assert_eq!(
                     calls,
-                    vec![Call::Run(edge.clone(), os(arguments))],
-                    "{arguments:?}"
+                    vec![Call::Run(installed.clone(), os(&["call", "--catalog"]))],
+                    "{version}"
                 );
             }
         }
-    }
-
-    #[test]
-    fn a_carrier_asked_for_a_relay_installs_first_and_then_runs_the_installed_edge() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        let (result, calls) = home.start(&carrier, &["mcp"]);
-        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
-        assert_eq!(
-            calls,
-            vec![
-                Call::Install(home.layout.bin()),
-                Call::Run(home.layout.edge(), os(&["mcp"])),
-            ]
-        );
-    }
-
-    #[test]
-    fn inspection_never_installs() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        for arguments in [
-            &["doctor"][..],
-            &["status"],
-            &["--help"],
-            &["help"],
-            &["--version"],
-        ] {
-            let (result, calls) = home.start(&carrier, arguments);
-            assert!(
-                matches!(result.unwrap(), Start::Dispatch(_)),
-                "{arguments:?}"
-            );
-            assert!(calls.is_empty(), "{arguments:?}");
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            home.installed();
+            home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
+            fs::remove_file(home.layout.service_executable()).unwrap();
+            for arguments in [&["call", "--catalog"][..], &["open"]] {
+                let (result, calls) = home.start(&carrier, arguments);
+                let error = result.unwrap_err();
+                let missing = error
+                    .downcast_ref::<DevelopmentExecutableMissing>()
+                    .unwrap_or_else(|| panic!("{error}"));
+                assert_eq!(missing.0, home.layout.service_executable());
+                assert!(error.to_string().contains("deployment install --restore"));
+                assert!(calls.is_empty(), "{arguments:?}");
+            }
+            let edge_missing = home.start(&carrier, &["mcp"]).0.unwrap_err();
+            assert!(edge_missing.is::<DevelopmentExecutableMissing>());
         }
-        let (result, calls) = home.start(&carrier, &["nonsense"]);
-        assert!(result.is_err());
-        assert!(calls.is_empty());
-    }
-
-    #[test]
-    fn serve_from_any_other_path_is_refused() {
-        let home = Home::new();
-        let carrier = home.carrier();
-        home.installed();
-        let (result, calls) = home.start(&carrier, &["serve", "--reason", "agent"]);
-        let error = result.unwrap_err();
-        assert!(error.is::<entry::Refusal>(), "{error}");
-        assert!(calls.is_empty());
-    }
-
-    #[test]
-    fn the_installed_service_runs_its_own_commands() {
-        let home = Home::new();
-        let installed = home.installed();
-        for (arguments, mode) in [
-            (
-                &["serve", "--reason", "person"][..],
-                LaunchMode::Serve(ServeStart {
-                    reason: StartReason::Person,
-                    relaunched: false,
-                }),
-            ),
-            (&["open"], LaunchMode::Open),
-        ] {
-            let (result, calls) = home.start(&installed, arguments);
-            assert_eq!(result.unwrap(), Start::Dispatch(mode));
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            home.installed();
+            home.record("0.0.1");
+            let (_, calls) = home.start(&carrier, &["open"]);
+            assert_eq!(calls[0], Call::Install(home.layout.bin()));
+            home.record_in("0.0.1", Channel::Development);
+            let (_, calls) = home.start(&carrier, &["open"]);
+            assert!(!calls.iter().any(|call| matches!(call, Call::Install(_))));
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            let installed = home.installed();
+            home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
+            let (result, calls) = home.start(&carrier, &["serve", "--reason", "agent"]);
+            assert!(result.unwrap_err().is::<entry::Refusal>());
             assert!(calls.is_empty());
+            let (result, calls) = home.start(&installed, &["serve", "--reason", "agent"]);
+            assert_eq!(
+                result.unwrap(),
+                Start::Dispatch(LaunchMode::Serve(ServeStart {
+                    reason: StartReason::Agent,
+                    relaunched: false
+                }))
+            );
+            assert!(calls.is_empty());
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            for arguments in [&["call", "--help"][..], &["call", "-h"]] {
+                let (result, calls) = home.start(&carrier, arguments);
+                assert_eq!(result.unwrap(), Start::Dispatch(LaunchMode::CallHelp));
+                assert!(calls.is_empty(), "{arguments:?}");
+            }
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            let (result, calls) = home.start(&carrier, &["open"]);
+            assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+            assert_eq!(
+                calls,
+                vec![
+                    Call::Install(home.layout.bin()),
+                    Call::Run(home.layout.service_executable(), os(&["open"])),
+                ]
+            );
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            let installed = home.installed();
+            home.record("0.0.1");
+            let (result, calls) = home.start(&carrier, &["install"]);
+            assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+            assert_eq!(calls[0], Call::Install(home.layout.bin()));
+            home.record(env!("CARGO_PKG_VERSION"));
+            let (result, calls) = home.start(&carrier, &["install"]);
+            assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+            assert_eq!(calls, vec![Call::Run(installed, os(&["install"]))]);
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            let installed = home.installed();
+            home.record("999.0.0");
+            let (result, calls) = home.start(&carrier, &["open"]);
+            assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+            assert_eq!(calls, vec![Call::Run(installed, os(&["open"]))]);
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            let installed = home.installed();
+            let edge = home.edge();
+            home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
+            for arguments in [
+                &["mcp"][..],
+                &["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"],
+                &[
+                    "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+                    "--parent-window=4",
+                ],
+            ] {
+                for current in [&carrier, &installed] {
+                    let (result, calls) = home.start(current, arguments);
+                    assert_eq!(
+                        result.unwrap(),
+                        Start::Exit(FORWARDED_EXIT),
+                        "{arguments:?}"
+                    );
+                    assert_eq!(
+                        calls,
+                        vec![Call::Run(edge.clone(), os(arguments))],
+                        "{arguments:?}"
+                    );
+                }
+            }
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            let (result, calls) = home.start(&carrier, &["mcp"]);
+            assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+            assert_eq!(
+                calls,
+                vec![
+                    Call::Install(home.layout.bin()),
+                    Call::Run(home.layout.edge(), os(&["mcp"])),
+                ]
+            );
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            for arguments in [
+                &["doctor"][..],
+                &["status"],
+                &["--help"],
+                &["help"],
+                &["--version"],
+            ] {
+                let (result, calls) = home.start(&carrier, arguments);
+                assert!(
+                    matches!(result.unwrap(), Start::Dispatch(_)),
+                    "{arguments:?}"
+                );
+                assert!(calls.is_empty(), "{arguments:?}");
+            }
+            let (result, calls) = home.start(&carrier, &["nonsense"]);
+            assert!(result.is_err());
+            assert!(calls.is_empty());
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            home.installed();
+            let (result, calls) = home.start(&carrier, &["serve", "--reason", "agent"]);
+            let error = result.unwrap_err();
+            assert!(error.is::<entry::Refusal>(), "{error}");
+            assert!(calls.is_empty());
+        }
+        {
+            let home = Home::new();
+            let installed = home.installed();
+            for (arguments, mode) in [
+                (
+                    &["serve", "--reason", "person"][..],
+                    LaunchMode::Serve(ServeStart {
+                        reason: StartReason::Person,
+                        relaunched: false,
+                    }),
+                ),
+                (&["open"], LaunchMode::Open),
+            ] {
+                let (result, calls) = home.start(&installed, arguments);
+                assert_eq!(result.unwrap(), Start::Dispatch(mode));
+                assert!(calls.is_empty());
+            }
+        }
+        {
+            let home = Home::new();
+            let carrier = home.carrier();
+            home.installed();
+            home.record(env!("CARGO_PKG_VERSION"));
+            fs::write(home.layout.service_executable(), b"damaged").unwrap();
+            let (result, calls) = home.start(&carrier, &["open"]);
+            assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+            assert_eq!(
+                calls,
+                vec![
+                    Call::Install(home.layout.bin()),
+                    Call::Run(home.layout.service_executable(), os(&["open"])),
+                ]
+            );
         }
     }
 }

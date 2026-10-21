@@ -214,210 +214,6 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
 
-    #[cfg(windows)]
-    const ROOT: &str = "C:\\Users\\person\\.ghostlight";
-    #[cfg(not(windows))]
-    const ROOT: &str = "/home/person/.ghostlight";
-
-    fn path(relative: &str) -> PathBuf {
-        let mut path = PathBuf::from(ROOT);
-        for part in relative.split('/') {
-            path.push(part);
-        }
-        path
-    }
-
-    fn facts(standing: Standing) -> Facts {
-        Facts {
-            installed_service: path("bin/ghostlight-service"),
-            installed_edge: path("bin/ghostlight"),
-            development_channel: false,
-            standing,
-        }
-    }
-
-    fn development(standing: Standing) -> Facts {
-        Facts {
-            development_channel: true,
-            ..facts(standing)
-        }
-    }
-
-    fn check(name: &str, current_exe: &Path, role: Role, facts: Facts, expected: Entry) {
-        assert_eq!(decide(current_exe, role, &facts), expected, "{name}");
-    }
-
-    #[test]
-    fn decisions_follow_the_entry_rule() {
-        let installed = path("bin/ghostlight-service");
-        let edge = path("bin/ghostlight");
-        let build = path("target/release/ghostlight-service");
-        let carrier = path("package/ghostlight-service");
-        check(
-            "the installer runs from a carrier",
-            &carrier,
-            Role::Deployment,
-            facts(Standing::Absent),
-            Entry::Run,
-        );
-        check(
-            "the installer runs over a development channel",
-            &carrier,
-            Role::Deployment,
-            development(Standing::Same),
-            Entry::Run,
-        );
-        check(
-            "the installed service runs",
-            &installed,
-            Role::Launch,
-            facts(Standing::Same),
-            Entry::Run,
-        );
-        check(
-            "the installed service serves",
-            &installed,
-            Role::Serve,
-            facts(Standing::Same),
-            Entry::Run,
-        );
-        check(
-            "the installed service serves a development channel",
-            &installed,
-            Role::Serve,
-            development(Standing::Same),
-            Entry::Run,
-        );
-        check(
-            "a carrier serving is refused",
-            &carrier,
-            Role::Serve,
-            facts(Standing::Same),
-            Entry::Refuse(Refusal::ServeFromElsewhere),
-        );
-        check(
-            "a build directory serving is refused whatever the channel",
-            &build,
-            Role::Serve,
-            development(Standing::Same),
-            Entry::Refuse(Refusal::ServeFromElsewhere),
-        );
-        check(
-            "an absent install is installed by the carrier",
-            &carrier,
-            Role::Launch,
-            facts(Standing::Absent),
-            Entry::CarrierInstall,
-        );
-        check(
-            "an older install is installed over by the carrier",
-            &carrier,
-            Role::Launch,
-            facts(Standing::Older),
-            Entry::CarrierInstall,
-        );
-        check(
-            "a damaged install is installed over by the carrier",
-            &carrier,
-            Role::Launch,
-            facts(Standing::Damaged),
-            Entry::CarrierInstall,
-        );
-        check(
-            "the same install is run, not reinstalled",
-            &carrier,
-            Role::Launch,
-            facts(Standing::Same),
-            Entry::Forward(installed.clone()),
-        );
-        check(
-            "a newer install is run, not downgraded",
-            &carrier,
-            Role::Launch,
-            facts(Standing::Newer),
-            Entry::Forward(installed.clone()),
-        );
-        check(
-            "inspection never installs",
-            &carrier,
-            Role::Inspect,
-            facts(Standing::Absent),
-            Entry::Run,
-        );
-        for (name, standing) in [
-            ("absent", Standing::Absent),
-            ("older", Standing::Older),
-            ("damaged", Standing::Damaged),
-        ] {
-            check(
-                &format!("a carrier handed the edge's verbs installs over an {name} install"),
-                &carrier,
-                Role::Relay,
-                facts(standing),
-                Entry::CarrierInstall,
-            );
-        }
-        for standing in [Standing::Same, Standing::Newer] {
-            check(
-                "a carrier hands the edge's verbs to the installed edge",
-                &carrier,
-                Role::Relay,
-                facts(standing),
-                Entry::Forward(edge.clone()),
-            );
-        }
-        check(
-            "the installed service hands the edge's verbs to the installed edge",
-            &installed,
-            Role::Relay,
-            facts(Standing::Same),
-            Entry::Forward(edge.clone()),
-        );
-    }
-
-    #[test]
-    fn a_carrier_never_installs_over_a_development_channel() {
-        let installed = path("bin/ghostlight-service");
-        let edge = path("bin/ghostlight");
-        let carrier = path("package/ghostlight-service");
-        for standing in [
-            Standing::Absent,
-            Standing::Older,
-            Standing::Damaged,
-            Standing::Same,
-            Standing::Newer,
-        ] {
-            check(
-                "a carrier runs the installed service",
-                &carrier,
-                Role::Launch,
-                development(standing),
-                Entry::Forward(installed.clone()),
-            );
-            check(
-                "a carrier hands the edge's verbs to the installed edge",
-                &carrier,
-                Role::Relay,
-                development(standing),
-                Entry::Forward(edge.clone()),
-            );
-        }
-        check(
-            "a build directory runs the installed service",
-            &path("target/release/ghostlight-service"),
-            Role::Launch,
-            development(Standing::Older),
-            Entry::Forward(installed),
-        );
-        check(
-            "the installed service hands the edge's verbs to the installed edge",
-            &path("bin/ghostlight-service"),
-            Role::Relay,
-            development(Standing::Same),
-            Entry::Forward(edge),
-        );
-    }
-
     /// Defect 664d0573: the entry rule reads one installed location however it is spelled. A
     /// service named in another case, with forward slashes, a verbatim prefix (a UNC one becomes
     /// its plain form) or a trailing separator is the installed one and is never forwarded to; a
@@ -465,6 +261,14 @@ mod tests {
 
         #[cfg(windows)]
         {
+            const ROOT: &str = "C:\\Users\\person\\.ghostlight";
+            let installed = PathBuf::from(format!(r"{ROOT}\bin\ghostlight-service"));
+            let facts = Facts {
+                installed_service: installed.clone(),
+                installed_edge: PathBuf::from(format!(r"{ROOT}\bin\ghostlight")),
+                development_channel: false,
+                standing: Standing::Same,
+            };
             let shouted = PathBuf::from(ROOT.to_uppercase())
                 .join("BIN")
                 .join("GHOSTLIGHT-SERVICE");
@@ -476,20 +280,19 @@ mod tests {
             let trailing = PathBuf::from(format!(r"{ROOT}\bin\ghostlight-service\"));
             for spelling in [&shouted, &slashed, &verbatim, &trailing] {
                 assert_eq!(
-                    decide(spelling, Role::Serve, &facts(Standing::Same)),
+                    decide(spelling, Role::Serve, &facts),
                     Entry::Run,
                     "{spelling:?}"
                 );
             }
-            check(
-                "a service named in another spelling is never forwarded to",
-                &path("bin/ghostlight-service"),
-                Role::Launch,
-                Facts {
-                    installed_service: shouted,
-                    ..facts(Standing::Same)
-                },
+            let respelled = Facts {
+                installed_service: shouted,
+                ..facts
+            };
+            assert_eq!(
+                decide(&installed, Role::Launch, &respelled),
                 Entry::Run,
+                "a service named in another spelling is never forwarded to"
             );
         }
     }
