@@ -600,203 +600,10 @@ pub enum CommandPathError {
     },
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
 
-    use crate::scratch::Scratch;
-
-    /// A context rooted in a fresh scratch directory, which lives as long as the returned guard.
-    fn context(name: &str) -> (Scratch, CommandPathContext) {
-        let root = Scratch::named(&format!("command-{name}"));
-        let context = CommandPathContext {
-            unix: true,
-            executable: root.join(".ghostlight/bin/v1.0.0/ghostlight"),
-            bin_home: root.join(".local/bin"),
-            user_path: None,
-            profile: None,
-            container: None,
-            search_path: Vec::new(),
-        };
-        (root, context)
-    }
-
-    #[test]
-    fn a_system_package_installation_needs_no_user_entry() {
-        let context = CommandPathContext {
-            unix: true,
-            executable: PathBuf::from("/usr/bin/ghostlight"),
-            bin_home: PathBuf::from("/nonexistent/.local/bin"),
-            user_path: None,
-            profile: None,
-            container: None,
-            search_path: Vec::new(),
-        };
-        let report = inspect(&context).unwrap();
-        assert_eq!(report.state, CommandPathState::NotApplicable);
-        assert!(report.detail.contains("system package"));
-    }
-
-    #[test]
-    fn a_platform_with_neither_route_reports_not_applicable() {
-        let (_root, mut context) = context("neither");
-        context.unix = false;
-        let report = inspect(&context).unwrap();
-        assert_eq!(report.state, CommandPathState::NotApplicable);
-        // No install may be attempted, so the unsupported symlink path is never reached.
-        assert!(!apply_install(&context).unwrap().changed);
-    }
-
-    #[test]
-    fn a_missing_entry_names_the_absolute_executable() {
-        let (_root, context) = context("missing");
-        let report = inspect(&context).unwrap();
-        assert_eq!(report.state, CommandPathState::Missing);
-        assert!(report
-            .detail
-            .contains(&context.executable.display().to_string()));
-    }
-
-    #[test]
-    fn user_entry_is_created_idempotent_and_removed() {
-        if !cfg!(unix) {
-            return;
-        }
-        let (_root, context) = context("lifecycle");
-        fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
-        fs::write(&context.executable, b"ghostlight").unwrap();
-
-        let first = apply_install(&context).unwrap();
-        assert!(first.changed);
-        assert!(!first.needs_new_terminal);
-        assert_eq!(first.report.state, CommandPathState::Current);
-        assert_eq!(fs::read_link(context.link()).unwrap(), context.executable);
-
-        assert!(!apply_install(&context).unwrap().changed);
-
-        assert_eq!(
-            removable(&context).unwrap(),
-            Some(OwnedEntry::Link(context.link()))
-        );
-        let removed = apply_uninstall(&context).unwrap();
-        assert!(removed.changed);
-        assert_eq!(removed.report.state, CommandPathState::Missing);
-        assert_eq!(removable(&context).unwrap(), None);
-        assert!(!apply_uninstall(&context).unwrap().changed);
-    }
-
-    #[test]
-    fn a_link_whose_directory_is_off_the_path_is_named_by_its_full_path() {
-        if !cfg!(unix) {
-            return;
-        }
-        let (_root, mut context) = context("off-path");
-        fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
-        fs::write(&context.executable, b"ghostlight").unwrap();
-        context.search_path = vec![PathBuf::from("/usr/bin")];
-
-        let first = apply_install(&context).unwrap();
-        assert_eq!(first.report.state, CommandPathState::Current);
-        assert_eq!(first.off_path, Some(context.link()));
-        // An install that finds the link already in place says it again.
-        assert_eq!(
-            apply_install(&context).unwrap().off_path,
-            Some(context.link())
-        );
-
-        context.search_path.push(context.bin_home.clone());
-        assert_eq!(apply_install(&context).unwrap().off_path, None);
-    }
-
-    #[test]
-    fn a_path_entry_names_a_directory_as_written_or_once_resolved() {
-        let (root, _context) = context("search-path");
-        let directory = root.join(".local/bin");
-        fs::create_dir_all(&directory).unwrap();
-
-        assert!(!on_search_path(&[], &directory));
-        assert!(on_search_path(std::slice::from_ref(&directory), &directory));
-        let with_dots = root.join(".local/../.local/bin");
-        assert!(on_search_path(&[with_dots], &directory));
-        assert!(!on_search_path(&[root.join(".local")], &directory));
-    }
-
-    #[test]
-    fn an_older_owned_entry_is_updated_in_place() {
-        if !cfg!(unix) {
-            return;
-        }
-        let (_root, context) = context("update");
-        fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
-        fs::write(&context.executable, b"ghostlight").unwrap();
-        let older = context
-            .executable
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("v0.9.0/ghostlight");
-        fs::create_dir_all(older.parent().unwrap()).unwrap();
-        fs::write(&older, b"ghostlight").unwrap();
-        fs::create_dir_all(&context.bin_home).unwrap();
-        create_symlink(&older, &context.link()).unwrap();
-
-        assert_eq!(
-            inspect(&context).unwrap().state,
-            CommandPathState::Updatable
-        );
-        let updated = apply_install(&context).unwrap();
-        assert!(updated.changed);
-        assert_eq!(updated.report.state, CommandPathState::Current);
-        assert_eq!(fs::read_link(context.link()).unwrap(), context.executable);
-    }
-
-    #[test]
-    fn a_foreign_file_is_never_replaced_or_removed() {
-        if !cfg!(unix) {
-            return;
-        }
-        let (_root, context) = context("foreign");
-        fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
-        fs::write(&context.executable, b"ghostlight").unwrap();
-        fs::create_dir_all(&context.bin_home).unwrap();
-        fs::write(context.link(), b"someone else's script").unwrap();
-
-        assert_eq!(
-            inspect(&context).unwrap().state,
-            CommandPathState::NeedsAttention
-        );
-        assert!(!apply_install(&context).unwrap().changed);
-        assert_eq!(removable(&context).unwrap(), None);
-        assert!(!apply_uninstall(&context).unwrap().changed);
-        assert_eq!(
-            fs::read(context.link()).unwrap(),
-            b"someone else's script".to_vec()
-        );
-    }
-
-    #[test]
-    fn a_symlink_to_something_else_is_foreign() {
-        if !cfg!(unix) {
-            return;
-        }
-        let (_root, context) = context("foreign-link");
-        fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
-        fs::write(&context.executable, b"ghostlight").unwrap();
-        let stranger = context.executable.parent().unwrap().join("other-tool");
-        fs::write(&stranger, b"other").unwrap();
-        fs::create_dir_all(&context.bin_home).unwrap();
-        create_symlink(&stranger, &context.link()).unwrap();
-
-        assert_eq!(
-            inspect(&context).unwrap().state,
-            CommandPathState::NeedsAttention
-        );
-        assert!(!apply_install(&context).unwrap().changed);
-        assert_eq!(fs::read_link(context.link()).unwrap(), stranger);
-    }
-
-    #[cfg(windows)]
     mod user_path_route {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Mutex;
@@ -869,117 +676,6 @@ mod tests {
             }
         }
 
-        #[test]
-        fn windows_install_appends_the_bin_directory_once_and_announces_it() {
-            let store = FakeUserPath::holding(r"C:\Windows;C:\Tools;", true);
-            let context = windows(&store);
-            assert_eq!(inspect(&context).unwrap().state, CommandPathState::Missing);
-
-            let first = apply_install(&context).unwrap();
-            assert!(first.changed);
-            assert!(first.needs_new_terminal);
-            assert_eq!(first.report.state, CommandPathState::Current);
-            assert_eq!(
-                store.text().unwrap(),
-                r"C:\Windows;C:\Tools;%USERPROFILE%\.ghostlight\bin;"
-            );
-            assert_eq!(store.expandable(), Some(true));
-            assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
-
-            let second = apply_install(&context).unwrap();
-            assert!(!second.changed);
-            assert!(!second.needs_new_terminal);
-            assert_eq!(store.writes.load(Ordering::SeqCst), 1);
-            assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
-        }
-
-        #[test]
-        fn windows_install_keeps_a_literal_value_literal() {
-            let store = FakeUserPath::holding(r"C:\Windows", false);
-            apply_install(&windows(&store)).unwrap();
-            assert_eq!(
-                store.text().unwrap(),
-                r"C:\Windows;C:\Users\person\.ghostlight\bin"
-            );
-            assert_eq!(store.expandable(), Some(false));
-        }
-
-        #[test]
-        fn windows_install_creates_an_expandable_value_when_there_is_none() {
-            let store = Arc::new(FakeUserPath::default());
-            let context = windows(&store);
-            assert_eq!(inspect(&context).unwrap().state, CommandPathState::Missing);
-            apply_install(&context).unwrap();
-            assert_eq!(store.text().unwrap(), r"%USERPROFILE%\.ghostlight\bin");
-            assert_eq!(store.expandable(), Some(true));
-        }
-
-        #[test]
-        fn windows_recognizes_an_entry_written_another_way() {
-            for entry in [
-                r"%USERPROFILE%\.ghostlight\bin",
-                r"c:\users\PERSON\.ghostlight\bin\",
-            ] {
-                let store = FakeUserPath::holding(&format!(r"C:\Windows;{entry}"), true);
-                let context = windows(&store);
-                assert_eq!(inspect(&context).unwrap().state, CommandPathState::Current);
-                assert!(!apply_install(&context).unwrap().changed);
-                assert_eq!(store.writes.load(Ordering::SeqCst), 0);
-            }
-        }
-
-        #[test]
-        fn windows_missing_names_the_fix() {
-            let store = FakeUserPath::holding(r"C:\Windows", true);
-            let report = inspect(&windows(&store)).unwrap();
-            assert_eq!(report.state, CommandPathState::Missing);
-            assert!(
-                report.detail.contains("ghostlight.exe install"),
-                "{report:?}"
-            );
-            assert_eq!(
-                report.link,
-                PathBuf::from(r"C:\Users\person\.ghostlight\bin")
-            );
-        }
-
-        #[test]
-        fn windows_uninstall_removes_only_the_bin_entry() {
-            let store = FakeUserPath::holding(
-                r"C:\Windows;%USERPROFILE%\.ghostlight\bin;C:\Users\person\.ghostlight\bin\old;;C:\Tools",
-                true,
-            );
-            let context = windows(&store);
-            assert_eq!(
-                removable(&context).unwrap(),
-                Some(OwnedEntry::UserPath(PathBuf::from(
-                    r"C:\Users\person\.ghostlight\bin"
-                )))
-            );
-            let removed = apply_uninstall(&context).unwrap();
-            assert!(removed.changed);
-            assert!(!removed.needs_new_terminal);
-            assert_eq!(removed.report.state, CommandPathState::Missing);
-            assert_eq!(
-                store.text().unwrap(),
-                r"C:\Windows;C:\Users\person\.ghostlight\bin\old;;C:\Tools"
-            );
-            assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
-
-            assert!(!apply_uninstall(&context).unwrap().changed);
-            assert_eq!(store.writes.load(Ordering::SeqCst), 1);
-        }
-
-        #[test]
-        fn windows_install_then_uninstall_restores_the_value() {
-            let original = r"C:\Windows;;C:\Tools\;%SystemRoot%\x;";
-            let store = FakeUserPath::holding(original, true);
-            let context = windows(&store);
-            apply_install(&context).unwrap();
-            apply_uninstall(&context).unwrap();
-            assert_eq!(store.text().as_deref(), Some(original));
-        }
-
         fn in_container(store: &Arc<FakeUserPath>) -> CommandPathContext {
             let mut context = windows(store);
             context.container = Some(AppContainer {
@@ -988,42 +684,132 @@ mod tests {
             context
         }
 
+        /// Ghostlight puts its `bin` on the per-user `Path` on Windows: once, announced to running programs,
+        /// keeping a literal value literal and making an expandable one when there is none, recognizing an
+        /// entry written another way, and on uninstall removing only that entry, so an install and an
+        /// uninstall leave the value byte for byte as it was. Inside an app container nothing is written,
+        /// since the change would reach only the app's private view.
         #[test]
-        fn inside_an_app_container_an_entry_already_there_is_current_and_nothing_is_written() {
-            let store = FakeUserPath::holding(r"C:\Windows;%USERPROFILE%\.ghostlight\bin", true);
-            let context = in_container(&store);
+        fn the_path_entry_round_trips_and_a_container_writes_nothing() {
+            {
+                let store = FakeUserPath::holding(r"C:\Windows;C:\Tools;", true);
+                let context = windows(&store);
+                assert_eq!(inspect(&context).unwrap().state, CommandPathState::Missing);
 
-            assert_eq!(inspect(&context).unwrap().state, CommandPathState::Current);
-            let installed = apply_install(&context).unwrap();
-            assert!(!installed.changed);
-            assert_eq!(installed.report.state, CommandPathState::Current);
-            assert_eq!(removable(&context).unwrap(), None);
-            let removed = apply_uninstall(&context).unwrap();
-            assert!(!removed.changed);
-            assert_eq!(store.writes.load(Ordering::SeqCst), 0);
-            assert_eq!(store.announcements.load(Ordering::SeqCst), 0);
-            assert_eq!(
-                store.text().as_deref(),
-                Some(r"C:\Windows;%USERPROFILE%\.ghostlight\bin")
-            );
-        }
+                let first = apply_install(&context).unwrap();
+                assert!(first.changed);
+                assert!(first.needs_new_terminal);
+                assert_eq!(first.report.state, CommandPathState::Current);
+                assert_eq!(
+                    store.text().unwrap(),
+                    r"C:\Windows;C:\Tools;%USERPROFILE%\.ghostlight\bin;"
+                );
+                assert_eq!(store.expandable(), Some(true));
+                assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
 
-        #[test]
-        fn inside_an_app_container_a_missing_entry_is_kept_private_and_nothing_is_written() {
-            let store = FakeUserPath::holding(r"C:\Windows", true);
-            let context = in_container(&store);
+                let second = apply_install(&context).unwrap();
+                assert!(!second.changed);
+                assert!(!second.needs_new_terminal);
+                assert_eq!(store.writes.load(Ordering::SeqCst), 1);
+                assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
+            }
+            {
+                let store = FakeUserPath::holding(r"C:\Windows", false);
+                apply_install(&windows(&store)).unwrap();
+                assert_eq!(
+                    store.text().unwrap(),
+                    r"C:\Windows;C:\Users\person\.ghostlight\bin"
+                );
+                assert_eq!(store.expandable(), Some(false));
+            }
+            {
+                let store = Arc::new(FakeUserPath::default());
+                let context = windows(&store);
+                assert_eq!(inspect(&context).unwrap().state, CommandPathState::Missing);
+                apply_install(&context).unwrap();
+                assert_eq!(store.text().unwrap(), r"%USERPROFILE%\.ghostlight\bin");
+                assert_eq!(store.expandable(), Some(true));
+            }
+            {
+                for entry in [
+                    r"%USERPROFILE%\.ghostlight\bin",
+                    r"c:\users\PERSON\.ghostlight\bin\",
+                ] {
+                    let store = FakeUserPath::holding(&format!(r"C:\Windows;{entry}"), true);
+                    let context = windows(&store);
+                    assert_eq!(inspect(&context).unwrap().state, CommandPathState::Current);
+                    assert!(!apply_install(&context).unwrap().changed);
+                    assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+                }
+            }
+            {
+                let store = FakeUserPath::holding(
+                    r"C:\Windows;%USERPROFILE%\.ghostlight\bin;C:\Users\person\.ghostlight\bin\old;;C:\Tools",
+                    true,
+                );
+                let context = windows(&store);
+                assert_eq!(
+                    removable(&context).unwrap(),
+                    Some(OwnedEntry::UserPath(PathBuf::from(
+                        r"C:\Users\person\.ghostlight\bin"
+                    )))
+                );
+                let removed = apply_uninstall(&context).unwrap();
+                assert!(removed.changed);
+                assert!(!removed.needs_new_terminal);
+                assert_eq!(removed.report.state, CommandPathState::Missing);
+                assert_eq!(
+                    store.text().unwrap(),
+                    r"C:\Windows;C:\Users\person\.ghostlight\bin\old;;C:\Tools"
+                );
+                assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
 
-            let report = inspect(&context).unwrap();
-            assert_eq!(report.state, CommandPathState::PrivateView);
-            assert!(report.detail.contains("Claude"));
-            assert!(!report.detail.contains("  "));
-            let installed = apply_install(&context).unwrap();
-            assert!(!installed.changed);
-            assert_eq!(installed.report.state, CommandPathState::PrivateView);
-            assert!(!apply_uninstall(&context).unwrap().changed);
-            assert_eq!(store.writes.load(Ordering::SeqCst), 0);
-            assert_eq!(store.announcements.load(Ordering::SeqCst), 0);
-            assert_eq!(store.text().as_deref(), Some(r"C:\Windows"));
+                assert!(!apply_uninstall(&context).unwrap().changed);
+                assert_eq!(store.writes.load(Ordering::SeqCst), 1);
+            }
+            {
+                let original = r"C:\Windows;;C:\Tools\;%SystemRoot%\x;";
+                let store = FakeUserPath::holding(original, true);
+                let context = windows(&store);
+                apply_install(&context).unwrap();
+                apply_uninstall(&context).unwrap();
+                assert_eq!(store.text().as_deref(), Some(original));
+            }
+            {
+                let store =
+                    FakeUserPath::holding(r"C:\Windows;%USERPROFILE%\.ghostlight\bin", true);
+                let context = in_container(&store);
+
+                assert_eq!(inspect(&context).unwrap().state, CommandPathState::Current);
+                let installed = apply_install(&context).unwrap();
+                assert!(!installed.changed);
+                assert_eq!(installed.report.state, CommandPathState::Current);
+                assert_eq!(removable(&context).unwrap(), None);
+                let removed = apply_uninstall(&context).unwrap();
+                assert!(!removed.changed);
+                assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+                assert_eq!(store.announcements.load(Ordering::SeqCst), 0);
+                assert_eq!(
+                    store.text().as_deref(),
+                    Some(r"C:\Windows;%USERPROFILE%\.ghostlight\bin")
+                );
+            }
+            {
+                let store = FakeUserPath::holding(r"C:\Windows", true);
+                let context = in_container(&store);
+
+                let report = inspect(&context).unwrap();
+                assert_eq!(report.state, CommandPathState::PrivateView);
+                assert!(report.detail.contains("Claude"));
+                assert!(!report.detail.contains("  "));
+                let installed = apply_install(&context).unwrap();
+                assert!(!installed.changed);
+                assert_eq!(installed.report.state, CommandPathState::PrivateView);
+                assert!(!apply_uninstall(&context).unwrap().changed);
+                assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+                assert_eq!(store.announcements.load(Ordering::SeqCst), 0);
+                assert_eq!(store.text().as_deref(), Some(r"C:\Windows"));
+            }
         }
     }
 }
