@@ -1,6 +1,6 @@
 use super::*;
 use crate::browser::adapter::TreeNodeKind;
-use crate::language::area::HIDDEN_STATE;
+use crate::language::area::{PageArea, HIDDEN_STATE};
 
 fn target(locator: &str) -> ObservedTarget {
     ObservedTarget {
@@ -38,10 +38,6 @@ fn section(text: &str, truncated: bool) -> Text {
     }
 }
 
-fn some(sections: &[Text]) -> Vec<Option<&Text>> {
-    sections.iter().map(Some).collect()
-}
-
 fn node(label: &str, children: Vec<TreeNode>) -> TreeNode {
     TreeNode {
         kind: TreeNodeKind::Container,
@@ -52,68 +48,6 @@ fn node(label: &str, children: Vec<TreeNode>) -> TreeNode {
 
 fn value(tree: TreeNode, truncated: bool) -> TreeValue {
     TreeValue { tree, truncated }
-}
-
-fn labels(tree: &TreeNode) -> Vec<&str> {
-    tree.children
-        .iter()
-        .map(|child| child.label.as_str())
-        .collect()
-}
-
-#[test]
-fn targets_keep_document_order_under_one_ceiling() {
-    let merged = targets(
-        [
-            found(&["0:locator_top", "0:locator_top2"], false),
-            found(&["5:locator_a"], false),
-            found(&["12:locator_deep"], false),
-        ],
-        10,
-    );
-    assert_eq!(
-        locators(&merged),
-        [
-            "0:locator_top",
-            "0:locator_top2",
-            "5:locator_a",
-            "12:locator_deep"
-        ]
-    );
-    assert!(!merged.over);
-}
-
-#[test]
-fn targets_cap_the_total_with_the_top_document_winning_first() {
-    let merged = targets(
-        [
-            found(&["0:locator_a"], false),
-            found(&["1:locator_b", "1:locator_c", "1:locator_d"], false),
-        ],
-        3,
-    );
-    assert_eq!(
-        locators(&merged),
-        ["0:locator_a", "1:locator_b", "1:locator_c"]
-    );
-    assert!(merged.over);
-    let empty = targets([], 3);
-    assert!(empty.targets.is_empty());
-    assert!(!empty.over);
-}
-
-#[test]
-fn targets_exactly_at_the_ceiling_are_not_over() {
-    let merged = targets([found(&["a", "b"], false), found(&["c"], false)], 3);
-    assert_eq!(locators(&merged), ["a", "b", "c"]);
-    assert!(!merged.over);
-}
-
-#[test]
-fn a_document_that_found_more_than_it_returned_makes_the_merge_over() {
-    let merged = targets([found(&["a", "b"], true)], 2);
-    assert_eq!(locators(&merged), ["a", "b"]);
-    assert!(merged.over);
 }
 
 /// A target in `area`, hidden when `hidden`.
@@ -136,82 +70,133 @@ fn document(targets: Vec<ObservedTarget>) -> DocumentTargets {
     }
 }
 
+/// A capped list of targets keeps one ceiling across documents in document order, cuts page
+/// chrome and hidden items before page content, so a child frame's form survives a top document
+/// full of navigation links (finding a19-inspect-tiers, ADR-0198 Decision 20), and says exactly
+/// what it left out and that it was cut.
 #[test]
-fn a_cut_keeps_page_content_over_chrome_over_hidden_in_document_order() {
-    let merged = targets(
-        [
-            document(vec![
-                placed("nav-1", Some("nav"), false),
-                placed("ghost", None, true),
-                placed("nav-2", Some("footer"), false),
-            ]),
-            document(vec![
-                placed("field-1", None, false),
-                placed("side", Some("aside"), false),
-                placed("field-2", Some("dialog"), false),
-            ]),
-        ],
-        4,
-    );
-    assert_eq!(locators(&merged), ["nav-1", "field-1", "side", "field-2"]);
-    assert!(merged.over);
-    assert_eq!(merged.left_out.count(LeftOutKey::Hidden), 1);
-    assert_eq!(merged.left_out.count(LeftOutKey::Chrome), 1);
-    assert_eq!(merged.left_out.count(LeftOutKey::Aside), 0);
-}
-
-#[test]
-fn a_child_frame_form_survives_a_navigation_heavy_top_document() {
+fn a_capped_list_keeps_page_content_first_and_counts_what_it_left_out() {
+    let nav = PageArea::Nav.word();
     let links: Vec<ObservedTarget> = (0..6)
-        .map(|index| placed(&format!("link-{index}"), Some("nav"), false))
+        .map(|index| placed(&format!("link-{index}"), Some(nav), false))
         .collect();
     let fields: Vec<ObservedTarget> = (0..3)
         .map(|index| placed(&format!("field-{index}"), None, false))
         .collect();
-    let merged = targets([document(links), document(fields)], 5);
-    assert_eq!(
-        locators(&merged),
-        ["link-0", "link-1", "field-0", "field-1", "field-2"]
-    );
-    assert_eq!(merged.left_out.count(LeftOutKey::Chrome), 4);
-}
-
-#[test]
-fn the_fold_adds_its_cut_to_what_each_document_already_left_out() {
     let mut own = LeftOut::default();
     own.add(LeftOutKey::Hidden, 7);
     own.add(LeftOutKey::BehindDialog, 2);
     let mut second = LeftOut::default();
     second.add(LeftOutKey::Chrome, 5);
-    let merged = targets(
-        [
-            DocumentTargets {
-                targets: vec![placed("a", None, false), placed("b", Some("nav"), false)],
-                truncated: true,
-                left_out: own,
-                ..DocumentTargets::default()
-            },
-            DocumentTargets {
-                targets: vec![placed("c", Some("nav"), false)],
-                left_out: second,
-                modal_open: true,
-                ..DocumentTargets::default()
-            },
-        ],
-        2,
+    type Case = (
+        Vec<DocumentTargets>,
+        usize,
+        &'static [&'static str],
+        bool,
+        &'static [(LeftOutKey, usize)],
     );
-    assert_eq!(locators(&merged), ["a", "b"]);
-    assert_eq!(merged.left_out.count(LeftOutKey::Hidden), 7);
-    assert_eq!(merged.left_out.count(LeftOutKey::BehindDialog), 2);
-    assert_eq!(merged.left_out.count(LeftOutKey::Chrome), 6);
-    assert!(merged.over && merged.modal_open);
-}
+    let cases: Vec<Case> = vec![
+        (
+            vec![
+                found(&["0:locator_top", "0:locator_top2"], false),
+                found(&["5:locator_a"], false),
+                found(&["12:locator_deep"], false),
+            ],
+            10,
+            &[
+                "0:locator_top",
+                "0:locator_top2",
+                "5:locator_a",
+                "12:locator_deep",
+            ],
+            false,
+            &[],
+        ),
+        (
+            vec![
+                found(&["0:locator_a"], false),
+                found(&["1:locator_b", "1:locator_c", "1:locator_d"], false),
+            ],
+            3,
+            &["0:locator_a", "1:locator_b", "1:locator_c"],
+            true,
+            &[],
+        ),
+        (vec![], 3, &[], false, &[]),
+        (
+            vec![found(&["a", "b"], false), found(&["c"], false)],
+            3,
+            &["a", "b", "c"],
+            false,
+            &[],
+        ),
+        (vec![found(&["a", "b"], true)], 2, &["a", "b"], true, &[]),
+        (
+            vec![
+                document(vec![
+                    placed("nav-1", Some(nav), false),
+                    placed("ghost", None, true),
+                    placed("nav-2", Some(PageArea::Footer.word()), false),
+                ]),
+                document(vec![
+                    placed("field-1", None, false),
+                    placed("side", Some(PageArea::Aside.word()), false),
+                    placed("field-2", Some(PageArea::Dialog.word()), false),
+                ]),
+            ],
+            4,
+            &["nav-1", "field-1", "side", "field-2"],
+            true,
+            &[
+                (LeftOutKey::Hidden, 1),
+                (LeftOutKey::Chrome, 1),
+                (LeftOutKey::Aside, 0),
+            ],
+        ),
+        (
+            vec![document(links), document(fields)],
+            5,
+            &["link-0", "link-1", "field-0", "field-1", "field-2"],
+            true,
+            &[(LeftOutKey::Chrome, 4)],
+        ),
+        (
+            vec![
+                DocumentTargets {
+                    targets: vec![placed("a", None, false), placed("b", Some(nav), false)],
+                    truncated: true,
+                    left_out: own,
+                    ..DocumentTargets::default()
+                },
+                DocumentTargets {
+                    targets: vec![placed("c", Some(nav), false)],
+                    left_out: second,
+                    modal_open: true,
+                    ..DocumentTargets::default()
+                },
+            ],
+            2,
+            &["a", "b"],
+            true,
+            &[
+                (LeftOutKey::Hidden, 7),
+                (LeftOutKey::BehindDialog, 2),
+                (LeftOutKey::Chrome, 6),
+            ],
+        ),
+    ];
+    for (documents, cap, kept, over, left_out) in cases {
+        let merged = targets(documents, cap);
+        assert_eq!(locators(&merged), kept);
+        assert_eq!(merged.over, over, "{kept:?}");
+        for (key, count) in left_out {
+            assert_eq!(merged.left_out.count(*key), *count, "{kept:?} {key:?}");
+        }
+    }
 
-#[test]
-fn nothing_is_left_out_when_everything_fits() {
-    let merged = targets([document(vec![placed("a", Some("nav"), true)])], 1);
-    assert!(merged.left_out.is_empty());
-    assert!(!merged.over && !merged.modal_open);
+    let everything = targets([document(vec![placed("a", Some(nav), true)])], 1);
+    assert!(everything.left_out.is_empty());
+    assert!(!everything.over && !everything.modal_open);
 }
 
 /// A document that holds `forms` forms and kept targets in the given ones.
@@ -234,335 +219,46 @@ fn form_ordinals(merged: &MergedTargets) -> Vec<Option<u32>> {
     merged.targets.iter().map(|target| target.form).collect()
 }
 
+/// A form's number is page-wide: documents number their forms on, and a form the answer did not
+/// keep, or whose target was cut, still counts for the documents after it, so the same form keeps
+/// one number however much of the page fits (commit f7d430f4).
 #[test]
-fn form_ordinals_are_renumbered_across_documents() {
-    let merged = targets(
-        [
-            in_forms(2, &[Some(1), None, Some(2), Some(1)]),
-            in_forms(2, &[Some(1), Some(2)]),
-            in_forms(1, &[None, Some(1)]),
-        ],
-        20,
-    );
-    assert_eq!(
-        form_ordinals(&merged),
-        [
-            Some(1),
-            None,
-            Some(2),
-            Some(1),
-            Some(3),
-            Some(4),
-            None,
-            Some(5)
-        ]
-    );
-}
-
-#[test]
-fn forms_the_answer_did_not_keep_still_count_for_the_documents_after_them() {
-    let cut_early = targets([in_forms(3, &[Some(1)]), in_forms(1, &[Some(1)])], 5);
-    assert_eq!(form_ordinals(&cut_early), [Some(1), Some(4)]);
-    let kept_all = targets(
-        [
-            in_forms(3, &[Some(1), Some(2), Some(3)]),
-            in_forms(1, &[Some(1)]),
-        ],
-        5,
-    );
-    assert_eq!(
-        form_ordinals(&kept_all),
-        [Some(1), Some(2), Some(3), Some(4)]
-    );
-}
-
-#[test]
-fn a_cut_target_still_counts_its_form_for_the_documents_after_it() {
-    let merged = targets(
-        [in_forms(2, &[Some(1), Some(2)]), in_forms(1, &[Some(1)])],
-        1,
-    );
-    assert_eq!(form_ordinals(&merged), [Some(1)]);
-    assert!(merged.over);
-    let wide = targets(
-        [in_forms(2, &[Some(1), Some(2)]), in_forms(1, &[Some(1)])],
-        3,
-    );
-    assert_eq!(form_ordinals(&wide), [Some(1), Some(2), Some(3)]);
-}
-
-#[test]
-fn text_keeps_document_order_under_one_page_wide_ceiling() {
-    let sections = [
-        section("top frame", false),
-        section("second frame", false),
-        section("third frame", false),
-    ];
-    assert_eq!(
-        text_sections(some(&sections), 26, false),
-        MergedText {
-            text: "top frame\n\nsecond frame\n\nt".into(),
-            truncated: true
-        }
-    );
-}
-
-#[test]
-fn text_preserves_local_and_skipped_truncation() {
-    let local = [section("complete", true)];
-    assert_eq!(
-        text_sections(some(&local), 20, false),
-        MergedText {
-            text: "complete".into(),
-            truncated: true
-        }
-    );
-    let whole = [section("complete", false)];
-    assert_eq!(
-        text_sections(some(&whole), 20, true),
-        MergedText {
-            text: "complete".into(),
-            truncated: true
-        }
-    );
-}
-
-#[test]
-fn an_empty_section_does_not_truncate_a_full_bound() {
-    let sections = [section("12345", false), section("", false)];
-    assert_eq!(
-        text_sections(some(&sections), 5, false),
-        MergedText {
-            text: "12345".into(),
-            truncated: false
-        }
-    );
-}
-
-#[test]
-fn a_section_that_has_no_room_truncates_a_full_bound() {
-    let sections = [section("12345", false), section("x", false)];
-    assert_eq!(
-        text_sections(some(&sections), 5, false),
-        MergedText {
-            text: "12345".into(),
-            truncated: true
-        }
-    );
-}
-
-#[test]
-fn text_trims_sections_and_ignores_documents_that_gave_none() {
-    let top = section("  top  \n", false);
-    let child = section("child", false);
-    let merged = text_sections([Some(&top), None, Some(&child)], 100, false);
-    assert_eq!(merged.text, "top\n\nchild");
-    assert!(!merged.truncated);
-}
-
-#[test]
-fn text_counts_characters_not_bytes() {
-    let sections = [
-        section("ab", false),
-        section("\u{e9}\u{e9}\u{e9}\u{e9}", false),
-    ];
-    let merged = text_sections(some(&sections), 6, false);
-    assert_eq!(merged.text, "ab\n\n\u{e9}\u{e9}");
-    assert!(merged.truncated);
-}
-
-#[test]
-fn the_next_document_asks_for_what_is_left_after_the_separator() {
-    let top = [section("1234567890", false)];
-    assert_eq!(remaining_after(some(&top), 15), 3);
-}
-
-#[test]
-fn nothing_is_asked_after_a_cut_section() {
-    let sections = [section("1234567890", false), section("abc", true)];
-    assert_eq!(remaining_after(some(&sections), 15), 0);
-    assert_eq!(
-        text_sections(some(&sections), 15, false),
-        MergedText {
-            text: "1234567890\n\nabc".into(),
-            truncated: true
-        }
-    );
-}
-
-#[test]
-fn an_empty_page_asks_for_the_whole_bound() {
-    let top = [section("", false)];
-    assert_eq!(remaining_after(some(&top), 40), 40);
-    assert_eq!(remaining_after([None], 40), 40);
-}
-
-#[test]
-fn a_full_bound_still_asks_for_one_character() {
-    let top = [section("12345", false)];
-    assert_eq!(remaining_after(some(&top), 5), 1);
-}
-
-#[test]
-fn subtrees_share_one_node_bound() {
-    let root = value(node("frame 0", vec![node("top", vec![])]), false);
-    let plan = subtree_plan(Some(&root), 5, 5);
-    assert_eq!(
-        plan,
-        Some(SubtreePlan {
-            max_depth: 4,
-            max_nodes: 3
-        })
-    );
-    let merged = append_and_trim(
-        Some(root),
-        vec![
-            value(node("frame 3", vec![node("a", vec![])]), false),
-            value(node("frame 8", vec![]), true),
-        ],
-        false,
-        5,
-    );
-    let tree = merged.tree.expect("a tree");
-    assert_eq!(labels(&tree), ["top", "frame 3", "frame 8"]);
-    assert_eq!(tree.nodes(), 5);
-    assert!(merged.truncated);
-}
-
-#[test]
-fn subtrees_asked_together_are_trimmed_in_pre_order() {
-    let root = value(node("frame 0", vec![node("top", vec![])]), false);
-    let merged = append_and_trim(
-        Some(root),
-        vec![
-            value(node("frame 3", vec![node("a", vec![])]), false),
-            value(node("frame 8", vec![node("b", vec![])]), false),
-        ],
-        false,
-        5,
-    );
-    let tree = merged.tree.expect("a tree");
-    assert_eq!(tree.nodes(), 5);
-    assert_eq!(labels(&tree), ["top", "frame 3", "frame 8"]);
-    assert!(tree.children[2].children.is_empty());
-    assert_eq!(tree.children[1].children.len(), 1);
-    assert!(merged.truncated);
-}
-
-#[test]
-fn a_trim_keeps_the_front_of_a_deep_tree() {
-    let root = value(
-        node(
-            "root",
+fn a_form_keeps_one_page_wide_number_however_much_of_the_page_fits() {
+    let one = Some(1);
+    let cases: [(Vec<DocumentTargets>, usize, Vec<Option<u32>>); 5] = [
+        (
             vec![
-                node("one", vec![node("one.a", vec![]), node("one.b", vec![])]),
-                node("two", vec![node("two.a", vec![])]),
+                in_forms(2, &[one, None, Some(2), one]),
+                in_forms(2, &[one, Some(2)]),
+                in_forms(1, &[None, one]),
             ],
+            20,
+            vec![one, None, Some(2), one, Some(3), Some(4), None, Some(5)],
         ),
-        false,
-    );
-    let merged = append_and_trim(
-        Some(root),
-        vec![value(node("child", vec![]), false)],
-        false,
-        4,
-    );
-    let tree = merged.tree.expect("a tree");
-    assert_eq!(labels(&tree), ["one"]);
-    assert_eq!(tree.nodes(), 4);
-    assert_eq!(tree.children[0].children.len(), 2);
-    assert!(merged.truncated);
-}
-
-#[test]
-fn a_tree_inside_the_bound_is_not_truncated() {
-    let root = value(node("frame 0", vec![]), false);
-    let merged = append_and_trim(
-        Some(root),
-        vec![value(node("frame 2", vec![]), false)],
-        false,
-        400,
-    );
-    assert!(!merged.truncated);
-    assert_eq!(labels(&merged.tree.expect("a tree")), ["frame 2"]);
-}
-
-#[test]
-fn a_depth_of_one_keeps_the_top_document_alone() {
-    let root = value(node("top", vec![]), false);
-    assert_eq!(subtree_plan(Some(&root), 400, 1), None);
-    let merged = append_and_trim(Some(root), Vec::new(), true, 400);
-    assert!(merged.truncated);
-    assert!(merged.tree.expect("a tree").children.is_empty());
-}
-
-#[test]
-fn a_spent_or_cut_top_tree_asks_for_no_subtrees() {
-    let spent = value(node("top", vec![node("a", vec![])]), false);
-    assert_eq!(subtree_plan(Some(&spent), 2, 5), None);
-    let cut = value(node("top", vec![]), true);
-    assert_eq!(subtree_plan(Some(&cut), 400, 5), None);
-}
-
-#[test]
-fn a_cut_tree_drops_every_later_subtree() {
-    let root = value(node("top", vec![]), true);
-    let merged = append_and_trim(
-        Some(root),
-        vec![value(node("frame 2", vec![]), false)],
-        false,
-        400,
-    );
-    assert!(merged.tree.expect("a tree").children.is_empty());
-    assert!(merged.truncated);
-}
-
-#[test]
-fn without_a_top_tree_the_first_embedded_tree_stands_in() {
-    assert_eq!(
-        subtree_plan(None, 400, 3),
-        Some(SubtreePlan {
-            max_depth: 2,
-            max_nodes: 400
-        })
-    );
-    let merged = append_and_trim(
-        None,
-        vec![
-            value(node("frame 2", vec![]), false),
-            value(node("frame 5", vec![]), false),
-        ],
-        false,
-        400,
-    );
-    let tree = merged.tree.expect("a tree");
-    assert_eq!(tree.label, "frame 2");
-    assert_eq!(labels(&tree), ["frame 5"]);
-    assert!(!merged.truncated);
-}
-
-#[test]
-fn without_a_top_tree_and_no_depth_for_children_nothing_is_read() {
-    assert_eq!(subtree_plan(None, 400, 1), None);
-    let merged = append_and_trim(None, Vec::new(), true, 400);
-    assert_eq!(merged.tree, None);
-    assert!(merged.truncated);
-}
-
-#[test]
-fn a_lone_embedded_tree_with_unread_siblings_is_reported_truncated() {
-    let merged = append_and_trim(None, vec![value(node("frame 2", vec![]), false)], true, 400);
-    let tree = merged.tree.expect("a tree");
-    assert_eq!(tree.label, "frame 2");
-    assert!(tree.children.is_empty());
-    assert!(merged.truncated);
-}
-
-#[test]
-fn no_tree_at_all_is_none() {
-    let merged = append_and_trim(None, Vec::new(), false, 400);
-    assert_eq!(merged.tree, None);
-    assert!(!merged.truncated);
+        (
+            vec![in_forms(3, &[one]), in_forms(1, &[one])],
+            5,
+            vec![one, Some(4)],
+        ),
+        (
+            vec![in_forms(3, &[one, Some(2), Some(3)]), in_forms(1, &[one])],
+            5,
+            vec![one, Some(2), Some(3), Some(4)],
+        ),
+        (
+            vec![in_forms(2, &[one, Some(2)]), in_forms(1, &[one])],
+            1,
+            vec![one],
+        ),
+        (
+            vec![in_forms(2, &[one, Some(2)]), in_forms(1, &[one])],
+            3,
+            vec![one, Some(2), Some(3)],
+        ),
+    ];
+    for (documents, cap, numbers) in cases {
+        assert_eq!(form_ordinals(&targets(documents, cap)), numbers, "{cap}");
+    }
 }
 
 /// A button named `name` in the row `context`, numbered `nth` by its own document.
@@ -583,97 +279,315 @@ fn keys(merged: &MergedTargets) -> Vec<(Option<&str>, Option<u32>)> {
         .collect()
 }
 
+/// A repeated control's `nth` and row `context` are decided once, after the fold, across the whole
+/// page: a cut renumbers from one or drops a lone repeat's key, two documents' repeats number on,
+/// and a credential-class target never carries either (commit 3fbe9b18).
 #[test]
-fn a_cut_that_leaves_one_repeat_leaves_it_without_context_or_nth() {
-    let merged = targets(
-        [document(vec![
-            repeated("a", "More options", Some("Alpha"), Some(1)),
-            ObservedTarget {
-                state: vec![HIDDEN_STATE.to_owned()],
-                ..repeated("b", "More options", Some("Alpha"), Some(2))
-            },
-        ])],
-        1,
-    );
-    assert_eq!(locators(&merged), ["a"]);
-    assert_eq!(keys(&merged), [(None, None)]);
-}
-
-#[test]
-fn a_cut_that_removes_the_first_of_a_place_renumbers_from_one() {
-    let hidden_first = ObservedTarget {
+fn a_repeated_control_is_numbered_once_across_the_page() {
+    let hidden = |target: ObservedTarget| ObservedTarget {
         state: vec![HIDDEN_STATE.to_owned()],
-        ..repeated("a", "More options", Some("Alpha"), Some(1))
+        ..target
     };
-    let merged = targets(
-        [document(vec![
-            hidden_first,
-            repeated("b", "More options", Some("Alpha"), Some(2)),
-            repeated("c", "More options", Some("Alpha"), Some(3)),
-            repeated("d", "More options", Some("Beta"), None),
-        ])],
-        3,
-    );
-    assert_eq!(locators(&merged), ["b", "c", "d"]);
-    assert_eq!(
-        keys(&merged),
-        [
-            (Some("Alpha"), Some(1)),
-            (Some("Alpha"), Some(2)),
-            (Some("Beta"), None)
-        ]
-    );
-}
-
-#[test]
-fn two_documents_with_the_same_row_label_number_their_repeats_page_wide() {
-    let merged = targets(
-        [
-            document(vec![
-                repeated("a", "More options", Some("Alpha"), None),
-                repeated("b", "More options", Some("Beta"), None),
-            ]),
-            document(vec![
-                repeated("c", "More options", Some("Alpha"), None),
-                repeated("d", "More options", Some("Beta"), None),
-            ]),
-        ],
-        10,
-    );
-    assert_eq!(
-        keys(&merged),
-        [
-            (Some("Alpha"), Some(1)),
-            (Some("Beta"), Some(1)),
-            (Some("Alpha"), Some(2)),
-            (Some("Beta"), Some(2))
-        ]
-    );
-}
-
-#[test]
-fn a_name_unique_in_each_document_but_repeated_across_them_is_numbered() {
-    let merged = targets(
-        [
-            document(vec![repeated("a", "Close", None, None)]),
-            document(vec![repeated("b", "Close", None, None)]),
-        ],
-        10,
-    );
-    assert_eq!(keys(&merged), [(None, Some(1)), (None, Some(2))]);
-}
-
-#[test]
-fn a_credential_class_target_never_carries_context_or_nth() {
     let secret = |locator: &str| ObservedTarget {
         credential_class: true,
         role: "textbox".into(),
         name: "Password".into(),
         ..target(locator)
     };
-    let merged = targets(
-        [document(vec![secret("a")]), document(vec![secret("b")])],
-        10,
+    let more = "More options";
+    let (alpha, beta) = (Some("Alpha"), Some("Beta"));
+    type Case<'a> = (
+        Vec<DocumentTargets>,
+        usize,
+        Vec<(Option<&'a str>, Option<u32>)>,
     );
-    assert_eq!(keys(&merged), [(None, None), (None, None)]);
+    let cases: [Case; 5] = [
+        (
+            vec![document(vec![
+                repeated("a", more, alpha, Some(1)),
+                hidden(repeated("b", more, alpha, Some(2))),
+            ])],
+            1,
+            vec![(None, None)],
+        ),
+        (
+            vec![document(vec![
+                hidden(repeated("a", more, alpha, Some(1))),
+                repeated("b", more, alpha, Some(2)),
+                repeated("c", more, alpha, Some(3)),
+                repeated("d", more, beta, None),
+            ])],
+            3,
+            vec![(alpha, Some(1)), (alpha, Some(2)), (beta, None)],
+        ),
+        (
+            vec![
+                document(vec![
+                    repeated("a", more, alpha, None),
+                    repeated("b", more, beta, None),
+                ]),
+                document(vec![
+                    repeated("c", more, alpha, None),
+                    repeated("d", more, beta, None),
+                ]),
+            ],
+            10,
+            vec![
+                (alpha, Some(1)),
+                (beta, Some(1)),
+                (alpha, Some(2)),
+                (beta, Some(2)),
+            ],
+        ),
+        (
+            vec![
+                document(vec![repeated("a", "Close", None, None)]),
+                document(vec![repeated("b", "Close", None, None)]),
+            ],
+            10,
+            vec![(None, Some(1)), (None, Some(2))],
+        ),
+        (
+            vec![document(vec![secret("a")]), document(vec![secret("b")])],
+            10,
+            vec![(None, None), (None, None)],
+        ),
+    ];
+    for (documents, cap, expected) in cases {
+        assert_eq!(keys(&targets(documents, cap)), expected, "{cap}");
+    }
+}
+
+/// A read across documents is one text in document order under one page-wide ceiling, counted
+/// in characters as the page asset counts them, and says it was cut when any document was cut,
+/// skipped or left without room; the next document is asked for what is left after the
+/// separator, and for one character more when the bound is full, which is how a cut is noticed
+/// (ACCEPTANCE, executor and truth gates 7).
+#[test]
+fn a_read_across_documents_is_one_text_under_one_ceiling() {
+    type Case = (Vec<Option<Text>>, usize, bool, String, bool);
+    let s = SECTION_SEPARATOR;
+    let cases: [Case; 8] = [
+        (
+            vec![
+                Some(section("top frame", false)),
+                Some(section("second frame", false)),
+                Some(section("third frame", false)),
+            ],
+            26,
+            false,
+            format!("top frame{s}second frame{s}t"),
+            true,
+        ),
+        (
+            vec![Some(section("complete", true))],
+            20,
+            false,
+            "complete".into(),
+            true,
+        ),
+        (
+            vec![Some(section("complete", false))],
+            20,
+            true,
+            "complete".into(),
+            true,
+        ),
+        (
+            vec![Some(section("12345", false)), Some(section("", false))],
+            5,
+            false,
+            "12345".into(),
+            false,
+        ),
+        (
+            vec![Some(section("12345", false)), Some(section("x", false))],
+            5,
+            false,
+            "12345".into(),
+            true,
+        ),
+        (
+            vec![
+                Some(section("  top  \n", false)),
+                None,
+                Some(section("child", false)),
+            ],
+            100,
+            false,
+            format!("top{s}child"),
+            false,
+        ),
+        (
+            vec![
+                Some(section("ab", false)),
+                Some(section("\u{e9}\u{e9}\u{e9}\u{e9}", false)),
+            ],
+            6,
+            false,
+            format!("ab{s}\u{e9}\u{e9}"),
+            true,
+        ),
+        (
+            vec![
+                Some(section("1234567890", false)),
+                Some(section("abc", true)),
+            ],
+            15,
+            false,
+            format!("1234567890{s}abc"),
+            true,
+        ),
+    ];
+    for (sections, bound, skipped, text, truncated) in cases {
+        assert_eq!(
+            text_sections(sections.iter().map(Option::as_ref), bound, skipped),
+            MergedText { text, truncated }
+        );
+    }
+
+    let asks = |sections: &[Option<Text>], bound: usize| {
+        remaining_after(sections.iter().map(Option::as_ref), bound)
+    };
+    let ten = Some(section("1234567890", false));
+    assert_eq!(
+        asks(std::slice::from_ref(&ten), 15),
+        15 - 10 - s.chars().count()
+    );
+    assert_eq!(asks(&[ten, Some(section("abc", true))], 15), 0);
+    assert_eq!(asks(&[Some(section("", false))], 40), 40);
+    assert_eq!(asks(&[None], 40), 40);
+    assert_eq!(asks(&[Some(section("12345", false))], 5), 1);
+}
+
+/// The page tree, embedded documents included, stays under one node bound: the embedded trees
+/// are asked for what the top tree left and the depth below it, appended in document order and
+/// trimmed in pre-order, and the tree says it was cut whenever a document was trimmed, cut or left
+/// unread; with no top tree the first embedded tree stands in (ACCEPTANCE, executor and truth
+/// gates 7).
+#[test]
+fn the_page_tree_stays_under_one_node_bound() {
+    let top = || value(node("frame 0", vec![node("top", vec![])]), false);
+    let leaf = |label: &str| value(node(label, vec![]), false);
+    for (root, limit, depth, plan) in [
+        (Some(top()), 5, 5, Some((4, 3))),
+        (Some(leaf("top")), 400, 1, None),
+        (
+            Some(value(node("top", vec![node("a", vec![])]), false)),
+            2,
+            5,
+            None,
+        ),
+        (Some(value(node("top", vec![]), true)), 400, 5, None),
+        (None, 400, 3, Some((2, 400))),
+        (None, 400, 1, None),
+    ] {
+        assert_eq!(
+            subtree_plan(root.as_ref(), limit, depth),
+            plan.map(|(max_depth, max_nodes)| SubtreePlan {
+                max_depth,
+                max_nodes
+            })
+        );
+    }
+
+    type Shape = Option<(&'static str, Vec<(&'static str, usize)>)>;
+    let deep = value(
+        node(
+            "root",
+            vec![
+                node("one", vec![node("one.a", vec![]), node("one.b", vec![])]),
+                node("two", vec![node("two.a", vec![])]),
+            ],
+        ),
+        false,
+    );
+    type Case = (Option<TreeValue>, Vec<TreeValue>, bool, usize, Shape, bool);
+    let cases: [Case; 8] = [
+        (
+            Some(top()),
+            vec![
+                value(node("frame 3", vec![node("a", vec![])]), false),
+                value(node("frame 8", vec![]), true),
+            ],
+            false,
+            5,
+            Some(("frame 0", vec![("top", 0), ("frame 3", 1), ("frame 8", 0)])),
+            true,
+        ),
+        (
+            Some(top()),
+            vec![
+                value(node("frame 3", vec![node("a", vec![])]), false),
+                value(node("frame 8", vec![node("b", vec![])]), false),
+            ],
+            false,
+            5,
+            Some(("frame 0", vec![("top", 0), ("frame 3", 1), ("frame 8", 0)])),
+            true,
+        ),
+        (
+            Some(deep),
+            vec![leaf("child")],
+            false,
+            4,
+            Some(("root", vec![("one", 2)])),
+            true,
+        ),
+        (
+            Some(value(node("frame 0", vec![]), false)),
+            vec![leaf("frame 2")],
+            false,
+            400,
+            Some(("frame 0", vec![("frame 2", 0)])),
+            false,
+        ),
+        (
+            Some(leaf("top")),
+            vec![],
+            true,
+            400,
+            Some(("top", vec![])),
+            true,
+        ),
+        (
+            Some(value(node("top", vec![]), true)),
+            vec![leaf("frame 2")],
+            false,
+            400,
+            Some(("top", vec![])),
+            true,
+        ),
+        (
+            None,
+            vec![leaf("frame 2"), leaf("frame 5")],
+            false,
+            400,
+            Some(("frame 2", vec![("frame 5", 0)])),
+            false,
+        ),
+        (
+            None,
+            vec![leaf("frame 2")],
+            true,
+            400,
+            Some(("frame 2", vec![])),
+            true,
+        ),
+    ];
+    for (root, subtrees, unread, limit, expected, truncated) in cases {
+        let merged = append_and_trim(root, subtrees, unread, limit);
+        let shape = merged.tree.as_ref().map(|tree| {
+            assert!(tree.nodes() <= limit);
+            let children: Vec<_> = tree
+                .children
+                .iter()
+                .map(|child| (child.label.as_str(), child.children.len()))
+                .collect();
+            (tree.label.as_str(), children)
+        });
+        assert_eq!((shape, merged.truncated), (expected, truncated));
+    }
+    let nothing = append_and_trim(None, Vec::new(), true, 400);
+    assert_eq!((nothing.tree, nothing.truncated), (None, true));
 }
