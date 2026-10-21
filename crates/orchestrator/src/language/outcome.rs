@@ -2811,13 +2811,33 @@ fn measured<T: TryInto<u32>>(value: T) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::{json, Value};
+
+    use super::{
+        ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
+        CaptureKind, CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, FileProblem,
+        ImageSize, Observed, Outcome, PolicyAuthor, PrimitiveCause, QuitCause, Refusal, SavedTo,
+        StaleHelp, TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE,
+        HUMAN_STOP_DIRECTIVE, REPEAT_IN_A_MOMENT, SCRIPT_EXCEPTION_MAX_CHARS, SCRIPT_THREW_CODE,
+        TARGET_LABEL_MAX_CHARS,
+    };
+    use crate::governance::ReasonCode;
+    use crate::intake::session::IntakeChannel;
+    use crate::language::area::{LeftOut, LeftOutKey};
+    use crate::language::audit::AuditRefusal;
+    use crate::language::field_problem::ControlRef;
+    use crate::language::page_refusal::{PageGesture, PageRefusal};
+    use crate::language::WaitCondition;
+    use crate::workspace::StaleReason;
+
+    /// Contract with the collectors that read the audit file: every field an audit line's
+    /// `observed` can carry is documented in docs/guides/siem-integration.md, the guide a person
+    /// configures a collector from. The literal names every field, so a new one must be set here,
+    /// and fails until the guide documents it.
     #[test]
     fn every_observed_fact_is_documented_for_the_collectors_that_read_it() {
-        // The audit record's reader is a person configuring a collector, so the guide is where
-        // the vocabulary has to stay honest. The literal names every field, so a new one must be
-        // set here, and fails until the guide documents it.
         let guide = include_str!("../../../../docs/guides/siem-integration.md");
-        let every_field = super::Observed {
+        let every_field = Observed {
             host: Some("example.com".into()),
             readiness: Some("complete".into()),
             count: Some(1240),
@@ -2835,21 +2855,68 @@ mod tests {
         }
     }
 
+    /// ACCEPTANCE Governance 16 and 17: a page-authored role narrows to the closed vocabulary and
+    /// an unknown or hostile role reads `control`; a name is normalized to one line, bounded and
+    /// kept only when governance preserves names. Defects 40848de9 (a number input read as a
+    /// slider) and 7cdd4031 (an upload named its file input a text field).
     #[test]
-    fn number_fields_and_list_boxes_keep_their_own_nouns() {
-        assert_eq!(TargetRole::classify("spinbutton"), TargetRole::NumberField);
-        assert_eq!(TargetRole::NumberField.noun(), "number field");
-        assert_eq!(TargetRole::classify("slider"), TargetRole::Slider);
-        assert_eq!(TargetRole::classify("listbox"), TargetRole::ListBox);
-        assert_eq!(TargetRole::ListBox.noun(), "list box");
-        assert_eq!(TargetRole::classify("combobox"), TargetRole::Combobox);
-        assert_ne!(TargetRole::classify("spinbutton").noun(), "slider");
+    fn a_page_authored_subject_reaches_a_sentence_only_as_a_closed_noun_and_a_bounded_name() {
+        for (page_role, role, noun) in [
+            ("button", TargetRole::Button, "button"),
+            ("SWITCH", TargetRole::Checkbox, "checkbox"),
+            ("spinbutton", TargetRole::NumberField, "number field"),
+            ("listbox", TargetRole::ListBox, "list box"),
+            ("slider", TargetRole::Slider, "slider"),
+            ("combobox", TargetRole::Combobox, "dropdown"),
+            ("Save my document", TargetRole::Control, "control"),
+            ("button onclick=steal", TargetRole::Control, "control"),
+        ] {
+            assert_eq!(TargetRole::classify(page_role), role, "{page_role}");
+            assert_eq!(role.noun(), noun, "{page_role}");
+        }
+        let clicked = |subject| {
+            Outcome::TargetClicked {
+                host: Some("example.com".into()),
+                subject,
+            }
+            .summary()
+        };
+        assert_eq!(
+            clicked(ActionSubject::from_page(
+                "button onclick=steal",
+                "  Save\n\"patient\"\u{202e}   record  ",
+                true,
+            )),
+            "Clicked the \"Save 'patient' record\" control on example.com."
+        );
+        assert_eq!(
+            clicked(ActionSubject::from_page("img", "private image name", false)),
+            "Clicked an image on example.com."
+        );
+        let long = "x".repeat(TARGET_LABEL_MAX_CHARS + 20);
+        let bounded = clicked(ActionSubject::from_page("button", &long, true));
+        assert!(bounded.contains(&format!("{}...", "x".repeat(TARGET_LABEL_MAX_CHARS - 3))));
+        assert!(!bounded.contains(&"x".repeat(TARGET_LABEL_MAX_CHARS - 2)));
+        let uploaded = Outcome::FilesUploaded {
+            count: 1,
+            host: Some("example.com".into()),
+            subject: Some(
+                ActionSubject::from_page("textbox", "Screenshot file", true).file_field(),
+            ),
+        }
+        .summary();
+        assert!(
+            uploaded.contains(TargetRole::FileField.noun()),
+            "{uploaded}"
+        );
+        assert!(!uploaded.contains(TargetRole::Textbox.noun()), "{uploaded}");
     }
 
-    fn composition(completed: usize, total: usize) -> super::Outcome {
+    /// A flow of `total` steps that completed `completed` of them, the next one failing.
+    fn composition(completed: usize, total: usize) -> Outcome {
         use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
         let incomplete = completed < total;
-        super::Outcome::CompositionRan(CompositionProgress {
+        Outcome::CompositionRan(CompositionProgress {
             counts: StepCounts {
                 total,
                 succeeded: completed,
@@ -2866,642 +2933,188 @@ mod tests {
         })
     }
 
-    use serde_json::json;
-
-    use super::{
-        workspace_refusal, ActionSubject, BlockedReason, BrowserRecoveryReason,
-        BrowserUnavailableReason, CancelCause, CaptureKind, CheckFailure, DialogKind, EmptyObject,
-        ExtensionAdvice, FileProblem, ImageSize, Observed, Outcome, PolicyAuthor, PrimitiveCause,
-        PromptField, QuitCause, Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole,
-        WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, REPEAT_IN_A_MOMENT,
-        TARGET_LABEL_MAX_CHARS,
-    };
-    use crate::intake::session::IntakeChannel;
-    use crate::language::area::{LeftOut, LeftOutKey};
-    use crate::language::field_problem::ControlRef;
-    use crate::language::WaitCondition;
-    use crate::workspace::{StaleReason, WorkspaceError};
-
+    /// LANGUAGE result contract: a sentence that names a host, count or capture size carries the
+    /// same value in `Observed`, and a cut listing audits the count it said. Defect 259241ad,
+    /// ADR-0198 Decision 17: a followed handle sets only the closed `rebound` fact, never the
+    /// sentence, for every subject-bearing action including a drag's destination and a
+    /// page-target recording save, and no wrapper or later account erases it. Defect W-D4
+    /// (eac543ea): a close on a handle this session does not hold observes no tab and its one
+    /// step lists this session's tabs.
     #[test]
-    fn a_duration_wait_has_its_own_sentence() {
-        let waited = |elapsed_ms, host: Option<&str>| {
-            Outcome::Waited {
-                condition: WaitCondition::Duration,
-                elapsed_ms,
-                satisfied: true,
-                host: host.map(str::to_owned),
-            }
-            .summary()
-        };
-        assert_eq!(
-            waited(1_200, Some("example.com")),
-            "Waited 1 second on example.com."
-        );
-        assert_eq!(waited(300, None), "Waited under a second on the page.");
-        for condition in WaitCondition::ALL {
-            let summary = Outcome::Waited {
-                condition,
-                elapsed_ms: 1_200,
-                satisfied: true,
-                host: None,
-            }
-            .summary();
-            assert!(!summary.contains("The condition"), "{summary}");
-        }
-    }
-
-    #[test]
-    fn outcome_summaries_transcribe_the_product_oracles() {
-        let examples = vec![
-            (
-                Outcome::TabsListed { count: 4 },
-                "Listed 4 tabs in this session.",
-            ),
-            (
-                Outcome::TabsListed { count: 1 },
-                "Listed 1 tab in this session.",
-            ),
-            (
-                Outcome::TabsListed { count: 0 },
-                "Listed 0 tabs in this session.",
-            ),
-            (
-                Outcome::DocumentInspected {
-                    nodes: 283,
-                    truncated: false,
-                    differences: None,
-                },
-                "Returned the document outline: 283 nodes.",
-            ),
-            (
-                Outcome::DocumentInspected {
-                    nodes: 283,
-                    truncated: false,
-                    differences: Some(0),
-                },
-                "Returned the document outline: 283 nodes, matching the previous outline.",
-            ),
-            (
-                Outcome::DocumentInspected {
-                    nodes: 1,
-                    truncated: false,
-                    differences: Some(6),
-                },
-                "Returned the document outline: 1 node, 6 differences from the previous outline.",
-            ),
-            (
-                Outcome::PolicyExplained {
-                    capabilities: 8,
-                    layers: 2,
-                },
-                "Explained what agents may do: 8 capability areas, 2 policy layers.",
-            ),
-            (
-                Outcome::PolicyExplained {
-                    capabilities: 1,
-                    layers: 1,
-                },
-                "Explained what agents may do: 1 capability area, 1 policy layer.",
-            ),
-            (
-                Outcome::PolicyExplained {
-                    capabilities: 4,
-                    layers: 0,
-                },
-                "Explained what agents may do: 4 capability areas, no policy layers.",
-            ),
-            (
-                Outcome::RecordingBoundary {
-                    duration_ms: 12_000,
-                },
-                "Recording stopped after 12 seconds because the page, or a frame inside it, loaded new content or went away. The captured portion is available.",
-            ),
-            (
-                Outcome::TabActivated {
-                    host: Some("example.com".into()),
-                },
-                "Brought example.com into view.",
-            ),
-            (
-                Outcome::PageOpened {
-                    host: Some("example.com".into()),
-                },
-                "Opened example.com.",
-            ),
-            (
-                Outcome::PageOpened { host: None },
-                "Opened the requested page.",
-            ),
-            (
-                Outcome::PageReused {
-                    host: Some("example.com".into()),
-                },
-                "Reused the example.com tab.",
-            ),
-            (
-                Outcome::PageReused { host: None },
-                "Reused the existing tab.",
-            ),
-            (
-                Outcome::PageNavigated {
-                    host: Some("example.com".into()),
-                },
-                "Navigated to example.com.",
-            ),
-            (
-                Outcome::HistoryTraversed {
-                    direction: "back".into(),
-                    host: Some("example.com".into()),
-                },
-                "Went back to example.com.",
-            ),
-            (
-                Outcome::PageReloaded {
-                    host: Some("example.com".into()),
-                },
-                "Reloaded example.com.",
-            ),
-            (Outcome::TabClosed, "Closed the controlled tab."),
-            (
-                Outcome::TextRead {
-                    words: 1_240,
-                    host: Some("example.com".into()),
-                },
-                "Read 1,240 words from example.com.",
-            ),
-            (
-                Outcome::TargetsListed {
-                    noun: TargetNoun::Match,
-                    count: 7,
-                    host: Some("example.com".into()),
-                    left_out: LeftOut::default(),
-                },
-                "Found 7 matches on example.com.",
-            ),
-            (
-                Outcome::TargetsListed {
-                    noun: TargetNoun::Control,
-                    count: 29,
-                    host: Some("example.com".into()),
-                    left_out: LeftOut::default(),
-                },
-                "Found 29 controls on example.com.",
-            ),
-            (
-                Outcome::TargetsListed {
-                    noun: TargetNoun::Item,
-                    count: 3,
-                    host: Some("example.com".into()),
-                    left_out: LeftOut::default(),
-                },
-                "Found 3 items on example.com.",
-            ),
-            (
-                Outcome::Captured {
-                    scope: CaptureKind::Viewport,
-                    width: 1280,
-                    height: 720,
-                },
-                "Captured the viewport at 1280x720.",
-            ),
-            (
-                Outcome::TargetClicked {
-                    host: Some("example.com".into()),
-                    subject: ActionSubject::from_page("button", "Save", true),
-                },
-                "Clicked the \"Save\" button on example.com.",
-            ),
-            (
-                Outcome::PointClicked {
-                    host: Some("example.com".into()),
-                    x: 640,
-                    y: 360,
-                    subject: None,
-                },
-                "Clicked at 640,360 on example.com.",
-            ),
-            (
-                Outcome::PageScrolled {
-                    host: Some("example.com".into()),
-                    direction: crate::language::ScrollDirection::Down,
-                },
-                "Scrolled down on example.com.",
-            ),
-            (
-                Outcome::TargetRevealed {
-                    host: Some("example.com".into()),
-                    subject: ActionSubject::from_page("checkbox", "Publish", true),
-                },
-                "Scrolled the \"Publish\" checkbox into view on example.com.",
-            ),
-            (
-                Outcome::ZoomSet {
-                    percent: 125,
-                    host: Some("example.com".into()),
-                },
-                "Set zoom to 125% on example.com.",
-            ),
-            (
-                Outcome::WindowResized {
-                    width: 1280,
-                    height: 800,
-                },
-                "Resized the browser window to 1280x800.",
-            ),
-            (
-                Outcome::Hovered {
-                    host: Some("example.com".into()),
-                    subject: Some(ActionSubject::from_page("link", "Details", true)),
-                },
-                "Hovered the \"Details\" link on example.com.",
-            ),
-            (
-                Outcome::Hovered {
-                    host: Some("example.com".into()),
-                    subject: None,
-                },
-                "Hovered a point on example.com.",
-            ),
-            (
-                Outcome::FormFilled {
-                    fields: 1,
-                    submitted: false,
-                    host: Some("example.com".into()),
-                    held: Vec::new(),
-                    rebound: false,
-                },
-                "Filled 1 field on example.com.",
-            ),
-            (
-                Outcome::FormFilled {
-                    fields: 3,
-                    submitted: true,
-                    host: Some("example.com".into()),
-                    held: Vec::new(),
-                    rebound: false,
-                },
-                "Filled 3 fields on example.com and submitted the form.",
-            ),
-            (
-                Outcome::TextTyped {
-                    host: Some("example.com".into()),
-                    subject: ActionSubject::from_page("textbox", "Email", true),
-                    characters: 54,
-                },
-                "Typed 54 characters into the \"Email\" text field on example.com.",
-            ),
-            (
-                Outcome::KeyboardSent {
-                    host: Some("example.com".into()),
-                    key: Some("Enter".into()),
-                    subject: None,
-                },
-                "Pressed Enter on example.com.",
-            ),
-            (
-                Outcome::KeyboardSent {
-                    host: Some("example.com".into()),
-                    key: None,
-                    subject: None,
-                },
-                "Pressed a key on example.com.",
-            ),
-            (
-                Outcome::Dragged {
-                    host: Some("example.com".into()),
-                    source: Some(ActionSubject::from_page("button", "Ticket", true)),
-                    destination: Some(ActionSubject::from_page("link", "Ready", true)),
-                },
-                "Dragged the \"Ticket\" button onto the \"Ready\" link on example.com.",
-            ),
-            (
-                Outcome::Dragged {
-                    host: Some("example.com".into()),
-                    source: Some(ActionSubject::from_page("slider", "Volume", true)),
-                    destination: Some(ActionSubject::from_page("slider", "Volume", true)),
-                },
-                "Dragged across the \"Volume\" slider on example.com.",
-            ),
-            (
-                // Without names there is no telling one control from another of its kind.
-                Outcome::Dragged {
-                    host: Some("example.com".into()),
-                    source: Some(ActionSubject::unnamed(TargetRole::Control)),
-                    destination: Some(ActionSubject::unnamed(TargetRole::Control)),
-                },
-                "Dragged a control onto a control on example.com.",
-            ),
-            (
-                Outcome::Dragged {
-                    host: Some("example.com".into()),
-                    source: None,
-                    destination: None,
-                },
-                "Dragged one point to another on example.com.",
-            ),
-            (
-                Outcome::FilesUploaded {
-                    count: 2,
-                    host: Some("example.com".into()),
-                    subject: None,
-                },
-                "Uploaded 2 files to example.com.",
-            ),
-            (
-                Outcome::FilesUploaded {
-                    count: 1,
-                    host: Some("example.com".into()),
-                    subject: Some(
-                        ActionSubject::from_page("textbox", "Screenshot file", true).file_field(),
-                    ),
-                },
-                "Uploaded 1 file through the \"Screenshot file\" file field on example.com.",
-            ),
-            (
-                Outcome::ScriptEvaluated {
-                    host: Some("example.com".into()),
-                    empty_object: EmptyObject::Absent,
-                },
-                "Executed JavaScript on example.com.",
-            ),
-            (composition(2, 5), "Completed 2 of 5 steps. Step 3 failed."),
-            (composition(5, 5), "Completed all 5 steps."),
-            (
-                Outcome::Waited {
-                    condition: WaitCondition::LoadReady,
-                    elapsed_ms: 1830,
-                    satisfied: true,
-                    host: Some("example.com".into()),
-                },
-                "example.com finished loading in 2 seconds.",
-            ),
-            (
-                Outcome::Waited {
-                    condition: WaitCondition::TextPresent,
-                    elapsed_ms: 8000,
-                    satisfied: false,
-                    host: Some("example.com".into()),
-                },
-                "Text never appeared on example.com within 8 seconds.",
-            ),
-            (
-                Outcome::TargetClicked {
-                    host: Some("example.com".into()),
-                    subject: ActionSubject::from_page("button", "Delete", true),
-                }
-                .with_open_dialog(DialogKind::Confirm),
-                "Clicked the \"Delete\" button on example.com. A confirm dialog is now open.",
-            ),
-            (
-                Outcome::ScriptEvaluated {
-                    host: Some("example.com".into()),
-                    empty_object: EmptyObject::Absent,
-                }
-                .with_open_dialog(DialogKind::classify("a kind from the future")),
-                "Executed JavaScript on example.com. A JavaScript dialog is now open.",
-            ),
-            (
-                Outcome::DialogHandled { accepted: true },
-                "Accepted the browser dialog.",
-            ),
-            (
-                Outcome::DialogHandled { accepted: false },
-                "Dismissed the browser dialog.",
-            ),
-            (
-                Outcome::DialogObserved {
-                    present: true,
-                    message: None,
-                    prompt: None,
-                },
-                "A JavaScript dialog is currently visible.",
-            ),
-            (
-                Outcome::DialogObserved {
-                    present: true,
-                    message: Some("Leave this page?
-Changes are \"unsaved\".".into()),
-                    prompt: None,
-                },
-                "A JavaScript dialog is currently visible: \"Leave this page? Changes are 'unsaved'.\".",
-            ),
-            (
-                Outcome::DialogObserved {
-                    present: true,
-                    message: Some("What should it say?".into()),
-                    prompt: Some(PromptField::Holds("hello from the desk".into())),
-                },
-                "A prompt dialog is currently visible: \"What should it say?\". Its field holds \"hello from the desk\".",
-            ),
-            (
-                Outcome::DialogObserved {
-                    present: true,
-                    message: Some("Name?".into()),
-                    prompt: Some(PromptField::Holds(String::new())),
-                },
-                "A prompt dialog is currently visible: \"Name?\". Its field is empty.",
-            ),
-            (
-                Outcome::DialogObserved {
-                    present: true,
-                    message: None,
-                    prompt: Some(PromptField::Holds("  \t ".into())),
-                },
-                "A prompt dialog is currently visible. Its field holds only spaces.",
-            ),
-            (
-                Outcome::DialogObserved {
-                    present: true,
-                    message: Some("Name?".into()),
-                    prompt: Some(PromptField::Unreported),
-                },
-                "A prompt dialog is currently visible: \"Name?\".",
-            ),
-            (
-                Outcome::DialogObserved {
-                    present: false,
-                    message: None,
-                    prompt: None,
-                },
-                "No JavaScript dialog is currently visible.",
-            ),
-            (
-                Outcome::DiagnosticsRead {
-                    count: 3,
-                    capture_started: false,
-                    problems_only: true,
-                    host: Some("example.com".into()),
-                },
-                "Found 3 problems on example.com.",
-            ),
-            (
-                Outcome::DiagnosticsRead {
-                    count: 2,
-                    capture_started: false,
-                    problems_only: false,
-                    host: Some("example.com".into()),
-                },
-                "Found 2 observations on example.com.",
-            ),
-            (
-                Outcome::RecordingStarted {
-                    host: Some("example.com".into()),
-                },
-                "Started recording example.com.",
-            ),
-            (
-                Outcome::RecordingObserved {
-                    frames: 3,
-                    duration_ms: 1200,
-                    active: true,
-                },
-                "Recording for 1 second, 3 frames so far.",
-            ),
-            (
-                Outcome::RecordingObserved {
-                    frames: 35,
-                    duration_ms: 20_598,
-                    active: false,
-                },
-                "A stopped recording of 21 seconds with 35 frames is ready to save.",
-            ),
-            (
-                Outcome::RecordingStopped {
-                    duration_ms: 30_400,
-                },
-                "Stopped recording after 30 seconds.",
-            ),
-            (
-                Outcome::RecordingSaved {
-                    duration_ms: 30_400,
-                    delivery: SavedTo::Client,
-                    rebound: false,
-                },
-                "Saved a replay of 30 seconds of page changes.",
-            ),
-            (
-                Outcome::RecordingSaved {
-                    duration_ms: 30_400,
-                    delivery: SavedTo::PageTarget,
-                    rebound: false,
-                },
-                "Attached a replay of 30 seconds of page changes to the page.",
-            ),
-            (
-                Outcome::RecordingSaved {
-                    duration_ms: 30_400,
-                    delivery: SavedTo::Download,
-                    rebound: false,
-                },
-                "Downloaded a replay of 30 seconds of page changes.",
-            ),
-            (Outcome::RecordingDiscarded, "Erased the recording."),
+    fn the_observation_carries_what_the_sentence_names_and_whether_a_handle_followed() {
+        let host = || Some("example.com".to_owned());
+        let host_outcomes = [
+            Outcome::TabActivated { host: host() },
+            Outcome::PageOpened { host: host() },
+            Outcome::PageNavigated { host: host() },
+            Outcome::HistoryTraversed {
+                direction: "back".into(),
+                host: host(),
+            },
+            Outcome::PageReloaded { host: host() },
+            Outcome::TargetClicked {
+                host: host(),
+                subject: ActionSubject::unnamed(TargetRole::Button),
+            },
+            Outcome::PointClicked {
+                host: host(),
+                x: 10,
+                y: 20,
+                subject: None,
+            },
+            Outcome::PageScrolled {
+                host: host(),
+                direction: crate::language::ScrollDirection::Down,
+            },
+            Outcome::TargetRevealed {
+                host: host(),
+                subject: ActionSubject::unnamed(TargetRole::Checkbox),
+            },
+            Outcome::ZoomSet {
+                percent: 100,
+                host: host(),
+            },
+            Outcome::Hovered {
+                host: host(),
+                subject: Some(ActionSubject::unnamed(TargetRole::Button)),
+            },
+            Outcome::TextTyped {
+                host: host(),
+                subject: ActionSubject::unnamed(TargetRole::Textbox),
+                characters: 3,
+            },
+            Outcome::KeyboardSent {
+                host: host(),
+                key: Some("Enter".into()),
+                subject: None,
+            },
+            Outcome::Dragged {
+                host: host(),
+                source: Some(ActionSubject::unnamed(TargetRole::Button)),
+                destination: Some(ActionSubject::unnamed(TargetRole::Link)),
+            },
+            Outcome::ScriptEvaluated {
+                host: host(),
+                empty_object: EmptyObject::Absent,
+            },
         ];
-        for (outcome, expected) in examples {
-            assert_eq!(outcome.summary(), expected);
+        for outcome in host_outcomes {
+            assert!(outcome.summary().contains("example.com"), "{outcome:?}");
+            assert_eq!(outcome.observed().host.as_deref(), Some("example.com"));
         }
-    }
 
-    #[test]
-    fn page_authored_roles_collapse_to_a_closed_audit_vocabulary() {
-        assert_eq!(TargetRole::classify("button"), TargetRole::Button);
-        assert_eq!(TargetRole::classify("SWITCH"), TargetRole::Checkbox);
-        assert_eq!(
-            TargetRole::classify("Save my document"),
-            TargetRole::Control
-        );
-        assert_eq!(
-            TargetRole::classify("button onclick=steal"),
-            TargetRole::Control
-        );
-        assert_eq!(TargetRole::Control.noun(), "control");
-    }
-
-    #[test]
-    fn action_labels_are_bounded_normalized_and_governed() {
-        let subject = ActionSubject::from_page(
-            "button onclick=steal",
-            "  Save\n\"patient\"\u{202e}   record  ",
-            true,
-        );
-        assert_eq!(
-            Outcome::TargetClicked {
-                host: Some("example.com".into()),
-                subject,
-            }
-            .summary(),
-            "Clicked the \"Save 'patient' record\" control on example.com."
-        );
-
-        let hidden = ActionSubject::from_page("img", "private image name", false);
-        assert_eq!(
-            Outcome::TargetClicked {
-                host: Some("example.com".into()),
-                subject: hidden,
-            }
-            .summary(),
-            "Clicked an image on example.com."
-        );
-
-        let long = "x".repeat(TARGET_LABEL_MAX_CHARS + 20);
-        let bounded = ActionSubject::from_page("button", &long, true);
-        let summary = Outcome::TargetClicked {
-            host: None,
-            subject: bounded,
+        let counted = [
+            Outcome::TabsListed { count: 3 },
+            Outcome::PolicyExplained {
+                capabilities: 3,
+                layers: 1,
+            },
+            Outcome::TextRead {
+                words: 3,
+                host: host(),
+            },
+            Outcome::TargetsListed {
+                noun: TargetNoun::Match,
+                count: 3,
+                host: host(),
+                left_out: LeftOut::default(),
+            },
+            Outcome::FormFilled {
+                fields: 3,
+                submitted: false,
+                host: host(),
+                held: Vec::new(),
+                rebound: false,
+            },
+            Outcome::FilesUploaded {
+                count: 3,
+                host: host(),
+                subject: None,
+            },
+            composition(3, 5),
+        ];
+        for outcome in counted {
+            assert!(outcome.summary().contains('3'), "{outcome:?}");
+            assert_eq!(outcome.observed().count, Some(3), "{outcome:?}");
         }
-        .summary();
-        assert!(summary.contains(&format!("{}...", "x".repeat(77))));
-        assert!(!summary.contains(&"x".repeat(81)));
-    }
+        let waited = |elapsed_ms| Outcome::Waited {
+            condition: WaitCondition::LoadReady,
+            elapsed_ms,
+            satisfied: true,
+            host: host(),
+        };
+        assert!(waited(1_830).summary().contains("2 seconds"));
+        assert_eq!(waited(1_830).observed().count, Some(2));
+        assert!(waited(300).summary().contains("under a second"));
+        assert_eq!(waited(300).observed().count, Some(0));
 
-    /// A followed handle changes no sentence. The one fact reaches the measurements of every
-    /// action that names a subject, and of an action that left a dialog open.
-    #[test]
-    fn a_followed_handle_marks_the_measurements_and_not_the_sentence() {
-        let host = Some("example.com".to_owned());
+        let capture = Outcome::Captured {
+            scope: CaptureKind::Viewport,
+            width: 1280,
+            height: 720,
+        };
+        assert!(capture.summary().contains("1280x720"));
+        assert_eq!(
+            (capture.observed().width, capture.observed().height),
+            (Some(1280), Some(720))
+        );
+
+        let listing = |left_out| Outcome::TargetsListed {
+            noun: TargetNoun::Control,
+            count: 80,
+            host: Some("news.example".into()),
+            left_out,
+        };
+        let mut cut = LeftOut::default();
+        cut.add(LeftOutKey::Chrome, 96);
+        assert_eq!(
+            listing(cut).observed(),
+            listing(LeftOut::default()).observed()
+        );
+
         let followed = || ActionSubject::from_page("button", "Save", true).rebound(true);
         let plain = || ActionSubject::from_page("button", "Save", true);
         let pairs = [
             (
                 Outcome::TargetClicked {
-                    host: host.clone(),
+                    host: host(),
                     subject: followed(),
                 },
                 Outcome::TargetClicked {
-                    host: host.clone(),
+                    host: host(),
                     subject: plain(),
                 },
             ),
             (
                 Outcome::Hovered {
-                    host: host.clone(),
+                    host: host(),
                     subject: Some(followed()),
                 },
                 Outcome::Hovered {
-                    host: host.clone(),
+                    host: host(),
                     subject: Some(plain()),
                 },
             ),
             (
                 Outcome::TextTyped {
-                    host: host.clone(),
+                    host: host(),
                     subject: followed(),
                     characters: 3,
                 },
                 Outcome::TextTyped {
-                    host: host.clone(),
+                    host: host(),
                     subject: plain(),
                     characters: 3,
                 },
             ),
             (
                 Outcome::Dragged {
-                    host: host.clone(),
+                    host: host(),
                     source: Some(plain()),
                     destination: Some(followed()),
                 },
                 Outcome::Dragged {
-                    host: host.clone(),
+                    host: host(),
                     source: Some(plain()),
                     destination: Some(plain()),
                 },
@@ -3529,1745 +3142,133 @@ Changes are \"unsaved\".".into()),
         }
         .merged(Observed::default());
         assert!(merged.rebound, "a later account does not erase the fact");
-        let line = serde_json::to_value(Observed::default()).unwrap();
-        assert!(
-            line.get("rebound").is_none(),
-            "an ordinary line is unchanged"
-        );
+
+        assert_eq!(Outcome::TabNotHeld.observed(), Observed::default());
         assert_eq!(
-            serde_json::to_value(merged).unwrap()["rebound"],
-            serde_json::json!(true)
+            Outcome::TabNotHeld.next_steps(),
+            vec!["Call browser_tabs with action list to see this session's tabs."]
         );
     }
 
+    /// ADR-0126 Decisions 4 and 5: a Pause and a Stop refusal say exactly the pinned directive and
+    /// suggest nothing. LANGUAGE refusal rules and ACCEPTANCE Executor 6: a refusal a policy can
+    /// lift points to policy_explain; Ghostlight's own control page, a required-history outage and
+    /// an unreadable policy keep no step. The directive literals stay because the ADR pins the
+    /// text, not the constant.
     #[test]
-    fn whatever_the_sentence_names_the_observation_carries() {
-        let host_outcomes = [
-            Outcome::TabActivated {
-                host: Some("example.com".into()),
-            },
-            Outcome::PageOpened {
-                host: Some("example.com".into()),
-            },
-            Outcome::PageNavigated {
-                host: Some("example.com".into()),
-            },
-            Outcome::HistoryTraversed {
-                direction: "back".into(),
-                host: Some("example.com".into()),
-            },
-            Outcome::PageReloaded {
-                host: Some("example.com".into()),
-            },
-            Outcome::TargetClicked {
-                host: Some("example.com".into()),
-                subject: ActionSubject::unnamed(TargetRole::Button),
-            },
-            Outcome::PointClicked {
-                host: Some("example.com".into()),
-                x: 10,
-                y: 20,
-                subject: None,
-            },
-            Outcome::PageScrolled {
-                host: Some("example.com".into()),
-                direction: crate::language::ScrollDirection::Down,
-            },
-            Outcome::TargetRevealed {
-                host: Some("example.com".into()),
-                subject: ActionSubject::unnamed(TargetRole::Checkbox),
-            },
-            Outcome::ZoomSet {
-                percent: 100,
-                host: Some("example.com".into()),
-            },
-            Outcome::Hovered {
-                host: Some("example.com".into()),
-                subject: Some(ActionSubject::unnamed(TargetRole::Button)),
-            },
-            Outcome::TextTyped {
-                host: Some("example.com".into()),
-                subject: ActionSubject::unnamed(TargetRole::Textbox),
-                characters: 3,
-            },
-            Outcome::KeyboardSent {
-                host: Some("example.com".into()),
-                key: Some("Enter".into()),
-                subject: None,
-            },
-            Outcome::Dragged {
-                host: Some("example.com".into()),
-                source: Some(ActionSubject::unnamed(TargetRole::Button)),
-                destination: Some(ActionSubject::unnamed(TargetRole::Link)),
-            },
-            Outcome::ScriptEvaluated {
-                host: Some("example.com".into()),
-                empty_object: EmptyObject::Absent,
-            },
-        ];
-        for outcome in host_outcomes {
-            assert!(outcome.summary().contains("example.com"));
-            assert_eq!(outcome.observed().host.as_deref(), Some("example.com"));
-        }
-
-        let counted = [
-            (Outcome::TabsListed { count: 3 }, 3),
-            (
-                Outcome::PolicyExplained {
-                    capabilities: 3,
-                    layers: 1,
-                },
-                3,
-            ),
-            (
-                Outcome::TextRead {
-                    words: 3,
-                    host: Some("example.com".into()),
-                },
-                3,
-            ),
-            (
-                Outcome::TargetsListed {
-                    noun: TargetNoun::Match,
-                    count: 3,
-                    host: Some("example.com".into()),
-                    left_out: LeftOut::default(),
-                },
-                3,
-            ),
-            (
-                Outcome::FormFilled {
-                    fields: 3,
-                    submitted: false,
-                    host: Some("example.com".into()),
-                    held: Vec::new(),
-                    rebound: false,
-                },
-                3,
-            ),
-            (
-                Outcome::FilesUploaded {
-                    count: 3,
-                    host: Some("example.com".into()),
-                    subject: None,
-                },
-                3,
-            ),
-            (
-                Outcome::Waited {
-                    condition: WaitCondition::LoadReady,
-                    elapsed_ms: 3_000,
-                    satisfied: true,
-                    host: Some("example.com".into()),
-                },
-                3,
-            ),
-        ];
-        for (outcome, expected) in counted {
-            assert!(outcome.summary().contains('3'));
-            assert_eq!(outcome.observed().count, Some(expected));
-        }
-
-        let sequence = composition(3, 5);
-        assert_eq!(sequence.summary(), "Completed 3 of 5 steps. Step 4 failed.");
-        assert_eq!(sequence.observed().count, Some(3));
-
-        let capture = Outcome::Captured {
-            scope: CaptureKind::Viewport,
-            width: 1280,
-            height: 720,
-        };
-        assert!(capture.summary().contains("1280x720"));
-        assert_eq!(
-            (capture.observed().width, capture.observed().height),
-            (Some(1280), Some(720))
-        );
-    }
-
-    /// The stop directive is exactly what ADR-0126 Decision 5 pins, to the character.
-    #[test]
-    fn stop_outcome_begins_with_the_pinned_directive() {
-        let refusal = Refusal::AuthorityBlocked {
-            code: crate::governance::ReasonCode::SessionEnded,
-            host: None,
-            origin: None,
-        };
-        assert_eq!(
-            refusal.summary(),
-            "The user asked to interrupt the process. Wait for further instructions."
-        );
-        assert!(refusal
-            .summary()
-            .starts_with("The user asked to interrupt the process."));
-    }
-
-    /// The pause directive is exactly what ADR-0126 Decision 4 pins, and is not the stop one.
-    #[test]
-    fn pause_outcome_uses_its_own_pinned_directive() {
-        let refusal = Refusal::AuthorityBlocked {
-            code: crate::governance::ReasonCode::RuntimeHold,
-            host: None,
-            origin: None,
-        };
-        assert_eq!(
-            refusal.summary(),
-            "The user paused Ghostlight. Wait for further instructions."
-        );
-        assert_ne!(refusal.summary(), HUMAN_STOP_DIRECTIVE);
-    }
-
-    /// Neither human control suggests trying again. A retry would fight the person who asked.
-    #[test]
-    fn stop_recommends_no_automatic_retry() {
-        for reason in [BlockedReason::SessionEnded, BlockedReason::Hold] {
-            let refusal = Refusal::AuthorityBlocked {
-                code: reason.code(),
-                host: None,
-                origin: None,
-            };
-            assert!(
-                refusal.next_steps().is_empty(),
-                "{reason:?} suggested a next step"
-            );
-        }
-    }
-
-    /// An action that happened stays in the account when its check falls short, and nothing in
-    /// that account says the action did not happen or invites a blind repeat.
-    #[test]
-    fn unconfirmed_actions_keep_the_action_and_say_why_the_check_fell_short() {
-        let action = Outcome::TargetClicked {
+    fn an_authority_refusal_says_the_pinned_directive_or_points_to_policy_explain_only_when_policy_can_lift_it(
+    ) {
+        let blocked = |reason: BlockedReason| Refusal::AuthorityBlocked {
+            code: reason.code(),
             host: Some("example.com".into()),
-            subject: ActionSubject::from_page("button", "Save", true),
+            origin: None,
         };
-        let check = "Check the page with browser_read or browser_inspect before repeating; the action already happened.";
-        let cases = [
+        for (reason, directive, pinned) in [
             (
-                CheckFailure::Unmet,
-                "The expected condition did not hold after the action. Clicked the \"Save\" button on example.com.",
-                vec![check],
+                BlockedReason::Hold,
+                HUMAN_PAUSE_DIRECTIVE,
+                "The user paused Ghostlight. Wait for further instructions.",
             ),
             (
-                CheckFailure::Cancelled,
-                "The expected condition was not checked because the call was cancelled. Clicked the \"Save\" button on example.com.",
-                vec![check],
+                BlockedReason::SessionEnded,
+                HUMAN_STOP_DIRECTIVE,
+                "The user asked to interrupt the process. Wait for further instructions.",
             ),
-            (
-                CheckFailure::Disconnected,
-                "The expected condition was not checked because the browser disconnected. Clicked the \"Save\" button on example.com.",
-                vec![check],
-            ),
-            (
-                CheckFailure::BrowserUnavailable,
-                "The expected condition was not checked because Ghostlight could not reach the browser. Clicked the \"Save\" button on example.com.",
-                vec![check],
-            ),
-            (
-                CheckFailure::DeadlineExpired,
-                "The expected condition was not checked because the call ran out of time. Clicked the \"Save\" button on example.com.",
-                vec![check],
-            ),
-            (
-                CheckFailure::DocumentUnavailable,
-                "The expected condition was not checked because access to the page could not be verified. Clicked the \"Save\" button on example.com.",
-                vec![check],
-            ),
-            (
-                CheckFailure::BrowserRefused,
-                "The expected condition was not checked because the browser could not run the check. Clicked the \"Save\" button on example.com.",
-                vec![check],
-            ),
-            (
-                CheckFailure::Blocked(BlockedReason::Hold),
-                "The user paused Ghostlight. Wait for further instructions. The expected condition was not checked. Clicked the \"Save\" button on example.com.",
-                vec![],
-            ),
-            (
-                CheckFailure::Blocked(BlockedReason::SessionEnded),
-                "The user asked to interrupt the process. Wait for further instructions. The expected condition was not checked. Clicked the \"Save\" button on example.com.",
-                vec![],
-            ),
-            (
-                CheckFailure::Blocked(BlockedReason::Host),
-                "The expected condition was not checked. Blocked: that host is not allowed. Clicked the \"Save\" button on example.com.",
-                vec!["Call policy_explain to see what this session may do."],
-            ),
+        ] {
+            assert_eq!(directive, pinned);
+            assert_eq!(blocked(reason).summary(), pinned);
+        }
+        for (reason, lifted) in [
+            (BlockedReason::Host, true),
+            (BlockedReason::ProtectedHost, true),
+            (BlockedReason::Capability, true),
+            (BlockedReason::TabClose, true),
+            (BlockedReason::Screenshot, true),
+            (BlockedReason::Unspecified, true),
+            (BlockedReason::OwnWorkbench, false),
+            (BlockedReason::AuditUnavailable, false),
+            (BlockedReason::InvalidAuthority, false),
+            (BlockedReason::Hold, false),
+            (BlockedReason::SessionEnded, false),
+        ] {
+            let steps = blocked(reason).next_steps();
+            if lifted {
+                assert_eq!(steps.len(), 1, "{reason:?}");
+                assert!(steps[0].starts_with("Call policy_explain"), "{reason:?}");
+            } else {
+                assert!(steps.is_empty(), "{reason:?}: {steps:?}");
+            }
+        }
+    }
+
+    /// Defect C11 (8c216920), ACCEPTANCE Executor 3 and 4: a cancellation says who cancelled and
+    /// never that the browser disconnected; before dispatch it suggests nothing, except that after
+    /// a quit, a replacement, an idle exit or an unknown reason the call can be repeated in a
+    /// moment; after dispatch it gives no replay advice. `service/mod.rs`
+    /// `a_call_during_a_quit_is_cancelled_with_an_audit_line_and_a_next_step_for_its_reason`
+    /// reads its expected steps from this rule.
+    #[test]
+    fn a_cancellation_says_who_cancelled_and_suggests_a_repeat_only_when_one_is_served() {
+        let causes = [
+            CancelCause::Client,
+            CancelCause::SessionEnded,
+            CancelCause::Quit(QuitCause::Quit),
         ];
-        for (cause, summary, steps) in cases {
-            let refusal = Refusal::ActionUnconfirmed {
-                action: Box::new(action.clone()),
-                cause,
-                code: cause.decision_code(),
-            };
-            assert_eq!(refusal.summary(), summary, "{cause:?}");
-            assert_eq!(refusal.next_steps(), steps, "{cause:?}");
-            for false_claim in ["before anything happened", "repeat the call", "nothing"] {
+        let phases: [fn(CancelCause) -> Refusal; 3] = [
+            |by| Refusal::CancelledBeforeStart { by },
+            |by| Refusal::CancelledBeforeDispatch { by: Some(by) },
+            |by| Refusal::CancelledAfterDispatch { by: Some(by) },
+        ];
+        for phase in phases {
+            let said: std::collections::BTreeSet<String> =
+                causes.iter().map(|by| phase(*by).summary()).collect();
+            assert_eq!(said.len(), causes.len(), "who cancelled is said: {said:?}");
+            for summary in &said {
+                assert!(!summary.contains("disconnect"), "{summary}");
+            }
+        }
+        for by in [None].into_iter().chain(causes.map(Some)) {
+            assert!(
+                Refusal::CancelledBeforeDispatch { by }
+                    .next_steps()
+                    .is_empty(),
+                "{by:?}"
+            );
+            let after = Refusal::CancelledAfterDispatch { by }.next_steps();
+            assert!(!after.is_empty(), "{by:?}");
+            for step in after {
                 assert!(
-                    !refusal.summary().contains(false_claim),
-                    "{cause:?} says {false_claim}"
+                    !step.contains("Repeat") && !step.contains("again"),
+                    "{step}"
                 );
             }
-            assert_eq!(refusal.observed(), action.observed(), "{cause:?}");
-            let audit = refusal.audit();
-            assert_eq!(audit.summary(), summary, "{cause:?}");
-            assert_eq!(
-                audit.refusal(),
-                Some(&crate::language::audit::AuditRefusal::ActionUnconfirmed { cause }),
-                "{cause:?}"
-            );
         }
-        assert_eq!(
-            serde_json::to_value(
-                Refusal::ActionUnconfirmed {
-                    action: Box::new(action.clone()),
-                    cause: CheckFailure::Blocked(BlockedReason::Hold),
-                    code: CheckFailure::Blocked(BlockedReason::Hold).decision_code(),
-                }
-                .audit()
-                .refusal()
-            )
-            .unwrap(),
-            json!({"reason":"action_unconfirmed","cause":{"blocked":"hold"}})
-        );
-    }
-
-    #[test]
-    fn refusal_wording_and_recovery_stay_exact() {
-        let summaries = vec![
-            (
-                Refusal::InvalidRequest,
-                "The call does not match the Ghostlight catalog.",
-            ),
-            (
-                Refusal::CancelledBeforeStart {
-                    by: CancelCause::Client,
-                },
-                "The agent cancelled the browser job before it started.",
-            ),
-            (
-                Refusal::CancelledBeforeStart {
-                    by: CancelCause::SessionEnded,
-                },
-                "The agent's session ended before the browser job started.",
-            ),
-            (
-                Refusal::CancelledBeforeStart {
-                    by: CancelCause::Quit(QuitCause::Quit),
-                },
-                "Ghostlight quit before the browser job started.",
-            ),
-            (
-                Refusal::DeadlineBeforeStart,
-                "The browser job deadline expired while waiting for the workspace.",
-            ),
-            (
-                Refusal::AuthorityBlocked {
-                    code: crate::governance::ReasonCode::HostDenied,
-                    host: Some("example.com".into()),
-                    origin: None,
-                },
-                "Blocked: example.com is not an allowed host.",
-            ),
-            (
-                Refusal::AuthorityBlocked {
-                    code: crate::governance::ReasonCode::RuntimeHold,
-                    host: None,
-                    origin: None,
-                },
-                HUMAN_PAUSE_DIRECTIVE,
-            ),
-            (
-                Refusal::AuthorityBlocked {
-                    code: crate::governance::ReasonCode::SessionEnded,
-                    host: None,
-                    origin: None,
-                },
-                HUMAN_STOP_DIRECTIVE,
-            ),
-            (
-                Refusal::LocalInterlock,
-                "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings.",
-            ),
-            (
-                Refusal::CredentialAuthorization {
-                    control: ControlRef::new(TargetRole::Textbox, "Password", Some("target_7k2nb5xe"), true),
-                },
-                "Nothing was typed. The \"Password\" text field (target_7k2nb5xe) is credential-class.",
-            ),
-            (
-                Refusal::IncompatibleReceipt,
-                "The browser answered in a form Ghostlight does not recognize.",
-            ),
-            (
-                Refusal::BrowserAdapterOutdated,
-                "This browser command needs a newer Ghostlight extension.",
-            ),
-            (
-                Refusal::BrowserUnavailable {
-                    reason: BrowserUnavailableReason::NotAnswering,
-                },
-                "The browser this session works in stopped answering. Nothing was sent.",
-            ),
-            (
-                Refusal::BrowserUnavailable {
-                    reason: BrowserUnavailableReason::NotConnected,
-                },
-                "The browser this session works in is not connected. Nothing was sent.",
-            ),
-            (
-                Refusal::BrowserUnavailable {
-                    reason: BrowserUnavailableReason::WrongProfile,
-                },
-                "This session works in a browser that is not connected; a different browser is.",
-            ),
-            (
-                Refusal::BrowserUnavailable {
-                    reason: BrowserUnavailableReason::Busy,
-                },
-                "The browser connection was busy, so nothing was sent.",
-            ),
-            (
-                Refusal::BrowserContract,
-                "Ghostlight and the browser extension do not agree on this request.",
-            ),
-            (
-                Refusal::CancelledBeforeDispatch { by: None },
-                "Cancelled before anything reached the browser.",
-            ),
-            (
-                Refusal::CancelledBeforeDispatch {
-                    by: Some(CancelCause::Client),
-                },
-                "The agent cancelled before anything reached the browser.",
-            ),
-            (
-                Refusal::CancelledBeforeDispatch {
-                    by: Some(CancelCause::SessionEnded),
-                },
-                "The agent's session ended before anything reached the browser.",
-            ),
-            (
-                Refusal::CancelledBeforeDispatch {
-                    by: Some(CancelCause::Quit(QuitCause::Quit)),
-                },
-                "Ghostlight quit before anything reached the browser.",
-            ),
-            (
-                Refusal::CancelledAfterDispatch { by: None },
-                "The browser never confirmed what the sent command did.",
-            ),
-            (
-                Refusal::CancelledAfterDispatch {
-                    by: Some(CancelCause::Client),
-                },
-                "The agent cancelled before the browser confirmed what the sent command did.",
-            ),
-            (
-                Refusal::CancelledAfterDispatch {
-                    by: Some(CancelCause::SessionEnded),
-                },
-                "The agent's session ended before the browser confirmed what the sent command did.",
-            ),
-            (
-                Refusal::CancelledAfterDispatch {
-                    by: Some(CancelCause::Quit(QuitCause::Quit)),
-                },
-                "Ghostlight quit before the browser confirmed what the sent command did.",
-            ),
-            (
-                Refusal::EffectUnknown,
-                "The browser never confirmed what the sent command did.",
-            ),
-            (
-                Refusal::LandingDeniedUnknown {
-            code: crate::governance::ReasonCode::HostDenied,
-        },
-                "The new tab's final state is unknown after its landing was blocked.",
-            ),
-            (
-                Refusal::WorkspaceUnusable {
-                    reason: WorkspaceReason::TabUnavailable,
-                },
-                "That tab handle names no open tab in this session.",
-            ),
-            (
-                Refusal::WorkspaceUnusable {
-                    reason: WorkspaceReason::NoTab,
-                },
-                "This session has no open tab yet.",
-            ),
-            (
-                Refusal::WorkspaceUnusable {
-                    reason: WorkspaceReason::AmbiguousTab,
-                },
-                "More than one tab is open in this session, so the call must name one.",
-            ),
-            (
-                Refusal::FilesUnreadable {
-            problem: crate::language::outcome::FileProblem::Unavailable,
-        },
-                "The selected local files could not be prepared safely.",
-            ),
-            (
-                Refusal::CaptureTooLarge,
-                "The screenshot was too large to return.",
-            ),
-            (
-                Refusal::TabNotShowing,
-                "Nothing was captured: another tab is showing in this tab's window, and the browser draws only the tab it shows.",
-            ),
-            (
-                Refusal::NoDialogVisible,
-                "No JavaScript dialog is currently visible.",
-            ),
-            (
-                Refusal::DialogOpen,
-                "A JavaScript dialog is open on this page, so nothing was sent.",
-            ),
-            (
-                Refusal::NoHistoryEntry { forward: false },
-                "This tab has no earlier page in its history, so nothing was sent.",
-            ),
-            (
-                Refusal::NoHistoryEntry { forward: true },
-                "This tab has no later page in its history, so nothing was sent.",
-            ),
-            (
-                Refusal::RecordingUnavailable,
-                "This session has no recording.",
-            ),
-            (
-                Refusal::RecordingHeld,
-                "This session already has a recording.",
-            ),
-            (
-                Refusal::RecordingExportFailed,
-                "The recording could not be turned into a replay.",
-            ),
-            (
-                Refusal::RecordingNotAttached,
-                "The page did not take the replay at that target, so nothing was attached; the recording is kept.",
-            ),
-            (
-                Refusal::DeadlineExpired {
-                    before_dispatch: true,
-                    timeout_adjustable: true,
-                },
-                "The job ran out of time before anything changed in the browser.",
-            ),
-            (
-                Refusal::DeadlineExpired {
-                    before_dispatch: false,
-                    timeout_adjustable: true,
-                },
-                "The job ran out of time before the browser confirmed what the sent command did.",
-            ),
-        ];
-        for (refusal, expected) in summaries {
-            assert_eq!(refusal.summary(), expected);
-        }
-        assert_eq!(
-            Refusal::InvalidRequest.next_steps(),
-            vec!["Match the call to the advertised schema; the invalid_input detail states exactly what to change."]
-        );
-        assert_eq!(
-            Refusal::DeadlineBeforeStart.next_steps(),
-            vec!["Repeat the call when the current Ghostlight action has finished."]
-        );
-        assert_eq!(
-            Refusal::IncompatibleReceipt.next_steps(),
-            vec![UPDATE_EXTENSION_STEP]
-        );
-        assert_eq!(
-            Refusal::BrowserAdapterOutdated.next_steps(),
-            vec![UPDATE_EXTENSION_STEP]
-        );
-        assert_eq!(
-            Refusal::FilesUnreadable {
-                problem: FileProblem::Unavailable
-            }
-            .next_steps(),
-            vec!["Confirm each path is an existing file within Ghostlight's upload limits."]
-        );
-        assert_eq!(
-            Refusal::CaptureTooLarge.next_steps(),
-            vec!["Capture the viewport or a smaller region instead of the full page."]
-        );
-        assert_eq!(
-            Refusal::TabNotShowing.next_steps(),
-            vec!["Call browser_tabs with action focus for this tab, then repeat the screenshot; browser_read and browser_inspect read the page without it."]
-        );
-        assert_eq!(
-            Refusal::LocalInterlock.next_steps(),
-            vec!["The tab stays open because the user chose to keep Ghostlight's tabs; continue without closing it."]
-        );
-        for by in [
-            None,
-            Some(CancelCause::Client),
-            Some(CancelCause::Quit(QuitCause::Quit)),
-        ] {
-            assert!(Refusal::CancelledBeforeDispatch { by }
-                .next_steps()
-                .is_empty());
+        for by in [CancelCause::Client, CancelCause::SessionEnded] {
+            assert!(Refusal::CancelledBeforeStart { by }.next_steps().is_empty());
         }
         for quit in QuitCause::ALL {
-            let by = CancelCause::Quit(quit);
-            let steps = Refusal::CancelledBeforeStart { by }.next_steps();
+            let steps = Refusal::CancelledBeforeStart {
+                by: CancelCause::Quit(quit),
+            }
+            .next_steps();
             if matches!(quit, QuitCause::Uninstall | QuitCause::SignOut) {
                 assert!(steps.is_empty(), "{quit:?}");
             } else {
                 assert_eq!(steps, vec![REPEAT_IN_A_MOMENT], "{quit:?}");
             }
         }
-        for by in [CancelCause::Client, CancelCause::SessionEnded] {
-            assert!(Refusal::CancelledBeforeStart { by }.next_steps().is_empty());
-        }
-        for (reason, step) in [
-            (
-                BrowserUnavailableReason::NotAnswering,
-                "Check that the browser window is open and responsive, then repeat the call.",
-            ),
-            (
-                BrowserUnavailableReason::NotConnected,
-                "Ask the user to reopen that browser, then repeat the call.",
-            ),
-            (BrowserUnavailableReason::Busy, "Repeat the call."),
-        ] {
-            assert_eq!(
-                Refusal::BrowserUnavailable { reason }.next_steps(),
-                vec![step]
-            );
-        }
-        assert_eq!(
-            Refusal::BrowserContract.next_steps(),
-            vec![UPDATE_EXTENSION_STEP]
-        );
-        assert_eq!(
-            Refusal::EffectUnknown.next_steps(),
-            vec![
-                "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.",
-                "Then observe the page with browser_read or browser_inspect to learn what happened.",
-            ]
-        );
+    }
 
-        // Localhost is protected only when an authored policy marks it never-touch.
-        let refusal = Refusal::AuthorityBlocked {
-            code: crate::governance::ReasonCode::ProtectedHost,
-            host: Some("localhost".into()),
-            origin: None,
+    /// Defect L-D6 (28ea74b3): a script the page threw on names what it threw, quoted on one line
+    /// bounded to `SCRIPT_EXCEPTION_MAX_CHARS`, and that it may already have acted; its one step
+    /// checks the page and none speaks of dialogs. The sentence is the defect's own.
+    #[test]
+    fn a_script_that_threw_says_what_it_threw_on_one_bounded_line() {
+        let threw = |exception: &str| Refusal::ScriptThrew {
+            exception: exception.into(),
         };
-        assert_eq!(
-            refusal.summary(),
-            "Blocked: localhost is protected and is never automated."
-        );
-        assert_eq!(refusal.observed().host.as_deref(), Some("localhost"));
-        assert!(Refusal::InvalidRequest.observed().host.is_none());
-    }
-
-    #[test]
-    fn a_channel_refusal_names_the_switch_and_whose_policy_turned_it_off() {
-        for (channel, author, expected) in [
-            (
-                IntakeChannel::Mcp,
-                PolicyAuthor::User,
-                "Blocked: the user's Ghostlight policy turns off work from MCP agents.",
-            ),
-            (
-                IntakeChannel::Mcp,
-                PolicyAuthor::Organization,
-                "Blocked: the organization's Ghostlight policy turns off work from MCP agents.",
-            ),
-            (
-                IntakeChannel::Cli,
-                PolicyAuthor::User,
-                "Blocked: the user's Ghostlight policy turns off work from the command line.",
-            ),
-            (
-                IntakeChannel::Cli,
-                PolicyAuthor::Organization,
-                "Blocked: the organization's Ghostlight policy turns off work from the command line.",
-            ),
-        ] {
-            let refusal = Refusal::ChannelOff { channel, author };
-            assert_eq!(refusal.summary(), expected);
-            assert!(refusal.next_steps().is_empty());
-            let audit = refusal.audit();
-            assert_eq!(audit.summary(), expected);
-            assert_eq!(
-                serde_json::to_value(audit.refusal()).unwrap(),
-                serde_json::json!({"reason": "channel_off", "channel": channel.as_str()})
-            );
-        }
-    }
-
-    /// A primitive adapter refusal speaks the browser's own reason and never masquerades as a
-    /// disconnection.
-    #[test]
-    fn primitive_refusal_carries_the_browser_reason_without_claiming_a_disconnection() {
-        let refusal = Refusal::BrowserPrimitive {
-            detail: "target is not visible for focus".into(),
-            cause: crate::language::outcome::PrimitiveCause::Refused,
-        };
-        let summary = refusal.summary();
-        assert!(summary.contains("target is not visible for focus"));
-        assert!(!summary.to_lowercase().contains("disconnected"));
-        assert_eq!(
-            refusal.next_steps(),
-            vec!["Read the browser's stated reason, adjust the call or the page, then repeat."]
-        );
-    }
-
-    /// A deadline suggests only what the call can actually change: more `timeout_ms` below the
-    /// maximum, a narrower request at it, and a look at the page when the action may already have
-    /// happened.
-    #[test]
-    fn deadline_advice_follows_what_the_call_can_change() {
-        assert_eq!(
-            Refusal::DeadlineExpired {
-                before_dispatch: true,
-                timeout_adjustable: true,
-            }
-            .next_steps(),
-            vec!["Repeat with a longer timeout_ms when the page genuinely needs more time."]
-        );
-        let fixed = Refusal::DeadlineExpired {
-            before_dispatch: true,
-            timeout_adjustable: false,
-        }
-        .next_steps();
-        assert_eq!(
-            fixed,
-            vec!["Repeat the call; if the page is very large, narrow it first (a target, a smaller max_chars, or a smaller inspect scope)."]
-        );
-        assert!(!fixed.join(" ").contains("timeout_ms"));
-        for timeout_adjustable in [true, false] {
-            let after = Refusal::DeadlineExpired {
-                before_dispatch: false,
-                timeout_adjustable,
-            }
-            .next_steps();
-            assert_eq!(
-                after,
-                vec!["Check the page with browser_read or browser_screenshot before repeating; the action may already have happened."]
-            );
-        }
-    }
-
-    /// Ghostlight's own control page is named by the address the caller wrote, says other ports
-    /// are untouched, and sends no one to policy, which cannot lift it.
-    #[test]
-    fn the_own_control_page_refusal_names_the_address_and_no_policy_call() {
-        for origin in [
-            "http://127.0.0.1:41259",
-            "http://localhost:41259",
-            "http://[::1]:41259",
-        ] {
-            let refusal = Refusal::AuthorityBlocked {
-                code: crate::governance::ReasonCode::OwnWorkbench,
-                host: Some("127.0.0.1".into()),
-                origin: Some(origin.into()),
-            };
-            assert_eq!(
-                refusal.summary(),
-                format!("Blocked: {origin} is Ghostlight's own control page and is never automated. Other ports on this computer are not affected.")
-            );
-            assert!(refusal.next_steps().is_empty());
-            assert_eq!(refusal.observed().host.as_deref(), Some("127.0.0.1"));
-        }
-        let unnamed = Refusal::AuthorityBlocked {
-            code: crate::governance::ReasonCode::OwnWorkbench,
-            host: None,
-            origin: None,
-        };
-        assert_eq!(
-            unnamed.summary(),
-            "Blocked: that address is Ghostlight's own control page and is never automated. Other ports on this computer are not affected."
-        );
-        let protected = Refusal::AuthorityBlocked {
-            code: crate::governance::ReasonCode::ProtectedHost,
-            host: Some("localhost".into()),
-            origin: None,
-        };
-        assert_eq!(
-            protected.summary(),
-            "Blocked: localhost is protected and is never automated."
-        );
-    }
-
-    /// A policy denial points to the one tool that explains policy. The human controls stay
-    /// step-free (ADR-0126), and so do the outages Ghostlight resolves without the caller.
-    #[test]
-    fn policy_denials_point_to_policy_explain() {
-        let explain = vec!["Call policy_explain to see what this session may do.".to_string()];
-        for reason in [
-            BlockedReason::Host,
-            BlockedReason::ProtectedHost,
-            BlockedReason::Capability,
-            BlockedReason::TabClose,
-            BlockedReason::Screenshot,
-            BlockedReason::Unspecified,
-        ] {
-            let refusal = Refusal::AuthorityBlocked {
-                code: reason.code(),
-                host: Some("example.com".into()),
-                origin: None,
-            };
-            assert_eq!(refusal.next_steps(), explain, "{reason:?}");
-        }
-        for reason in [
-            BlockedReason::AuditUnavailable,
-            BlockedReason::InvalidAuthority,
-            BlockedReason::Hold,
-            BlockedReason::SessionEnded,
-        ] {
-            let refusal = Refusal::AuthorityBlocked {
-                code: reason.code(),
-                host: None,
-                origin: None,
-            };
-            assert!(refusal.next_steps().is_empty(), "{reason:?}");
-        }
-    }
-
-    /// Governance vocabulary stays out of what the model reads.
-    #[test]
-    fn model_facing_sentences_use_plain_words() {
-        let sentences = [
-            Outcome::TabsListed { count: 3 }.summary(),
-            Outcome::PolicyExplained {
-                capabilities: 3,
-                layers: 2,
-            }
-            .summary(),
-            Outcome::RecordingBoundary { duration_ms: 3_000 }.summary(),
-            Refusal::AuthorityBlocked {
-                code: crate::governance::ReasonCode::ScreenshotDenied,
-                host: None,
-                origin: None,
-            }
-            .summary(),
-        ];
-        for sentence in sentences {
-            let lower = sentence.to_lowercase();
-            for jargon in [
-                "authority",
-                "admitted",
-                "bound",
-                "custody",
-                "document scope",
-                "document boundary",
-                "intake",
-            ] {
-                assert!(!lower.contains(jargon), "{sentence:?} says {jargon:?}");
-            }
-        }
-    }
-
-    /// Every workspace reason names its own way back, or deliberately none.
-    #[test]
-    fn workspace_reasons_teach_their_own_recovery() {
-        assert_eq!(
-            WorkspaceReason::NoTab.next_steps(),
-            vec!["Call browser_navigate with url to open a page."]
-        );
-        assert_eq!(
-            WorkspaceReason::AmbiguousTab.next_steps(),
-            vec!["Repeat the call with tab set to the handle of the tab you mean, listed in tabs."]
-        );
-        assert_eq!(
-            WorkspaceReason::TabUnavailable.next_steps(),
-            vec!["Call browser_tabs with action list to obtain current tab handles."]
-        );
-        for (reason, step) in [
-            (
-                StaleReason::Removed,
-                "Call browser_find or browser_inspect to obtain current target handles.",
-            ),
-            (
-                StaleReason::Navigated,
-                "Call browser_inspect to obtain current target handles.",
-            ),
-            (
-                StaleReason::TabClosed,
-                "Call browser_tabs to choose an open tab.",
-            ),
-            (
-                StaleReason::Unknown,
-                "Call browser_find or browser_inspect to obtain current target handles.",
-            ),
-        ] {
-            assert_eq!(
-                WorkspaceReason::StaleTarget {
-                    reason,
-                    help: StaleHelp::None,
-                }
-                .next_steps(),
-                vec![step]
-            );
-        }
-        assert_eq!(
-            WorkspaceReason::StaleView.next_steps(),
-            vec!["Call browser_screenshot to obtain a current view handle."]
-        );
-        assert_eq!(
-            WorkspaceReason::TabHeld.next_steps(),
-            vec!["Call browser_navigate with the tab and an allowed url to leave the page, or browser_tabs with action close to close the tab."]
-        );
-        assert_eq!(
-            WorkspaceReason::WorkspaceBusy.next_steps(),
-            vec!["Wait for the active Ghostlight invocation to finish."]
-        );
-        assert_eq!(
-            WorkspaceReason::OwnershipMismatch { owner: None }.next_steps(),
-            vec!["Collect fresh handles from this session, then continue with those."]
-        );
-        assert_eq!(
-            WorkspaceReason::OwnershipMismatch {
-                owner: Some("Workspace B".into())
-            }
-            .next_steps(),
-            vec!["Call browser_tabs with action list to see this session's tabs, then continue with those handles."]
-        );
-        assert_eq!(
-            WorkspaceReason::OwnershipMismatch {
-                owner: Some("Workspace B".into())
-            }
-            .summary(),
-            "That handle belongs to another Ghostlight session (Workspace B)."
-        );
-        assert_eq!(
-            WorkspaceReason::WorkspaceClosed.next_steps(),
-            vec!["Start over; the next call opens a fresh session and old handles will not work."]
-        );
-    }
-
-    /// An empty-object script value adds one step, worded for whether the script was awaited, and
-    /// no measurement or sentence.
-    #[test]
-    fn an_empty_object_value_adds_one_step_and_nothing_else() {
-        let evaluated = |empty_object| Outcome::ScriptEvaluated {
-            host: Some("example.com".into()),
-            empty_object,
-        };
-        assert!(evaluated(EmptyObject::Absent).next_steps().is_empty());
-        assert_eq!(
-            evaluated(EmptyObject::Awaited).next_steps(),
-            vec!["The value {} is also how a DOM node, a Map or a class instance reads as JSON. Return plain fields, such as el.textContent or Array.from(map), to read them."]
-        );
-        assert_eq!(
-            evaluated(EmptyObject::NotAwaited).next_steps(),
-            vec!["The value {} is also how an unawaited promise, a DOM node or a Map reads as JSON. To wait for a promise, end the script with return await <promise>."]
-        );
-        for empty_object in [EmptyObject::Awaited, EmptyObject::NotAwaited] {
-            assert_eq!(
-                evaluated(empty_object).summary(),
-                "Executed JavaScript on example.com."
-            );
-            assert_eq!(
-                evaluated(empty_object).observed(),
-                evaluated(EmptyObject::Absent).observed()
-            );
-        }
-    }
-
-    /// Outcome guidance leads with the recovery action and stays truthful about partial work.
-    #[test]
-    fn outcome_next_steps_teach_the_fix() {
-        assert_eq!(
-            Outcome::TabsListed { count: 0 }.next_steps(),
-            vec!["Call browser_navigate with url to open a page."]
-        );
-        assert!(Outcome::TabsListed { count: 2 }.next_steps().is_empty());
-        assert_eq!(
-            Outcome::TabNotHeld.next_steps(),
-            vec!["Call browser_tabs with action list to see this session's tabs."]
-        );
-        let opened = Outcome::PageScrolled {
-            host: None,
-            direction: crate::language::ScrollDirection::Down,
-        }
-        .with_open_dialog(DialogKind::Prompt);
-        assert_eq!(
-            opened.next_steps(),
-            vec!["Call browser_dialog with action status to read it, then accept, dismiss, or respond with text for a prompt."]
-        );
-        assert_eq!(opened.observed(), Observed::default());
-        assert_eq!(
-            Outcome::TargetsListed {
-                noun: TargetNoun::Control,
-                count: 0,
-                host: None,
-                left_out: LeftOut::default(),
-            }
-            .next_steps(),
-            vec!["Try a different search term, scroll to reveal content, or use browser_inspect to view available page controls."]
-        );
-        assert!(Outcome::TargetsListed {
-            noun: TargetNoun::Control,
-            count: 3,
-            host: None,
-            left_out: LeftOut::default(),
-        }
-        .next_steps()
-        .is_empty());
-        assert_eq!(
-            Outcome::TextRead {
-                words: 0,
-                host: None,
-            }
-            .next_steps(),
-            vec!["Wait for the page to finish rendering with browser_wait, or inspect controls with browser_inspect."]
-        );
-        assert!(Outcome::TextRead {
-            words: 42,
-            host: None,
-        }
-        .next_steps()
-        .is_empty());
-        assert_eq!(
-            Outcome::DialogObserved {
-            present: true,
-            message: None,
-            prompt: None,
-        }.next_steps(),
-            vec!["Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing."]
-        );
-        for field in [PromptField::Holds("hello".into()), PromptField::Unreported] {
-            assert_eq!(
-                Outcome::DialogObserved {
-                    present: true,
-                    message: None,
-                    prompt: Some(field),
-                }
-                .next_steps(),
-                vec!["Call browser_dialog with action accept to answer with the text in its field, as OK does, respond with your own text, or dismiss, before continuing."]
-            );
-        }
-        assert!(Outcome::DialogObserved {
-            present: false,
-            message: None,
-            prompt: None,
-        }
-        .next_steps()
-        .is_empty());
-        assert_eq!(
-            Outcome::DocumentInspected {
-                nodes: 0,
-                truncated: false,
-                differences: None,
-            }
-            .next_steps(),
-            vec!["Wait for the page to finish loading with browser_wait, or inspect without a root selector."]
-        );
-        assert_eq!(
-            Outcome::SelectorUnresolved {
-                matched: 0,
-                more: false
-            }
-            .next_steps(),
-            vec!["Use browser_find with text visible on the page, inspect for fresh handles, or narrow the selector with role and exact."]
-        );
-        assert_eq!(
-            composition(2, 5)
-            .next_steps(),
-            vec!["Use the per-step results to prepare only unfinished work with current page references."]
-        );
-        assert!(composition(5, 5).next_steps().is_empty());
-        assert_eq!(
-            composition(2, 5)
-            .next_steps(),
-            vec!["Use the per-step results to prepare only unfinished work with current page references."]
-        );
-        assert_eq!(
-            Outcome::Waited {
-                condition: WaitCondition::TextPresent,
-                elapsed_ms: 8_000,
-                satisfied: false,
-                host: None,
-            }
-            .next_steps(),
-            vec![
-                "Read or inspect the page to see its current state before choosing another action."
-            ]
-        );
-        assert_eq!(
-            Outcome::DiagnosticsRead {
-                count: 0,
-                capture_started: true,
-                problems_only: true,
-                host: None,
-            }
-            .next_steps(),
-            vec!["Reproduce the problem or reload the page, then call browser_diagnose again."]
-        );
-        assert_eq!(
-            Outcome::DocumentInspected {
-                nodes: 200,
-                truncated: true,
-                differences: None,
-            }
-            .next_steps(),
-            vec!["Narrow the subtree root or depth to capture the rest."]
-        );
-    }
-
-    #[test]
-    fn a_stale_handle_says_why_in_one_sentence_per_word() {
-        for (reason, summary) in [
-            (
-                StaleReason::Removed,
-                "That target is no longer on the page.",
-            ),
-            (
-                StaleReason::Navigated,
-                "That target belongs to an older version of the page.",
-            ),
-            (StaleReason::TabClosed, "That target's tab is closed."),
-            (
-                StaleReason::Unknown,
-                "Ghostlight does not know that target handle.",
-            ),
-        ] {
-            let stale = WorkspaceReason::StaleTarget {
-                reason,
-                help: StaleHelp::None,
-            };
-            assert_eq!(stale.summary(), summary);
-            assert_eq!(stale.as_fact(), "stale_target");
-            assert_eq!(stale.next_steps().len(), 1);
-            assert_eq!(
-                Refusal::WorkspaceUnusable { reason: stale }.summary(),
-                summary
-            );
-        }
-    }
-
-    #[test]
-    fn a_removed_handle_names_its_replacement_or_asks_for_a_pick() {
-        let replacement = WorkspaceReason::StaleTarget {
-            reason: StaleReason::Removed,
-            help: StaleHelp::Replacement {
-                tool: "browser_click",
-                target: "target_7k2nb5xe".into(),
-            },
-        };
-        assert_eq!(
-            replacement.summary(),
-            "That target is no longer on the page. One control on the page has the same role, name and row."
-        );
-        assert_eq!(
-            replacement.next_steps(),
-            vec!["Repeat browser_click with target target_7k2nb5xe."]
-        );
-        let candidates = WorkspaceReason::StaleTarget {
-            reason: StaleReason::Removed,
-            help: StaleHelp::Candidates { named: true },
-        };
-        assert_eq!(
-            candidates.summary(),
-            "That target is no longer on the page."
-        );
-        assert_eq!(
-            candidates.next_steps(),
-            vec!["Pick a target from recovery_candidates by its context, or call browser_find for current target handles."]
-        );
-        // Only a removed control has a replacement: every other word keeps its own sentence.
-        for reason in [
-            StaleReason::Navigated,
-            StaleReason::TabClosed,
-            StaleReason::Unknown,
-        ] {
-            let offered = WorkspaceReason::StaleTarget {
-                reason,
-                help: StaleHelp::Candidates { named: true },
-            };
-            let bare = WorkspaceReason::StaleTarget {
-                reason,
-                help: StaleHelp::None,
-            };
-            assert_eq!(offered.summary(), bare.summary());
-            assert_eq!(offered.next_steps(), bare.next_steps());
-        }
-    }
-
-    #[test]
-    fn candidates_without_names_are_picked_by_role_and_nth_not_by_context() {
-        let unnamed = WorkspaceReason::StaleTarget {
-            reason: StaleReason::Removed,
-            help: StaleHelp::Candidates { named: false },
-        };
-        assert_eq!(unnamed.summary(), "That target is no longer on the page.");
-        assert_eq!(
-            unnamed.next_steps(),
-            vec!["Pick a target from recovery_candidates by its role and nth, or call browser_find for current target handles."]
-        );
-    }
-
-    #[test]
-    fn workspace_errors_map_to_the_refusal_that_says_what_is_true() {
-        let unusable = |reason: WorkspaceReason| Refusal::WorkspaceUnusable { reason };
-        let examples = [
-            (
-                WorkspaceError::StaleTab,
-                unusable(WorkspaceReason::TabUnavailable),
-            ),
-            (WorkspaceError::NoTab, unusable(WorkspaceReason::NoTab)),
-            (
-                WorkspaceError::AmbiguousTab,
-                unusable(WorkspaceReason::AmbiguousTab),
-            ),
-            (
-                WorkspaceError::StaleTarget {
-                    reason: StaleReason::Removed,
-                },
-                unusable(WorkspaceReason::StaleTarget {
-                    reason: StaleReason::Removed,
-                    help: StaleHelp::None,
-                }),
-            ),
-            (
-                WorkspaceError::StaleView,
-                unusable(WorkspaceReason::StaleView),
-            ),
-            (
-                WorkspaceError::OutsideImage {
-                    width: 400,
-                    height: 300,
-                },
-                unusable(WorkspaceReason::OutsideImage(Some(ImageSize {
-                    width: 400,
-                    height: 300,
-                }))),
-            ),
-            (
-                WorkspaceError::FieldsOnSeveralTabs,
-                unusable(WorkspaceReason::FieldsOnSeveralTabs),
-            ),
-            (
-                WorkspaceError::Held(crate::workspace::TabHold {
-                    denial: crate::governance::Decision::refused(
-                        crate::governance::ReasonCode::HostDenied,
-                    ),
-                    authority: "authority_test".into(),
-                    requirements: crate::governance::CapabilitySet::READ,
-                    url: "https://Elsewhere.test/path".into(),
-                }),
-                Refusal::TabHeld {
-                    host: Some("elsewhere.test".into()),
-                },
-            ),
-            (WorkspaceError::BrowserPinned, Refusal::BrowserPinned),
-            (
-                WorkspaceError::Busy,
-                unusable(WorkspaceReason::WorkspaceBusy),
-            ),
-            (
-                WorkspaceError::NotOwnedTab,
-                unusable(WorkspaceReason::OwnershipMismatch { owner: None }),
-            ),
-            (
-                WorkspaceError::NotOwnedTarget,
-                unusable(WorkspaceReason::OwnershipMismatch { owner: None }),
-            ),
-            (
-                WorkspaceError::NotOwnedView,
-                unusable(WorkspaceReason::OwnershipMismatch { owner: None }),
-            ),
-            (
-                WorkspaceError::PhysicalTabOwned,
-                unusable(WorkspaceReason::OwnershipMismatch { owner: None }),
-            ),
-            (
-                WorkspaceError::UnknownWorkspace,
-                unusable(WorkspaceReason::WorkspaceClosed),
-            ),
-        ];
-        for (error, expected) in examples {
-            let refusal = workspace_refusal(error);
-            let expected_fact = match &expected {
-                Refusal::WorkspaceUnusable { reason } => reason.as_fact(),
-                Refusal::TabHeld { .. } => "tab_held",
-                _ => "browser_pinned",
-            };
-            assert_eq!(refusal, expected);
-            assert_eq!(refusal.reason(), expected_fact);
-        }
-        assert_eq!(WorkspaceReason::TabUnavailable.as_fact(), "tab_unavailable");
-        assert_eq!(WorkspaceReason::NoTab.as_fact(), "no_tab");
-        assert_eq!(WorkspaceReason::AmbiguousTab.as_fact(), "ambiguous_tab");
-        // History stores the same names the facts use, and none of the carried tab or size.
-        for reason in [
-            WorkspaceReason::NoTab,
-            WorkspaceReason::AmbiguousTab,
-            WorkspaceReason::TabUnavailable,
-            WorkspaceReason::HandleOnOtherTab(Some("tab_7k2nb5xe".into())),
-            WorkspaceReason::FieldsOnSeveralTabs,
-            WorkspaceReason::OutsideImage(Some(ImageSize {
-                width: 400,
-                height: 300,
-            })),
-        ] {
-            assert_eq!(serde_json::to_value(&reason).unwrap(), reason.as_fact());
-        }
-    }
-
-    #[test]
-    fn a_handle_on_another_tab_a_split_fill_and_a_point_off_the_image_each_say_so() {
-        let other = WorkspaceReason::HandleOnOtherTab(Some("tab_7k2nb5xe".into()));
-        assert_eq!(
-            other.summary(),
-            "That handle belongs to tab_7k2nb5xe, another of this session's tabs."
-        );
-        assert_eq!(
-            other.next_steps(),
-            vec!["Repeat the call with handles from one tab, and with tab left out or set to that tab."]
-        );
-        assert_eq!(
-            WorkspaceReason::HandleOnOtherTab(None).summary(),
-            "That handle belongs to another of this session's tabs."
-        );
-        assert_eq!(
-            WorkspaceReason::FieldsOnSeveralTabs.summary(),
-            "A fill works in one tab, and these targets are on more than one."
-        );
-        assert_eq!(
-            WorkspaceReason::FieldsOnSeveralTabs.next_steps(),
-            vec!["Make one browser_fill_form call for each tab."]
-        );
-        let outside = WorkspaceReason::OutsideImage(Some(ImageSize {
-            width: 400,
-            height: 300,
-        }));
-        assert_eq!(
-            outside.summary(),
-            "Those coordinates are outside the view's image, which is 400 by 300 pixels."
-        );
-        assert_eq!(
-            outside.next_steps(),
-            vec!["Repeat with coordinates inside the image, or call browser_screenshot for a new view."]
-        );
-        assert_eq!(
-            WorkspaceReason::TabUnavailable.summary(),
-            "That tab handle names no open tab in this session."
-        );
-    }
-
-    const UPDATE_EXTENSION_STEP: &str = "Ask the user to update Ghostlight in Browser (to update now, open chrome://extensions, turn on Developer mode and click Update), then repeat the call.";
-
-    fn store_step() -> String {
-        format!(
-            "Ask the user to add Ghostlight in Browser from {}, or to open the Ghostlight window on this computer for the setup steps, then repeat the call.",
-            crate::language::setup::STORE_LISTING_URL
-        )
-    }
-
-    #[test]
-    fn advice_is_given_only_while_setup_is_incomplete_and_no_profile_has_the_extension() {
-        assert_eq!(
-            ExtensionAdvice::resolve(false, false),
-            ExtensionAdvice::AddFromStore
-        );
-        for (complete, present) in [(false, true), (true, false), (true, true)] {
-            assert_eq!(
-                ExtensionAdvice::resolve(complete, present),
-                ExtensionAdvice::Plain
-            );
-        }
-    }
-
-    #[test]
-    fn the_no_browser_answer_adds_the_store_step_only_when_advised() {
-        let plain = Refusal::BrowserStartupManual {
-            browsers: vec!["Chrome".into()],
-            extension: ExtensionAdvice::Plain,
-        };
-        let advised = Refusal::BrowserStartupManual {
-            browsers: vec!["Chrome".into()],
-            extension: ExtensionAdvice::AddFromStore,
-        };
-        assert!(plain.next_steps().is_empty());
-        assert_eq!(advised.next_steps(), vec![store_step()]);
-        assert_eq!(plain.summary(), advised.summary());
-    }
-
-    #[test]
-    fn an_absent_extension_sends_the_person_to_the_store_only_when_advised() {
-        let absent = |extension| Refusal::BrowserRecoveryFailed {
-            reason: BrowserRecoveryReason::ExtensionAbsent,
-            extension,
-        };
-        assert_eq!(
-            absent(ExtensionAdvice::Plain).next_steps(),
-            vec!["Install Ghostlight in the selected browser profile, then repeat the call."]
-        );
-        assert_eq!(
-            absent(ExtensionAdvice::AddFromStore).next_steps(),
-            vec![store_step()]
-        );
-        assert_eq!(
-            absent(ExtensionAdvice::Plain).summary(),
-            absent(ExtensionAdvice::AddFromStore).summary()
-        );
-    }
-
-    #[test]
-    fn a_launched_browser_whose_adapter_never_arrived_sends_the_person_to_the_store_only_when_advised(
-    ) {
-        let timed_out = |extension| Refusal::BrowserRecoveryFailed {
-            reason: BrowserRecoveryReason::HandshakeTimeout,
-            extension,
-        };
-        assert_eq!(
-            timed_out(ExtensionAdvice::Plain).next_steps(),
-            vec!["Ask the user to open a window of that browser with the Ghostlight extension installed, then repeat the call."]
-        );
-        assert_eq!(
-            timed_out(ExtensionAdvice::AddFromStore).next_steps(),
-            vec![store_step()]
-        );
-        assert_eq!(
-            timed_out(ExtensionAdvice::Plain).summary(),
-            timed_out(ExtensionAdvice::AddFromStore).summary()
-        );
-    }
-
-    #[test]
-    fn advice_changes_no_other_recovery_failure() {
-        for reason in [
-            BrowserRecoveryReason::BrowserAbsent,
-            BrowserRecoveryReason::LaunchFailed,
-            BrowserRecoveryReason::SandboxedPackage,
-            BrowserRecoveryReason::NativeHostUnavailable,
-            BrowserRecoveryReason::OwnedElsewhere,
-        ] {
-            let with =
-                |extension| Refusal::BrowserRecoveryFailed { reason, extension }.next_steps();
-            assert_eq!(
-                with(ExtensionAdvice::Plain),
-                with(ExtensionAdvice::AddFromStore)
-            );
-        }
-    }
-
-    #[test]
-    fn cross_tree_ownership_refusal_teaches_the_deliberate_install() {
-        let refusal = Refusal::BrowserRecoveryFailed {
-            reason: super::BrowserRecoveryReason::OwnedElsewhere,
-            extension: ExtensionAdvice::AddFromStore,
-        };
-        assert_eq!(
-            refusal.summary(),
-            "Another Ghostlight installation owns the browser registration."
-        );
-        assert_eq!(
-            refusal.next_steps(),
-            vec![
-                "Ask the user to run ghostlight install from the Ghostlight installation that should own the browsers, then repeat the call."
-                    .to_owned()
-            ]
-        );
-    }
-
-    #[test]
-    fn observed_json_shape_round_trips_unchanged() {
-        let observed = Observed {
-            host: Some("example.com".into()),
-            readiness: Some("complete".into()),
-            count: Some(3),
-            width: Some(1280),
-            height: Some(720),
-            rebound: false,
-        };
-        let encoded = serde_json::to_value(&observed).unwrap();
-        assert_eq!(
-            encoded,
-            json!({
-                "host":"example.com",
-                "readiness":"complete",
-                "count":3,
-                "width":1280,
-                "height":720
-            })
-        );
-        assert_eq!(
-            serde_json::from_value::<Observed>(encoded).unwrap(),
-            observed
-        );
-    }
-
-    fn listed(noun: TargetNoun, cut: &[(LeftOutKey, usize)]) -> Outcome {
-        let mut left_out = LeftOut::default();
-        for (key, amount) in cut {
-            left_out.add(*key, *amount);
-        }
-        Outcome::TargetsListed {
-            noun,
-            count: 80,
-            host: Some("news.example".into()),
-            left_out,
-        }
-    }
-
-    #[test]
-    fn a_cut_listing_keeps_its_summary_and_adds_one_step() {
-        let outcome = listed(TargetNoun::Control, &[(LeftOutKey::Chrome, 96)]);
-        assert_eq!(outcome.summary(), "Found 80 controls on news.example.");
-        assert_eq!(
-            outcome.next_steps(),
-            vec![
-                "96 header, nav and footer controls were left out to fit; raise max_items (up to 200) or use browser_find for one by name."
-            ]
-        );
-    }
-
-    #[test]
-    fn the_step_names_the_tier_that_matters_most_among_those_cut() {
-        let both = listed(
-            TargetNoun::Item,
-            &[(LeftOutKey::Chrome, 4), (LeftOutKey::Content, 1)],
-        );
-        assert_eq!(
-            both.next_steps(),
-            vec!["1 page content item was left out to fit; raise max_items (up to 200) or use browser_find for one by name."]
-        );
-        let aside = listed(TargetNoun::Control, &[(LeftOutKey::Aside, 12)]);
-        assert_eq!(
-            aside.next_steps(),
-            vec!["12 aside controls were left out to fit; raise max_items (up to 200) or use browser_find for one by name."]
-        );
-    }
-
-    #[test]
-    fn hidden_controls_a_dialog_and_a_find_get_no_cut_step() {
-        for outcome in [
-            listed(TargetNoun::Control, &[(LeftOutKey::Hidden, 30)]),
-            listed(TargetNoun::Control, &[(LeftOutKey::BehindDialog, 30)]),
-            listed(TargetNoun::Match, &[(LeftOutKey::Content, 30)]),
-            listed(TargetNoun::Control, &[]),
-        ] {
-            assert!(outcome.next_steps().is_empty(), "{outcome:?}");
-        }
-    }
-
-    #[test]
-    fn a_cut_listing_audits_the_same_count_as_a_whole_one() {
-        let cut = listed(TargetNoun::Control, &[(LeftOutKey::Chrome, 96)]);
-        let whole = listed(TargetNoun::Control, &[]);
-        assert_eq!(cut.observed(), whole.observed());
-    }
-
-    /// One refusal of every variant, and of every closed cause that changes its model code.
-    fn every_refusal() -> Vec<Refusal> {
-        use crate::governance::ReasonCode;
-        use crate::language::page_refusal::{PageGesture, PageRefusal};
-        let mut all = vec![
-            Refusal::Capacity,
-            Refusal::InvalidRequest,
-            Refusal::CancelledBeforeStart {
-                by: CancelCause::Client,
-            },
-            Refusal::DeadlineBeforeStart,
-            Refusal::AuthorityBlocked {
-                code: ReasonCode::HostDenied,
-                host: None,
-                origin: None,
-            },
-            Refusal::AuthorityBlocked {
-                code: ReasonCode::ChannelDenied,
-                host: None,
-                origin: None,
-            },
-            Refusal::ChannelOff {
-                channel: IntakeChannel::Mcp,
-                author: PolicyAuthor::User,
-            },
-            Refusal::LocalInterlock,
-            Refusal::CredentialAuthorization {
-                control: ControlRef::new(TargetRole::Textbox, "Password", None, true),
-            },
-            Refusal::IncompatibleReceipt,
-            Refusal::BrowserAdapterOutdated,
-            Refusal::DeadlineExpired {
-                before_dispatch: true,
-                timeout_adjustable: false,
-            },
-            Refusal::PageRefused {
-                refusal: PageRefusal::Disabled,
-                gesture: PageGesture::Other,
-            },
-            Refusal::FieldsReverted {
-                set: 1,
-                reverted: vec![],
-            },
-            Refusal::FieldValuesRejected {
-                fields: vec![],
-                total: 1,
-            },
-            Refusal::DocumentUnavailable,
-            Refusal::CancelledBeforeDispatch { by: None },
-            Refusal::BrowserContract,
-            Refusal::BrowserAmbiguous,
-            Refusal::BrowserUnknown,
-            Refusal::BrowserPinned,
-            Refusal::BrowserStartupManual {
-                browsers: vec![],
-                extension: ExtensionAdvice::Plain,
-            },
-            Refusal::ConnectionLost,
-            Refusal::CancelledAfterDispatch { by: None },
-            Refusal::EffectUnknown,
-            Refusal::ScriptThrew {
-                exception: "ReferenceError: missing is not defined".into(),
-            },
-            Refusal::LandingDeniedUnknown {
-                code: ReasonCode::HostDenied,
-            },
-            Refusal::WorkspaceUnusable {
-                reason: WorkspaceReason::NoTab,
-            },
-            Refusal::TabHeld { host: None },
-            Refusal::CaptureTooLarge,
-            Refusal::TabNotShowing,
-            Refusal::NoDialogVisible,
-            Refusal::DialogOpen,
-            Refusal::NoHistoryEntry { forward: false },
-            Refusal::RecordingUnavailable,
-            Refusal::RecordingHeld,
-            Refusal::RecordingExportFailed,
-            Refusal::RecordingNotAttached,
-        ];
-        for cause in [
-            PrimitiveCause::Refused,
-            PrimitiveCause::DebuggerUnavailable,
-            PrimitiveCause::SessionLost,
-        ] {
-            all.push(Refusal::BrowserPrimitive {
-                detail: "Frame gone".into(),
-                cause,
-            });
-        }
-        for reason in [
-            BrowserUnavailableReason::NotAnswering,
-            BrowserUnavailableReason::NotConnected,
-            BrowserUnavailableReason::WrongProfile,
-            BrowserUnavailableReason::Busy,
-        ] {
-            all.push(Refusal::BrowserUnavailable { reason });
-        }
-        for reason in [
-            BrowserRecoveryReason::BrowserAbsent,
-            BrowserRecoveryReason::LaunchFailed,
-            BrowserRecoveryReason::SandboxedPackage,
-            BrowserRecoveryReason::ExtensionAbsent,
-            BrowserRecoveryReason::NativeHostUnavailable,
-            BrowserRecoveryReason::OwnedElsewhere,
-            BrowserRecoveryReason::HandshakeTimeout,
-        ] {
-            all.push(Refusal::BrowserRecoveryFailed {
-                reason,
-                extension: ExtensionAdvice::Plain,
-            });
-        }
-        for problem in [
-            FileProblem::Unavailable,
-            FileProblem::NotAFile,
-            FileProblem::FileTooLarge,
-            FileProblem::UploadTooLarge,
-            FileProblem::ReadFailed,
-            FileProblem::Changed,
-            FileProblem::InvalidName,
-            FileProblem::NotBase64,
-            FileProblem::StaleCapture,
-        ] {
-            all.push(Refusal::FilesUnreadable { problem });
-        }
-        for cause in [
-            CheckFailure::Unmet,
-            CheckFailure::Blocked(BlockedReason::Capability),
-            CheckFailure::Cancelled,
-            CheckFailure::DeadlineExpired,
-            CheckFailure::Disconnected,
-            CheckFailure::BrowserUnavailable,
-            CheckFailure::DocumentUnavailable,
-            CheckFailure::BrowserRefused,
-        ] {
-            all.push(Refusal::ActionUnconfirmed {
-                action: Box::new(Outcome::DialogHandled { accepted: true }),
-                cause,
-                code: cause.decision_code(),
-            });
-        }
-        all
-    }
-
-    /// The name of a refusal's variant. The match is exhaustive, so a new variant fails to
-    /// compile here until the table below gives it a model code and an audit tag.
-    const fn variant_name(refusal: &Refusal) -> &'static str {
-        match refusal {
-            Refusal::Capacity => "Capacity",
-            Refusal::InvalidRequest => "InvalidRequest",
-            Refusal::CancelledBeforeStart { .. } => "CancelledBeforeStart",
-            Refusal::DeadlineBeforeStart => "DeadlineBeforeStart",
-            Refusal::AuthorityBlocked { .. } => "AuthorityBlocked",
-            Refusal::ChannelOff { .. } => "ChannelOff",
-            Refusal::LocalInterlock => "LocalInterlock",
-            Refusal::CredentialAuthorization { .. } => "CredentialAuthorization",
-            Refusal::IncompatibleReceipt => "IncompatibleReceipt",
-            Refusal::BrowserAdapterOutdated => "BrowserAdapterOutdated",
-            Refusal::DeadlineExpired { .. } => "DeadlineExpired",
-            Refusal::BrowserPrimitive { .. } => "BrowserPrimitive",
-            Refusal::PageRefused { .. } => "PageRefused",
-            Refusal::FieldsReverted { .. } => "FieldsReverted",
-            Refusal::FieldValuesRejected { .. } => "FieldValuesRejected",
-            Refusal::DocumentUnavailable => "DocumentUnavailable",
-            Refusal::CancelledBeforeDispatch { .. } => "CancelledBeforeDispatch",
-            Refusal::BrowserUnavailable { .. } => "BrowserUnavailable",
-            Refusal::BrowserContract => "BrowserContract",
-            Refusal::BrowserAmbiguous => "BrowserAmbiguous",
-            Refusal::BrowserUnknown => "BrowserUnknown",
-            Refusal::BrowserPinned => "BrowserPinned",
-            Refusal::BrowserStartupManual { .. } => "BrowserStartupManual",
-            Refusal::BrowserRecoveryFailed { .. } => "BrowserRecoveryFailed",
-            Refusal::ConnectionLost => "ConnectionLost",
-            Refusal::CancelledAfterDispatch { .. } => "CancelledAfterDispatch",
-            Refusal::EffectUnknown => "EffectUnknown",
-            Refusal::ScriptThrew { .. } => "ScriptThrew",
-            Refusal::LandingDeniedUnknown { .. } => "LandingDeniedUnknown",
-            Refusal::WorkspaceUnusable { .. } => "WorkspaceUnusable",
-            Refusal::TabHeld { .. } => "TabHeld",
-            Refusal::FilesUnreadable { .. } => "FilesUnreadable",
-            Refusal::CaptureTooLarge => "CaptureTooLarge",
-            Refusal::TabNotShowing => "TabNotShowing",
-            Refusal::NoDialogVisible => "NoDialogVisible",
-            Refusal::DialogOpen => "DialogOpen",
-            Refusal::NoHistoryEntry { .. } => "NoHistoryEntry",
-            Refusal::RecordingUnavailable => "RecordingUnavailable",
-            Refusal::RecordingHeld => "RecordingHeld",
-            Refusal::RecordingExportFailed => "RecordingExportFailed",
-            Refusal::RecordingNotAttached => "RecordingNotAttached",
-            Refusal::ActionUnconfirmed { .. } => "ActionUnconfirmed",
-        }
-    }
-
-    /// How many variants `Refusal` has; `variant_name` names each once.
-    const REFUSAL_VARIANTS: usize = 42;
-
-    fn audit_tag(refusal: &Refusal) -> String {
-        let tag = serde_json::to_value(refusal.audit().refusal()).expect("an audit tag encodes");
-        tag["reason"]
-            .as_str()
-            .expect("an audit tag has a reason")
-            .to_owned()
-    }
-
-    /// A script the page threw on names what it threw, as one bounded line, and that it may
-    /// already have acted; its one step checks the page, and none speaks of dialogs (L-D6).
-    #[test]
-    fn a_script_that_threw_says_what_it_threw_and_that_it_may_have_acted() {
-        let refusal = Refusal::ScriptThrew {
-            exception: "ReferenceError: missing is not defined\n    at <anonymous>:1:1".into(),
-        };
-        assert_eq!(refusal.reason(), "script_threw");
+        let refusal = threw("ReferenceError: missing is not defined\n    at <anonymous>:1:1");
+        assert_eq!(refusal.reason(), SCRIPT_THREW_CODE);
         assert_eq!(
             refusal.summary(),
             "The script threw \"ReferenceError: missing is not defined at <anonymous>:1:1\". It may have changed the page before it threw."
@@ -5275,319 +3276,552 @@ Changes are \"unsaved\".".into()),
         let steps = refusal.next_steps();
         assert_eq!(steps.len(), 1);
         assert!(steps[0].contains("browser_read"));
-        assert!(steps.iter().all(|step| !step.contains("dialog")));
-    }
+        assert!(!steps[0].contains("dialog"));
 
-    #[test]
-    fn what_a_script_threw_is_quoted_as_one_bounded_line() {
-        let long = Refusal::ScriptThrew {
-            exception: format!("Error: {}", "x".repeat(2_000)),
-        }
-        .summary();
-        assert!(long.contains("...\". It may have changed the page"));
-        assert!(long.chars().count() < crate::language::outcome::SCRIPT_EXCEPTION_MAX_CHARS + 80);
-        let quoted = Refusal::ScriptThrew {
-            exception: "Error: say \"hi\"".into(),
-        }
-        .summary();
-        assert!(quoted.starts_with("The script threw \"Error: say 'hi'\"."));
-        let blank = Refusal::ScriptThrew {
-            exception: " \n\t ".into(),
-        };
+        let long = threw(&format!("Error: {}", "x".repeat(2_000))).summary();
+        let quoted = long.split('"').nth(1).expect("the exception is quoted");
+        assert_eq!(quoted.chars().count(), SCRIPT_EXCEPTION_MAX_CHARS);
+        assert!(quoted.ends_with("..."), "{quoted}");
+        assert!(threw("Error: say \"hi\"")
+            .summary()
+            .starts_with("The script threw \"Error: say 'hi'\"."));
         assert_eq!(
-            blank.summary(),
+            threw(" \n\t ").summary(),
             "The script threw. It may have changed the page before it threw."
         );
     }
 
-    /// Each refusal has one closed model code, the `reason` fact its result carries, and one
-    /// audit tag, the closed fact durable history keeps. The two spell some refusals differently;
-    /// aligning them is a separate, visible choice (ADR-0203 Decision 5.1).
-    #[test]
-    fn every_refusal_has_one_model_code_and_one_audit_tag() {
-        let expected = [
-            ("Capacity", "capacity", "capacity"),
-            ("InvalidRequest", "invalid_input", "invalid_request"),
-            (
-                "CancelledBeforeStart",
-                "cancelled",
-                "cancelled_before_start",
-            ),
-            ("DeadlineBeforeStart", "deadline", "deadline_before_start"),
-            ("AuthorityBlocked", "host_denied", "authority_blocked"),
-            ("AuthorityBlocked", "channel_denied", "authority_blocked"),
-            ("ChannelOff", "channel_denied", "channel_off"),
-            (
-                "LocalInterlock",
-                "browser_local_interlock",
-                "local_interlock",
-            ),
-            (
-                "CredentialAuthorization",
-                "credential_authorization_required",
-                "credential_authorization",
-            ),
-            (
-                "IncompatibleReceipt",
-                "incompatible_browser_receipt",
-                "incompatible_receipt",
-            ),
-            (
-                "BrowserAdapterOutdated",
-                "browser_contract_failed",
-                "browser_adapter_outdated",
-            ),
-            ("DeadlineExpired", "deadline", "deadline_expired"),
-            ("PageRefused", "disabled", "page_refused"),
-            ("FieldsReverted", "fields_reverted", "fields_reverted"),
-            (
-                "FieldValuesRejected",
-                "field_value_rejected",
-                "field_values_rejected",
-            ),
-            (
-                "DocumentUnavailable",
-                "document_unavailable",
-                "document_unavailable",
-            ),
-            (
-                "CancelledBeforeDispatch",
-                "cancelled",
-                "cancelled_before_dispatch",
-            ),
-            (
-                "BrowserContract",
-                "browser_contract_failed",
-                "browser_contract",
-            ),
-            ("BrowserAmbiguous", "browser_ambiguous", "browser_ambiguous"),
-            ("BrowserUnknown", "browser_unknown", "browser_unknown"),
-            ("BrowserPinned", "browser_pinned", "browser_pinned"),
-            (
-                "BrowserStartupManual",
-                "browser_startup_manual",
-                "browser_startup_manual",
-            ),
-            (
-                "ConnectionLost",
-                "browser_effect_unknown",
-                "connection_lost",
-            ),
-            (
-                "CancelledAfterDispatch",
-                "browser_effect_unknown",
-                "cancelled_after_dispatch",
-            ),
-            ("EffectUnknown", "browser_effect_unknown", "effect_unknown"),
-            ("ScriptThrew", "script_threw", "effect_unknown"),
-            (
-                "LandingDeniedUnknown",
-                "host_denied",
-                "landing_denied_unknown",
-            ),
-            ("WorkspaceUnusable", "no_tab", "workspace_unusable"),
-            ("TabHeld", "tab_held", "workspace_unusable"),
-            (
-                "CaptureTooLarge",
-                "screenshot_too_large",
-                "capture_too_large",
-            ),
-            ("TabNotShowing", "tab_not_showing", "tab_not_showing"),
-            ("NoDialogVisible", "no_dialog_visible", "no_dialog_visible"),
-            ("DialogOpen", "dialog_open", "dialog_open"),
-            ("NoHistoryEntry", "no_history_entry", "no_history_entry"),
-            ("RecordingUnavailable", "not_found", "recording_unavailable"),
-            ("RecordingHeld", "held", "recording_held"),
-            (
-                "RecordingExportFailed",
-                "recording_export_failed",
-                "recording_export_failed",
-            ),
-            (
-                "RecordingNotAttached",
-                "recording_not_attached",
-                "recording_not_attached",
-            ),
-            (
-                "BrowserPrimitive",
-                "browser_primitive_failed",
-                "browser_primitive_failed",
-            ),
-            (
-                "BrowserPrimitive",
-                "debugger_unavailable",
-                "browser_primitive_failed",
-            ),
-            (
-                "BrowserPrimitive",
-                "session_lost",
-                "browser_primitive_failed",
-            ),
-            (
-                "BrowserUnavailable",
-                "browser_not_answering",
-                "browser_unavailable",
-            ),
-            (
-                "BrowserUnavailable",
-                "browser_disconnected",
-                "browser_unavailable",
-            ),
-            (
-                "BrowserUnavailable",
-                "browser_wrong_profile",
-                "browser_unavailable",
-            ),
-            ("BrowserUnavailable", "browser_busy", "browser_unavailable"),
-            (
-                "BrowserRecoveryFailed",
-                "browser_absent",
-                "browser_recovery_failed",
-            ),
-            (
-                "BrowserRecoveryFailed",
-                "browser_launch_failed",
-                "browser_recovery_failed",
-            ),
-            (
-                "BrowserRecoveryFailed",
-                "browser_sandboxed",
-                "browser_recovery_failed",
-            ),
-            (
-                "BrowserRecoveryFailed",
-                "browser_extension_absent",
-                "browser_recovery_failed",
-            ),
-            (
-                "BrowserRecoveryFailed",
-                "native_host_unavailable",
-                "browser_recovery_failed",
-            ),
-            (
-                "BrowserRecoveryFailed",
-                "native_host_owned_elsewhere",
-                "browser_recovery_failed",
-            ),
-            (
-                "BrowserRecoveryFailed",
-                "browser_handshake_timeout",
-                "browser_recovery_failed",
-            ),
-            ("FilesUnreadable", "file_unavailable", "files_unreadable"),
-            ("FilesUnreadable", "not_a_file", "files_unreadable"),
-            ("FilesUnreadable", "file_too_large", "files_unreadable"),
-            ("FilesUnreadable", "upload_too_large", "files_unreadable"),
-            ("FilesUnreadable", "file_read_failed", "files_unreadable"),
-            ("FilesUnreadable", "file_changed", "files_unreadable"),
-            ("FilesUnreadable", "invalid_file_name", "files_unreadable"),
-            (
-                "FilesUnreadable",
-                "inline_file_not_base64",
-                "files_unreadable",
-            ),
-            ("FilesUnreadable", "capture_stale", "files_unreadable"),
-            (
-                "ActionUnconfirmed",
-                "expectation_unmet",
-                "action_unconfirmed",
-            ),
-            (
-                "ActionUnconfirmed",
-                "capability_denied",
-                "action_unconfirmed",
-            ),
-            ("ActionUnconfirmed", "cancelled", "action_unconfirmed"),
-            ("ActionUnconfirmed", "deadline", "action_unconfirmed"),
-            (
-                "ActionUnconfirmed",
-                "browser_disconnected",
-                "action_unconfirmed",
-            ),
-            (
-                "ActionUnconfirmed",
-                "browser_unavailable",
-                "action_unconfirmed",
-            ),
-            (
-                "ActionUnconfirmed",
-                "document_unavailable",
-                "action_unconfirmed",
-            ),
-            ("ActionUnconfirmed", "browser_refused", "action_unconfirmed"),
-        ];
-        let refusals = every_refusal();
-        assert_eq!(refusals.len(), expected.len());
-        for (refusal, (variant, code, tag)) in refusals.iter().zip(expected) {
-            assert_eq!(variant_name(refusal), variant);
-            assert_eq!(refusal.reason(), code, "{variant}");
-            assert_eq!(audit_tag(refusal), tag, "{variant}");
-        }
-        let named: std::collections::HashSet<&str> = refusals.iter().map(variant_name).collect();
-        assert_eq!(named.len(), REFUSAL_VARIANTS, "every variant has a row");
-    }
+    /// Names every variant of `Refusal` and lists the names, from one list. The match has no
+    /// wildcard, so a new variant fails to compile until it is listed, and the test below then
+    /// fails until it has a row.
+    macro_rules! refusal_variants {
+        ($($variant:ident),+ $(,)?) => {
+            const fn variant_name(refusal: &Refusal) -> &'static str {
+                match refusal {
+                    $(Refusal::$variant { .. } => stringify!($variant)),+
+                }
+            }
 
-    /// A browser refusal with a closed cause says what happened in Ghostlight's words; only the
-    /// open refusal repeats the browser's text, and history keeps none of it.
-    #[test]
-    fn a_closed_primitive_cause_reads_its_own_sentence() {
-        for cause in [
-            PrimitiveCause::DebuggerUnavailable,
-            PrimitiveCause::SessionLost,
-        ] {
-            let refusal = Refusal::BrowserPrimitive {
-                detail: "Cannot access a chrome:// URL".into(),
-                cause,
-            };
-            assert!(!refusal.summary().contains("chrome://"), "{cause:?}");
-            assert_eq!(refusal.next_steps().len(), 1, "{cause:?}");
-            assert!(
-                !refusal.audit().summary().contains("chrome://"),
-                "{cause:?}"
-            );
-        }
-        let open = Refusal::BrowserPrimitive {
-            detail: "Frame gone".into(),
-            cause: PrimitiveCause::Refused,
+            const REFUSAL_VARIANTS: &[&str] = &[$(stringify!($variant)),+];
         };
-        assert_eq!(open.summary(), "The browser refused this job: Frame gone.");
     }
 
-    /// The recovery words are the browser recovery's own fact words.
-    #[test]
-    fn recovery_reasons_say_the_recovery_fact_words() {
-        use crate::browser::recovery::RecoveryFailure;
-        for (reason, failure) in [
+    refusal_variants!(
+        Capacity,
+        InvalidRequest,
+        CancelledBeforeStart,
+        DeadlineBeforeStart,
+        AuthorityBlocked,
+        ChannelOff,
+        LocalInterlock,
+        CredentialAuthorization,
+        IncompatibleReceipt,
+        BrowserAdapterOutdated,
+        DeadlineExpired,
+        BrowserPrimitive,
+        PageRefused,
+        FieldsReverted,
+        FieldValuesRejected,
+        DocumentUnavailable,
+        CancelledBeforeDispatch,
+        BrowserUnavailable,
+        BrowserContract,
+        BrowserAmbiguous,
+        BrowserUnknown,
+        BrowserPinned,
+        BrowserStartupManual,
+        BrowserRecoveryFailed,
+        ConnectionLost,
+        CancelledAfterDispatch,
+        EffectUnknown,
+        ScriptThrew,
+        LandingDeniedUnknown,
+        WorkspaceUnusable,
+        TabHeld,
+        FilesUnreadable,
+        CaptureTooLarge,
+        TabNotShowing,
+        NoDialogVisible,
+        DialogOpen,
+        NoHistoryEntry,
+        RecordingUnavailable,
+        RecordingHeld,
+        RecordingExportFailed,
+        RecordingNotAttached,
+        ActionUnconfirmed,
+    );
+
+    /// One refusal of every variant and of every closed cause that changes its model code or
+    /// what history keeps, with its model code and the closed facts its audit line persists.
+    fn every_refusal() -> Vec<(Refusal, &'static str, Value)> {
+        let unusable = |reason| Refusal::WorkspaceUnusable { reason };
+        let workspace = |cause: Value| json!({"reason":"workspace_unusable","cause":cause});
+        let mut all = vec![
+            (Refusal::Capacity, "capacity", json!({"reason":"capacity"})),
+            (
+                Refusal::InvalidRequest,
+                "invalid_input",
+                json!({"reason":"invalid_request"}),
+            ),
+            (
+                Refusal::CancelledBeforeStart {
+                    by: CancelCause::Client,
+                },
+                "cancelled",
+                json!({"reason":"cancelled_before_start"}),
+            ),
+            (
+                Refusal::DeadlineBeforeStart,
+                "deadline",
+                json!({"reason":"deadline_before_start"}),
+            ),
+            (
+                Refusal::AuthorityBlocked {
+                    code: ReasonCode::HostDenied,
+                    host: None,
+                    origin: None,
+                },
+                "host_denied",
+                json!({"reason":"authority_blocked","cause":"host"}),
+            ),
+            (
+                Refusal::AuthorityBlocked {
+                    code: ReasonCode::ChannelDenied,
+                    host: None,
+                    origin: None,
+                },
+                "channel_denied",
+                json!({"reason":"authority_blocked","cause":"unspecified"}),
+            ),
+            (
+                Refusal::ChannelOff {
+                    channel: IntakeChannel::Mcp,
+                    author: PolicyAuthor::User,
+                },
+                "channel_denied",
+                json!({"reason":"channel_off","channel":"mcp"}),
+            ),
+            (
+                Refusal::ChannelOff {
+                    channel: IntakeChannel::Cli,
+                    author: PolicyAuthor::Organization,
+                },
+                "channel_denied",
+                json!({"reason":"channel_off","channel":"cli"}),
+            ),
+            (
+                Refusal::LocalInterlock,
+                "browser_local_interlock",
+                json!({"reason":"local_interlock"}),
+            ),
+            (
+                Refusal::CredentialAuthorization {
+                    control: ControlRef::new(TargetRole::Textbox, "Password", None, true),
+                },
+                "credential_authorization_required",
+                json!({"reason":"credential_authorization"}),
+            ),
+            (
+                Refusal::IncompatibleReceipt,
+                "incompatible_browser_receipt",
+                json!({"reason":"incompatible_receipt"}),
+            ),
+            (
+                Refusal::BrowserAdapterOutdated,
+                "browser_contract_failed",
+                json!({"reason":"browser_adapter_outdated"}),
+            ),
+            (
+                Refusal::DeadlineExpired {
+                    before_dispatch: true,
+                    timeout_adjustable: false,
+                },
+                "deadline",
+                json!({"reason":"deadline_expired","before_dispatch":true}),
+            ),
+            (
+                Refusal::FieldsReverted {
+                    set: 1,
+                    reverted: vec![],
+                },
+                "fields_reverted",
+                json!({"reason":"fields_reverted"}),
+            ),
+            (
+                Refusal::FieldValuesRejected {
+                    fields: vec![],
+                    total: 1,
+                },
+                "field_value_rejected",
+                json!({"reason":"field_values_rejected"}),
+            ),
+            (
+                Refusal::DocumentUnavailable,
+                "document_unavailable",
+                json!({"reason":"document_unavailable"}),
+            ),
+            (
+                Refusal::CancelledBeforeDispatch { by: None },
+                "cancelled",
+                json!({"reason":"cancelled_before_dispatch"}),
+            ),
+            (
+                Refusal::BrowserContract,
+                "browser_contract_failed",
+                json!({"reason":"browser_contract"}),
+            ),
+            (
+                Refusal::BrowserAmbiguous,
+                "browser_ambiguous",
+                json!({"reason":"browser_ambiguous"}),
+            ),
+            (
+                Refusal::BrowserUnknown,
+                "browser_unknown",
+                json!({"reason":"browser_unknown"}),
+            ),
+            (
+                Refusal::BrowserPinned,
+                "browser_pinned",
+                json!({"reason":"browser_pinned"}),
+            ),
+            (
+                Refusal::BrowserStartupManual {
+                    browsers: vec![],
+                    extension: ExtensionAdvice::Plain,
+                },
+                "browser_startup_manual",
+                json!({"reason":"browser_startup_manual"}),
+            ),
+            (
+                Refusal::ConnectionLost,
+                "browser_effect_unknown",
+                json!({"reason":"connection_lost"}),
+            ),
+            (
+                Refusal::CancelledAfterDispatch { by: None },
+                "browser_effect_unknown",
+                json!({"reason":"cancelled_after_dispatch"}),
+            ),
+            (
+                Refusal::EffectUnknown,
+                "browser_effect_unknown",
+                json!({"reason":"effect_unknown"}),
+            ),
+            (
+                Refusal::ScriptThrew {
+                    exception: "ReferenceError: missing is not defined".into(),
+                },
+                "script_threw",
+                json!({"reason":"effect_unknown"}),
+            ),
+            (
+                Refusal::LandingDeniedUnknown {
+                    code: ReasonCode::HostDenied,
+                },
+                "host_denied",
+                json!({"reason":"landing_denied_unknown"}),
+            ),
+            (
+                Refusal::TabHeld {
+                    host: Some("elsewhere.test".into()),
+                },
+                "tab_held",
+                workspace(json!("tab_held")),
+            ),
+            (
+                Refusal::TabHeld { host: None },
+                "tab_held",
+                workspace(json!("tab_held")),
+            ),
+            (
+                Refusal::CaptureTooLarge,
+                "screenshot_too_large",
+                json!({"reason":"capture_too_large"}),
+            ),
+            (
+                Refusal::TabNotShowing,
+                "tab_not_showing",
+                json!({"reason":"tab_not_showing"}),
+            ),
+            (
+                Refusal::NoDialogVisible,
+                "no_dialog_visible",
+                json!({"reason":"no_dialog_visible"}),
+            ),
+            (
+                Refusal::DialogOpen,
+                "dialog_open",
+                json!({"reason":"dialog_open"}),
+            ),
+            (
+                Refusal::NoHistoryEntry { forward: false },
+                "no_history_entry",
+                json!({"reason":"no_history_entry"}),
+            ),
+            (
+                Refusal::RecordingUnavailable,
+                "not_found",
+                json!({"reason":"recording_unavailable"}),
+            ),
+            (
+                Refusal::RecordingHeld,
+                "held",
+                json!({"reason":"recording_held"}),
+            ),
+            (
+                Refusal::RecordingExportFailed,
+                "recording_export_failed",
+                json!({"reason":"recording_export_failed"}),
+            ),
+            (
+                Refusal::RecordingNotAttached,
+                "recording_not_attached",
+                json!({"reason":"recording_not_attached"}),
+            ),
+        ];
+        for (refusal, word) in [
+            (PageRefusal::NotVisible, "not_visible"),
+            (PageRefusal::Disabled, "disabled"),
+            (PageRefusal::ReadOnly, "read_only"),
+            (PageRefusal::NotEditable, "not_editable"),
+        ] {
+            all.push((
+                Refusal::PageRefused {
+                    refusal,
+                    gesture: PageGesture::Click,
+                },
+                word,
+                json!({"reason":"page_refused","cause":word}),
+            ));
+        }
+        for (reason, code) in [
+            (WorkspaceReason::NoTab, "no_tab"),
+            (WorkspaceReason::AmbiguousTab, "ambiguous_tab"),
+            (WorkspaceReason::TabUnavailable, "tab_unavailable"),
+            (
+                WorkspaceReason::HandleOnOtherTab(Some("tab_7k2nb5xe".into())),
+                "handle_on_other_tab",
+            ),
+            (
+                WorkspaceReason::FieldsOnSeveralTabs,
+                "fields_on_several_tabs",
+            ),
+            (
+                WorkspaceReason::OutsideImage(Some(ImageSize {
+                    width: 400,
+                    height: 300,
+                })),
+                "outside_image",
+            ),
+        ] {
+            all.push((unusable(reason), code, workspace(json!(code))));
+        }
+        all.push((
+            unusable(WorkspaceReason::OwnershipMismatch {
+                owner: Some("PRIVATE_CLIENT".into()),
+            }),
+            "ownership_mismatch",
+            workspace(json!({"ownership_mismatch":{"owner":null}})),
+        ));
+        for (reason, word) in [
+            (StaleReason::Removed, "removed"),
+            (StaleReason::Navigated, "navigated"),
+            (StaleReason::TabClosed, "tab_closed"),
+            (StaleReason::Unknown, "unknown"),
+        ] {
+            for help in [
+                StaleHelp::None,
+                StaleHelp::Candidates { named: true },
+                StaleHelp::Candidates { named: false },
+                StaleHelp::Replacement {
+                    tool: "browser_click",
+                    target: "target_7k2nb5xe".into(),
+                },
+            ] {
+                all.push((
+                    unusable(WorkspaceReason::StaleTarget { reason, help }),
+                    "stale_target",
+                    workspace(json!({"stale_target":{"reason":word}})),
+                ));
+            }
+        }
+        for (cause, code) in [
+            (PrimitiveCause::Refused, "browser_primitive_failed"),
+            (PrimitiveCause::DebuggerUnavailable, "debugger_unavailable"),
+            (PrimitiveCause::SessionLost, "session_lost"),
+        ] {
+            all.push((
+                Refusal::BrowserPrimitive {
+                    detail: "Frame gone".into(),
+                    cause,
+                },
+                code,
+                json!({"reason":"browser_primitive_failed"}),
+            ));
+        }
+        for (reason, code, cause) in [
+            (
+                BrowserUnavailableReason::NotAnswering,
+                "browser_not_answering",
+                "not_answering",
+            ),
+            (
+                BrowserUnavailableReason::NotConnected,
+                "browser_disconnected",
+                "not_connected",
+            ),
+            (
+                BrowserUnavailableReason::WrongProfile,
+                "browser_wrong_profile",
+                "wrong_profile",
+            ),
+            (BrowserUnavailableReason::Busy, "browser_busy", "busy"),
+        ] {
+            all.push((
+                Refusal::BrowserUnavailable { reason },
+                code,
+                json!({"reason":"browser_unavailable","cause":cause}),
+            ));
+        }
+        for (reason, code, cause) in [
             (
                 BrowserRecoveryReason::BrowserAbsent,
-                RecoveryFailure::BrowserAbsent,
+                "browser_absent",
+                "browser_absent",
             ),
             (
                 BrowserRecoveryReason::LaunchFailed,
-                RecoveryFailure::LaunchFailed,
+                "browser_launch_failed",
+                "launch_failed",
             ),
             (
                 BrowserRecoveryReason::SandboxedPackage,
-                RecoveryFailure::SandboxedPackage,
+                "browser_sandboxed",
+                "sandboxed_package",
             ),
             (
                 BrowserRecoveryReason::ExtensionAbsent,
-                RecoveryFailure::ExtensionAbsent,
+                "browser_extension_absent",
+                "extension_absent",
             ),
             (
                 BrowserRecoveryReason::NativeHostUnavailable,
-                RecoveryFailure::NativeHostUnavailable,
+                "native_host_unavailable",
+                "native_host_unavailable",
             ),
             (
                 BrowserRecoveryReason::OwnedElsewhere,
-                RecoveryFailure::OwnedElsewhere,
+                "native_host_owned_elsewhere",
+                "owned_elsewhere",
             ),
             (
                 BrowserRecoveryReason::HandshakeTimeout,
-                RecoveryFailure::HandshakeTimeout,
+                "browser_handshake_timeout",
+                "handshake_timeout",
             ),
         ] {
-            assert_eq!(reason.fact(), failure.as_str());
+            all.push((
+                Refusal::BrowserRecoveryFailed {
+                    reason,
+                    extension: ExtensionAdvice::Plain,
+                },
+                code,
+                json!({"reason":"browser_recovery_failed","cause":cause}),
+            ));
         }
+        for (problem, code) in [
+            (FileProblem::Unavailable, "file_unavailable"),
+            (FileProblem::NotAFile, "not_a_file"),
+            (FileProblem::FileTooLarge, "file_too_large"),
+            (FileProblem::UploadTooLarge, "upload_too_large"),
+            (FileProblem::ReadFailed, "file_read_failed"),
+            (FileProblem::Changed, "file_changed"),
+            (FileProblem::InvalidName, "invalid_file_name"),
+            (FileProblem::NotBase64, "inline_file_not_base64"),
+            (FileProblem::StaleCapture, "capture_stale"),
+        ] {
+            all.push((
+                Refusal::FilesUnreadable { problem },
+                code,
+                json!({"reason":"files_unreadable"}),
+            ));
+        }
+        for (cause, code, kept) in [
+            (CheckFailure::Unmet, "expectation_unmet", json!("unmet")),
+            (
+                CheckFailure::Blocked(BlockedReason::Capability),
+                "capability_denied",
+                json!({"blocked":"capability"}),
+            ),
+            (
+                CheckFailure::Blocked(BlockedReason::Hold),
+                "runtime_hold",
+                json!({"blocked":"hold"}),
+            ),
+            (CheckFailure::Cancelled, "cancelled", json!("cancelled")),
+            (
+                CheckFailure::DeadlineExpired,
+                "deadline",
+                json!("deadline_expired"),
+            ),
+            (
+                CheckFailure::Disconnected,
+                "browser_disconnected",
+                json!("disconnected"),
+            ),
+            (
+                CheckFailure::BrowserUnavailable,
+                "browser_unavailable",
+                json!("browser_unavailable"),
+            ),
+            (
+                CheckFailure::DocumentUnavailable,
+                "document_unavailable",
+                json!("document_unavailable"),
+            ),
+            (
+                CheckFailure::BrowserRefused,
+                "browser_refused",
+                json!("browser_refused"),
+            ),
+        ] {
+            all.push((
+                Refusal::ActionUnconfirmed {
+                    action: Box::new(Outcome::DialogHandled { accepted: true }),
+                    cause,
+                    code: cause.decision_code(),
+                },
+                code,
+                json!({"reason":"action_unconfirmed","cause":kept}),
+            ));
+        }
+        all
+    }
+
+    /// Contract between the model, durable history and the window (ADR-0203 Decision 5.1): each
+    /// refusal has one closed model code, the `reason` fact its result carries, and persists
+    /// closed facts that history reads back as written. The two vocabularies spell some refusals
+    /// differently; aligning them is a separate, visible choice. Defect 5b462889: a held tab keeps
+    /// the `tab_held` cause. LANGUAGE pins `{"reason":"page_refused","cause":"<code>"}`.
+    #[test]
+    fn every_refusal_has_one_model_code_and_persists_closed_facts_that_read_back() {
+        let refusals = every_refusal();
+        for (refusal, code, facts) in &refusals {
+            let variant = variant_name(refusal);
+            assert_eq!(refusal.reason(), *code, "{variant}");
+            let audit = refusal.audit();
+            let kept = audit.refusal().expect("a refusal keeps closed facts");
+            assert_eq!(&serde_json::to_value(kept).unwrap(), facts, "{variant}");
+            let read: AuditRefusal = serde_json::from_value(facts.clone())
+                .unwrap_or_else(|error| panic!("{variant}: {facts} reads back: {error}"));
+            assert_eq!(&serde_json::to_value(read).unwrap(), facts, "{variant}");
+        }
+        let named: std::collections::BTreeSet<&str> = refusals
+            .iter()
+            .map(|(refusal, ..)| variant_name(refusal))
+            .collect();
+        let every: std::collections::BTreeSet<&str> = REFUSAL_VARIANTS.iter().copied().collect();
+        assert_eq!(named, every, "every variant has a row");
     }
 }

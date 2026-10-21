@@ -87,22 +87,6 @@ pub enum RecoveryFailure {
     HandshakeTimeout,
 }
 
-impl RecoveryFailure {
-    /// Stable structured fact vocabulary.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::BrowserAbsent => "browser_absent",
-            Self::LaunchFailed => "browser_launch_failed",
-            Self::SandboxedPackage => "browser_sandboxed",
-            Self::ExtensionAbsent => "browser_extension_absent",
-            Self::NativeHostUnavailable => "native_host_unavailable",
-            Self::OwnedElsewhere => "native_host_owned_elsewhere",
-            Self::HandshakeTimeout => "browser_handshake_timeout",
-        }
-    }
-}
-
 /// One deterministic recovery answer before any browser process is started.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecoveryDecision {

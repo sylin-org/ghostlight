@@ -472,78 +472,13 @@ pub fn tool_name(requested: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::governance::ReasonCode;
     use crate::language::field_echo::HeldField;
     use crate::language::field_problem::ControlRef;
-    use crate::language::outcome::{ActionSubject, DialogKind, StaleHelp, TargetRole};
+    use crate::language::outcome::{
+        model_text, ActionSubject, DialogKind, PrimitiveCause, StaleHelp, TargetRole,
+    };
     use crate::workspace::StaleReason;
-
-    #[test]
-    fn retained_language_preserves_useful_context_and_governed_names() {
-        for preserve in [true, false] {
-            let outcome = Outcome::TargetClicked {
-                host: Some("example.com".into()),
-                subject: ActionSubject::from_page("button", "Save record", preserve),
-            };
-            let audit = outcome.audit();
-            assert_eq!(audit.summary(), outcome.summary());
-            assert_eq!(audit.summary().contains("Save record"), preserve);
-            assert!(audit.summary().contains("button on example.com"));
-        }
-        let outcome = Outcome::TextTyped {
-            host: Some("example.com".into()),
-            subject: ActionSubject::unnamed(TargetRole::Textbox),
-            characters: 12,
-        };
-        assert_eq!(outcome.audit().summary(), outcome.summary());
-        assert_eq!(outcome.observed().count, Some(12));
-    }
-
-    /// What a script threw is the script's result, so durable history keeps only that a script
-    /// threw, under the effect-unknown tag it always wrote (L-D6).
-    #[test]
-    fn durable_history_keeps_that_a_script_threw_and_never_what_it_threw() {
-        let refusal = Refusal::ScriptThrew {
-            exception: "Error: PRIVATE_SCRIPT_TEXT".into(),
-        };
-        assert!(refusal.summary().contains("PRIVATE_SCRIPT_TEXT"));
-        let audit = refusal.audit();
-        assert_eq!(
-            audit.summary(),
-            "The script threw. It may have changed the page before it threw."
-        );
-        let closed = serde_json::to_value(audit.refusal()).expect("closed facts encode");
-        assert_eq!(closed["reason"], "effect_unknown");
-        assert!(!closed.to_string().contains("PRIVATE_SCRIPT_TEXT"));
-    }
-
-    #[test]
-    fn retained_dialog_observation_omits_the_page_authored_message() {
-        let outcome = Outcome::DialogObserved {
-            present: true,
-            message: Some("Delete account PRIVATE_DIALOG_TEXT?".into()),
-            prompt: None,
-        };
-        assert!(outcome.summary().contains("PRIVATE_DIALOG_TEXT"));
-        let audit = outcome.audit();
-        assert!(!audit.summary().contains("PRIVATE_DIALOG_TEXT"));
-        assert!(audit
-            .summary()
-            .contains("JavaScript dialog is currently visible"));
-    }
-
-    #[test]
-    fn retained_prompt_observation_keeps_the_kind_and_drops_the_field() {
-        let outcome = Outcome::DialogObserved {
-            present: true,
-            message: Some("Your PRIVATE_DIALOG_TEXT?".into()),
-            prompt: Some(PromptField::Holds("PRIVATE_FIELD_TEXT".into())),
-        };
-        assert!(outcome.summary().contains("PRIVATE_FIELD_TEXT"));
-        let audit = outcome.audit();
-        assert!(!audit.summary().contains("PRIVATE_FIELD_TEXT"));
-        assert!(!audit.summary().contains("PRIVATE_DIALOG_TEXT"));
-        assert_eq!(audit.summary(), "A prompt dialog is currently visible.");
-    }
 
     /// A fill whose page read back a choice and a reformatted text, with names preserved, so the
     /// agent's sentence carries both readings.
@@ -588,9 +523,23 @@ mod tests {
         CheckFailure::BrowserRefused,
     ];
 
+    /// `action` inside the refusal of a check that fell short for `cause`.
+    fn unconfirmed(action: &Outcome, cause: CheckFailure) -> Refusal {
+        Refusal::ActionUnconfirmed {
+            action: Box::new(action.clone()),
+            cause,
+            code: cause.decision_code(),
+        }
+    }
+
+    /// ACCEPTANCE Governance 10 and ADR-0203 Decision 4.1: what the agent is told may hold page,
+    /// browser or client text; durable history keeps none of it, through any wrapper, and keeps
+    /// only a governed target name. Defects 9ce822e5 (the control page's address), 8f2241c0
+    /// (another session's name), 0ca89f71 (a prompt's field), L-D6 (what a script threw) and
+    /// a60cd481 window-10 (a browser failure names only the kind of act it could not do).
     #[test]
-    fn no_page_text_reaches_the_audit_through_any_wrapper() {
-        let cases = [
+    fn durable_history_keeps_no_page_or_client_text_through_any_wrapper() {
+        let outcomes = [
             (read_back_fill(), vec!["PRIVATE_CHOICE", "PRIVATE_READING"]),
             (
                 Outcome::DialogObserved {
@@ -600,247 +549,165 @@ mod tests {
                 },
                 vec!["PRIVATE_DIALOG"],
             ),
+            (
+                Outcome::DialogObserved {
+                    present: true,
+                    message: Some("Your PRIVATE_DIALOG_TEXT?".into()),
+                    prompt: Some(PromptField::Holds("PRIVATE_FIELD_TEXT".into())),
+                },
+                vec!["PRIVATE_DIALOG_TEXT", "PRIVATE_FIELD_TEXT"],
+            ),
         ];
-        for (bare, sentinels) in cases {
+        let mut accounts: Vec<(String, AuditProjection, Vec<&str>)> = Vec::new();
+        for (bare, sentinels) in outcomes {
             let wrapped = bare.clone().with_open_dialog(DialogKind::Confirm);
-            let mut accounts = vec![
-                (bare.summary(), bare.audit()),
-                (wrapped.summary(), wrapped.audit()),
-            ];
-            for cause in CHECK_FAILURES {
-                for action in [&bare, &wrapped] {
-                    let refusal = Refusal::ActionUnconfirmed {
-                        action: Box::new(action.clone()),
-                        cause,
-                        code: cause.decision_code(),
-                    };
-                    accounts.push((refusal.summary(), refusal.audit()));
-                }
-            }
-            for (said, audit) in accounts {
-                let kept = serde_json::to_string(&audit.refusal()).unwrap();
-                for sentinel in &sentinels {
-                    assert!(said.contains(sentinel), "the agent reads it: {said}");
-                    assert!(!audit.summary().contains(sentinel), "{}", audit.summary());
-                    assert!(!kept.contains(sentinel), "{kept}");
+            for action in [&bare, &wrapped] {
+                let said = model_text(&action.summary(), &action.next_steps());
+                accounts.push((said, action.audit(), sentinels.clone()));
+                for cause in CHECK_FAILURES {
+                    let refusal = unconfirmed(action, cause);
+                    let said = model_text(&refusal.summary(), &refusal.next_steps());
+                    accounts.push((said, refusal.audit(), sentinels.clone()));
                 }
             }
         }
+        let own_page = Refusal::AuthorityBlocked {
+            code: ReasonCode::OwnWorkbench,
+            host: Some("127.0.0.1".into()),
+            origin: Some("http://127.0.0.1:41259".into()),
+        };
+        assert_eq!(own_page.observed().host.as_deref(), Some("127.0.0.1"));
+        let refusals = [
+            (
+                Refusal::ScriptThrew {
+                    exception: "Error: PRIVATE_SCRIPT_TEXT".into(),
+                },
+                vec!["PRIVATE_SCRIPT_TEXT"],
+            ),
+            (
+                Refusal::BrowserPrimitive {
+                    detail: "PRIVATE_EXCEPTION".into(),
+                    cause: PrimitiveCause::Refused,
+                },
+                vec!["PRIVATE_EXCEPTION"],
+            ),
+            (
+                Refusal::CredentialAuthorization {
+                    control: ControlRef::new(
+                        TargetRole::Textbox,
+                        "PRIVATE_NAME",
+                        Some("target_7k2nb5xe"),
+                        true,
+                    ),
+                },
+                vec!["PRIVATE_NAME", "target_7k2nb5xe"],
+            ),
+            (
+                Refusal::WorkspaceUnusable {
+                    reason: WorkspaceReason::OwnershipMismatch {
+                        owner: Some("PRIVATE_CLIENT".into()),
+                    },
+                },
+                vec!["PRIVATE_CLIENT"],
+            ),
+            (
+                Refusal::WorkspaceUnusable {
+                    reason: WorkspaceReason::HandleOnOtherTab(Some("tab_7k2nb5xe".into())),
+                },
+                vec!["tab_7k2nb5xe"],
+            ),
+            (own_page, vec![":41259"]),
+            (
+                Refusal::WorkspaceUnusable {
+                    reason: WorkspaceReason::StaleTarget {
+                        reason: StaleReason::Removed,
+                        help: StaleHelp::Replacement {
+                            tool: "browser_click",
+                            target: "target_7k2nb5xe".into(),
+                        },
+                    },
+                },
+                vec!["target_7k2nb5xe"],
+            ),
+        ];
+        for (refusal, sentinels) in refusals {
+            let said = model_text(&refusal.summary(), &refusal.next_steps());
+            accounts.push((said, refusal.audit(), sentinels));
+        }
+        for (said, audit, sentinels) in accounts {
+            let kept = serde_json::to_string(&audit.refusal()).unwrap();
+            for sentinel in sentinels {
+                assert!(
+                    said.contains(sentinel),
+                    "the agent reads {sentinel}: {said}"
+                );
+                assert!(!audit.summary().contains(sentinel), "{}", audit.summary());
+                assert!(!kept.contains(sentinel), "{kept}");
+            }
+        }
+
+        // The retained fill is the same fill without what the page read back, in every wrapper.
         let fill = read_back_fill();
-        assert_eq!(
-            fill.audit().summary(),
-            "Filled 2 fields on example.com and submitted the form."
-        );
+        let Outcome::FormFilled {
+            fields,
+            submitted,
+            host,
+            rebound,
+            ..
+        } = fill.clone()
+        else {
+            unreachable!("read_back_fill is a fill")
+        };
+        let unread = Outcome::FormFilled {
+            fields,
+            submitted,
+            host,
+            held: Vec::new(),
+            rebound,
+        };
+        assert_eq!(fill.audit().summary(), unread.summary());
         assert_eq!(
             fill.clone()
                 .with_open_dialog(DialogKind::Confirm)
                 .audit()
                 .summary(),
-            "Filled 2 fields on example.com and submitted the form. A confirm dialog is now open."
+            unread
+                .clone()
+                .with_open_dialog(DialogKind::Confirm)
+                .summary()
         );
         assert_eq!(
-            Refusal::ActionUnconfirmed {
-                action: Box::new(fill),
-                cause: CheckFailure::Unmet,
-                code: CheckFailure::Unmet.decision_code(),
-            }
-            .audit()
-            .summary(),
-            "The expected condition did not hold after the action. Filled 2 fields on example.com and submitted the form."
+            unconfirmed(&fill, CheckFailure::Unmet).audit().summary(),
+            unconfirmed(&unread, CheckFailure::Unmet).summary()
         );
-    }
 
-    #[test]
-    fn an_ownership_refusal_writes_no_other_clients_name() {
-        let refusal = Refusal::WorkspaceUnusable {
-            reason: WorkspaceReason::OwnershipMismatch {
-                owner: Some("PRIVATE_CLIENT".into()),
-            },
-        };
-        assert!(refusal.summary().contains("PRIVATE_CLIENT"));
-        let audit = refusal.audit();
-        assert_eq!(
-            audit.summary(),
-            "That handle belongs to a different Ghostlight session."
-        );
-        assert_eq!(
-            serde_json::to_value(audit.refusal()).unwrap(),
-            serde_json::json!({
-                "reason": "workspace_unusable",
-                "cause": {"ownership_mismatch": {"owner": null}}
-            })
-        );
-    }
-
-    #[test]
-    fn the_retained_refusal_drops_the_control_page_address_the_credential_name_and_the_browsers_words(
-    ) {
-        let own_page = Refusal::AuthorityBlocked {
-            code: crate::governance::ReasonCode::OwnWorkbench,
-            host: Some("127.0.0.1".into()),
-            origin: Some("http://127.0.0.1:41259".into()),
-        };
-        assert!(own_page.summary().contains(":41259"));
-        assert!(!own_page.retained().summary().contains(":41259"));
-        assert!(!own_page.audit().summary().contains(":41259"));
-        assert_eq!(own_page.observed().host.as_deref(), Some("127.0.0.1"));
-
-        let credential = Refusal::CredentialAuthorization {
-            control: ControlRef::new(
-                TargetRole::Textbox,
-                "PRIVATE_NAME",
-                Some("target_7k2nb5xe"),
-                true,
-            ),
-        };
-        assert!(credential.summary().contains("PRIVATE_NAME"));
-        for kept in [
-            credential.retained().summary(),
-            credential.audit().summary().into(),
-        ] {
-            assert!(!kept.contains("PRIVATE_NAME"), "{kept}");
-            assert!(!kept.contains("target_"), "{kept}");
+        for preserve in [true, false] {
+            let clicked = Outcome::TargetClicked {
+                host: Some("example.com".into()),
+                subject: ActionSubject::from_page("button", "Save record", preserve),
+            };
+            let audit = clicked.audit();
+            assert_eq!(audit.summary(), clicked.summary());
+            assert_eq!(audit.summary().contains("Save record"), preserve);
         }
 
         let primitive = Refusal::BrowserPrimitive {
             detail: "PRIVATE_EXCEPTION".into(),
-            cause: crate::language::outcome::PrimitiveCause::Refused,
-        };
-        assert!(!primitive.retained().summary().contains("PRIVATE_EXCEPTION"));
-    }
-
-    #[test]
-    fn retained_refusal_has_no_browser_text_but_client_detail_survives() {
-        let refusal = Refusal::BrowserPrimitive {
-            detail: "PRIVATE_EXCEPTION".into(),
-            cause: crate::language::outcome::PrimitiveCause::Refused,
-        };
-        assert!(refusal.summary().contains("PRIVATE_EXCEPTION"));
-        assert!(!refusal.audit().summary().contains("PRIVATE_EXCEPTION"));
-        assert_eq!(
-            serde_json::to_value(refusal.audit().refusal()).unwrap(),
-            serde_json::json!({"reason":"browser_primitive_failed"})
-        );
-    }
-
-    #[test]
-    fn a_held_tab_keeps_the_audit_cause_word_and_reads_back() {
-        let facts = serde_json::json!({"reason":"workspace_unusable","cause":"tab_held"});
-        for host in [Some("elsewhere.test".to_owned()), None] {
-            let refusal = Refusal::TabHeld { host };
-            assert_eq!(
-                serde_json::to_value(refusal.audit().refusal()).unwrap(),
-                facts
-            );
+            cause: PrimitiveCause::Refused,
         }
-        let read: AuditRefusal = serde_json::from_value(facts).unwrap();
+        .audit();
+        let typed = primitive.clone().for_gesture(PageGesture::Type);
+        assert_eq!(typed.summary(), PageGesture::Type.could_not());
+        assert_eq!(typed.refusal(), primitive.refusal());
         assert_eq!(
-            read,
-            AuditRefusal::WorkspaceUnusable {
-                cause: WorkspaceReason::TabHeld
-            }
+            primitive.clone().for_gesture(PageGesture::Other).summary(),
+            primitive.summary()
         );
-    }
-
-    #[test]
-    fn a_browser_failure_keeps_the_kind_of_act_it_could_not_do_and_nothing_of_the_page() {
-        let refusal = Refusal::BrowserPrimitive {
-            detail: "PRIVATE_EXCEPTION".into(),
-            cause: crate::language::outcome::PrimitiveCause::Refused,
-        };
-        let typed = refusal.audit().for_gesture(PageGesture::Type);
+        let contract = Refusal::BrowserContract.audit();
         assert_eq!(
-            typed.summary(),
-            "The browser could not type into that field."
-        );
-        assert_eq!(typed.refusal(), refusal.audit().refusal());
-        assert_eq!(
-            refusal.audit().for_gesture(PageGesture::Other).summary(),
-            refusal.audit().summary()
-        );
-        let other = Refusal::BrowserContract.audit();
-        assert_eq!(
-            other.clone().for_gesture(PageGesture::Type).summary(),
-            other.summary(),
+            contract.clone().for_gesture(PageGesture::Type).summary(),
+            contract.summary(),
             "only a browser failure takes the gesture's words"
         );
-    }
-
-    #[test]
-    fn a_page_refusal_audits_its_word_and_the_sentence_that_quotes_no_page() {
-        use crate::language::page_refusal::{PageGesture, PageRefusal};
-        for refusal in PageRefusal::ALL {
-            let refused = Refusal::PageRefused {
-                refusal,
-                gesture: PageGesture::Click,
-            };
-            let audit = refused.audit();
-            assert_eq!(audit.summary(), refused.summary());
-            assert_eq!(
-                serde_json::to_value(audit.refusal()).unwrap(),
-                serde_json::json!({"reason":"page_refused","cause":refusal.as_str()})
-            );
-        }
-    }
-
-    #[test]
-    fn a_stale_target_audits_its_word_and_the_history_holds_the_sentence_only() {
-        for reason in StaleReason::ALL {
-            let refusal = Refusal::WorkspaceUnusable {
-                reason: WorkspaceReason::StaleTarget {
-                    reason,
-                    help: StaleHelp::None,
-                },
-            };
-            let audit = refusal.audit();
-            assert_eq!(audit.summary(), refusal.summary());
-            assert_eq!(
-                serde_json::to_value(audit.refusal()).unwrap(),
-                serde_json::json!({
-                    "reason": "workspace_unusable",
-                    "cause": {"stale_target": {"reason": reason.word()}}
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn a_stale_target_audits_no_replacement_and_no_handle() {
-        for help in [
-            StaleHelp::Candidates { named: true },
-            StaleHelp::Candidates { named: false },
-            StaleHelp::Replacement {
-                tool: "browser_click",
-                target: "target_7k2nb5xe".into(),
-            },
-        ] {
-            let refusal = Refusal::WorkspaceUnusable {
-                reason: WorkspaceReason::StaleTarget {
-                    reason: StaleReason::Removed,
-                    help,
-                },
-            };
-            let audit = refusal.audit();
-            assert_eq!(
-                serde_json::to_value(audit.refusal()).unwrap(),
-                serde_json::json!({
-                    "reason": "workspace_unusable",
-                    "cause": {"stale_target": {"reason": "removed"}}
-                })
-            );
-            assert!(!serde_json::to_value(audit.refusal())
-                .unwrap()
-                .to_string()
-                .contains("target_"));
-            assert!(!audit.summary().contains("target_"));
-        }
-    }
-
-    #[test]
-    fn every_catalog_tool_has_a_stable_audit_name() {
-        for tool in super::super::catalog() {
-            assert_eq!(tool_name(&tool.name), tool.name);
-        }
-        assert_eq!(tool_name("PRIVATE_UNKNOWN_TOOL"), "unknown_tool");
     }
 }
