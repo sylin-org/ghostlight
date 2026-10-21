@@ -29,13 +29,11 @@ pub mod world;
 use self::link::Link;
 use self::locator::bind_lookup;
 use self::scope::Scope;
-use self::translate::forms::{self, Fill};
-use self::translate::keyboard::{PressKey, TypeFocused, TypeText};
-use self::translate::observe::{self, Subjects, Wait};
-use self::translate::pointer::{Click, Drag, Scroll};
-use self::translate::points::{PointClick, PointDrag, PointDrop, PointWheel, ViewPoint};
-use self::translate::records::{self, DiagnosticsRead, PageExport};
-use self::translate::{capture, keyboard, pointer, points, present, reach, read, script, tabs};
+use self::translate::observe::{self, Subjects};
+use self::translate::records::{self, PageExport};
+use self::translate::{
+    capture, forms, keyboard, pointer, points, present, reach, read, script, tabs,
+};
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, RecordingDestination};
 use crate::browser::BrowserError;
 
@@ -177,45 +175,13 @@ fn translate(
         BrowserCommand::DescribeTargets { tab_id, locators } => {
             read::describe_targets(l, reach(scope)?, tab_id, &locators)
         }
-        BrowserCommand::QuerySemantic {
-            tab_id,
-            name,
-            role,
-            exact,
-            form_scope,
-            max_results,
-        } => read::query_semantic(
-            l,
-            reach(scope)?,
-            tab_id,
-            &read::Semantic {
-                name: &name,
-                role: role.as_deref(),
-                exact,
-                form_scope,
-                max_results,
-            },
-        ),
+        BrowserCommand::QuerySemantic(selector) => {
+            read::query_semantic(l, reach(scope)?, &selector)
+        }
         BrowserCommand::DescribeFocused { tab_id } => {
             read::describe_focused(l, reach(scope)?, tab_id)
         }
-        BrowserCommand::Observe {
-            tab_id,
-            condition,
-            value,
-            locator,
-            timeout_ms,
-        } => observe::observe(
-            l,
-            reach(scope)?,
-            tab_id,
-            Wait {
-                condition,
-                value: value.as_deref(),
-                locator: locator.as_deref(),
-                timeout_ms,
-            },
-        ),
+        BrowserCommand::Observe(wait) => observe::observe(l, reach(scope)?, &wait),
         BrowserCommand::SetZoom { tab_id, zoom } => tabs::set_zoom(l, tab_id, zoom),
         BrowserCommand::ResizeWindow {
             tab_id,
@@ -228,25 +194,7 @@ fn translate(
             accept,
             text,
         } => tabs::handle_dialog(l, tab_id, accept, text),
-        BrowserCommand::ReadDiagnostics {
-            tab_id,
-            source,
-            detail,
-            match_text,
-            after,
-            limit,
-        } => records::read_diagnostics(
-            l,
-            reach(scope)?,
-            DiagnosticsRead {
-                tab_id,
-                source,
-                detail,
-                match_text,
-                after,
-                limit,
-            },
-        ),
+        BrowserCommand::ReadDiagnostics(read) => records::read_diagnostics(l, reach(scope)?, read),
         BrowserCommand::ClearDiagnostics { tab_ids } => records::clear_diagnostics(l, tab_ids),
         BrowserCommand::StartRecording { tab_id } => records::start(l, reach(scope)?, tab_id),
         BrowserCommand::StatusRecording => records::status(l),
@@ -295,212 +243,30 @@ fn translate(
             expected_viewport,
             settle_ms,
         } => capture::screenshot_region(l, tab_id, &region, &expected_viewport, settle_ms),
-        BrowserCommand::Activate {
-            tab_id,
-            locator,
-            button,
-            click_count,
-            modifiers,
-        } => pointer::activate(
-            l,
-            reach(scope)?,
-            Click {
-                tab_id,
-                locator: &locator,
-                button: &button,
-                click_count,
-                modifiers: &modifiers,
-            },
-        ),
+        BrowserCommand::Activate(click) => pointer::activate(l, reach(scope)?, &click),
         BrowserCommand::Hover { tab_id, locator } => {
             pointer::hover(l, reach(scope)?, tab_id, &locator)
         }
-        BrowserCommand::Scroll {
-            tab_id,
-            locator,
-            direction,
-            amount,
-        } => pointer::scroll(
-            l,
-            reach(scope)?,
-            Scroll {
-                tab_id,
-                locator: locator.as_deref(),
-                direction: direction.as_deref(),
-                amount: amount.as_deref(),
-            },
-        ),
-        BrowserCommand::TypeText {
-            tab_id,
-            locator,
-            text,
-            clear_first,
-            allow_credentials,
-        } => keyboard::type_text(
-            l,
-            reach(scope)?,
-            TypeText {
-                tab_id,
-                locator: &locator,
-                text: &text,
-                clear_first,
-                allow_credentials,
-            },
-        ),
-        BrowserCommand::TypeFocused {
-            tab_id,
-            text,
-            clear_first,
-            allow_credentials,
-        } => keyboard::type_focused(
-            l,
-            reach(scope)?,
-            TypeFocused {
-                tab_id,
-                text: &text,
-                clear_first,
-                allow_credentials,
-            },
-        ),
-        BrowserCommand::PressKey {
-            tab_id,
-            locator,
-            key,
-            modifiers,
-        } => keyboard::press_key(
-            l,
-            reach(scope)?,
-            PressKey {
-                tab_id,
-                locator: locator.as_deref(),
-                key: &key,
-                modifiers: &modifiers,
-            },
-        ),
+        BrowserCommand::Scroll(request) => pointer::scroll(l, reach(scope)?, &request),
+        BrowserCommand::TypeText(request) => keyboard::type_text(l, reach(scope)?, &request),
+        BrowserCommand::TypeFocused(request) => keyboard::type_focused(l, reach(scope)?, &request),
+        BrowserCommand::PressKey(request) => keyboard::press_key(l, reach(scope)?, &request),
         BrowserCommand::UploadFiles {
             tab_id,
             locator,
             files,
         } => keyboard::upload_files(l, reach(scope)?, tab_id, &locator, &files),
-        BrowserCommand::Fill {
-            tab_id,
-            fields,
-            submit_locator,
-            timeout_ms,
-            allow_credentials,
-        } => forms::fill(
-            l,
-            reach(scope)?,
-            Fill {
-                tab_id,
-                fields: &fields,
-                submit_locator: submit_locator.as_deref(),
-                timeout_ms,
-                allow_credentials,
-            },
-        ),
+        BrowserCommand::Fill(fill) => forms::fill(l, reach(scope)?, &fill),
         BrowserCommand::EvaluateScript {
             tab_id,
             script,
             max_result_chars,
         } => script::evaluate(l, reach(scope)?, tab_id, &script, max_result_chars),
-        BrowserCommand::ActivatePoint {
-            tab_id,
-            point,
-            expected_viewport,
-            button,
-            click_count,
-            modifiers,
-        } => points::activate(
-            l,
-            reach(scope)?,
-            PointClick {
-                at: ViewPoint {
-                    tab_id,
-                    point,
-                    expected: &expected_viewport,
-                },
-                button: &button,
-                click_count,
-                modifiers: &modifiers,
-            },
-        ),
-        BrowserCommand::WheelAt {
-            tab_id,
-            point,
-            expected_viewport,
-            direction,
-            ticks,
-        } => points::wheel(
-            l,
-            reach(scope)?,
-            PointWheel {
-                at: ViewPoint {
-                    tab_id,
-                    point,
-                    expected: &expected_viewport,
-                },
-                direction: &direction,
-                ticks,
-            },
-        ),
-        BrowserCommand::HoverPoint {
-            tab_id,
-            point,
-            expected_viewport,
-        } => points::hover(
-            l,
-            reach(scope)?,
-            ViewPoint {
-                tab_id,
-                point,
-                expected: &expected_viewport,
-            },
-        ),
-        BrowserCommand::Drag {
-            tab_id,
-            source_locator,
-            destination_locator,
-        } => pointer::drag(
-            l,
-            reach(scope)?,
-            Drag {
-                tab_id,
-                source: &source_locator,
-                destination: &destination_locator,
-            },
-        ),
-        BrowserCommand::DragPoints {
-            tab_id,
-            start,
-            end,
-            expected_viewport,
-        } => points::drag(
-            l,
-            reach(scope)?,
-            PointDrag {
-                tab_id,
-                start,
-                end,
-                expected: &expected_viewport,
-            },
-        ),
-        BrowserCommand::DropImageAt {
-            tab_id,
-            point,
-            expected_viewport,
-            file,
-        } => points::drop_file(
-            l,
-            reach(scope)?,
-            PointDrop {
-                at: ViewPoint {
-                    tab_id,
-                    point,
-                    expected: &expected_viewport,
-                },
-                file: &file,
-            },
-        ),
+        BrowserCommand::ActivatePoint(click) => points::activate(l, reach(scope)?, &click),
+        BrowserCommand::WheelAt(wheel) => points::wheel(l, reach(scope)?, &wheel),
+        BrowserCommand::HoverPoint(view) => points::hover(l, reach(scope)?, &view),
+        BrowserCommand::Drag(drag) => pointer::drag(l, reach(scope)?, &drag),
+        BrowserCommand::DragPoints(drag) => points::drag(l, reach(scope)?, &drag),
+        BrowserCommand::DropImageAt(drop) => points::drop_file(l, reach(scope)?, &drop),
     }
 }

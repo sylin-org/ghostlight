@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 use super::super::super::keys;
 use super::*;
+use crate::browser::adapter::PhysicalFill;
 use crate::browser::adapter::{FieldNow, PhysicalField};
 use crate::browser::BrowserDispatch;
 use crate::governance::ReasonCode;
@@ -27,13 +28,13 @@ fn field(locator: &str, value: &str) -> PhysicalField {
 }
 
 fn fill(fields: Vec<PhysicalField>, submit: Option<&str>, timeout_ms: u64) -> BrowserCommand {
-    BrowserCommand::Fill {
+    BrowserCommand::Fill(PhysicalFill {
         tab_id: 12,
         fields,
         submit_locator: submit.map(Into::into),
         timeout_ms,
         allow_credentials: false,
-    }
+    })
 }
 
 fn all_open() -> DocumentScope {

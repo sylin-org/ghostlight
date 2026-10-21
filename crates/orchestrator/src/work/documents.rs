@@ -5,6 +5,11 @@ use crate::browser::adapter::documents::{DocumentInventory, DocumentScope, DOCUM
 use crate::language::coverage::{Coverage, HumanCoverage};
 
 use super::*;
+use crate::browser::adapter::{
+    PhysicalClick, PhysicalDiagnosticsRead, PhysicalDrag, PhysicalFill, PhysicalPointClick,
+    PhysicalPointDrag, PhysicalPointDrop, PhysicalPointWheel, PhysicalPressKey, PhysicalScroll,
+    PhysicalSemantic, PhysicalTypeFocused, PhysicalTypeText, PhysicalViewPoint, PhysicalWait,
+};
 
 /// The longest document url the executor accepts from an adapter.
 const URL_LIMIT: usize = 8192;
@@ -35,9 +40,9 @@ impl RequestScope {
             | BrowserCommand::InspectTree {
                 tab_id, locator, ..
             }
-            | BrowserCommand::Scroll {
+            | BrowserCommand::Scroll(PhysicalScroll {
                 tab_id, locator, ..
-            } => {
+            }) => {
                 scope.locators.extend(locator.clone());
                 scope.whole = locator.is_none();
                 *tab_id
@@ -45,7 +50,7 @@ impl RequestScope {
             BrowserCommand::ReadDocument { tab_id, .. }
             | BrowserCommand::Inspect { tab_id, .. }
             | BrowserCommand::Find { tab_id, .. }
-            | BrowserCommand::QuerySemantic { tab_id, .. } => {
+            | BrowserCommand::QuerySemantic(PhysicalSemantic { tab_id, .. }) => {
                 scope.whole = true;
                 *tab_id
             }
@@ -53,32 +58,41 @@ impl RequestScope {
                 scope.locators = locators.clone();
                 *tab_id
             }
-            BrowserCommand::Activate {
+            BrowserCommand::Activate(PhysicalClick {
                 tab_id, locator, ..
-            }
+            })
             | BrowserCommand::Hover { tab_id, locator }
-            | BrowserCommand::TypeText {
+            | BrowserCommand::TypeText(PhysicalTypeText {
                 tab_id, locator, ..
-            }
+            })
             | BrowserCommand::UploadFiles {
                 tab_id, locator, ..
             } => {
                 scope.locators.push(locator.clone());
                 *tab_id
             }
-            BrowserCommand::ActivatePoint { tab_id, point, .. }
-            | BrowserCommand::WheelAt { tab_id, point, .. }
-            | BrowserCommand::HoverPoint { tab_id, point, .. }
-            | BrowserCommand::DropImageAt { tab_id, point, .. } => {
+            BrowserCommand::ActivatePoint(PhysicalPointClick {
+                at: PhysicalViewPoint { tab_id, point, .. },
+                ..
+            })
+            | BrowserCommand::WheelAt(PhysicalPointWheel {
+                at: PhysicalViewPoint { tab_id, point, .. },
+                ..
+            })
+            | BrowserCommand::HoverPoint(PhysicalViewPoint { tab_id, point, .. })
+            | BrowserCommand::DropImageAt(PhysicalPointDrop {
+                at: PhysicalViewPoint { tab_id, point, .. },
+                ..
+            }) => {
                 scope.points.push(*point);
                 *tab_id
             }
-            BrowserCommand::Fill {
+            BrowserCommand::Fill(PhysicalFill {
                 tab_id,
                 fields,
                 submit_locator,
                 ..
-            } => {
+            }) => {
                 scope
                     .locators
                     .extend(fields.iter().map(|field| field.locator.clone()));
@@ -86,22 +100,22 @@ impl RequestScope {
                 *tab_id
             }
             BrowserCommand::DescribeFocused { tab_id }
-            | BrowserCommand::TypeFocused { tab_id, .. } => {
+            | BrowserCommand::TypeFocused(PhysicalTypeFocused { tab_id, .. }) => {
                 scope.focused = true;
                 *tab_id
             }
-            BrowserCommand::PressKey {
+            BrowserCommand::PressKey(PhysicalPressKey {
                 tab_id, locator, ..
-            } => {
+            }) => {
                 scope.locators.extend(locator.clone());
                 scope.focused = locator.is_none();
                 *tab_id
             }
-            BrowserCommand::Drag {
+            BrowserCommand::Drag(PhysicalDrag {
                 tab_id,
                 source_locator,
                 destination_locator,
-            } => {
+            }) => {
                 scope
                     .locators
                     .extend([source_locator.clone(), destination_locator.clone()]);
@@ -109,26 +123,26 @@ impl RequestScope {
                 scope.unbounded = true;
                 *tab_id
             }
-            BrowserCommand::DragPoints {
+            BrowserCommand::DragPoints(PhysicalPointDrag {
                 tab_id, start, end, ..
-            } => {
+            }) => {
                 scope.points.extend([*start, *end]);
                 scope.unbounded = true;
                 *tab_id
             }
             BrowserCommand::EvaluateScript { tab_id, .. }
-            | BrowserCommand::ReadDiagnostics { tab_id, .. }
+            | BrowserCommand::ReadDiagnostics(PhysicalDiagnosticsRead { tab_id, .. })
             | BrowserCommand::StartRecording { tab_id } => {
                 scope.whole = true;
                 scope.unbounded = true;
                 *tab_id
             }
-            BrowserCommand::Observe {
+            BrowserCommand::Observe(PhysicalWait {
                 tab_id,
                 locator,
                 condition,
                 ..
-            } => {
+            }) => {
                 scope.locators.extend(locator.clone());
                 scope.whole = condition.reads_whole_page();
                 *tab_id
@@ -296,10 +310,10 @@ impl ApplicationExecutor {
         let preparation_started = Instant::now();
         let settle_ms = if !matches!(
             command,
-            BrowserCommand::Observe { .. }
+            BrowserCommand::Observe(PhysicalWait { .. })
                 | BrowserCommand::DescribeTargets { .. }
                 | BrowserCommand::DescribeFocused { .. }
-                | BrowserCommand::ReadDiagnostics { .. }
+                | BrowserCommand::ReadDiagnostics(PhysicalDiagnosticsRead { .. })
                 | BrowserCommand::StartRecording { .. }
         ) && context.settlement_pending.swap(false, Ordering::SeqCst)
         {
@@ -389,7 +403,7 @@ impl ApplicationExecutor {
         {
             return Err(BrowserError::DocumentUnavailable);
         }
-        let tests_absence = matches!(&command, BrowserCommand::Observe { condition, .. } if condition.tests_absence());
+        let tests_absence = matches!(&command, BrowserCommand::Observe(PhysicalWait { condition, .. }) if condition.tests_absence());
         let admitted = allowed.clone();
         let scoped = BrowserCommand::InDocuments {
             scope: DocumentScope {

@@ -750,52 +750,16 @@ pub enum BrowserCommand {
     /// Recheck credential classification immediately before a fill.
     DescribeTargets { tab_id: u64, locators: Vec<String> },
     /// Resolve one typed semantic selector against visible targets.
-    QuerySemantic {
-        tab_id: u64,
-        /// Required accessible-name text.
-        name: String,
-        /// Optional closed role filter.
-        role: Option<String>,
-        /// Require the whole accessible name to equal the text.
-        exact: bool,
-        /// Restrict to controls associated with a form.
-        form_scope: bool,
-        /// The most targets to return across every document.
-        max_results: usize,
-    },
+    QuerySemantic(PhysicalSemantic),
     /// Activate one target, holding `modifiers` (none when empty).
-    Activate {
-        tab_id: u64,
-        locator: String,
-        button: String,
-        click_count: u8,
-        modifiers: Vec<String>,
-    },
+    Activate(PhysicalClick),
     /// Activate one page point resolved from a governed view handle, holding `modifiers` (none
     /// when empty).
-    ActivatePoint {
-        tab_id: u64,
-        point: PhysicalPoint,
-        expected_viewport: ViewportGeometry,
-        button: String,
-        click_count: u8,
-        modifiers: Vec<String>,
-    },
+    ActivatePoint(PhysicalPointClick),
     /// Wheel-scroll at one page point resolved from a governed view handle.
-    WheelAt {
-        tab_id: u64,
-        point: PhysicalPoint,
-        expected_viewport: ViewportGeometry,
-        direction: String,
-        ticks: u8,
-    },
+    WheelAt(PhysicalPointWheel),
     /// Scroll the page or reveal a locator.
-    Scroll {
-        tab_id: u64,
-        locator: Option<String>,
-        direction: Option<String>,
-        amount: Option<String>,
-    },
+    Scroll(PhysicalScroll),
     /// Set tab zoom as a browser scale factor.
     SetZoom { tab_id: u64, zoom: f64 },
     /// Resize the normal browser window containing a physical tab.
@@ -807,60 +771,21 @@ pub enum BrowserCommand {
     /// Hover one browser-local locator.
     Hover { tab_id: u64, locator: String },
     /// Hover one page point resolved from a governed view handle.
-    HoverPoint {
-        tab_id: u64,
-        point: PhysicalPoint,
-        expected_viewport: ViewportGeometry,
-    },
+    HoverPoint(PhysicalViewPoint),
     /// Fill fields after service preflight and optionally submit.
-    Fill {
-        tab_id: u64,
-        fields: Vec<PhysicalField>,
-        submit_locator: Option<String>,
-        /// Adapter-side budget for the complete physical fill and its terminal verification.
-        timeout_ms: u64,
-        /// Whether service preflight allows credential-class fields in this request.
-        allow_credentials: bool,
-    },
+    Fill(PhysicalFill),
     /// Type text through browser input events after credential preflight.
-    TypeText {
-        tab_id: u64,
-        locator: String,
-        text: String,
-        clear_first: bool,
-        /// Whether service preflight allows credential-class input in this request.
-        allow_credentials: bool,
-    },
+    TypeText(PhysicalTypeText),
     /// Describe the currently focused editable control before typing.
     DescribeFocused { tab_id: u64 },
     /// Type into the currently focused editable control after credential preflight.
-    TypeFocused {
-        tab_id: u64,
-        text: String,
-        clear_first: bool,
-        /// Whether service preflight allows credential-class input in this request.
-        allow_credentials: bool,
-    },
+    TypeFocused(PhysicalTypeFocused),
     /// Send one physical keyboard action.
-    PressKey {
-        tab_id: u64,
-        locator: Option<String>,
-        key: String,
-        modifiers: Vec<String>,
-    },
+    PressKey(PhysicalPressKey),
     /// Drag between two browser-local locators.
-    Drag {
-        tab_id: u64,
-        source_locator: String,
-        destination_locator: String,
-    },
+    Drag(PhysicalDrag),
     /// Drag between two page points resolved from a governed view handle.
-    DragPoints {
-        tab_id: u64,
-        start: PhysicalPoint,
-        end: PhysicalPoint,
-        expected_viewport: ViewportGeometry,
-    },
+    DragPoints(PhysicalPointDrag),
     /// Upload already selected and bounded file bytes.
     UploadFiles {
         tab_id: u64,
@@ -868,12 +793,7 @@ pub enum BrowserCommand {
         files: Vec<PhysicalFile>,
     },
     /// Drop one bounded image at a page point resolved from a governed view handle.
-    DropImageAt {
-        tab_id: u64,
-        point: PhysicalPoint,
-        expected_viewport: ViewportGeometry,
-        file: PhysicalFile,
-    },
+    DropImageAt(PhysicalPointDrop),
     /// Evaluate an explicit script in the page's main world.
     EvaluateScript {
         tab_id: u64,
@@ -881,13 +801,7 @@ pub enum BrowserCommand {
         max_result_chars: usize,
     },
     /// Observe one condition.
-    Observe {
-        tab_id: u64,
-        condition: PageCondition,
-        value: Option<String>,
-        locator: Option<String>,
-        timeout_ms: u64,
-    },
+    Observe(PhysicalWait),
     /// Inspect the current JavaScript dialog.
     InspectDialog { tab_id: u64 },
     /// Handle the current JavaScript dialog.
@@ -897,14 +811,7 @@ pub enum BrowserCommand {
         text: Option<String>,
     },
     /// Enable and read bounded volatile browser diagnostics.
-    ReadDiagnostics {
-        tab_id: u64,
-        source: DiagnosticSource,
-        detail: DiagnosticDetail,
-        match_text: Option<String>,
-        after: Option<String>,
-        limit: u16,
-    },
+    ReadDiagnostics(PhysicalDiagnosticsRead),
     /// Erase volatile diagnostics for tabs released by the owning workspace.
     ClearDiagnostics { tab_ids: Vec<u64> },
     /// Start the workspace's one bounded recording on a physical tab.
@@ -923,6 +830,207 @@ pub enum BrowserCommand {
     DiscardRecording,
     /// Render content-free feedback.
     Present { signal: PresentationSignal },
+}
+
+/// One semantic selector as work names it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalSemantic {
+    /// The tab.
+    pub tab_id: u64,
+    /// Required accessible-name text.
+    pub name: String,
+    /// Optional closed role filter.
+    pub role: Option<String>,
+    /// Require the whole accessible name to equal the text.
+    pub exact: bool,
+    /// Restrict to controls associated with a form.
+    pub form_scope: bool,
+    /// The most targets to return across every document.
+    pub max_results: usize,
+}
+
+/// One click on a located target.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalClick {
+    /// The tab.
+    pub tab_id: u64,
+    /// The target's encoded locator.
+    pub locator: String,
+    /// The button's name.
+    pub button: String,
+    /// How many clicks, one after another.
+    pub click_count: u8,
+    /// The modifier names held during the clicks.
+    pub modifiers: Vec<String>,
+}
+
+/// One click at a point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalPointClick {
+    /// The point and the view it was read in.
+    pub at: PhysicalViewPoint,
+    /// The button's name.
+    pub button: String,
+    /// How many clicks, one after another.
+    pub click_count: u8,
+    /// The modifier names held during the clicks.
+    pub modifiers: Vec<String>,
+}
+
+/// A wheel turn at a point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalPointWheel {
+    /// The point and the view it was read in.
+    pub at: PhysicalViewPoint,
+    /// The direction's name.
+    pub direction: String,
+    /// How many ticks.
+    pub ticks: u8,
+}
+
+/// What a scroll asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalScroll {
+    /// The tab.
+    pub tab_id: u64,
+    /// The target to reveal, when the scroll names one.
+    pub locator: Option<String>,
+    /// The direction to scroll the page in, when it names no target.
+    pub direction: Option<String>,
+    /// How far to scroll the page, when it names no target.
+    pub amount: Option<String>,
+}
+
+/// A page point on a view the model looked at.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalViewPoint {
+    /// The tab.
+    pub tab_id: u64,
+    /// The point, in page coordinates.
+    pub point: PhysicalPoint,
+    /// The view the model chose the point on.
+    pub expected_viewport: ViewportGeometry,
+}
+
+/// What a fill asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalFill {
+    /// The tab.
+    pub tab_id: u64,
+    /// The fields, each with an encoded locator, in the order they are filled.
+    pub fields: Vec<PhysicalField>,
+    /// The encoded locator of the control to click after the fields, when there is one.
+    pub submit_locator: Option<String>,
+    /// Adapter-side budget for the complete physical fill and its terminal verification.
+    pub timeout_ms: u64,
+    /// Whether service preflight allows credential-class fields in this request.
+    pub allow_credentials: bool,
+}
+
+/// What typing into a located control asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalTypeText {
+    /// The tab.
+    pub tab_id: u64,
+    /// The control's encoded locator.
+    pub locator: String,
+    /// The text.
+    pub text: String,
+    /// Whether to clear the control first.
+    pub clear_first: bool,
+    /// Whether service preflight allows credential-class input in this request.
+    pub allow_credentials: bool,
+}
+
+/// What typing into the focused control asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalTypeFocused {
+    /// The tab.
+    pub tab_id: u64,
+    /// The text.
+    pub text: String,
+    /// Whether to clear the control first.
+    pub clear_first: bool,
+    /// Whether service preflight allows credential-class input in this request.
+    pub allow_credentials: bool,
+}
+
+/// What a key press asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalPressKey {
+    /// The tab.
+    pub tab_id: u64,
+    /// The control to focus first, when the press names one.
+    pub locator: Option<String>,
+    /// The key's name.
+    pub key: String,
+    /// The modifier names held during the press.
+    pub modifiers: Vec<String>,
+}
+
+/// What a drag between two located targets asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalDrag {
+    /// The tab.
+    pub tab_id: u64,
+    /// The encoded locator of the target the drag starts on.
+    pub source_locator: String,
+    /// The encoded locator of the target the drag ends on.
+    pub destination_locator: String,
+}
+
+/// A drag between two points of one view.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalPointDrag {
+    /// The tab.
+    pub tab_id: u64,
+    /// Where the pointer presses, in page coordinates.
+    pub start: PhysicalPoint,
+    /// Where the pointer releases, in page coordinates.
+    pub end: PhysicalPoint,
+    /// The view the model chose the points on.
+    pub expected_viewport: ViewportGeometry,
+}
+
+/// A file dropped at a point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalPointDrop {
+    /// The point and the view it was read in.
+    pub at: PhysicalViewPoint,
+    /// The file.
+    pub file: PhysicalFile,
+}
+
+/// One wait for a condition.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalWait {
+    /// The tab.
+    pub tab_id: u64,
+    /// The condition.
+    pub condition: PageCondition,
+    /// The text or URL fragment the condition compares, when it takes one.
+    pub value: Option<String>,
+    /// The target the condition watches, when it watches one.
+    pub locator: Option<String>,
+    /// How long the page may wait, in milliseconds.
+    pub timeout_ms: u64,
+}
+
+/// One diagnostics read as work names it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalDiagnosticsRead {
+    /// The tab to read.
+    pub tab_id: u64,
+    /// Which sources to read.
+    pub source: DiagnosticSource,
+    /// How much to return.
+    pub detail: DiagnosticDetail,
+    /// Text an entry must contain.
+    pub match_text: Option<String>,
+    /// Cursor after which to read.
+    pub after: Option<String>,
+    /// Most entries to return.
+    pub limit: u16,
 }
 
 impl BrowserCommand {
@@ -946,12 +1054,12 @@ impl BrowserCommand {
             Self::ReadText { locator, .. }
             | Self::InspectTree { locator, .. }
             | Self::Screenshot { locator, .. }
-            | Self::Scroll { locator, .. }
-            | Self::PressKey { locator, .. }
-            | Self::Observe { locator, .. } => locator.as_deref(),
-            Self::Activate { locator, .. }
+            | Self::Scroll(PhysicalScroll { locator, .. })
+            | Self::PressKey(PhysicalPressKey { locator, .. })
+            | Self::Observe(PhysicalWait { locator, .. }) => locator.as_deref(),
+            Self::Activate(PhysicalClick { locator, .. })
             | Self::Hover { locator, .. }
-            | Self::TypeText { locator, .. }
+            | Self::TypeText(PhysicalTypeText { locator, .. })
             | Self::UploadFiles { locator, .. }
             | Self::ExportRecording {
                 destination: RecordingDestination::Target { locator, .. },
@@ -1307,14 +1415,16 @@ mod tests {
     #[test]
     fn a_command_names_one_locator_only_when_it_acts_on_exactly_one() {
         use crate::browser::adapter::documents::DocumentScope;
-        use crate::browser::adapter::{BrowserCommand, RecordingDestination};
-        let click = BrowserCommand::Activate {
+        use crate::browser::adapter::{
+            BrowserCommand, PhysicalClick, PhysicalDrag, PhysicalScroll, RecordingDestination,
+        };
+        let click = BrowserCommand::Activate(PhysicalClick {
             tab_id: 1,
             locator: "F:L:locator_a_1".into(),
             button: "left".into(),
             click_count: 1,
             modifiers: vec![],
-        };
+        });
         assert_eq!(click.sole_locator(), Some("F:L:locator_a_1"));
         let scoped = BrowserCommand::InDocuments {
             scope: DocumentScope {
@@ -1329,23 +1439,23 @@ mod tests {
             primitive: Box::new(click),
         };
         assert_eq!(scoped.sole_locator(), Some("F:L:locator_a_1"));
-        let page_scroll = BrowserCommand::Scroll {
+        let page_scroll = BrowserCommand::Scroll(PhysicalScroll {
             tab_id: 1,
             locator: None,
             direction: Some("down".into()),
             amount: None,
-        };
+        });
         assert_eq!(page_scroll.sole_locator(), None);
         let two = BrowserCommand::DescribeTargets {
             tab_id: 1,
             locators: vec!["a".into(), "b".into()],
         };
         assert_eq!(two.sole_locator(), None);
-        let drag = BrowserCommand::Drag {
+        let drag = BrowserCommand::Drag(PhysicalDrag {
             tab_id: 1,
             source_locator: "a".into(),
             destination_locator: "b".into(),
-        };
+        });
         assert_eq!(drag.sole_locator(), None);
         let into_page = BrowserCommand::ExportRecording {
             destination: RecordingDestination::Target {

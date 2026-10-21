@@ -1,6 +1,7 @@
 //! Actual executor dispatch binds read feedback and closes each composition child's visuals.
 
 use super::*;
+use crate::browser::adapter::{PhysicalFill, PhysicalScroll};
 use crate::browser::adapter::{PresentationActivity, PresentationKind, PresentationSignal};
 
 #[derive(Default)]
@@ -362,7 +363,7 @@ fn fill_upload_and_scroll_name_their_targets_once_the_browser_has_acted() {
         &CancellationToken::default(),
     );
     assert_eq!(filled.status, Status::Succeeded, "{filled:?}");
-    let after_fill = sent(|call| matches!(call, BrowserCommand::Fill { .. }));
+    let after_fill = sent(|call| matches!(call, BrowserCommand::Fill(PhysicalFill { .. })));
     assert_eq!(
         signals.targets(filled.invocation.as_str()),
         [
@@ -423,7 +424,7 @@ fn fill_upload_and_scroll_name_their_targets_once_the_browser_has_acted() {
         &CancellationToken::default(),
     );
     assert_eq!(revealed.status, Status::Succeeded, "{revealed:?}");
-    let after_scroll = sent(|call| matches!(call, BrowserCommand::Scroll { .. }));
+    let after_scroll = sent(|call| matches!(call, BrowserCommand::Scroll(PhysicalScroll { .. })));
     assert_eq!(
         signals.targets(revealed.invocation.as_str()),
         [(

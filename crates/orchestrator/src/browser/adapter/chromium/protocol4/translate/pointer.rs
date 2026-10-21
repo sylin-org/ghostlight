@@ -19,7 +19,9 @@ use super::super::scope::Scope;
 use super::super::wire::{FrameRef, InputStep, Point};
 use super::super::world::{self, Message, OwnerBox, Prepared, ScrollOffset, Scrolled};
 use super::{input_for, route_and_admit, send_input, settled, value, OnDialog};
-use crate::browser::adapter::{BrowserOutcome, PhysicalActionSubject};
+use crate::browser::adapter::{
+    BrowserOutcome, PhysicalActionSubject, PhysicalClick, PhysicalDrag, PhysicalScroll,
+};
 use crate::browser::BrowserError;
 
 /// How long the page may take to settle after a click, in milliseconds.
@@ -38,21 +40,6 @@ const DRAG_SOURCE_BOX: usize = 2;
 const DRAG_DESTINATION_BOX: usize = 3;
 /// How many calls a drag makes before the owner-box chains that place its ends.
 const DRAG_FIXED_CALLS: usize = 4;
-
-/// One click on a located target.
-#[derive(Clone, Copy, Debug)]
-pub struct Click<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// The target's encoded locator.
-    pub locator: &'a str,
-    /// The button's name.
-    pub button: &'a str,
-    /// How many clicks, one after another.
-    pub click_count: u8,
-    /// The modifier names held during the clicks.
-    pub modifiers: &'a [String],
-}
 
 /// Where a prepared target sits, and what it is.
 struct Aim {
@@ -126,15 +113,15 @@ fn admit_aim(
 pub fn activate(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    click: Click<'_>,
+    click: &PhysicalClick,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let aim = aim(l, scope, click.tab_id, click.locator, world::activate)?;
+    let aim = aim(l, scope, click.tab_id, &click.locator, world::activate)?;
     admit_aim(l, scope, click.tab_id, &aim)?;
     let steps = keys::click(
         aim.point,
-        keys::mouse_button(click.button),
+        keys::mouse_button(&click.button),
         click.click_count,
-        keys::modifier_mask(click.modifiers),
+        keys::modifier_mask(&click.modifiers),
     );
     let input = input_for(
         l,
@@ -180,19 +167,6 @@ pub fn hover(
     })
 }
 
-/// What a scroll asks for.
-#[derive(Clone, Copy, Debug)]
-pub struct Scroll<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// The target to reveal, when the scroll names one.
-    pub locator: Option<&'a str>,
-    /// The direction to scroll the page in, when it names no target.
-    pub direction: Option<&'a str>,
-    /// How far to scroll the page, when it names no target.
-    pub amount: Option<&'a str>,
-}
-
 /// Scroll the page or reveal a located target.
 ///
 /// A target inside an embedded document is revealed there, and the position reported is the top
@@ -204,13 +178,17 @@ pub struct Scroll<'a> {
 pub fn scroll(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    request: Scroll<'_>,
+    request: &PhysicalScroll,
 ) -> Result<BrowserOutcome, BrowserError> {
     let top = scope.top();
-    let (doc, local) = scope.target(request.locator)?;
+    let (doc, local) = scope.target(request.locator.as_deref())?;
     let mut plans = vec![scope.call(
         &doc,
-        world::scroll(local.as_deref(), request.direction, request.amount),
+        world::scroll(
+            local.as_deref(),
+            request.direction.as_deref(),
+            request.amount.as_deref(),
+        ),
     )?];
     let nested = doc != top;
     if nested {
@@ -233,17 +211,6 @@ pub fn scroll(
     })
 }
 
-/// What a drag between two located targets asks for.
-#[derive(Clone, Copy, Debug)]
-pub struct Drag<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// The encoded locator of the target the drag starts on.
-    pub source: &'a str,
-    /// The encoded locator of the target the drag ends on.
-    pub destination: &'a str,
-}
-
 /// Drag from one located target to another.
 ///
 /// The destination is brought into view first and then the source, so the source is the one
@@ -259,10 +226,10 @@ pub struct Drag<'a> {
 pub fn drag(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    request: Drag<'_>,
+    request: &PhysicalDrag,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let source = Locator::decode(request.source)?;
-    let destination = Locator::decode(request.destination)?;
+    let source = Locator::decode(&request.source_locator)?;
+    let destination = Locator::decode(&request.destination_locator)?;
     let source_chain = scope.tree().chain(&source.doc)?;
     let destination_chain = scope.tree().chain(&destination.doc)?;
     let source_end = DRAG_FIXED_CALLS + source_chain.len();

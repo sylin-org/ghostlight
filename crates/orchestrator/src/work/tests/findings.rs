@@ -14,6 +14,7 @@ use super::execution::workspace_with_a_target;
 use super::replacement::{one_same, removed};
 use super::*;
 use crate::browser::adapter::BrowserCommand as Work;
+use crate::browser::adapter::PhysicalSemantic;
 use crate::browser::{BrowserPort, BrowserSummary};
 use crate::governance::CapabilitySet;
 
@@ -360,7 +361,7 @@ fn a_flow_step_whose_target_the_page_removed_is_marked_and_offered_its_replaceme
     assert_eq!(again.facts["stale"], "removed");
     assert!(browser.calls()[before..]
         .iter()
-        .all(|call| matches!(call, Work::QuerySemantic { .. })));
+        .all(|call| matches!(call, Work::QuerySemantic(PhysicalSemantic { .. }))));
 }
 
 #[test]

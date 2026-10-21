@@ -10,6 +10,9 @@ use super::*;
 use crate::browser::adapter::{
     CaptureScope, PhysicalFile, PhysicalRectangle, ScriptForm, ViewportGeometry,
 };
+use crate::browser::adapter::{
+    PhysicalClick, PhysicalPressKey, PhysicalScroll, PhysicalTypeFocused, PhysicalTypeText,
+};
 use crate::language::page_refusal::PageRefusal;
 
 const NESTED: &str = "C:c1:locator_a1_1";
@@ -153,31 +156,31 @@ fn all_open() -> DocumentScope {
 }
 
 fn activate(locator: &str) -> BrowserCommand {
-    BrowserCommand::Activate {
+    BrowserCommand::Activate(PhysicalClick {
         tab_id: 12,
         locator: locator.into(),
         button: "left".into(),
         click_count: 1,
         modifiers: vec![],
-    }
+    })
 }
 
 fn press(locator: Option<&str>, key: &str, modifiers: &[&str]) -> BrowserCommand {
-    BrowserCommand::PressKey {
+    BrowserCommand::PressKey(PhysicalPressKey {
         tab_id: 12,
         locator: locator.map(Into::into),
         key: key.into(),
         modifiers: modifiers.iter().map(|name| (*name).into()).collect(),
-    }
+    })
 }
 
 fn type_focused(clear_first: bool) -> BrowserCommand {
-    BrowserCommand::TypeFocused {
+    BrowserCommand::TypeFocused(PhysicalTypeFocused {
         tab_id: 12,
         text: "hello".into(),
         clear_first,
         allow_credentials: false,
-    }
+    })
 }
 
 pub(super) fn unscoped(outcome: BrowserOutcome) -> BrowserOutcome {
@@ -281,13 +284,13 @@ fn a_modified_click_holds_its_modifiers() {
         &port,
         scoped(
             all_open(),
-            BrowserCommand::Activate {
+            BrowserCommand::Activate(PhysicalClick {
                 tab_id: 12,
                 locator: TOP_LOCATOR.into(),
                 button: "left".into(),
                 click_count: 2,
                 modifiers: vec!["Shift".into()],
-            },
+            }),
         ),
     )
     .unwrap();
@@ -432,11 +435,13 @@ fn a_hover_moves_the_pointer_to_the_targets_centre() {
 
 #[test]
 fn a_scroll_in_a_nested_document_reports_the_top_documents_offset() {
-    let scroll = |locator: Option<&str>| BrowserCommand::Scroll {
-        tab_id: 12,
-        locator: locator.map(Into::into),
-        direction: Some("down".into()),
-        amount: Some("page".into()),
+    let scroll = |locator: Option<&str>| {
+        BrowserCommand::Scroll(PhysicalScroll {
+            tab_id: 12,
+            locator: locator.map(Into::into),
+            direction: Some("down".into()),
+            amount: Some("page".into()),
+        })
     };
     let (port, fake) = rig(page(), |_| Out::Value(Value::Null));
     let nested = unscoped(call(&port, scoped(all_open(), scroll(Some(NESTED)))).unwrap());
@@ -474,13 +479,13 @@ fn typing_into_a_control_is_one_guarded_call_to_its_document() {
             &port,
             scoped(
                 all_open(),
-                BrowserCommand::TypeText {
+                BrowserCommand::TypeText(PhysicalTypeText {
                     tab_id: 12,
                     locator: NESTED.into(),
                     text: "h\u{e9}llo".into(),
                     clear_first: true,
                     allow_credentials: false,
-                },
+                }),
             ),
         )
         .unwrap(),

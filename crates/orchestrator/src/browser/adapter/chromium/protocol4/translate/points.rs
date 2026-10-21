@@ -18,69 +18,13 @@ use super::pointer::{dragged, CLICK_SETTLE_MS};
 use super::read::one;
 use super::{input_for, route_and_admit, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{
-    BrowserOutcome, PhysicalActionSubject, PhysicalFile, PhysicalPoint, ViewportGeometry,
+    BrowserOutcome, PhysicalActionSubject, PhysicalPoint, PhysicalPointClick, PhysicalPointDrag,
+    PhysicalPointDrop, PhysicalPointWheel, PhysicalViewPoint, ViewportGeometry,
 };
 use crate::browser::BrowserError;
 
 /// How long the page may take to settle after a wheel turn, in milliseconds.
 const WHEEL_SETTLE_MS: u64 = 120;
-
-/// A page point on a view the model looked at.
-#[derive(Clone, Copy, Debug)]
-pub struct ViewPoint<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// The point, in page coordinates.
-    pub point: PhysicalPoint,
-    /// The view the model chose the point on.
-    pub expected: &'a ViewportGeometry,
-}
-
-/// One click at a point.
-#[derive(Clone, Copy, Debug)]
-pub struct PointClick<'a> {
-    /// Where.
-    pub at: ViewPoint<'a>,
-    /// The button's name.
-    pub button: &'a str,
-    /// How many clicks, one after another.
-    pub click_count: u8,
-    /// The modifier names held during the clicks.
-    pub modifiers: &'a [String],
-}
-
-/// A wheel turn at a point.
-#[derive(Clone, Copy, Debug)]
-pub struct PointWheel<'a> {
-    /// Where.
-    pub at: ViewPoint<'a>,
-    /// The direction's name.
-    pub direction: &'a str,
-    /// How many ticks.
-    pub ticks: u8,
-}
-
-/// A drag between two points of one view.
-#[derive(Clone, Copy, Debug)]
-pub struct PointDrag<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// Where the pointer presses, in page coordinates.
-    pub start: PhysicalPoint,
-    /// Where the pointer releases, in page coordinates.
-    pub end: PhysicalPoint,
-    /// The view the model chose the points on.
-    pub expected: &'a ViewportGeometry,
-}
-
-/// A file dropped at a point.
-#[derive(Clone, Copy, Debug)]
-pub struct PointDrop<'a> {
-    /// Where.
-    pub at: ViewPoint<'a>,
-    /// The file.
-    pub file: &'a PhysicalFile,
-}
 
 /// Where input must go to reach a point, and what is there.
 struct Aim {
@@ -151,8 +95,8 @@ fn subject_at(
 ///
 /// Returns the plain failure of a view that moved, of a point the scope refuses and of one the
 /// page cannot place. Nothing has been sent as input.
-fn aim(l: &mut Link<'_>, scope: &mut Scope, view: ViewPoint<'_>) -> Result<Aim, BrowserError> {
-    confirm_view(l, view.tab_id, view.expected)?;
+fn aim(l: &mut Link<'_>, scope: &mut Scope, view: &PhysicalViewPoint) -> Result<Aim, BrowserError> {
+    confirm_view(l, view.tab_id, &view.expected_viewport)?;
     let placed = scroll_to(l, scope, view.tab_id, view.point)?;
     subject_at(l, scope, view.tab_id, placed)
 }
@@ -168,14 +112,14 @@ fn aim(l: &mut Link<'_>, scope: &mut Scope, view: ViewPoint<'_>) -> Result<Aim, 
 pub fn activate(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    click: PointClick<'_>,
+    click: &PhysicalPointClick,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let aim = aim(l, scope, click.at)?;
+    let aim = aim(l, scope, &click.at)?;
     let steps = keys::click(
         aim.at,
-        keys::mouse_button(click.button),
+        keys::mouse_button(&click.button),
         click.click_count,
-        keys::modifier_mask(click.modifiers),
+        keys::modifier_mask(&click.modifiers),
     );
     let input = input_for(
         l,
@@ -201,7 +145,7 @@ pub fn activate(
 pub fn hover(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    view: ViewPoint<'_>,
+    view: &PhysicalViewPoint,
 ) -> Result<BrowserOutcome, BrowserError> {
     let aim = aim(l, scope, view)?;
     let input = input_for(
@@ -229,12 +173,12 @@ pub fn hover(
 pub fn wheel(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    wheel: PointWheel<'_>,
+    wheel: &PhysicalPointWheel,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let aim = aim(l, scope, wheel.at)?;
+    let aim = aim(l, scope, &wheel.at)?;
     let steps = keys::wheel(
         aim.at,
-        WheelDirection::from_name(wheel.direction),
+        WheelDirection::from_name(&wheel.direction),
         wheel.ticks,
     );
     let input = input_for(
@@ -269,9 +213,9 @@ pub fn wheel(
 pub fn drag(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    request: PointDrag<'_>,
+    request: &PhysicalPointDrag,
 ) -> Result<BrowserOutcome, BrowserError> {
-    confirm_view(l, request.tab_id, request.expected)?;
+    confirm_view(l, request.tab_id, &request.expected_viewport)?;
     let top = scope.top();
     let plans = [request.start, request.end]
         .map(|point| scope.call(&top, world::viewport_point(point.x, point.y)))
@@ -304,10 +248,10 @@ pub fn drag(
 pub fn drop_file(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    request: PointDrop<'_>,
+    request: &PhysicalPointDrop,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let view = request.at;
-    confirm_view(l, view.tab_id, view.expected)?;
+    let view = &request.at;
+    confirm_view(l, view.tab_id, &view.expected_viewport)?;
     let placed = scroll_to(l, scope, view.tab_id, view.point)?;
     let routed = route_and_admit(l, scope, view.tab_id, placed.at())?;
     let plan = scope.call(
@@ -315,7 +259,7 @@ pub fn drop_file(
         world::drop_files(
             routed.local.x,
             routed.local.y,
-            std::slice::from_ref(request.file),
+            std::slice::from_ref(&request.file),
         ),
     )?;
     let answers = one(l, scope, view.tab_id, plan)?;

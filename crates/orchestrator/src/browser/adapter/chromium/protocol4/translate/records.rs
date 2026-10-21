@@ -21,7 +21,7 @@ use super::super::locator::Locator;
 use super::super::scope::Scope;
 use super::super::wire;
 use super::super::world;
-use crate::browser::adapter::{BrowserOutcome, DiagnosticDetail, DiagnosticSource};
+use crate::browser::adapter::{BrowserOutcome, PhysicalDiagnosticsRead};
 use crate::browser::BrowserError;
 
 /// The protocol failure of recording facts this service cannot read.
@@ -31,23 +31,6 @@ const UNREADABLE_RECORDING: &str = "recording facts carry a value this service d
 const ID_SEPARATOR: &str = "\n";
 /// The protocol failure of a diagnostic entry this service cannot read.
 const UNREADABLE_DIAGNOSTIC: &str = "a diagnostic entry carries a value this service does not know";
-
-/// One diagnostics read as work names it.
-#[derive(Clone, Debug)]
-pub struct DiagnosticsRead {
-    /// The tab to read.
-    pub tab_id: u64,
-    /// Which sources to read.
-    pub source: DiagnosticSource,
-    /// How much to return.
-    pub detail: DiagnosticDetail,
-    /// Text an entry must contain.
-    pub match_text: Option<String>,
-    /// Cursor after which to read.
-    pub after: Option<String>,
-    /// Most entries to return.
-    pub limit: u16,
-}
 
 /// Read the diagnostics retained for one tab, guarded by the scope, and bound to the admitted
 /// documents when the scope watches them.
@@ -59,7 +42,7 @@ pub struct DiagnosticsRead {
 pub fn read_diagnostics(
     l: &mut Link<'_>,
     scope: &Scope,
-    read: DiagnosticsRead,
+    read: PhysicalDiagnosticsRead,
 ) -> Result<BrowserOutcome, BrowserError> {
     let facts = l.send(wire::DiagnosticsOp::Read {
         tab_id: read.tab_id,

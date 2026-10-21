@@ -1,6 +1,7 @@
 //! Explicit credential acknowledgement is per request and preserves configured human authority.
 
 use super::*;
+use crate::browser::adapter::{PhysicalFill, PhysicalTypeFocused, PhysicalTypeText};
 
 fn credential() -> ObservedTarget {
     ObservedTarget {
@@ -90,16 +91,16 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
             );
             assert!(browser.calls().iter().any(|command| matches!(
                 command,
-                BrowserCommand::Fill {
+                BrowserCommand::Fill(PhysicalFill {
                     allow_credentials: true,
                     ..
-                } | BrowserCommand::TypeText {
+                }) | BrowserCommand::TypeText(PhysicalTypeText {
                     allow_credentials: true,
                     ..
-                } | BrowserCommand::TypeFocused {
+                }) | BrowserCommand::TypeFocused(PhysicalTypeFocused {
                     allow_credentials: true,
                     ..
-                }
+                })
             )));
             assert!(!serde_json::to_string(&*audit.0.lock().unwrap())
                 .unwrap()
@@ -166,10 +167,10 @@ fn credential_guidance_obeys_flow_continue_without_pausing_later_work() {
     );
     assert_eq!(result.facts["steps"][0]["result"]["status"], "blocked");
     assert_eq!(result.facts["steps"][1]["result"]["status"], "succeeded");
-    assert!(!browser
-        .calls()
-        .iter()
-        .any(|command| matches!(command, BrowserCommand::TypeFocused { .. })));
+    assert!(!browser.calls().iter().any(|command| matches!(
+        command,
+        BrowserCommand::TypeFocused(PhysicalTypeFocused { .. })
+    )));
 }
 
 #[test]

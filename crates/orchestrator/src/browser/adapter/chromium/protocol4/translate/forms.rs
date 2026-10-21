@@ -27,7 +27,7 @@ use super::super::scope::{PlannedCall, Scope};
 use super::super::wire::{CallAnswer, FrameRef};
 use super::super::world::{self, FieldKind, FillPlan, FillVerified, Submitted};
 use super::{input_for, send_input, settled, value, OnDialog};
-use crate::browser::adapter::{BrowserOutcome, FieldNow, PhysicalField};
+use crate::browser::adapter::{BrowserOutcome, FieldNow, PhysicalField, PhysicalFill};
 use crate::browser::BrowserError;
 
 /// The longest a fill waits for its values to hold, in milliseconds.
@@ -46,21 +46,6 @@ const INVALID_PLAN: &str = "content primitive returned an invalid fill plan";
 const BUDGET_EXHAUSTED: &str = "form fill exhausted its physical execution budget";
 /// The failure of a verification that named a position the document does not have.
 const INVALID_VERIFICATION: &str = "content primitive returned an invalid fill verification";
-
-/// What a fill asks for.
-#[derive(Clone, Copy, Debug)]
-pub struct Fill<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// The fields, each with an encoded locator, in the order they are filled.
-    pub fields: &'a [PhysicalField],
-    /// The encoded locator of the control to click after the fields, when there is one.
-    pub submit_locator: Option<&'a str>,
-    /// The fill's own time budget, in milliseconds.
-    pub timeout_ms: u64,
-    /// Whether the request may fill credential-class controls.
-    pub allow_credentials: bool,
-}
 
 /// The fields of one document, with document-local locators, in the order they were asked for.
 #[derive(Clone, Debug, PartialEq)]
@@ -155,12 +140,16 @@ pub fn field_kinds(
 pub fn fill(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    request: Fill<'_>,
+    request: &PhysicalFill,
 ) -> Result<BrowserOutcome, BrowserError> {
     let budget = Instant::now() + Duration::from_millis(request.timeout_ms);
     let credentials = request.allow_credentials;
-    let groups = group_by_document(request.fields)?;
-    let submit = request.submit_locator.map(Locator::decode).transpose()?;
+    let groups = group_by_document(&request.fields)?;
+    let submit = request
+        .submit_locator
+        .as_deref()
+        .map(Locator::decode)
+        .transpose()?;
     if submit
         .as_ref()
         .is_some_and(|target| !groups.iter().any(|group| group.doc == target.doc))

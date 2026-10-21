@@ -15,6 +15,9 @@ use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, DiagnosticDetail, DiagnosticSource,
     PhysicalPoint, RecordingDestination,
 };
+use crate::browser::adapter::{
+    PhysicalClick, PhysicalDiagnosticsRead, PhysicalFill, PhysicalTypeText, PhysicalWait,
+};
 use crate::browser::{BrowserError, BrowserPort, RelayBrowserPort};
 use crate::language::PageCondition;
 use crate::workspace::StaleReason;
@@ -172,13 +175,13 @@ fn observed(satisfied: bool, elapsed_ms: u64) -> Value {
 }
 
 fn wait(condition: PageCondition) -> BrowserCommand {
-    BrowserCommand::Observe {
+    BrowserCommand::Observe(PhysicalWait {
         tab_id: 12,
         condition,
         value: Some("Saved".into()),
         locator: None,
         timeout_ms: 2_000,
-    }
+    })
 }
 
 #[test]
@@ -312,14 +315,14 @@ fn an_unseen_frame_is_an_unsupported_document_that_a_strict_guard_pins() {
         &port,
         scoped(
             strict,
-            BrowserCommand::ReadDiagnostics {
+            BrowserCommand::ReadDiagnostics(PhysicalDiagnosticsRead {
                 tab_id: 12,
                 source: DiagnosticSource::Both,
                 detail: DiagnosticDetail::Problems,
                 match_text: None,
                 after: None,
                 limit: 20,
-            },
+            }),
         ),
     )
     .unwrap();
@@ -712,14 +715,14 @@ fn a_recording_started_under_a_watching_scope_watches_the_admitted_documents() {
 }
 
 fn read_console() -> BrowserCommand {
-    BrowserCommand::ReadDiagnostics {
+    BrowserCommand::ReadDiagnostics(PhysicalDiagnosticsRead {
         tab_id: 12,
         source: DiagnosticSource::Console,
         detail: DiagnosticDetail::All,
         match_text: None,
         after: None,
         limit: 50,
-    }
+    })
 }
 
 /// The binding and guard of every diagnostics read the extension received.
@@ -832,27 +835,27 @@ fn a_content_command_without_a_scope_is_a_protocol_error() {
             max_results: 5,
         },
         wait(PageCondition::LoadReady),
-        BrowserCommand::Activate {
+        BrowserCommand::Activate(PhysicalClick {
             tab_id: 12,
             locator: locator.into(),
             button: "left".into(),
             click_count: 1,
             modifiers: vec![],
-        },
-        BrowserCommand::TypeText {
+        }),
+        BrowserCommand::TypeText(PhysicalTypeText {
             tab_id: 12,
             locator: locator.into(),
             text: "hello".into(),
             clear_first: false,
             allow_credentials: false,
-        },
-        BrowserCommand::Fill {
+        }),
+        BrowserCommand::Fill(PhysicalFill {
             tab_id: 12,
             fields: vec![],
             submit_locator: None,
             timeout_ms: 1_000,
             allow_credentials: false,
-        },
+        }),
         BrowserCommand::EvaluateScript {
             tab_id: 12,
             script: "1".into(),

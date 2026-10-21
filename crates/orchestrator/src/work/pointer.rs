@@ -14,6 +14,10 @@ use super::{
     action_subject, observed_host, readiness, ApplicationExecutor, Clicked, Effect,
     InvocationContext, ResolvedLocation, Terminal,
 };
+use crate::browser::adapter::{
+    PhysicalClick, PhysicalDrag, PhysicalPointClick, PhysicalPointDrag, PhysicalPointWheel,
+    PhysicalScroll, PhysicalViewPoint,
+};
 
 impl ApplicationExecutor {
     pub(super) fn perform_click(
@@ -65,13 +69,13 @@ impl ApplicationExecutor {
                         button: value.button.clone(),
                     }),
                 );
-                let command = BrowserCommand::Activate {
+                let command = BrowserCommand::Activate(PhysicalClick {
                     tab_id: tab.physical_id,
                     locator: target.locator,
                     button: value.button.clone(),
                     click_count: value.click_count,
                     modifiers: value.modifiers.clone(),
-                };
+                });
                 (
                     command,
                     json!({"tab":tab.handle.as_str(),"target":target.handle.as_str(),"activated":true}),
@@ -79,14 +83,16 @@ impl ApplicationExecutor {
                 )
             }
             ResolvedLocation::Point { tab, view, point } => {
-                let command = BrowserCommand::ActivatePoint {
-                    tab_id: tab.physical_id,
-                    point,
-                    expected_viewport: view.viewport,
+                let command = BrowserCommand::ActivatePoint(PhysicalPointClick {
+                    at: PhysicalViewPoint {
+                        tab_id: tab.physical_id,
+                        point,
+                        expected_viewport: view.viewport,
+                    },
                     button: value.button.clone(),
                     click_count: value.click_count,
                     modifiers: value.modifiers.clone(),
-                };
+                });
                 (
                     command,
                     json!({"tab":tab.handle.as_str(),"view":view.handle.as_str(),"activated":true}),
@@ -158,7 +164,7 @@ impl ApplicationExecutor {
                 }
                 match self.dispatch(
                     context,
-                    BrowserCommand::Scroll {
+                    BrowserCommand::Scroll(PhysicalScroll {
                         tab_id: selected.physical_id,
                         locator,
                         direction: value
@@ -179,7 +185,7 @@ impl ApplicationExecutor {
                                     .clone()
                                     .unwrap_or_else(|| SCROLL_AMOUNT_DEFAULT.into())
                             }),
-                    },
+                    }),
                 ) {
                     Ok(BrowserOutcome::Scrolled {
                         tab_id,
@@ -271,16 +277,18 @@ impl ApplicationExecutor {
         }
         match self.dispatch(
             context,
-            BrowserCommand::WheelAt {
-                tab_id: selected.physical_id,
-                point,
-                expected_viewport: view.viewport,
+            BrowserCommand::WheelAt(PhysicalPointWheel {
+                at: PhysicalViewPoint {
+                    tab_id: selected.physical_id,
+                    point,
+                    expected_viewport: view.viewport,
+                },
                 direction: value
                     .direction
                     .clone()
                     .expect("language validated direction"),
                 ticks: value.ticks.expect("language validated ticks"),
-            },
+            }),
         ) {
             Ok(BrowserOutcome::Scrolled {
                 tab_id,
@@ -460,11 +468,11 @@ impl ApplicationExecutor {
                 )
             }
             ResolvedLocation::Point { tab, view, point } => (
-                BrowserCommand::HoverPoint {
+                BrowserCommand::HoverPoint(PhysicalViewPoint {
                     tab_id: tab.physical_id,
                     point,
                     expected_viewport: view.viewport,
-                },
+                }),
                 json!({"tab":tab.handle.as_str(),"view":view.handle.as_str(),"hovered":true}),
             ),
         };
@@ -522,11 +530,11 @@ impl ApplicationExecutor {
             dragged_from = Some(source.role);
             dragged_onto = Some(destination.role);
             let facts = json!({"tab":selected.handle.as_str(),"source_target":source.handle.as_str(),"destination_target":destination.handle.as_str(),"dragged":true});
-            let command = BrowserCommand::Drag {
+            let command = BrowserCommand::Drag(PhysicalDrag {
                 tab_id: selected.physical_id,
                 source_locator: source.locator,
                 destination_locator: destination.locator,
-            };
+            });
             (selected, command, facts)
         } else {
             let view_handle = value.view.as_deref().expect("language validated view");
@@ -561,12 +569,12 @@ impl ApplicationExecutor {
             };
             let facts =
                 json!({"tab":selected.handle.as_str(),"view":view.handle.as_str(),"dragged":true});
-            let command = BrowserCommand::DragPoints {
+            let command = BrowserCommand::DragPoints(PhysicalPointDrag {
                 tab_id: selected.physical_id,
                 start,
                 end,
                 expected_viewport: view.viewport,
-            };
+            });
             (selected, command, facts)
         };
         let decision = self.authorize(context, context.requirements, Some(selected.url.as_str()));

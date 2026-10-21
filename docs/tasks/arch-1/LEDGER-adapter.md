@@ -10,7 +10,7 @@ A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset 
 Notes).
 
 The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7,
-BROW-6, BROW-14, BROW-8a and BROW-11a have landed; BROW-15 is next.
+BROW-6, BROW-14, BROW-8a, BROW-11a and BROW-15 have landed; D52 is next (after SERV-7).
 
 ## Slices
 
@@ -139,7 +139,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a and BROW-11a have landed; BROW-15 is next.
+with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a, BROW-11a and BROW-15 have landed; D52 is next (after SERV-7).
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -150,9 +150,10 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | landed (this commit) |
 | BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | landed (this commit) |
 | BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | todo |
-| BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | todo |
+| BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | landed (this commit) |
 | BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | todo |
 | BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | landed (this commit) |
+| D52 | fix(adapter): Decision 5.2's receipt codes reach the refusal as a typed cause | SERV-7 | the coordinator's placement: `BrowserError::Primitive { detail, cause }` with `language::outcome::PrimitiveCause`; core-work's routing_refusal half is D52(c) in its ledger | todo |
 
 ### Notes (second sweep)
 
@@ -239,3 +240,23 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   not adapter files: the `docs/1.0/ARCHITECTURE.md` line that still names the removed closed
   `Family` is the docs lane's, and the one-line doc of `browser/mod.rs` is core-service's, after
   BROW-1 settles what that file holds.
+- BROW-15: 15 field-heavy `BrowserCommand` variants are newtypes over owned argument structs in
+  the port vocabulary: `Activate(PhysicalClick)`, `ActivatePoint(PhysicalPointClick)`,
+  `WheelAt(PhysicalPointWheel)`, `HoverPoint(PhysicalViewPoint)`, `DropImageAt(PhysicalPointDrop)`,
+  `DragPoints(PhysicalPointDrag)`, `Drag(PhysicalDrag)`, `Scroll(PhysicalScroll)`,
+  `TypeText(PhysicalTypeText)`, `TypeFocused(PhysicalTypeFocused)`, `PressKey(PhysicalPressKey)`,
+  `Fill(PhysicalFill)`, `Observe(PhysicalWait)`, `QuerySemantic(PhysicalSemantic)` and
+  `ReadDiagnostics(PhysicalDiagnosticsRead)`. The three point variants that shared a tab, a point
+  and a viewport carry it as `at: PhysicalViewPoint`, as the skeptic corrected, and `HoverPoint`
+  is that view point alone. The executors build the structs, each translator borrows its own, and
+  every `translate` arm of them is one line; the translator's 15 borrowed copies go, and their
+  struct and field docs move onto the port structs. The `Physical` prefix is the layer's own
+  (`PhysicalPoint`, `PhysicalField`); the translator's names would have met the language layer's
+  `Click`, `Drag`, `TypeText`, `PressKey` and `Wait` in the executors that import both. Field
+  names and types are unchanged, so test-01's LANG-3 retypes each field in one place.
+  `observe::observe` and `read::query_semantic` read the tab from their struct. Not taken:
+  `DescribeDocuments`, whose `Subjects` held three of its five fields, and
+  `RecordingDestination::Target`, a serde-tagged type the language layer decodes. 27 files, 226
+  lines fewer. Cross-lane, one construction or pattern each, the `work/` executors and tests
+  (core-work, which test-03 cleared) and `browser/mod.rs`'s `addressed_tab` and fake (core-service),
+  landed after SERV-7. No wire byte changes.

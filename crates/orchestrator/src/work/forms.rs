@@ -26,6 +26,10 @@ use super::{
     ResolvedLocation, Status, Terminal, SELECTOR_MATCH_MAX,
 };
 use crate::browser::adapter::PhysicalFile;
+use crate::browser::adapter::{
+    PhysicalFill, PhysicalPointDrop, PhysicalPressKey, PhysicalSemantic, PhysicalTypeFocused,
+    PhysicalTypeText, PhysicalViewPoint, PhysicalWait,
+};
 
 /// How often a duration wait looks for a cancellation while it sleeps.
 const DURATION_POLL: Duration = Duration::from_millis(20);
@@ -175,7 +179,7 @@ impl ApplicationExecutor {
             .collect();
         match self.dispatch(
             context,
-            BrowserCommand::Fill {
+            BrowserCommand::Fill(PhysicalFill {
                 tab_id: selected.physical_id,
                 fields,
                 allow_credentials: value.user_authorized_credentials,
@@ -184,7 +188,7 @@ impl ApplicationExecutor {
                     value.timeout_ms,
                     context.deadline.saturating_duration_since(Instant::now()),
                 ),
-            },
+            }),
         ) {
             Ok(BrowserOutcome::Filled {
                 tab,
@@ -377,13 +381,13 @@ impl ApplicationExecutor {
         self.indicate_target(context, selected.physical_id, &target.locator, None);
         match self.dispatch(
             context,
-            BrowserCommand::TypeText {
+            BrowserCommand::TypeText(PhysicalTypeText {
                 tab_id: selected.physical_id,
                 locator: target.locator,
                 text: value.text.clone(),
                 clear_first: value.clear_first,
                 allow_credentials: value.user_authorized_credentials,
-            },
+            }),
         ) {
             Ok(BrowserOutcome::Typed {
                 tab,
@@ -573,12 +577,14 @@ impl ApplicationExecutor {
         let attached = target_locator.clone();
         let dispatch = if dropping {
             let (point, viewport) = drop.expect("validated drop geometry");
-            BrowserCommand::DropImageAt {
-                tab_id: selected.physical_id,
-                point,
-                expected_viewport: viewport,
+            BrowserCommand::DropImageAt(PhysicalPointDrop {
+                at: PhysicalViewPoint {
+                    tab_id: selected.physical_id,
+                    point,
+                    expected_viewport: viewport,
+                },
                 file: files.into_iter().next().expect("one image"),
-            }
+            })
         } else {
             BrowserCommand::UploadFiles {
                 tab_id: selected.physical_id,
@@ -724,12 +730,12 @@ impl ApplicationExecutor {
                         }
                         match self.dispatch(
                             context,
-                            BrowserCommand::PressKey {
+                            BrowserCommand::PressKey(PhysicalPressKey {
                                 tab_id: selected.physical_id,
                                 locator: locator.clone(),
                                 key: stroke.clone(),
                                 modifiers: value.modifiers.clone(),
-                            },
+                            }),
                         ) {
                             Ok(receipt @ BrowserOutcome::KeyPressed { .. }) => {
                                 last = Some(receipt);
@@ -926,14 +932,14 @@ impl ApplicationExecutor {
                         }
                         match self.dispatch(
                             context,
-                            BrowserCommand::QuerySemantic {
+                            BrowserCommand::QuerySemantic(PhysicalSemantic {
                                 tab_id: selected.physical_id,
                                 name: selector.name.clone(),
                                 role: selector.role.clone(),
                                 exact: selector.exact,
                                 form_scope: false,
                                 max_results: SELECTOR_MATCH_MAX,
-                            },
+                            }),
                         ) {
                             Ok(BrowserOutcome::Targets { targets, .. }) if !targets.is_empty() => {
                                 satisfied = true;
@@ -1027,7 +1033,7 @@ impl ApplicationExecutor {
                 };
                 match self.dispatch(
                     context,
-                    BrowserCommand::Observe {
+                    BrowserCommand::Observe(PhysicalWait {
                         tab_id: selected.physical_id,
                         condition,
                         value: value.value.clone(),
@@ -1036,7 +1042,7 @@ impl ApplicationExecutor {
                             value.timeout_ms,
                             context.deadline.saturating_duration_since(Instant::now()),
                         ),
-                    },
+                    }),
                 ) {
                     Ok(BrowserOutcome::Observed {
                         tab_id,
@@ -1137,7 +1143,7 @@ impl ApplicationExecutor {
         }
         match self.dispatch(
             context,
-            BrowserCommand::Observe {
+            BrowserCommand::Observe(PhysicalWait {
                 tab_id: selected.physical_id,
                 condition: PageCondition::VisualSettle,
                 value: None,
@@ -1146,7 +1152,7 @@ impl ApplicationExecutor {
                     budget,
                     context.deadline.saturating_duration_since(Instant::now()),
                 ),
-            },
+            }),
         )? {
             BrowserOutcome::Observed {
                 tab_id,
@@ -1211,12 +1217,12 @@ impl ApplicationExecutor {
                 };
                 match self.dispatch(
                     context,
-                    BrowserCommand::TypeFocused {
+                    BrowserCommand::TypeFocused(PhysicalTypeFocused {
                         tab_id: selected.physical_id,
                         text: value.text.clone(),
                         clear_first: value.clear_first,
                         allow_credentials: value.user_authorized_credentials,
-                    },
+                    }),
                 ) {
                     Ok(BrowserOutcome::Typed {
                         tab,

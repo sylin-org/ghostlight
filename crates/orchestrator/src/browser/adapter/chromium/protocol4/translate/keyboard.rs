@@ -18,23 +18,10 @@ use super::super::wire::InputStep;
 use super::super::world::{self, Focused, Typed, Uploaded};
 use super::read::{all, focus_candidates, one, plan_each};
 use super::{input_for, send_input, settled, value, OnDialog};
-use crate::browser::adapter::{BrowserOutcome, PhysicalFile};
+use crate::browser::adapter::{
+    BrowserOutcome, PhysicalFile, PhysicalPressKey, PhysicalTypeFocused, PhysicalTypeText,
+};
 use crate::browser::BrowserError;
-
-/// What typing into a located control asks for.
-#[derive(Clone, Copy, Debug)]
-pub struct TypeText<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// The control's encoded locator.
-    pub locator: &'a str,
-    /// The text.
-    pub text: &'a str,
-    /// Whether to clear the control first.
-    pub clear_first: bool,
-    /// Whether the request may type into a credential-class control.
-    pub allow_credentials: bool,
-}
 
 /// Type text into a located control.
 ///
@@ -45,15 +32,15 @@ pub struct TypeText<'a> {
 pub fn type_text(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    request: TypeText<'_>,
+    request: &PhysicalTypeText,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let target = Locator::decode(request.locator)?;
+    let target = Locator::decode(&request.locator)?;
 
     let plan = scope.call(
         &target.doc,
         world::type_text(
             &target.local,
-            request.text,
+            &request.text,
             request.clear_first,
             request.allow_credentials,
         ),
@@ -66,19 +53,6 @@ pub fn type_text(
         subject: typed.subject,
         committed_urls: l.committed(),
     })
-}
-
-/// What typing into the focused control asks for.
-#[derive(Clone, Copy, Debug)]
-pub struct TypeFocused<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// The text.
-    pub text: &'a str,
-    /// Whether to clear the control first.
-    pub clear_first: bool,
-    /// Whether the request may type into a credential-class control.
-    pub allow_credentials: bool,
 }
 
 /// Type text into the control that holds the focus.
@@ -94,7 +68,7 @@ pub struct TypeFocused<'a> {
 pub fn type_focused(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    request: TypeFocused<'_>,
+    request: &PhysicalTypeFocused,
 ) -> Result<BrowserOutcome, BrowserError> {
     let candidates = focus_candidates(scope);
     let plans = plan_each(scope, &candidates, |_| {
@@ -157,19 +131,6 @@ pub fn type_focused(
     })
 }
 
-/// What a key press asks for.
-#[derive(Clone, Copy, Debug)]
-pub struct PressKey<'a> {
-    /// The tab.
-    pub tab_id: u64,
-    /// The control to focus first, when the press names one.
-    pub locator: Option<&'a str>,
-    /// The key's name.
-    pub key: &'a str,
-    /// The modifier names held during the press.
-    pub modifiers: &'a [String],
-}
-
 /// Press one key.
 ///
 /// With a locator the control takes the focus first. Without one, a scope that bound the focus
@@ -183,9 +144,9 @@ pub struct PressKey<'a> {
 pub fn press_key(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    request: PressKey<'_>,
+    request: &PhysicalPressKey,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let (document, precondition) = match request.locator {
+    let (document, precondition) = match request.locator.as_deref() {
         Some(locator) => {
             let target = Locator::decode(locator)?;
             let plan = scope.call(&target.doc, world::focus(&target.local))?;
@@ -206,12 +167,12 @@ pub fn press_key(
         l,
         request.tab_id,
         precondition,
-        keys::press(request.key, keys::modifier_mask(request.modifiers)),
+        keys::press(&request.key, keys::modifier_mask(&request.modifiers)),
         Some(scope.guard()),
         0,
     );
     let answered = send_input(l, input, OnDialog::EffectUnknown)?;
-    let subject = match (request.locator, answered) {
+    let subject = match (request.locator.as_deref(), answered) {
         (Some(_), Some(answer)) => settled::<Focused>(l, &answer)?.subject,
         _ => None,
     };

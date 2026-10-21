@@ -15,6 +15,10 @@ use super::super::super::keys;
 use super::super::super::wire::{InputStep, MouseAction, Point};
 use super::super::super::world::OwnerBox;
 use crate::browser::adapter::PhysicalActionSubject;
+use crate::browser::adapter::{
+    PhysicalClick, PhysicalDrag, PhysicalPointClick, PhysicalPointDrag, PhysicalPointDrop,
+    PhysicalPointWheel, PhysicalViewPoint,
+};
 
 /// How far the top document is scrolled, in pixels.
 const SCROLL: f64 = 100.0;
@@ -252,41 +256,45 @@ const OVER_G: (f64, f64) = (150.0, 200.0);
 const OVER_E: (f64, f64) = (550.0, 200.0);
 
 fn click_at(point: (f64, f64)) -> BrowserCommand {
-    BrowserCommand::ActivatePoint {
-        tab_id: 12,
-        point: at(point.0, point.1),
-        expected_viewport: expected_view(),
+    BrowserCommand::ActivatePoint(PhysicalPointClick {
+        at: PhysicalViewPoint {
+            tab_id: 12,
+            point: at(point.0, point.1),
+            expected_viewport: expected_view(),
+        },
         button: "left".into(),
         click_count: 1,
         modifiers: vec![],
-    }
+    })
 }
 
 fn hover_at(point: (f64, f64)) -> BrowserCommand {
-    BrowserCommand::HoverPoint {
+    BrowserCommand::HoverPoint(PhysicalViewPoint {
         tab_id: 12,
         point: at(point.0, point.1),
         expected_viewport: expected_view(),
-    }
+    })
 }
 
 fn wheel_at(point: (f64, f64), direction: &str, ticks: u8) -> BrowserCommand {
-    BrowserCommand::WheelAt {
-        tab_id: 12,
-        point: at(point.0, point.1),
-        expected_viewport: expected_view(),
+    BrowserCommand::WheelAt(PhysicalPointWheel {
+        at: PhysicalViewPoint {
+            tab_id: 12,
+            point: at(point.0, point.1),
+            expected_viewport: expected_view(),
+        },
         direction: direction.into(),
         ticks,
-    }
+    })
 }
 
 fn drag_points(start: (f64, f64), end: (f64, f64)) -> BrowserCommand {
-    BrowserCommand::DragPoints {
+    BrowserCommand::DragPoints(PhysicalPointDrag {
         tab_id: 12,
         start: at(start.0, start.1),
         end: at(end.0, end.1),
         expected_viewport: expected_view(),
-    }
+    })
 }
 
 fn picture() -> PhysicalFile {
@@ -299,12 +307,14 @@ fn picture() -> PhysicalFile {
 }
 
 fn drop_at(point: (f64, f64)) -> BrowserCommand {
-    BrowserCommand::DropImageAt {
-        tab_id: 12,
-        point: at(point.0, point.1),
-        expected_viewport: expected_view(),
+    BrowserCommand::DropImageAt(PhysicalPointDrop {
+        at: PhysicalViewPoint {
+            tab_id: 12,
+            point: at(point.0, point.1),
+            expected_viewport: expected_view(),
+        },
         file: picture(),
-    }
+    })
 }
 
 fn subject_name(outcome: &BrowserOutcome) -> Option<String> {
@@ -366,14 +376,16 @@ fn a_modified_point_click_holds_its_modifiers() {
         &port,
         scoped(
             all_open(),
-            BrowserCommand::ActivatePoint {
-                tab_id: 12,
-                point: at(OVER_E.0, OVER_E.1),
-                expected_viewport: expected_view(),
+            BrowserCommand::ActivatePoint(PhysicalPointClick {
+                at: PhysicalViewPoint {
+                    tab_id: 12,
+                    point: at(OVER_E.0, OVER_E.1),
+                    expected_viewport: expected_view(),
+                },
                 button: "left".into(),
                 click_count: 2,
                 modifiers: vec!["Shift".into()],
-            },
+            }),
         ),
     )
     .unwrap();
@@ -528,13 +540,13 @@ fn a_restricted_click_on_a_target_lands_when_the_point_is_where_the_target_is() 
             &port,
             scoped(
                 without_c(),
-                BrowserCommand::Activate {
+                BrowserCommand::Activate(PhysicalClick {
                     tab_id: 12,
                     locator: "T:t1:locator_a1_2".into(),
                     button: "left".into(),
                     click_count: 1,
                     modifiers: vec![],
-                },
+                }),
             ),
         )
         .unwrap(),
@@ -556,13 +568,13 @@ fn a_restricted_click_covered_by_a_denied_document_is_refused_before_input() {
             &port,
             scoped(
                 scope,
-                BrowserCommand::Activate {
+                BrowserCommand::Activate(PhysicalClick {
                     tab_id: 12,
                     locator: "T:t1:locator_a1_9".into(),
                     button: "left".into(),
                     click_count: 1,
                     modifiers: vec![],
-                },
+                }),
             ),
         );
         (result, inputs_seen(&fake).len())
@@ -716,11 +728,11 @@ fn offsets_through_two_nested_frames_place_a_dragged_target() {
             &port,
             scoped(
                 all_open(),
-                BrowserCommand::Drag {
+                BrowserCommand::Drag(PhysicalDrag {
                     tab_id: 12,
                     source_locator: "G:g1:locator_a1_1".into(),
                     destination_locator: "T:t1:locator_a1_2".into(),
-                },
+                }),
             ),
         )
         .unwrap(),
@@ -822,11 +834,11 @@ fn a_drag_whose_preparing_hover_followed_a_handle_reports_it_at_that_end() {
                 &port,
                 scoped(
                     all_open(),
-                    BrowserCommand::Drag {
+                    BrowserCommand::Drag(PhysicalDrag {
                         tab_id: 12,
                         source_locator: "G:g1:locator_a1_1".into(),
                         destination_locator: "T:t1:locator_a1_2".into(),
-                    },
+                    }),
                 ),
             )
             .unwrap(),

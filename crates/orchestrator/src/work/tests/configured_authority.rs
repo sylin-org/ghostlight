@@ -1,6 +1,7 @@
 //! Configured authority preserves form, upload, and typing boundaries.
 
 use super::*;
+use crate::browser::adapter::{PhysicalFill, PhysicalSemantic};
 
 #[test]
 fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit_authority() {
@@ -144,9 +145,9 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 );
             } else {
                 assert!(
-                    matches!(requested.first(), Some(BrowserCommand::QuerySemantic {
+                    matches!(requested.first(), Some(BrowserCommand::QuerySemantic(PhysicalSemantic {
                     tab_id: 7, name, role: Some(role), exact: true, form_scope: false, ..
-                }) if name == "Visible draft" && role == "textbox"),
+                })) if name == "Visible draft" && role == "textbox"),
                     "{label}: ordinary labeled controls need no form ancestor: {requested:?}"
                 );
                 assert!(
@@ -172,7 +173,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                         "{label}: one lookup, preflight, and fill"
                     );
                     assert!(
-                        matches!(requested.last(), Some(BrowserCommand::Fill { fields, submit_locator, .. })
+                        matches!(requested.last(), Some(BrowserCommand::Fill(PhysicalFill { fields, submit_locator, .. }))
                         if fields.len() == 1 && fields[0].locator == "standalone-editor" && fields[0].value == crate::browser::adapter::PhysicalValue::from("PRIVATE_DRAFT")
                             && submit_locator.as_deref() == if submit { Some("explicit-submit") } else { None }),
                         "{label}: only an explicit submit target permits submission"
@@ -263,9 +264,9 @@ fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
             let commands = browser.calls();
             let requested = &commands[before..];
             assert!(
-                matches!(requested.first(), Some(BrowserCommand::QuerySemantic {
+                matches!(requested.first(), Some(BrowserCommand::QuerySemantic(PhysicalSemantic {
                 tab_id: 7, name, role: Some(role), exact: true, form_scope: false, ..
-            }) if name == "Attachment" && role == "button"),
+            })) if name == "Attachment" && role == "button"),
                 "standalone file inputs need no form ancestor: {requested:?}"
             );
             assert!(
@@ -622,10 +623,10 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
             assert_eq!(result.facts["submitted"], false);
             assert!(browser.calls().iter().any(|call| matches!(
                 call,
-                BrowserCommand::Fill {
+                BrowserCommand::Fill(PhysicalFill {
                     submit_locator: None,
                     ..
-                }
+                })
             )));
         } else {
             assert_eq!(result.status, Status::Blocked);

@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::browser::adapter::Listing;
+use crate::browser::adapter::PhysicalSemantic;
 use crate::language::area::{LeftOut, LeftOutKey};
 
 fn role_select() -> ObservedTarget {
@@ -322,9 +323,9 @@ fn a_selector_matching_thirty_controls_says_at_least_eight() {
         );
         assert_eq!(result.status, Status::Failed, "{}", result.summary);
         assert_eq!(result.summary, summary);
-        assert!(browser
-            .calls()
-            .iter()
-            .any(|call| matches!(call, BrowserCommand::QuerySemantic { max_results: 8, .. })));
+        assert!(browser.calls().iter().any(|call| matches!(
+            call,
+            BrowserCommand::QuerySemantic(PhysicalSemantic { max_results: 8, .. })
+        )));
     }
 }

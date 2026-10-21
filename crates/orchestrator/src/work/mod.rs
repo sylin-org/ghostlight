@@ -45,6 +45,7 @@ use crate::browser::{
 use crate::events::{DenialPresentation, DomainEvent};
 
 use crate::audit::AuditRecord;
+use crate::browser::adapter::{PhysicalSemantic, PhysicalWait};
 use crate::governance::manifest::BrowserStartup;
 use crate::governance::{
     AuthoritySnapshot, Capability, CapabilitySet, Decision, GovernanceFacade, ReasonCode,
@@ -917,14 +918,14 @@ impl ApplicationExecutor {
         }
         match self.dispatch(
             context,
-            BrowserCommand::QuerySemantic {
+            BrowserCommand::QuerySemantic(PhysicalSemantic {
                 tab_id: info.physical_id,
                 name: info.name.clone(),
                 role: Some(info.role_page.clone()),
                 exact: false,
                 form_scope: false,
                 max_results: SELECTOR_MATCH_MAX,
-            },
+            }),
         ) {
             Ok(BrowserOutcome::Targets { targets, .. }) => {
                 targets.into_iter().take(STALE_CANDIDATES_MAX).collect()
@@ -989,13 +990,13 @@ impl ApplicationExecutor {
             .as_millis() as u64;
         let (cause, decision) = match self.dispatch(
             context,
-            BrowserCommand::Observe {
+            BrowserCommand::Observe(PhysicalWait {
                 tab_id: selected.physical_id,
                 condition: expectation.condition,
                 value: expectation.value.clone(),
                 locator: None,
                 timeout_ms: budget,
-            },
+            }),
         ) {
             Ok(BrowserOutcome::Observed {
                 satisfied: true, ..
@@ -1080,14 +1081,14 @@ impl ApplicationExecutor {
         }
         match self.dispatch(
             context,
-            BrowserCommand::QuerySemantic {
+            BrowserCommand::QuerySemantic(PhysicalSemantic {
                 tab_id: selected.physical_id,
                 name: selector.name.clone(),
                 role: selector.role.clone(),
                 exact: selector.exact,
                 form_scope: false,
                 max_results: SELECTOR_MATCH_MAX,
-            },
+            }),
         ) {
             Ok(BrowserOutcome::Targets {
                 tab_id,

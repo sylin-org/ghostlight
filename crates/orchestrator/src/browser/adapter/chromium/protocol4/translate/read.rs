@@ -13,7 +13,7 @@ use super::super::scope::{PlannedCall, Scope};
 use super::super::wire::FrameRef;
 use super::super::world::{self, Article, Message, Targets, Text, TreeValue};
 use super::value;
-use crate::browser::adapter::{BrowserOutcome, Listing, ObservedTarget};
+use crate::browser::adapter::{BrowserOutcome, Listing, ObservedTarget, PhysicalSemantic};
 use crate::browser::BrowserError;
 
 /// The most nodes one structure tree holds across every document. Every document is asked
@@ -106,21 +106,6 @@ pub fn find(
     )
 }
 
-/// One semantic selector as work names it.
-#[derive(Clone, Copy, Debug)]
-pub struct Semantic<'a> {
-    /// The accessible-name text.
-    pub name: &'a str,
-    /// The role a target must have, when one is named.
-    pub role: Option<&'a str>,
-    /// Whether the whole accessible name must equal the text.
-    pub exact: bool,
-    /// Whether only controls associated with a form count.
-    pub form_scope: bool,
-    /// The most targets to return across every document.
-    pub max_results: usize,
-}
-
 /// Find targets by accessible name and role in every readable document, up to the selector's
 /// `max_results`.
 ///
@@ -130,16 +115,15 @@ pub struct Semantic<'a> {
 pub fn query_semantic(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    tab_id: u64,
-    selector: &Semantic<'_>,
+    selector: &PhysicalSemantic,
 ) -> Result<BrowserOutcome, BrowserError> {
     targets(
         l,
         scope,
-        tab_id,
+        selector.tab_id,
         &world::query_semantic(
-            selector.name,
-            selector.role,
+            &selector.name,
+            selector.role.as_deref(),
             selector.exact,
             selector.form_scope,
             selector.max_results,

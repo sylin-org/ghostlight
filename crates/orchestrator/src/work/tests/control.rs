@@ -30,6 +30,7 @@ fn human_pause_and_stop_drain_work_without_repeated_guardrail_popups() {
         );
     }
 }
+use crate::browser::adapter::{PhysicalTypeFocused, PhysicalWait};
 use crate::browser::{BrowserDispatch, BrowserPort, BrowserSummary};
 use crate::governance::{CapabilitySet, ReasonCode};
 use crate::workbench::{
@@ -394,7 +395,8 @@ impl BrowserPort for ControlledBrowser {
         if self.before
             && matches!(
                 command.primitive(),
-                BrowserCommand::TypeFocused { .. } | BrowserCommand::Observe { .. }
+                BrowserCommand::TypeFocused(PhysicalTypeFocused { .. })
+                    | BrowserCommand::Observe(PhysicalWait { .. })
             )
         {
             self.governance.apply_runtime_intent(self.intent);
@@ -516,7 +518,10 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
             command: BrowserCommand,
             d: BrowserDispatch<'_>,
         ) -> Result<BrowserOutcome, BrowserError> {
-            if matches!(command.primitive(), BrowserCommand::Observe { .. }) {
+            if matches!(
+                command.primitive(),
+                BrowserCommand::Observe(PhysicalWait { .. })
+            ) {
                 self.0
                     .governance
                     .apply_runtime_intent(RuntimeControlIntent::Hold);

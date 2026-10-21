@@ -14,6 +14,11 @@ use std::time::{Duration, Instant};
 
 use crate::browser::adapter::chromium::protocol4::{self, link::Line, link::Link, wire};
 use crate::browser::adapter::{BrowserEvent, BrowserOutcome, RuntimeControlState, Work};
+use crate::browser::adapter::{
+    PhysicalClick, PhysicalDiagnosticsRead, PhysicalDrag, PhysicalFill, PhysicalPointClick,
+    PhysicalPointDrag, PhysicalPointDrop, PhysicalPointWheel, PhysicalPressKey, PhysicalScroll,
+    PhysicalSemantic, PhysicalTypeFocused, PhysicalTypeText, PhysicalViewPoint, PhysicalWait,
+};
 use crate::browser::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
 use crate::install::last_browser;
 use crate::install::native_host::browser_id_named;
@@ -130,29 +135,38 @@ pub fn addressed_tab(command: &Work) -> Option<u64> {
         | Work::Screenshot { tab_id, .. }
         | Work::ScreenshotRegion { tab_id, .. }
         | Work::DescribeTargets { tab_id, .. }
-        | Work::QuerySemantic { tab_id, .. }
-        | Work::Activate { tab_id, .. }
-        | Work::ActivatePoint { tab_id, .. }
-        | Work::WheelAt { tab_id, .. }
-        | Work::Scroll { tab_id, .. }
+        | Work::QuerySemantic(PhysicalSemantic { tab_id, .. })
+        | Work::Activate(PhysicalClick { tab_id, .. })
+        | Work::ActivatePoint(PhysicalPointClick {
+            at: PhysicalViewPoint { tab_id, .. },
+            ..
+        })
+        | Work::WheelAt(PhysicalPointWheel {
+            at: PhysicalViewPoint { tab_id, .. },
+            ..
+        })
+        | Work::Scroll(PhysicalScroll { tab_id, .. })
         | Work::SetZoom { tab_id, .. }
         | Work::ResizeWindow { tab_id, .. }
         | Work::Hover { tab_id, .. }
-        | Work::HoverPoint { tab_id, .. }
-        | Work::Fill { tab_id, .. }
-        | Work::TypeText { tab_id, .. }
+        | Work::HoverPoint(PhysicalViewPoint { tab_id, .. })
+        | Work::Fill(PhysicalFill { tab_id, .. })
+        | Work::TypeText(PhysicalTypeText { tab_id, .. })
         | Work::DescribeFocused { tab_id }
-        | Work::TypeFocused { tab_id, .. }
-        | Work::PressKey { tab_id, .. }
-        | Work::Drag { tab_id, .. }
-        | Work::DragPoints { tab_id, .. }
+        | Work::TypeFocused(PhysicalTypeFocused { tab_id, .. })
+        | Work::PressKey(PhysicalPressKey { tab_id, .. })
+        | Work::Drag(PhysicalDrag { tab_id, .. })
+        | Work::DragPoints(PhysicalPointDrag { tab_id, .. })
         | Work::UploadFiles { tab_id, .. }
-        | Work::DropImageAt { tab_id, .. }
+        | Work::DropImageAt(PhysicalPointDrop {
+            at: PhysicalViewPoint { tab_id, .. },
+            ..
+        })
         | Work::EvaluateScript { tab_id, .. }
-        | Work::Observe { tab_id, .. }
+        | Work::Observe(PhysicalWait { tab_id, .. })
         | Work::InspectDialog { tab_id }
         | Work::HandleDialog { tab_id, .. }
-        | Work::ReadDiagnostics { tab_id, .. }
+        | Work::ReadDiagnostics(PhysicalDiagnosticsRead { tab_id, .. })
         | Work::StartRecording { tab_id } => Some(*tab_id),
         Work::ListTabs
         | Work::OpenTab { .. }
@@ -1503,7 +1517,7 @@ pub(crate) mod testing {
     use std::sync::Mutex;
     use std::time::Instant;
 
-    use crate::browser::adapter::{BrowserOutcome, RuntimeControlState, Work};
+    use crate::browser::adapter::{BrowserOutcome, PhysicalWait, RuntimeControlState, Work};
     use crate::sync::lock;
 
     use super::{BrowserError, BrowserPort, BrowserSummary};
@@ -1700,13 +1714,13 @@ pub(crate) mod testing {
             }
             if matches!(
                 &command,
-                Work::Observe {
+                Work::Observe(PhysicalWait {
                     condition: crate::language::PageCondition::VisualSettle,
                     ..
-                }
+                })
             ) {
                 let tab_id = match &command {
-                    Work::Observe { tab_id, .. } => *tab_id,
+                    Work::Observe(PhysicalWait { tab_id, .. }) => *tab_id,
                     _ => unreachable!(),
                 };
                 lock(&self.routed).push(browser.into());

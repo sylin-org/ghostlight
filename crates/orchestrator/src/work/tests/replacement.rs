@@ -4,6 +4,7 @@
 
 use super::execution::{workspace_with_a_target, PICK_STEP, REMOVED_STEP};
 use super::*;
+use crate::browser::adapter::PhysicalSemantic;
 use crate::browser::adapter::{StaleCandidate, StaleLookup};
 
 const REPLACEMENT_SUMMARY: &str = "That target is no longer on the page. One control on the page has the same role, name and row.";
@@ -63,7 +64,7 @@ fn queried(browser: &FakeBrowser) -> usize {
     browser
         .calls()
         .iter()
-        .filter(|call| matches!(call, BrowserCommand::QuerySemantic { .. }))
+        .filter(|call| matches!(call, BrowserCommand::QuerySemantic(PhysicalSemantic { .. })))
         .count()
 }
 

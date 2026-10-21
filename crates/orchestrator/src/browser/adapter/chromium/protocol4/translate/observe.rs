@@ -18,7 +18,7 @@ use super::super::wire::{CallMode, FrameRef, Point};
 use super::super::world::{self, FocusProbe, Observed};
 use super::{route, value};
 use crate::browser::adapter::documents::DocumentInventory;
-use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalPoint};
+use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalPoint, PhysicalWait};
 use crate::browser::BrowserError;
 use crate::language::PageCondition;
 use crate::workspace::StaleReason;
@@ -151,19 +151,6 @@ fn focused_document(
         .map(|(doc, _)| doc))
 }
 
-/// One wait for a condition.
-#[derive(Clone, Copy, Debug)]
-pub struct Wait<'a> {
-    /// The condition.
-    pub condition: PageCondition,
-    /// The text or URL fragment the condition compares, when it takes one.
-    pub value: Option<&'a str>,
-    /// The target the condition watches, when it watches one.
-    pub locator: Option<&'a str>,
-    /// How long the page may wait, in milliseconds.
-    pub timeout_ms: u64,
-}
-
 /// Wait for one condition in the document it lives in.
 ///
 /// Text presence races every readable document: the first that shows the text wins and the
@@ -178,15 +165,15 @@ pub struct Wait<'a> {
 pub fn observe(
     l: &mut Link<'_>,
     scope: &mut Scope,
-    tab_id: u64,
-    wait: Wait<'_>,
+    wait: &PhysicalWait,
 ) -> Result<BrowserOutcome, BrowserError> {
+    let tab_id = wait.tab_id;
     let budget = wait.timeout_ms.saturating_add(CALL_MARGIN_MS);
     let (doc, local) = match wait.condition {
-        PageCondition::VisualSettle => scope.target(wait.locator)?,
+        PageCondition::VisualSettle => scope.target(wait.locator.as_deref())?,
         PageCondition::LoadReady | PageCondition::UrlContains => scope.target(None)?,
         PageCondition::TargetPresent | PageCondition::TargetAbsent => {
-            scope.target(Some(wait.locator.unwrap_or_default()))?
+            scope.target(Some(wait.locator.as_deref().unwrap_or_default()))?
         }
         PageCondition::TextPresent | PageCondition::TextAbsent => {
             return observe_text(l, scope, tab_id, wait, budget)
@@ -196,7 +183,7 @@ pub fn observe(
         &doc,
         world::observe(
             wait.condition.as_str(),
-            wait.value,
+            wait.value.as_deref(),
             local.as_deref(),
             wait.timeout_ms,
             false,
@@ -219,7 +206,7 @@ fn observe_text(
     l: &mut Link<'_>,
     scope: &mut Scope,
     tab_id: u64,
-    wait: Wait<'_>,
+    wait: &PhysicalWait,
     budget: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
     let presence = wait.condition == PageCondition::TextPresent;
@@ -234,7 +221,7 @@ fn observe_text(
                 doc,
                 world::observe(
                     wait.condition.as_str(),
-                    wait.value,
+                    wait.value.as_deref(),
                     None,
                     wait.timeout_ms,
                     presence,

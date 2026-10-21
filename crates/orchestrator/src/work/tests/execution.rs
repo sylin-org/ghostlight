@@ -1,6 +1,10 @@
 //! Core executor dispatch, invocation lifecycle, and error mapping tests.
 
 use super::*;
+use crate::browser::adapter::{
+    PhysicalClick, PhysicalFill, PhysicalPointClick, PhysicalPointDrop, PhysicalSemantic,
+    PhysicalTypeFocused, PhysicalViewPoint, PhysicalWait,
+};
 
 /// A primitive adapter error routes to an honest refusal that carries the browser's own
 /// detail, instead of falling through to the browser-stopped rendering.
@@ -141,7 +145,7 @@ fn a_contract_failure_after_dispatch_never_claims_nothing_was_sent() {
         browser
             .calls()
             .iter()
-            .any(|call| matches!(call, BrowserCommand::Activate { .. })),
+            .any(|call| matches!(call, BrowserCommand::Activate(PhysicalClick { .. }))),
         "the click reached the browser before its receipt failed the contract"
     );
     let contract = crate::language::outcome::Refusal::BrowserContract;
@@ -811,7 +815,7 @@ fn a_captured_image_states_its_decoded_size() {
         assert!(
             browser.calls().iter().any(|call| matches!(
                 call,
-                BrowserCommand::DropImageAt { file, .. } if file.size == size && file.data == data
+                BrowserCommand::DropImageAt(PhysicalPointDrop { file, .. }) if file.size == size && file.data == data
             )),
             "{data} must state {size} bytes: {:?}",
             browser.calls()
@@ -1432,7 +1436,10 @@ fn focused_typing_names_the_control_it_described_and_settles() {
     );
     let calls = browser.calls();
     assert!(matches!(calls[1], BrowserCommand::DescribeFocused { .. }));
-    assert!(matches!(calls[2], BrowserCommand::TypeFocused { .. }));
+    assert!(matches!(
+        calls[2],
+        BrowserCommand::TypeFocused(PhysicalTypeFocused { .. })
+    ));
 }
 
 #[test]
@@ -2063,7 +2070,7 @@ fn unsatisfied_wait_is_decisive_before_the_invocation_deadline() {
     let timeout_ms = calls
         .iter()
         .find_map(|call| match call {
-            BrowserCommand::Observe { timeout_ms, .. } => Some(*timeout_ms),
+            BrowserCommand::Observe(PhysicalWait { timeout_ms, .. }) => Some(*timeout_ms),
             _ => None,
         })
         .unwrap();
@@ -2546,7 +2553,7 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
         browser
             .calls()
             .iter()
-            .all(|call| !matches!(call, BrowserCommand::Observe { .. })),
+            .all(|call| !matches!(call, BrowserCommand::Observe(PhysicalWait { .. }))),
         "the browser must never be asked to read a tab whose destination was never checked"
     );
 }
@@ -2797,14 +2804,14 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
     assert_eq!(
         calls
             .iter()
-            .filter(|call| matches!(call, BrowserCommand::Activate { .. }))
+            .filter(|call| matches!(call, BrowserCommand::Activate(PhysicalClick { .. })))
             .count(),
         2
     );
     assert_eq!(
         calls
             .iter()
-            .filter(|call| matches!(call, BrowserCommand::Observe { .. }))
+            .filter(|call| matches!(call, BrowserCommand::Observe(PhysicalWait { .. })))
             .count(),
         1
     );
@@ -2918,7 +2925,7 @@ fn credential_target_returns_guidance_without_holding_the_session() {
     assert!(!browser
         .calls()
         .iter()
-        .any(|call| matches!(call, BrowserCommand::Fill { .. })));
+        .any(|call| matches!(call, BrowserCommand::Fill(PhysicalFill { .. }))));
     browser.push(Ok(BrowserOutcome::Text {
         tab_id: 7,
         text: "ordinary page".into(),
@@ -3108,7 +3115,7 @@ fn stale_target_fails_before_browser_dispatch() {
     assert_eq!(browser.calls().len(), before + 1);
     assert!(matches!(
         browser.calls().last(),
-        Some(BrowserCommand::QuerySemantic { name, .. })
+        Some(BrowserCommand::QuerySemantic(PhysicalSemantic { name, .. }))
             if name == "Old"
     ));
     let candidates = stale.facts["recovery_candidates"].as_array().unwrap();
@@ -3178,7 +3185,7 @@ fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
     assert_eq!(clicked.status, Status::Succeeded);
     assert!(browser.calls().iter().any(|call| matches!(
         call,
-        BrowserCommand::ActivatePoint { point, expected_viewport, .. }
+        BrowserCommand::ActivatePoint(PhysicalPointClick { at: PhysicalViewPoint { point, expected_viewport, .. }, .. })
             if point.x == 210.0 && point.y == 120.0 && *expected_viewport == viewport
     )));
 
@@ -3522,10 +3529,10 @@ fn wait_condition_visual_settle_observes_view_settlement() {
     let calls = browser.calls();
     assert!(calls.iter().any(|call| matches!(
         call,
-        BrowserCommand::Observe {
+        BrowserCommand::Observe(PhysicalWait {
             condition: crate::language::PageCondition::VisualSettle,
             ..
-        }
+        })
     )));
 }
 
@@ -3582,7 +3589,7 @@ fn wait_composite_visual_settle_chains_after_primary_condition() {
     let observe_conditions: Vec<&str> = calls
         .iter()
         .filter_map(|call| match call {
-            BrowserCommand::Observe { condition, .. } => Some(condition.as_str()),
+            BrowserCommand::Observe(PhysicalWait { condition, .. }) => Some(condition.as_str()),
             _ => None,
         })
         .collect();
@@ -3776,13 +3783,13 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
     let calls = browser.calls();
     assert!(calls
         .iter()
-        .any(|c| matches!(c, BrowserCommand::QuerySemantic { .. })));
+        .any(|c| matches!(c, BrowserCommand::QuerySemantic(PhysicalSemantic { .. }))));
     assert!(calls.iter().any(|c| matches!(
         c,
-        BrowserCommand::Observe {
+        BrowserCommand::Observe(PhysicalWait {
             condition: crate::language::PageCondition::VisualSettle,
             ..
-        }
+        })
     )));
 }
 
@@ -4624,7 +4631,7 @@ fn a_tombstoned_handle_refuses_before_dispatch() {
     assert_stale_removed(&again, REMOVED_STEP);
     assert!(browser.calls()[before..]
         .iter()
-        .all(|call| matches!(call, BrowserCommand::QuerySemantic { .. })));
+        .all(|call| matches!(call, BrowserCommand::QuerySemantic(PhysicalSemantic { .. }))));
 }
 
 /// Every operation that names exactly one handle tombstones it, not only the ones that read or
@@ -4650,7 +4657,7 @@ fn a_typed_into_handle_the_page_removed_is_tombstoned() {
     assert_stale_removed(&again, REMOVED_STEP);
     assert!(browser.calls()[before..]
         .iter()
-        .all(|call| matches!(call, BrowserCommand::QuerySemantic { .. })));
+        .all(|call| matches!(call, BrowserCommand::QuerySemantic(PhysicalSemantic { .. }))));
 }
 
 /// A page that does not know the handle (evicted, or from another world) says unknown, and that

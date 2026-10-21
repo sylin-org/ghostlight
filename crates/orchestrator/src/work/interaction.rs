@@ -13,6 +13,7 @@ use crate::workspace::WorkspaceLease;
 
 use super::result::Effect;
 use super::{observed_host, readiness, ApplicationExecutor, InvocationContext, Terminal};
+use crate::browser::adapter::PhysicalDiagnosticsRead;
 
 impl ApplicationExecutor {
     /// Keep the workspace's record of a tab's dialog in line with what the browser just said,
@@ -165,14 +166,14 @@ impl ApplicationExecutor {
                 };
                 match self.dispatch(
                     context,
-                    BrowserCommand::ReadDiagnostics {
+                    BrowserCommand::ReadDiagnostics(PhysicalDiagnosticsRead {
                         tab_id: selected.physical_id,
                         source,
                         detail,
                         match_text: value.r#match.clone(),
                         after: value.after.clone(),
                         limit: u16::try_from(value.limit).expect("validated diagnostic limit"),
-                    },
+                    }),
                 ) {
                     Ok(BrowserOutcome::DiagnosticsRead {
                         tab_id,
