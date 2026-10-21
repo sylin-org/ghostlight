@@ -30,6 +30,8 @@ In order. "After" names what a slice waits for.
 | S-D5 | fix(intake): a batch is answered as one array, its tool results in it | - | tests-1's service plan; the owner's question of 2026-10-21, sent back to the coordinator (Notes) | landed (this commit) |
 | S-D6 | fix(intake): a client before MCP 2025-06-18 gets the lean JSON in a cut-off or expired answer too | - | tests-1's service plan (Notes) | landed (this commit) |
 | S-D7 | fix(browser): a browser with no Ghostlight extension reads as the missing extension, with the step to add it | - | found on leo-desktop-02 and by test-01, 2026-10-21 (Notes) | todo |
+| S-D8 | fix(edge): a browser frame over the relay bound ends nothing | tests-1 T4 | test-02's answer to the coordinator's question, 2026-10-21 (Notes) | todo |
+| S-D9 | fix(edge): a client line over the relay bound is answered, in the service's words | S-D8 | the coordinator's relay and edge classification, 2026-10-21 (Notes) | todo |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
 | BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
@@ -128,3 +130,22 @@ A kill-on-close job would need the relay to break away; none has been seen.
   `language/`). The browser profiles the installer reads say whether a profile holds the extension
   (`install/browser_profiles.rs`); recovery should use that, so a start into a browser with no
   Ghostlight extension says so and how to add it.
+- S-D8, found on 2026-10-21 by the relay and edge classification and confirmed by test-02: the
+  browser relay ends its port on any Chrome frame over the relay bound (8 MiB), and that one port
+  carries every session's browser. The extension bounds what it sends in UTF-16 characters, never
+  the frame's UTF-8 bytes, and three answers can pass the bound on a large page: a read across
+  documents (up to 255 frames of 50,000 characters in one receipt), an inspect across documents, and
+  an accessibility snapshot (5,000 nodes, about 16 MB in CJK text). The edge reads the length header
+  first, so it can skip the frame's bytes, log the size alone and keep the port, as `Reading::run`
+  does for a frame it cannot decode (P-D5). The receipt is lost, so that call waits out its
+  deadline, and every other session keeps its browser, with a 2.0.0 extension too. P-D6 (package)
+  turns the wait into a refusal with a next step.
+- S-D9, found the same day by the same classification: a client line over the relay bound is
+  skipped up to its newline and never answered, so the agent waits forever. A line just under the
+  bound whose frame is over it is answered from the `expired` template, whose words ("did not come
+  back in time. Try the call again.") are wrong for it. An inline upload of about 6.3 MB or more
+  reaches this, since the service's own 5 MB refusal never gets the line. The edge scans the
+  skipped bytes for each request's id and method, whatever their order (the TypeScript SDK writes
+  the id after the params), and answers each from a `too_large` template the service hands over
+  with the others, in its own words with a next step (ADR-0197's Decision 2 gains the case). Before
+  any reply, or from a service without that template, it answers as before any reply.

@@ -112,6 +112,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | P-D3 | feat(extension): a group's title is the ghost and the agent's name, and a 2.0.0 group is retitled | - | the owner's request of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `language/provenance.rs` | landed (this commit) |
 | P-D4 | fix(extension): a text limit counts characters, as the service does | - | found while doing P-D3 (Notes); the coordinator | landed (this commit) |
 | P-D5 | fix(browser): half an emoji in page text no longer drops the browser connection | - | the coordinator's live check of P-D4's note (Notes) | landed (this commit) |
+| P-D6 | fix(extension): no frame over the relay bound leaves the extension, and an oversized answer says so | P-D5; core-service S-D8 | test-02's answer to the coordinator's question, 2026-10-21 (Notes); cross-lane into the adapter's receipt words and `language/` | todo |
 | B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | todo |
 
 ### Notes (second sweep)
@@ -360,3 +361,12 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   losing its browser. The packaged `lib/shared.js` and `worker.js` change, and the freeze record is
   regenerated. Owed: the tab the check opened is left open with the long title in the owner's
   Chrome, outside any session.
+- P-D6, found on 2026-10-21 (core-service S-D8 has the paths): the worker's `send` measures each
+  frame's UTF-8 length against the relay bound before it posts it. An oversized receipt becomes a
+  failure receipt with its correlation, `dispatched`, committed URLs and tab, so its effect
+  semantics survive, under one new additive receipt word, `answer_too_large`; an older service
+  decodes it as `other` through the tolerance rule. The service gives it its own refusal and next
+  step: ask for fewer characters or items, or name one document. Any other oversized frame (an
+  event, a hello) is dropped, not sent. Later, not in 2.0.1: the service plans a read, an inspect
+  or a find across documents by its worst-case size and splits it over several `call` primitives,
+  so a normal page never reaches the refusal.
