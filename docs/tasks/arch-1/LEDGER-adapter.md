@@ -10,7 +10,8 @@ A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset 
 Notes).
 
 The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7,
-BROW-6, BROW-14, BROW-8a, BROW-11a and BROW-15 have landed; D52 is next (after SERV-7).
+BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15 and D52 have landed; D52(c) is next, then
+BROW-12a.
 
 ## Slices
 
@@ -139,7 +140,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a, BROW-11a and BROW-15 have landed; D52 is next (after SERV-7).
+with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a, BROW-11a, BROW-15 and D52 have landed; D52(c) is next, then BROW-12a.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -153,7 +154,8 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | landed (this commit) |
 | BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | todo |
 | BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | landed (this commit) |
-| D52 | fix(adapter): Decision 5.2's receipt codes reach the refusal as a typed cause | SERV-7 | the coordinator's placement: `BrowserError::Primitive { detail, cause }` with `language::outcome::PrimitiveCause`; core-work's routing_refusal half is D52(c) in its ledger | todo |
+| D52 | fix(adapter): Decision 5.2's receipt codes reach the refusal as a typed cause | SERV-7 | the coordinator's placement: `BrowserError::Primitive { detail, cause }` with `language::outcome::PrimitiveCause`; core-work's routing_refusal half is D52(c) in its ledger | landed (696fa557) |
+| D52(c) | fix(work): a refusal names its typed cause, and a capture over its budget says so | D52 | test-03 handed core-work's D52(c) to this lane on 2026-10-20; cross-lane in `work/mod.rs` | todo |
 
 ### Notes (second sweep)
 
@@ -260,3 +262,19 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   lines fewer. Cross-lane, one construction or pattern each, the `work/` executors and tests
   (core-work, which test-03 cleared) and `browser/mod.rs`'s `addressed_tab` and fake (core-service),
   landed after SERV-7. No wire byte changes.
+- D52, (a) and (b) of the coordinator's placement, landed as 696fa557 (this row came in the next
+  commit): `BrowserError::Primitive` is `{ detail, cause: language::outcome::PrimitiveCause }`,
+  the vocabulary C12b-1 defined, so it has one home, as C17 did with `PageCondition`;
+  `BrowserError::primitive(detail)` builds the common `Refused` case beside `BrowserError::stale`.
+  `link.rs` stops folding the receipt's closed codes into one string: `debugger_unavailable` and
+  `session_lost` keep their cause, `capture_too_large` is the new
+  `BrowserError::CaptureTooLarge { detail }`, and `browser_refused` and `other` stay `Refused`.
+  The browser's words stay in `detail`. `work/mod.rs` got only the arms that keep today's refusal,
+  facts and audit tag (`routing_refusal`, `unchecked`, `browser_reason`), so no result golden
+  moved. Proof: the rows for all five codes in
+  `receipt_failures_map_to_plain_or_local_failures_before_any_effect` (`protocol4/link/tests.rs`),
+  whose `debugger_unavailable` row read the folded string before. Cross-lane: `browser/mod.rs`
+  (handed over by the coordinator after SERV-7), three `work/mod.rs` arms and four
+  `work/tests/execution.rs` constructions.
+- D52(c): test-03 asked this lane to write the routing too, so it is a slice here; core-work's
+  ledger marks its row as taken by D52.
