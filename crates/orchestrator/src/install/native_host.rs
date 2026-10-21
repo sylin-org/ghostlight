@@ -24,9 +24,9 @@ use thiserror::Error;
 
 use super::browser_package::{self, BrowserPackage, BrowserPackageContext, BrowserPackageSpec};
 use super::container::{AppContainer, Residence};
-use super::entry::{canonical_path, same_location_on};
-use super::layout::{Layout, EDGE_COMMAND_NAME, MANIFESTS_DIRECTORY_NAME};
-use super::record;
+use super::files;
+use super::layout::{program_file_name, Layout, EDGE_COMMAND_NAME, MANIFESTS_DIRECTORY_NAME};
+use super::paths::{canonical_path, same_location_on};
 use super::user_dirs::{self, UserDirs};
 use crate::language::deployment as words;
 
@@ -333,9 +333,10 @@ impl NativeHostContext {
         let (home, local, config, registry_isolated) =
             environment_native_host_roots(&dirs, &|name| env::var_os(name));
         let layout = Layout::current().unwrap_or_else(|_| Layout::new(PathBuf::new()));
-        let connector = layout
-            .bin()
-            .join(executable_name(EDGE_COMMAND_NAME, platform));
+        let connector = layout.bin().join(program_file_name(
+            EDGE_COMMAND_NAME,
+            platform == NativeHostPlatform::Windows,
+        ));
         let manifests = if registry_isolated {
             home.join(MANIFESTS_DIRECTORY_NAME)
         } else {
@@ -381,14 +382,7 @@ impl NativeHostContext {
 
     /// Registry location this context reads and writes for one browser.
     fn registry_key(&self, browser: &BrowserSpec) -> String {
-        if self.registry_isolated {
-            format!(
-                r"Software\Ghostlight\Isolated\{}\NativeMessagingHosts\{HOST_NAME}",
-                browser.windows_vendor.join(r"\")
-            )
-        } else {
-            windows_registry_key(browser)
-        }
+        registry_key_of(browser.windows_vendor, self.registry_isolated)
     }
 }
 
@@ -452,9 +446,10 @@ struct BrowserSpec {
     /// `Google Chrome`.
     short: &'static str,
     windows_vendor: &'static [&'static str],
-    windows_directory: &'static [&'static str],
     windows_executable: &'static str,
-    linux_directory: &'static str,
+    /// The browser's directory below the XDG configuration home on Linux: its profiles, and its
+    /// native-messaging manifests in [`NATIVE_MESSAGING_HOSTS`] below it.
+    linux_config_directory: &'static str,
     package: BrowserPackageSpec,
 }
 
@@ -467,9 +462,8 @@ const BROWSERS: &[BrowserSpec] = &[
         name: "Google Chrome",
         short: "Chrome",
         windows_vendor: &["Google", "Chrome"],
-        windows_directory: &["Google", "Chrome", "Application"],
         windows_executable: "chrome.exe",
-        linux_directory: "google-chrome/NativeMessagingHosts",
+        linux_config_directory: "google-chrome",
         package: BrowserPackageSpec {
             executables: &["google-chrome", "google-chrome-stable"],
             snap_executable: "google-chrome",
@@ -481,9 +475,8 @@ const BROWSERS: &[BrowserSpec] = &[
         name: "Microsoft Edge",
         short: "Edge",
         windows_vendor: &["Microsoft", "Edge"],
-        windows_directory: &["Microsoft", "Edge", "Application"],
         windows_executable: "msedge.exe",
-        linux_directory: "microsoft-edge/NativeMessagingHosts",
+        linux_config_directory: "microsoft-edge",
         package: BrowserPackageSpec {
             executables: &["microsoft-edge", "microsoft-edge-stable"],
             snap_executable: "microsoft-edge",
@@ -495,9 +488,8 @@ const BROWSERS: &[BrowserSpec] = &[
         name: "Brave",
         short: "Brave",
         windows_vendor: &["BraveSoftware", "Brave-Browser"],
-        windows_directory: &["BraveSoftware", "Brave-Browser", "Application"],
         windows_executable: "brave.exe",
-        linux_directory: "BraveSoftware/Brave-Browser/NativeMessagingHosts",
+        linux_config_directory: "BraveSoftware/Brave-Browser",
         package: BrowserPackageSpec {
             executables: &["brave-browser", "brave"],
             snap_executable: "brave",
@@ -509,9 +501,8 @@ const BROWSERS: &[BrowserSpec] = &[
         name: "Chromium",
         short: "Chromium",
         windows_vendor: &["Chromium"],
-        windows_directory: &["Chromium", "Application"],
         windows_executable: "chrome.exe",
-        linux_directory: "chromium/NativeMessagingHosts",
+        linux_config_directory: "chromium",
         package: BrowserPackageSpec {
             executables: &["chromium", "chromium-browser"],
             snap_executable: "chromium",
@@ -522,8 +513,37 @@ const BROWSERS: &[BrowserSpec] = &[
 
 /// Name of the directory under a Windows vendor path that holds the profiles.
 const WINDOWS_USER_DATA_DIRECTORY: &str = "User Data";
-/// Last component of a Linux native-messaging directory; its parent holds the profiles.
-const LINUX_NATIVE_MESSAGING_COMPONENT: &str = "NativeMessagingHosts";
+/// The directory below a browser's configuration that holds its native-messaging manifests, and
+/// the registry key below a vendor's key that names them.
+const NATIVE_MESSAGING_HOSTS: &str = "NativeMessagingHosts";
+
+/// The directory below a Windows browser's vendor path that holds its program.
+const WINDOWS_APPLICATION_DIRECTORY: &str = "Application";
+
+/// The registry key below which an isolated context keeps every browser's registration.
+const ISOLATED_REGISTRY_ROOT: &str = r"Software\Ghostlight\Isolated";
+
+/// The registry key below which every browser's registration is kept.
+const REGISTRY_ROOT: &str = "Software";
+
+/// The file name of Ghostlight's host manifest, which every browser reads.
+fn manifest_file_name() -> String {
+    format!("{HOST_NAME}.json")
+}
+
+/// The registry key that names Ghostlight's manifest for the browser of `vendor`, below the
+/// isolated root when `isolated`.
+fn registry_key_of(vendor: &[&str], isolated: bool) -> String {
+    let root = if isolated {
+        ISOLATED_REGISTRY_ROOT
+    } else {
+        REGISTRY_ROOT
+    };
+    format!(
+        r"{root}\{}\{NATIVE_MESSAGING_HOSTS}\{HOST_NAME}",
+        vendor.join(r"\")
+    )
+}
 
 /// The directory that holds one browser's profiles, derived from the same table as its
 /// registration: the vendor path under `LOCALAPPDATA` on Windows, and the native-messaging
@@ -537,14 +557,7 @@ fn user_data_directory(context: &NativeHostContext, browser: &BrowserSpec) -> Pa
                 path.join(component)
             })
             .join(WINDOWS_USER_DATA_DIRECTORY),
-        NativeHostPlatform::Linux => {
-            let directory = browser
-                .linux_directory
-                .strip_suffix(LINUX_NATIVE_MESSAGING_COMPONENT)
-                .unwrap_or(browser.linux_directory)
-                .trim_end_matches('/');
-            context.config.join(directory)
-        }
+        NativeHostPlatform::Linux => context.config.join(browser.linux_config_directory),
     }
 }
 
@@ -587,9 +600,10 @@ fn browser_executable(context: &NativeHostContext, browser: &BrowserSpec) -> Opt
 
 fn windows_browser_executable_path(root: &Path, browser: &BrowserSpec) -> PathBuf {
     browser
-        .windows_directory
+        .windows_vendor
         .iter()
         .fold(root.to_path_buf(), |path, component| path.join(component))
+        .join(WINDOWS_APPLICATION_DIRECTORY)
         .join(browser.windows_executable)
 }
 
@@ -702,7 +716,7 @@ impl RegistrationIo for SystemRegistrationIo {
     }
 
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), NativeHostError> {
-        record::atomic_replace_keeping_access(path, contents.as_bytes()).map_err(|source| {
+        files::atomic_replace_keeping_access(path, contents.as_bytes()).map_err(|source| {
             NativeHostError::Write {
                 path: path.to_path_buf(),
                 source,
@@ -1210,7 +1224,7 @@ fn remove_legacy_windows_manifest(
     registration_io: &dyn RegistrationIo,
 ) -> Result<bool, NativeHostError> {
     let directory = legacy_windows_manifest_directory(context);
-    let manifest = directory.join(format!("{HOST_NAME}.json"));
+    let manifest = directory.join(manifest_file_name());
     let owned = registration_io
         .read_file(&manifest)?
         .and_then(|contents| serde_json::from_str::<HostManifest>(&contents).ok())
@@ -1246,7 +1260,7 @@ fn remove_retired_firefox_registration(
             .home
             .join(".mozilla")
             .join("native-messaging-hosts")
-            .join(format!("{HOST_NAME}.json")),
+            .join(manifest_file_name()),
     };
     let owned = registration_io
         .read_file(&manifest_path)?
@@ -1257,11 +1271,7 @@ fn remove_retired_firefox_registration(
     }
 
     if context.platform == NativeHostPlatform::Windows {
-        let registry_key = if context.registry_isolated {
-            format!(r"Software\Ghostlight\Isolated\Mozilla\NativeMessagingHosts\{HOST_NAME}")
-        } else {
-            format!(r"Software\Mozilla\NativeMessagingHosts\{HOST_NAME}")
-        };
+        let registry_key = registry_key_of(&["Mozilla"], context.registry_isolated);
         if let Some(value) = registration_io.read_registry(&registry_key)? {
             let registered_path = PathBuf::from(value);
             let registered_owned = registration_io
@@ -1299,7 +1309,7 @@ fn owned_elsewhere_detail(
 
 /// The one Windows manifest every browser's registry value names: `home/manifests`.
 fn windows_manifest_path(context: &NativeHostContext) -> PathBuf {
-    context.manifests.join(format!("{HOST_NAME}.json"))
+    context.manifests.join(manifest_file_name())
 }
 
 /// The per-user `AppData` directory earlier versions kept the Windows manifest in. Packaged apps
@@ -1308,42 +1318,31 @@ fn legacy_windows_manifest_directory(context: &NativeHostContext) -> PathBuf {
     context
         .local
         .join("Ghostlight")
-        .join("NativeMessagingHosts")
+        .join(NATIVE_MESSAGING_HOSTS)
 }
 
 fn browser_manifest_path(context: &NativeHostContext, browser: &BrowserSpec) -> PathBuf {
     if context.platform == NativeHostPlatform::Windows {
         return windows_manifest_path(context);
     }
+    // One join keeps the separators the browser's own path uses.
     context
         .config
-        .join(browser.linux_directory)
-        .join(format!("{HOST_NAME}.json"))
+        .join(format!(
+            "{}/{NATIVE_MESSAGING_HOSTS}",
+            browser.linux_config_directory
+        ))
+        .join(manifest_file_name())
 }
 
 /// Whether `path` names a manifest file of Ghostlight's host, `org.sylin.ghostlight.json`, in any
 /// folder. Windows paths are split by hand so the answer does not depend on the host system.
 fn names_host_manifest(path: &Path) -> bool {
-    let file = format!("{HOST_NAME}.json");
+    let file = manifest_file_name();
     path.to_string_lossy()
         .rsplit(['\\', '/'])
         .next()
         .is_some_and(|name| name.eq_ignore_ascii_case(&file))
-}
-
-fn windows_registry_key(browser: &BrowserSpec) -> String {
-    format!(
-        r"Software\{}\NativeMessagingHosts\{HOST_NAME}",
-        browser.windows_vendor.join(r"\")
-    )
-}
-
-fn executable_name(name: &str, platform: NativeHostPlatform) -> String {
-    if platform == NativeHostPlatform::Windows {
-        format!("{name}.exe")
-    } else {
-        name.into()
-    }
 }
 
 #[cfg(windows)]
@@ -1455,6 +1454,11 @@ mod tests {
 
     use super::*;
     use crate::scratch::Scratch;
+
+    /// The registry key that names Ghostlight's manifest for `browser`, outside any isolation.
+    fn windows_registry_key(browser: &BrowserSpec) -> String {
+        registry_key_of(browser.windows_vendor, false)
+    }
 
     #[derive(Default)]
     struct MemoryIo {
@@ -1583,9 +1587,10 @@ mod tests {
             local: local.clone(),
             manifests: layout.manifests(),
             layout,
-            connector: root
-                .join("Ghostlight/bin")
-                .join(executable_name(EDGE_COMMAND_NAME, platform)),
+            connector: root.join("Ghostlight/bin").join(program_file_name(
+                EDGE_COMMAND_NAME,
+                platform == NativeHostPlatform::Windows,
+            )),
             browser_packages: BrowserPackageContext::isolated(&root.join("browser-packages")),
             windows_browser_roots: vec![
                 local,
@@ -1698,7 +1703,7 @@ mod tests {
             )
         );
             assert_eq!(
-                windows_registry_key(&BROWSERS[2]),
+                registry_key_of(BROWSERS[2].windows_vendor, false),
                 r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\org.sylin.ghostlight"
             );
             assert_eq!(

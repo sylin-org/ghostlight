@@ -53,9 +53,9 @@ use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
-use super::entry::{canonical_path, same_path};
 use super::layout::{retired_connector_names, Layout, DESKTOP_EXECUTABLE_NAME};
 use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan, Move};
+use super::paths::{canonical_path, same_path};
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
 use super::record::{self, Channel, InstallRecord, PayloadRefused, Standing};
 use super::swap;

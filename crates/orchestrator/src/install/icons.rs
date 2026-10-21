@@ -39,8 +39,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::apps::is_wrapper;
+use super::files::atomic_replace;
+use super::layout::WINDOWS_PROGRAM_SUFFIX;
 use super::packaged::{is_family_of, PACKAGES_DIRECTORY};
-use super::record::atomic_replace;
 use super::user_dirs::UserDirs;
 use crate::sync::lock;
 
@@ -116,9 +117,6 @@ const PREFERRED_SIZES: [u32; 4] = [128, 96, 64, 48];
 
 /// The theme sizes looked at after the unthemed icons, when an app ships no preferred size.
 const OTHER_SIZES: [u32; 4] = [256, 512, 32, 24];
-
-/// The suffix of a Windows program.
-const EXE_SUFFIX: &str = ".exe";
 
 /// The launcher scripts a command on `PATH` may be, in the order Windows runs them.
 const LAUNCHER_SUFFIXES: [&str; 2] = [".cmd", ".ps1"];
@@ -1149,7 +1147,7 @@ pub(super) fn program(places: &IconPlaces, place: ProgramPlace) -> Option<PathBu
 /// The program the command `name` in `directory` is: its `.exe`, or the program its launcher
 /// script starts.
 fn command_program(directory: &Path, name: &str) -> Option<PathBuf> {
-    let exe = directory.join(format!("{name}{EXE_SUFFIX}"));
+    let exe = directory.join(format!("{name}{WINDOWS_PROGRAM_SUFFIX}"));
     if exe.is_file() {
         return Some(exe);
     }
@@ -1169,7 +1167,7 @@ fn launched_program(launcher: &Path) -> Option<PathBuf> {
     text.split(|character: char| {
         character.is_whitespace() || matches!(character, '"' | '\'' | '(' | ')' | '&' | '|' | '@')
     })
-    .filter(|token| token.to_ascii_lowercase().ends_with(EXE_SUFFIX))
+    .filter(|token| token.to_ascii_lowercase().ends_with(WINDOWS_PROGRAM_SUFFIX))
     .filter_map(|token| launcher_path(directory, token))
     .filter(|path| !is_wrapper(path))
     .find(|path| path.is_file())

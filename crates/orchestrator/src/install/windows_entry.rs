@@ -20,9 +20,9 @@ use std::path::{Path, PathBuf};
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 use winreg::RegKey;
 
-use super::entry::lies_within;
+use super::files::atomic_replace;
 use super::layout::Layout;
-use super::record::atomic_replace;
+use super::paths::lies_within;
 
 /// The name the shortcut and the installed-apps entry carry.
 const PRODUCT_NAME: &str = "Ghostlight";

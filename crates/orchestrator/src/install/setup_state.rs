@@ -12,7 +12,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::record::atomic_replace;
+use super::files::atomic_replace;
 
 /// The content of `state/setup.json`. A reader ignores fields it does not know.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

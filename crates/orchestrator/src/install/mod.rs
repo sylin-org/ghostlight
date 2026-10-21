@@ -10,12 +10,14 @@ pub mod container;
 pub mod deployment;
 pub mod desktop_entry;
 pub mod entry;
+pub mod files;
 pub mod icons;
 pub mod last_browser;
 pub mod layout;
 pub mod migration;
 pub mod native_host;
 mod packaged;
+pub mod paths;
 pub mod reconcile;
 pub mod record;
 pub mod setup_state;
@@ -52,10 +54,12 @@ use crate::language::deployment as words;
 use crate::sync::lock;
 
 use container::{AppContainer, Residence};
+use files::{Access, Link, Replace};
 use icons::{AgentIconSources, AppPlace, KnownFolder, ProgramPlace};
-use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
+use layout::{
+    program_file_name, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, WINDOWS_PROGRAM_SUFFIX,
+};
 use packaged::{CopyPlace, DataRoots, Packages, SettingsCopy};
-use record::{Access, Link, Replace};
 use user_dirs::UserDirs;
 
 const SERVER_NAME: &str = "ghostlight";
@@ -726,7 +730,7 @@ impl HarnessContext {
         }
         view.roots
             .iter()
-            .any(|root| entry::lies_within(&definition.path, root, self.windows))
+            .any(|root| paths::lies_within(&definition.path, root, self.windows))
             .then_some(&view.container)
     }
 
@@ -748,7 +752,7 @@ impl HarnessContext {
             .as_ref()
             .map(layout::Layout::bin)
             .unwrap_or_default()
-            .join(executable_name(EDGE_COMMAND_NAME, windows));
+            .join(program_file_name(EDGE_COMMAND_NAME, windows));
         let path_entries = dirs.path_entries().to_vec();
         let locations = layout.map_or_else(
             |_| PathBuf::from(layout::HARNESS_LOCATIONS_NAME),
@@ -916,7 +920,7 @@ impl HarnessDefinition {
     fn packaged(&self, windows: bool) -> bool {
         self.copies.iter().any(|copy| {
             copy.place == CopyPlace::OwnPackage
-                && entry::spelled_alike(&copy.file, &self.path, windows)
+                && paths::spelled_alike(&copy.file, &self.path, windows)
         })
     }
 
@@ -927,7 +931,7 @@ impl HarnessDefinition {
         self.copies
             .iter()
             .filter(move |copy| {
-                !entry::spelled_alike(&copy.file, &self.path, windows) && copy.file.is_file()
+                !paths::spelled_alike(&copy.file, &self.path, windows) && copy.file.is_file()
             })
             .map(|copy| copy.file.as_path())
     }
@@ -1944,7 +1948,7 @@ fn product_config_parent_exists(context: &HarnessContext, path: &Path) -> bool {
     // appear installed on every ordinary machine and would make aggregate setup overreach.
     ![&context.home, &context.config_root]
         .into_iter()
-        .any(|root| entry::spelled_alike(parent, root, context.windows))
+        .any(|root| paths::spelled_alike(parent, root, context.windows))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2900,7 +2904,7 @@ fn legacy_relay_owned(command: &str, args: Option<&[&str]>, edge: &Path, windows
     let Some(expected_root) = edge.parent().and_then(Path::parent) else {
         return false;
     };
-    entry::same_location_on(actual_root, expected_root, windows)
+    paths::same_location_on(actual_root, expected_root, windows)
 }
 
 fn command_registration_state(
@@ -2916,7 +2920,7 @@ fn command_registration_state(
         );
     }
     let current = command_name(command, EDGE_COMMAND_NAME)
-        && entry::same_location_on(Path::new(command), edge, windows)
+        && paths::same_location_on(Path::new(command), edge, windows)
         && args == Some(&MCP_ARGUMENTS[..]);
     if current {
         RegistrationState::Current
@@ -3042,7 +3046,7 @@ fn write_location_overrides(
 ) -> Result<(), HarnessError> {
     let bytes = serde_json::to_vec_pretty(overrides)
         .map_err(|error| HarnessError::MalformedLocationState(error.to_string()))?;
-    record::atomic_replace(&context.locations, &bytes).map_err(HarnessError::Write)
+    files::atomic_replace(&context.locations, &bytes).map_err(HarnessError::Write)
 }
 
 fn validate_located_config(path: &Path, dialect: ConfigDialect) -> Result<(), HarnessError> {
@@ -3067,7 +3071,11 @@ fn is_executable_file(path: &Path, windows: bool) -> bool {
         return path
             .extension()
             .and_then(OsStr::to_str)
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"));
+            .is_some_and(|extension| {
+                WINDOWS_PROGRAM_SUFFIX
+                    .strip_prefix('.')
+                    .is_some_and(|suffix| extension.eq_ignore_ascii_case(suffix))
+            });
     }
     #[cfg(unix)]
     {
@@ -3090,7 +3098,7 @@ const CONFIGURATION_WRITE: Replace = Replace {
     link: Link::Follow,
 };
 
-/// Remove from `directory` each replace temporary ([`record::is_temporary`]) that is at least
+/// Remove from `directory` each replace temporary ([`files::is_temporary`]) that is at least
 /// [`STRAY_TEMPORARY_AGE`] old at `now`. Returns how many were removed.
 fn remove_stray_temporaries_in(directory: &Path, now: SystemTime) -> usize {
     let Ok(entries) = fs::read_dir(directory) else {
@@ -3098,7 +3106,7 @@ fn remove_stray_temporaries_in(directory: &Path, now: SystemTime) -> usize {
     };
     entries
         .flatten()
-        .filter(|entry| record::is_temporary(&entry.file_name()))
+        .filter(|entry| files::is_temporary(&entry.file_name()))
         .filter(|entry| {
             entry
                 .metadata()
@@ -3128,7 +3136,7 @@ fn read_or_empty(path: &Path) -> Result<String, HarnessError> {
 }
 
 fn executable_on_path(context: &HarnessContext, name: &str) -> bool {
-    let executable = executable_name(name, context.windows);
+    let executable = program_file_name(name, context.windows);
     context
         .path_entries
         .iter()
@@ -3150,14 +3158,6 @@ fn mcp_command_line(edge: &Path) -> String {
 /// The arguments of an edge entry as a TOML array.
 fn mcp_arguments_array() -> Array {
     MCP_ARGUMENTS.iter().copied().collect()
-}
-
-fn executable_name(name: &str, windows: bool) -> String {
-    if windows {
-        format!("{name}.exe")
-    } else {
-        name.into()
-    }
 }
 
 /// Safe harness registration failure.
@@ -3217,15 +3217,15 @@ mod tests {
 
     use serde_json::{json, Value};
 
-    use crate::install::record::assert_owner_only;
+    use crate::install::files::assert_owner_only;
     use crate::scratch::Scratch;
 
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
         agent_called, command_registration_state, definition, definitions, environment_roots,
-        executable_name, expected_json_entry, harness_roots, holds_owned_entry, inspect,
-        inspect_json, inspect_toml, json_entry_defaults, packaged, remove_stray_temporaries_in,
+        expected_json_entry, harness_roots, holds_owned_entry, inspect, inspect_json, inspect_toml,
+        json_entry_defaults, packaged, program_file_name, remove_stray_temporaries_in,
         replace_with_backup, AppContainer, Attention, ForeignCommand, Format, HarnessAction,
         HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
         JsonDialect, LauncherPin, NpmLauncher, Packages, PrivateView, RegistrationEdit,
@@ -3243,7 +3243,7 @@ mod tests {
     }
 
     fn edge(directory: &Path) -> PathBuf {
-        let edge = directory.join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
+        let edge = directory.join(program_file_name(EDGE_COMMAND_NAME, cfg!(windows)));
         fs::write(&edge, b"test").unwrap();
         edge
     }
@@ -3444,7 +3444,7 @@ mod tests {
             let install_root = directory.join("bin");
             let current = install_root
                 .join("v1")
-                .join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
+                .join(program_file_name(EDGE_COMMAND_NAME, cfg!(windows)));
             let legacy = install_root.join("v0").join(if cfg!(windows) {
                 "ghostlight-relay.exe"
             } else {
@@ -3488,7 +3488,7 @@ mod tests {
             let install_root = directory.join("bin");
             let current = install_root
                 .join("v1")
-                .join(executable_name(EDGE_COMMAND_NAME, true));
+                .join(program_file_name(EDGE_COMMAND_NAME, true));
             let legacy = install_root.join("v0").join("ghostlight-relay.exe");
             let respelled = legacy.to_string_lossy().replace('\\', "/").to_uppercase();
             assert_eq!(
@@ -3505,7 +3505,7 @@ mod tests {
             let context = context(&directory);
             let edge = context.edge.clone();
             let orchestrator = directory
-                .join(executable_name("ghostlight-service", cfg!(windows)))
+                .join(program_file_name("ghostlight-service", cfg!(windows)))
                 .to_string_lossy()
                 .replace('\\', "\\\\");
             let source = format!(
@@ -3538,7 +3538,7 @@ mod tests {
             let current = edge(&directory);
             let old = directory
                 .join("old")
-                .join(executable_name(RETIRED_MCP_CONNECTOR_NAME, cfg!(windows)));
+                .join(program_file_name(RETIRED_MCP_CONNECTOR_NAME, cfg!(windows)));
             let source = serde_json::json!({
                 "mcpServers": {
                     "ghostlight": {
@@ -3559,7 +3559,7 @@ mod tests {
             let current = edge(&directory);
             let elsewhere = directory
                 .join("elsewhere")
-                .join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
+                .join(program_file_name(EDGE_COMMAND_NAME, cfg!(windows)));
             for (command, args) in [
                 (current.clone(), serde_json::json!([])),
                 (current.clone(), serde_json::json!(["serve"])),

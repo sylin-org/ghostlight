@@ -13,7 +13,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::record::atomic_replace;
+use super::files::atomic_replace;
 
 /// The content of `state/last-browser.json`. A reader ignores fields it does not know.
 #[derive(Debug, Deserialize, Serialize)]

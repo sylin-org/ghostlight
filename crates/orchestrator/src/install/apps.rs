@@ -22,10 +22,11 @@ use std::path::{Path, PathBuf};
 
 use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME};
 
-use super::entry::{lies_within, same_path};
 use super::icons::{
     desktop_entry_value, program, read_text, AppPlace, IconPlaces, KnownFolder, ProgramPlace,
 };
+use super::layout::WINDOWS_PROGRAM_SUFFIX;
+use super::paths::{lies_within, same_path};
 
 /// The programs that only start another, by file stem in lowercase: shells, consoles, script
 /// interpreters, package runners and process wrappers. A stem compares without the `.exe` suffix
@@ -77,9 +78,6 @@ const WRAPPERS: &[&str] = &[
 /// The separators a path may carry on either system.
 pub const PATH_SEPARATORS: [char; 2] = ['/', '\\'];
 
-/// The suffix of a Windows program, which a stem leaves out.
-const EXE_SUFFIX: &str = ".exe";
-
 /// The `[Desktop Entry]` key that names the program to check for before showing an app.
 const TRY_EXEC_KEY: &str = "TryExec";
 
@@ -91,7 +89,7 @@ const EXEC_KEY: &str = "Exec";
 fn stem(file_name: &str) -> String {
     let last = file_name.rsplit(PATH_SEPARATORS).next().unwrap_or_default();
     let lower = last.to_ascii_lowercase();
-    let bare = lower.strip_suffix(EXE_SUFFIX).unwrap_or(&lower);
+    let bare = lower.strip_suffix(WINDOWS_PROGRAM_SUFFIX).unwrap_or(&lower);
     bare.trim_end_matches(|character: char| character.is_ascii_digit() || character == '.')
         .to_owned()
 }

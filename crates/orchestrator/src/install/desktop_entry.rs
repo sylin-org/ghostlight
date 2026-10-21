@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
-use super::record::{Link, Replace};
+use super::files::{Link, Replace};
 use crate::language::deployment as words;
 
 const APPLICATION_ID: &str = ghostlight_relay::APPLICATION_ID;

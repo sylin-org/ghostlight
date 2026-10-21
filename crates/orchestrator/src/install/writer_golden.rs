@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use super::container::AppContainer;
 use super::layout::{EDGE_COMMAND_NAME, HARNESS_LOCATIONS_NAME, RETIRED_MCP_CONNECTOR_NAME};
 use super::{
-    definition, executable_name, harness_roots, AgentRow, ConfigDialect, HarnessAction,
+    definition, harness_roots, program_file_name, AgentRow, ConfigDialect, HarnessAction,
     HarnessContext, HarnessRegistry, HarnessState, HarnessSummary, JsonDialect, PrivateView,
     ROSTER,
 };
@@ -371,7 +371,7 @@ impl Run {
         );
         let windows = computer.windows();
         let home = PathBuf::from(spelled(&root, separator, &[PERSON]));
-        let edge_name = executable_name(EDGE_COMMAND_NAME, windows);
+        let edge_name = program_file_name(EDGE_COMMAND_NAME, windows);
         let edge = PathBuf::from(spelled(
             &root,
             separator,
@@ -449,12 +449,12 @@ impl Run {
 
     /// A program of this run's install, by name.
     fn program(&self, directory: &str, name: &str) -> String {
-        let name = executable_name(name, self.computer.windows());
+        let name = program_file_name(name, self.computer.windows());
         self.below(&[PERSON, ".ghostlight", directory, &name])
     }
 
     fn old_edge(&self) -> String {
-        let name = executable_name(EDGE_COMMAND_NAME, self.computer.windows());
+        let name = program_file_name(EDGE_COMMAND_NAME, self.computer.windows());
         self.below(&[OLD_PERSON, ".ghostlight", "bin", &name])
     }
 

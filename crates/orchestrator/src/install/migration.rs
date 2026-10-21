@@ -61,10 +61,11 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
 use super::container::Residence;
-use super::entry::{lies_within, same_location, same_path};
+use super::files::{self, Link, Replace};
 use super::layout::{retired_connector_names, Layout, INSTALL_RECORD_NAME};
 use super::native_host::{self, NativeHostRegistry};
-use super::record::{self, InstallRecord, Link, Replace, Version};
+use super::paths::{lies_within, same_location, same_path};
+use super::record::{self, InstallRecord, Version};
 use super::setup_state::{self, SetupRecord};
 use super::{HarnessRegistry, HarnessState};
 
@@ -1252,7 +1253,7 @@ fn record_path(copy: &Path) -> PathBuf {
 
 /// Record that `sha256` is the content being copied to `copy`.
 fn record_copy(copy: &Path, sha256: &str) -> io::Result<()> {
-    record::atomic_replace(&record_path(copy), sha256.as_bytes())
+    files::atomic_replace(&record_path(copy), sha256.as_bytes())
 }
 
 /// The content an earlier run recorded as copied to `copy`, if it did.

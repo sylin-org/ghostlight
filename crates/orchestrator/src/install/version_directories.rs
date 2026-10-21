@@ -16,9 +16,9 @@ use std::path::{Path, PathBuf};
 
 use ghostlight_relay::private;
 
-use super::entry::same_path;
 use super::layout::Layout;
 use super::migration::{self, Move, AUDIT_FILE_NAME};
+use super::paths::same_path;
 use super::record::Version;
 
 /// The letter every 1.x version directory name starts with, before the version.

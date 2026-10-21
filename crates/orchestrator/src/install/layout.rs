@@ -17,6 +17,20 @@ use ghostlight_relay::home::{
     SERVICE_LOCK_NAME,
 };
 
+/// The suffix of a Windows program's file name.
+pub const WINDOWS_PROGRAM_SUFFIX: &str = ".exe";
+
+/// The file name of the program `name` on Windows (`windows`) or on another system, where a
+/// program has no suffix. Tests model a Windows computer on any system through `windows`.
+#[must_use]
+pub fn program_file_name(name: &str, windows: bool) -> String {
+    if windows {
+        format!("{name}{WINDOWS_PROGRAM_SUFFIX}")
+    } else {
+        name.to_owned()
+    }
+}
+
 /// File name of the Ghostlight shell on this platform. The relay owns the names of the service and
 /// the edge; the shell is not a relay peer's executable, so its name lives here.
 #[cfg(windows)]
