@@ -84,25 +84,24 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
 
+    /// Protects docs/trust/data-flows.md (`state/watch.off` exists exactly while watching is off)
+    /// and ADR-0199's amendment of 2026-10-15, item 8: watching is off exactly while the home holds
+    /// the marker, through a load, a change, a repeated change, a restart and a marker that cannot
+    /// be written, and a change is reported only when there is one.
     #[test]
-    fn watching_is_off_exactly_while_the_marker_exists() {
-        let directory = Scratch::named("watching");
-        let marker = directory.join("watch.off");
-        assert!(Watching::load(marker.clone()).is_on());
-        std::fs::write(&marker, b"").unwrap();
-        assert!(!Watching::load(marker).is_on());
-    }
-
-    #[test]
-    fn setting_writes_and_removes_the_marker_and_reports_a_change_only_when_there_is_one() {
+    fn watching_is_off_exactly_while_the_home_holds_the_marker() {
         let directory = Scratch::named("watching");
         let marker = directory.join("state").join("watch.off");
         let watching = Watching::load(marker.clone());
+        assert!(
+            watching.is_on(),
+            "a fresh home, with no state folder yet, is on"
+        );
         assert!(!watching.set(true).unwrap(), "a fresh home is already on");
         assert!(watching.set(false).unwrap());
         assert!(!watching.is_on());
         assert!(marker.exists());
-        assert!(!watching.set(false).unwrap());
+        assert!(!watching.set(false).unwrap(), "a repeat changes nothing");
         assert!(
             !Watching::load(marker.clone()).is_on(),
             "a restart keeps it off"
@@ -110,16 +109,16 @@ mod tests {
         assert!(watching.set(true).unwrap());
         assert!(watching.is_on());
         assert!(!marker.exists());
-    }
 
-    #[test]
-    fn a_marker_that_cannot_be_written_leaves_watching_on() {
-        let directory = Scratch::named("watching");
-        // A file where the state directory should be makes the marker impossible to create.
-        let blocker = directory.join("state");
-        std::fs::write(&blocker, b"").unwrap();
-        let watching = Watching::load(blocker.join("watch.off"));
+        // A file where the state folder should be makes the marker impossible to create, and
+        // watching stays on rather than claim an off a restart would forget.
+        let blocked = Scratch::named("watching");
+        let state = blocked.join("state");
+        std::fs::write(&state, b"").unwrap();
+        let marker = state.join("watch.off");
+        let watching = Watching::load(marker.clone());
         assert!(watching.set(false).is_err());
         assert!(watching.is_on());
+        assert!(!marker.exists());
     }
 }

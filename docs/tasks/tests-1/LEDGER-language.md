@@ -18,7 +18,7 @@ found by that classification, landed first. Then cut it file by file.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `language/` | 349 | 55 | 55 |
-| `workbench/` | 252 | 35 | 39 |
+| `workbench/` | 252 | 35 | 37 |
 
 ## Slices
 
@@ -53,7 +53,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TW1 | test(workbench): the loopback server keeps the 14 tests of its promises and gates | 105 | 14 | 5 promise, 5 contract, 4 defect | landed (debcc8df) |
 | TW2 | test(workbench): the facade keeps the 14 tests of what the window shows | 83 | 14 | 10 promise, 3 contract, 1 defect | landed (e5f0438a) |
 | TW3 | test(workbench): history.rs keeps the two grouped-history promises | 6 | 2 | 2 promise | landed (dac5c6c5) |
-| TW4 | test(workbench): setup.rs keeps the 5 tests of the setup journey, and parts/ its none | 54 | 5 | 4 promise, 1 defect | landed (this commit) |
+| TW4 | test(workbench): setup.rs keeps the 5 tests of the setup journey, and parts/ its none | 54 | 5 | 4 promise, 1 defect | landed (878404a8) |
+| TW5 | test(workbench): watching.rs keeps the marker rule | 3 | 1 | 1 promise | landed (this commit) |
 
 ## Notes
 
