@@ -432,7 +432,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | I-D1 | fix(install): an empty `XDG_CONFIG_HOME`, `APPDATA` or `CODEX_HOME` counts as unset | - | INST-4's defect | landed (this commit); see Notes, second sweep |
 | I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | landed (this commit); see Notes, second sweep |
 | I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | landed (this commit); see Notes, second sweep |
-| I-D4 | fix(cli): an agent's `ghostlight call` joins one session named for that agent | - | the owner's question of 2026-10-21; the ADR-0106 amendment of 2026-10-21; the coordinator builds it | todo |
+| I-D4 | fix(cli): an agent's `ghostlight call` joins one session named for that agent | - | the owner's question of 2026-10-21; the ADR-0106 amendment of 2026-10-21; this lane's first slice when leo-desktop-02 is on, before its tests-1 cut | todo |
 | INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | landed (this commit); see Notes, second sweep |
 | INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | landed (this commit); see Notes, second sweep |
 | INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | todo |
@@ -518,4 +518,8 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
   records no source either), so such a script keeps the terminal rule unless it sets
   `GHOSTLIGHT_SESSION`; and inside the Claude desktop app, Claude Code's own `claude.exe` matches no
   catalog app before the desktop app's does, so the source reads `claude-desktop` and the name would
-  be Claude. The slice settles that name first.
+  be Claude. The slice settles that name first: the desktop app keeps Claude Code at
+  `%APPDATA%\Claude\claude-code\<version>\<build>\claude.exe`, which Claude Code's app sources do not
+  name, so it lies in the desktop app's folder; Claude Code's sources gain that folder ahead of the
+  desktop app's, on each system where the desktop app keeps one (check the icon tiles and the agent
+  list after).
