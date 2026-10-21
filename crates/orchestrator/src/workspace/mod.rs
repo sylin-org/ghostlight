@@ -12,7 +12,9 @@ use crate::browser::adapter::{
 use crate::agent::Agent;
 use crate::governance::{CapabilitySet, Decision};
 use crate::intake::session::SessionMarker;
+use crate::language::handle::WORKSPACE_SUFFIX_CHARS;
 use crate::language::outcome::{DialogKind, TargetRole};
+use crate::language::HandleKind;
 use crate::provenance::{ConnectionDetails, ConnectionEvidence};
 use thiserror::Error;
 use url::Url;
@@ -26,13 +28,6 @@ use released::PooledTab;
 pub use released::{ReleasedTab, ReleasedTabs};
 pub use stale::StaleReason;
 use targets::TargetBook;
-
-/// How many random characters follow the prefix of a handle Ghostlight issues.
-///
-/// Eight base32 characters are 40 random bits. Handles are checked against the workspace that
-/// owns them, so they only have to be unique there and hard to confuse with a handle from an
-/// earlier session, which a short counter would not be.
-const HANDLE_SUFFIX_CHARS: usize = 8;
 
 /// The characters a handle's random part is drawn from: lowercase RFC 4648 base32.
 const HANDLE_ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
@@ -187,12 +182,17 @@ pub struct TabRequest<'a> {
     pub view: Option<&'a str>,
 }
 
-/// Mint a short handle with `prefix` that `taken` does not already name.
-fn short_handle(prefix: &str, taken: impl Fn(&str) -> bool) -> String {
+/// Mint a handle of `kind` that `taken` does not already name: its prefix and
+/// [`WORKSPACE_SUFFIX_CHARS`] random base32 characters.
+///
+/// Eight base32 characters are 40 random bits. Handles are checked against the workspace that
+/// owns them, so they only have to be unique there and hard to confuse with a handle from an
+/// earlier session, which a short counter would not be.
+fn short_handle(kind: HandleKind, taken: impl Fn(&str) -> bool) -> String {
     loop {
-        let mut random = [0_u8; HANDLE_SUFFIX_CHARS];
+        let mut random = [0_u8; WORKSPACE_SUFFIX_CHARS];
         getrandom::getrandom(&mut random).expect("the operating system supplies random bytes");
-        let mut handle = String::from(prefix);
+        let mut handle = String::from(kind.prefix());
         handle.extend(
             random
                 .iter()
@@ -1529,9 +1529,7 @@ impl WorkspaceStore {
     }
 
     fn lock(&self) -> MutexGuard<'_, AggregateState> {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        crate::sync::lock(&self.inner)
     }
 }
 
@@ -1758,7 +1756,7 @@ impl WorkspaceLease {
                 .get(&self.workspace)
                 .ok_or(WorkspaceError::UnknownWorkspace)?
                 .tabs;
-            TabHandle(short_handle("tab_", |candidate| {
+            TabHandle(short_handle(HandleKind::Tab, |candidate| {
                 tabs.contains_key(&TabHandle(candidate.into()))
             }))
         };
@@ -1849,7 +1847,7 @@ impl WorkspaceLease {
         workspace
             .snapshots
             .retain(|_, snapshot| snapshot.tab != tab.handle);
-        let handle = SnapshotHandle(short_handle("snapshot_", |candidate| {
+        let handle = SnapshotHandle(short_handle(HandleKind::Snapshot, |candidate| {
             workspace
                 .snapshots
                 .contains_key(&SnapshotHandle(candidate.into()))
@@ -1904,7 +1902,7 @@ impl WorkspaceLease {
         let workspace = self.workspace_in_mut(&mut state)?;
         let generation = workspace.current(tab)?.generation;
         workspace.images.retain(|_, image| image.tab != tab.handle);
-        let handle = ImageHandle(short_handle("image_", |candidate| {
+        let handle = ImageHandle(short_handle(HandleKind::Image, |candidate| {
             workspace
                 .images
                 .contains_key(&ImageHandle(candidate.into()))
@@ -2062,7 +2060,7 @@ impl WorkspaceLease {
         let workspace = self.workspace_in_mut(&mut state)?;
         workspace.current(tab)?;
         workspace.views.retain(|_, view| view.tab != tab.handle);
-        let handle = ViewHandle(short_handle("view_", |candidate| {
+        let handle = ViewHandle(short_handle(HandleKind::View, |candidate| {
             workspace.views.contains_key(&ViewHandle(candidate.into()))
         }));
         workspace.views.insert(

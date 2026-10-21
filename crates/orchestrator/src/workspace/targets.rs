@@ -6,6 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use super::{short_handle, SelectedTab, StaleReason, TabHandle, TabState, TargetHandle};
 use crate::browser::adapter::ObservedTarget;
 use crate::language::outcome::TargetRole;
+use crate::language::HandleKind;
 
 /// How many document generations of target records a tab keeps behind its current one.
 ///
@@ -95,7 +96,7 @@ impl TargetBook {
                 return handle;
             }
         }
-        let handle = TargetHandle(short_handle("target_", |candidate| {
+        let handle = TargetHandle(short_handle(HandleKind::Target, |candidate| {
             self.records.contains_key(&TargetHandle(candidate.into()))
         }));
         self.records.insert(

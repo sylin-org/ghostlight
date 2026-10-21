@@ -8,7 +8,7 @@ entry in [ADR-0203](../../adr/0203-one-owner-for-each-fact.md)'s Rebuild plan. S
 
 ## RESUME HERE
 
-W-D2, W-D3, C19c and WORK-12 have landed.
+W-D2, W-D3, C19c and WORK-12 have landed, and WORK-2b's workspace half.
 W-D1 moved to core-language (L-D5). Next: C10c (P1 and P5 have landed). A slice's hash is
 filled in by the next slice's commit, since a rebase before the push changes it.
 
@@ -32,9 +32,9 @@ In order. "After" names what a slice waits for.
 | WORK-9 | refactor(work): one name per contract | - | WORK-9; no persisted word changes | todo |
 | WORK-13 | refactor(work): one finish for every wait | W-D3 | WORK-13 | todo |
 | WORK-6 | refactor(work): `work/mod.rs` splits on its seams | WORK-3 | WORK-6; the moves land alone | todo |
-| WORK-12 | refactor(workspace): its tests and its two books move out, and the lease helpers come in | - | WORK-12; the moves land alone | landed (8108ea82, 66a8842b, c65ec18d and the helpers) |
+| WORK-12 | refactor(workspace): its tests and its two books move out, and the lease helpers come in | - | WORK-12; the moves land alone | landed (8108ea82, 66a8842b, c65ec18d, dcb985e0) |
 | WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5 | todo |
-| WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | todo |
+| WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | workspace half landed; `work/mod.rs`'s stage locks ride with C10c |
 
 ## Notes
 
@@ -78,3 +78,10 @@ check at the six sites that compare a selected tab's generation; `AggregateState
 takes the five scans for another workspace holding a handle; and `resolve_view` holds what
 `resolve_view_point` and `resolve_view_region` shared, the checks and the `SelectedView`. The three
 generation checks that compare a record with its own tab keep their own refusals.
+
+WORK-2b, the workspace half: `short_handle` takes a `HandleKind` (LANG-2, 01cc55e6), so the five
+mint sites name their kind and read its prefix and `WORKSPACE_SUFFIX_CHARS` from `language::handle`;
+the local suffix constant goes, and the base32 alphabet stays as the mint's own. The handle test
+checks each minted handle with `HandleKind::minted`. `WorkspaceStore::lock` calls
+`crate::sync::lock` (SERV-7); the two `Condvar` waits keep their inline recovery. `work/mod.rs`'s
+three `stage` locks change with C10c, the next slice in that file, after LANG-3's hold.

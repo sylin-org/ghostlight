@@ -6,11 +6,11 @@ use crate::browser::adapter::{
 use crate::intake::session::{IntakeChannel, SessionMarker};
 
 use crate::language::outcome::TargetRole;
+use crate::language::HandleKind;
 
 use super::{
     short_handle, BindingState, ReleasedTabs, SnapshotScope, StaleReason, TabHold, TargetBook,
-    TargetHandle, WorkspaceError, WorkspaceId, WorkspaceStore, HANDLE_ALPHABET,
-    HANDLE_SUFFIX_CHARS,
+    TargetHandle, WorkspaceError, WorkspaceId, WorkspaceStore,
 };
 use crate::language::outcome::DialogKind;
 
@@ -1423,11 +1423,7 @@ fn tombstones_are_bounded_and_the_oldest_are_dropped() {
 /// workspace holds, and no two of a kind collide.
 #[test]
 fn handles_are_short_base32_and_unique_within_their_workspace() {
-    let shaped = |handle: &str, prefix: &str| {
-        let suffix = handle.strip_prefix(prefix).expect("the prefix");
-        suffix.len() == HANDLE_SUFFIX_CHARS
-            && suffix.bytes().all(|byte| HANDLE_ALPHABET.contains(&byte))
-    };
+    let shaped = |handle: &str, kind: HandleKind| kind.minted(handle);
     let store = WorkspaceStore::default();
     let workspace = admit_test(&store);
     let lease = store.acquire(&workspace).unwrap();
@@ -1435,7 +1431,7 @@ fn handles_are_short_base32_and_unique_within_their_workspace() {
         .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
         .unwrap();
     assert!(
-        shaped(tab.handle.as_str(), "tab_"),
+        shaped(tab.handle.as_str(), HandleKind::Tab),
         "{}",
         tab.handle.as_str()
     );
@@ -1455,7 +1451,11 @@ fn handles_are_short_base32_and_unique_within_their_workspace() {
     let targets = lease.register_targets(&tab, &observed).unwrap();
     let mut seen = std::collections::HashSet::new();
     for (handle, _) in &targets {
-        assert!(shaped(handle.as_str(), "target_"), "{}", handle.as_str());
+        assert!(
+            shaped(handle.as_str(), HandleKind::Target),
+            "{}",
+            handle.as_str()
+        );
         assert!(seen.insert(handle.as_str().to_owned()), "a handle repeated");
     }
     let view = lease
@@ -1479,7 +1479,7 @@ fn handles_are_short_base32_and_unique_within_their_workspace() {
             600,
         )
         .unwrap();
-    assert!(shaped(view.as_str(), "view_"), "{}", view.as_str());
+    assert!(shaped(view.as_str(), HandleKind::View), "{}", view.as_str());
     let snapshot = lease
         .register_snapshot(
             &tab,
@@ -1491,7 +1491,7 @@ fn handles_are_short_base32_and_unique_within_their_workspace() {
         )
         .unwrap();
     assert!(
-        shaped(snapshot.as_str(), "snapshot_"),
+        shaped(snapshot.as_str(), HandleKind::Snapshot),
         "{}",
         snapshot.as_str()
     );
@@ -1499,8 +1499,15 @@ fn handles_are_short_base32_and_unique_within_their_workspace() {
         .register_image(&tab, "image/png", "AAAA", 3)
         .unwrap()
         .expect("a small capture is kept");
-    assert!(shaped(image.as_str(), "image_"), "{}", image.as_str());
-    assert_eq!(short_handle("tab_", |_| false).len(), "tab_".len() + 8);
+    assert!(
+        shaped(image.as_str(), HandleKind::Image),
+        "{}",
+        image.as_str()
+    );
+    assert_eq!(
+        short_handle(HandleKind::Tab, |_| false).len(),
+        HandleKind::Tab.prefix().len() + crate::language::handle::WORKSPACE_SUFFIX_CHARS
+    );
 }
 
 /// The dialog the browser reports open on a tab is remembered for that tab alone, and a
