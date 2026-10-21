@@ -106,8 +106,9 @@ the owner wants, and what this project learned the hard way.
 - **Coordinated machines may commit and push as the owner.** The owner authorized provisioning
   the local Ghostlight Git credentials to the four dedicated machines. Use the owner's verified
   identity and secure credential helpers; never put tokens or private keys in task messages,
-  logs, command arguments, source, Git URLs, or evidence. Keep each agent's pushes on its own
-  campaign branch for integration. This does not grant force-push, merge, or release authority.
+  logs, command arguments, source, Git URLs, or evidence. Lanes push their slices straight to
+  `dev` after their checks, never to a branch of their own (owner, 2026-10-20, for arch-1's second
+  sweep; only `main` and `dev` exist). This does not grant force-push, merge, or release authority.
 - **Ghostlight manages only its own actions.** Human browsing creates no Ghostlight activity,
   audit, policy check, tab hold, automatic child-tab adoption, or regrouping. A controlled opener
   and an in-flight command do not prove that Ghostlight caused a browser event. Silently stale
