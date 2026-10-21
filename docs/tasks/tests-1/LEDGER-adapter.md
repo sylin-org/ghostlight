@@ -17,7 +17,7 @@ contracts both sides read; keep them.
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 42 |
+| `crates/desktop` | 161 | 20 | 33 |
 
 ## Slices
 
@@ -52,7 +52,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | D5 | `crates/desktop/src/scratch.rs`: tests of a test helper | 2 | 0 | - | landed (d3bbe962) |
 | D6 | `crates/desktop/src/session.rs`: a test of the test fake | 1 | 0 | - | landed (2cf00417) |
 | D7 | `crates/desktop/src/window.rs` and `webview.rs`: the window's life and the webview's one origin | 27 + 6 | 3 | promise 2, defect 1 | landed (f9b8a4a2) |
-| D8 | `crates/desktop/src/tray.rs`: each tray state's icon (its two `cfg(windows)` tests wait for the coordinator) | 22 | 1 + 2 Windows | promise 1 | landed (this commit) |
+| D8 | `crates/desktop/src/tray.rs`: each tray state's icon (its two `cfg(windows)` tests wait for the coordinator) | 22 | 1 + 2 Windows | promise 1 | landed (b0796dd0) |
+| D9 | `crates/desktop/src/app.rs`: what the shell says, its alarm, its window slot and what is missing | 13 | 4 | promise 1, defect 3 | landed (this commit) |
 
 ## Notes
 
@@ -115,6 +116,14 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   model, dot geometry restating `DOT_RADIUS` and `RING_WIDTH`, and the error path of compiled-in
   PNGs. The two `cfg(windows)` size tests stay as they are: the coordinator's verdict is asked for
   (fold them as `cfg(windows)` rows of the kept table).
+- D9: kept four: the shell says it shows its window exactly while it does (17ec7571); the alarm
+  wakes at the latest deadline, once per deadline (da28f0f1); a trayless shell whose window is
+  gone ends (14c3174b); and the shell names what the computer is missing with its own exit code
+  (desktop 13). The alarm test no longer bounds its claim with a 400 ms real-time limit or waits
+  500 ms for silence: the replaced deadline is 60 s away, so any wake within the failure bound
+  proves the replacement, and the next wake must be the next deadline's. A tray shell's success
+  exit is now `EXIT_NO_TRAY`, not a bare 0. Cut: the tray-click mapping, which restates
+  `tray_action` and whose ids and frame the goldens pin.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against

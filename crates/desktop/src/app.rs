@@ -67,6 +67,10 @@ pub const EXIT_NO_DISPLAY: u8 = 3;
 /// The exit code of a computer with no web view runtime.
 pub const EXIT_NO_WEBVIEW: u8 = 4;
 
+/// The exit code of a tray shell on a desktop with no tray host: it ends with success, because
+/// there is nothing for it to show and nothing went wrong.
+pub const EXIT_NO_TRAY: u8 = 0;
+
 /// The exit code of a failure that is not a missing display or web view.
 const EXIT_FAILURE: u8 = 1;
 
@@ -140,7 +144,7 @@ pub fn preflight(launch: Launch, probe: &dyn Probe) -> Result<(), Missing> {
     if launch == Launch::Tray && !probe.tray_host() {
         return Err(Missing {
             reason: UnavailableReason::NoTray,
-            exit: 0,
+            exit: EXIT_NO_TRAY,
             detail: "this desktop shows no tray icons".to_owned(),
         });
     }
@@ -961,6 +965,8 @@ pub fn run(launch: Launch) -> ExitCode {
 mod tests {
     use super::*;
 
+    /// The shell tells the service it shows its window exactly while the window is open or a person
+    /// started it, so status never claims a window a crashed shell left behind (commit 17ec7571).
     #[test]
     fn a_shell_says_it_shows_its_window_while_it_is_open_or_a_person_started_it() {
         assert_eq!(view_of(false, false, Launch::Person), View::Window);
@@ -978,99 +984,60 @@ mod tests {
         );
     }
 
+    /// A shell with only its tray reconnects on its own clock: the alarm wakes at the latest
+    /// deadline it was given, once per deadline, and at once for one already due (commit da28f0f1).
     #[test]
     fn the_alarm_wakes_at_the_latest_deadline_it_was_given() {
+        const PATIENCE: Duration = Duration::from_secs(2);
         let (woke, wakes) = mpsc::channel::<Instant>();
         let mut alarm = Alarm::start(move || {
             let _ = woke.send(Instant::now());
         })
         .unwrap();
         let start = Instant::now();
-        alarm.set(Some(start + Duration::from_millis(400)));
-        alarm.set(Some(start + Duration::from_millis(80)));
-        alarm.set(Some(start + Duration::from_millis(80)));
-        let at = wakes.recv_timeout(Duration::from_secs(2)).unwrap();
+        let soon = start + Duration::from_millis(80);
+        alarm.set(Some(start + Duration::from_secs(60)));
+        alarm.set(Some(soon));
+        alarm.set(Some(soon));
+        let at = wakes
+            .recv_timeout(PATIENCE)
+            .expect("the earlier deadline replaced the later one");
+        assert!(at >= soon, "not before the deadline");
+
+        let next = Instant::now() + Duration::from_millis(50);
+        alarm.set(Some(next));
         assert!(
-            at >= start + Duration::from_millis(80),
-            "not before the deadline"
-        );
-        assert!(
-            at < start + Duration::from_millis(400),
-            "the earlier deadline replaced the later"
-        );
-        assert!(
-            wakes.recv_timeout(Duration::from_millis(500)).is_err(),
-            "one wake for one deadline"
+            wakes
+                .recv_timeout(PATIENCE)
+                .expect("the next deadline wakes")
+                >= next,
+            "one wake for one deadline: the next wake is the next deadline's"
         );
         alarm.set(Some(Instant::now()));
         assert!(
-            wakes.recv_timeout(Duration::from_secs(2)).is_ok(),
+            wakes.recv_timeout(PATIENCE).is_ok(),
             "a due deadline wakes at once"
         );
     }
 
-    fn item(id: &str) -> TrayEvent {
-        TrayEvent::Item(id.to_owned())
-    }
-
-    #[test]
-    fn open_and_a_left_click_open_the_window() {
-        assert_eq!(tray_action(&item("open")), Some(TrayAction::OpenWindow));
-        assert_eq!(
-            tray_action(&TrayEvent::Activate),
-            Some(TrayAction::OpenWindow)
-        );
-    }
-
-    #[test]
-    fn a_person_opening_the_window_from_the_tray_is_reported_as_the_open_entry() {
-        for event in [item("open"), TrayEvent::Activate] {
-            let action = tray_action(&event).expect("the tray event asks for something");
-            assert_eq!(action, TrayAction::OpenWindow);
-            assert_eq!(action.reported(), TrayItemId::Open);
-        }
-        assert_eq!(
-            TrayAction::Report(TrayItemId::Hold).reported(),
-            TrayItemId::Hold
-        );
-    }
-
-    #[test]
-    fn hold_resume_and_quit_are_reported_to_the_service() {
-        assert_eq!(
-            tray_action(&item("hold")),
-            Some(TrayAction::Report(TrayItemId::Hold))
-        );
-        assert_eq!(
-            tray_action(&item("resume")),
-            Some(TrayAction::Report(TrayItemId::Resume))
-        );
-        assert_eq!(
-            tray_action(&item("quit")),
-            Some(TrayAction::Report(TrayItemId::Quit))
-        );
-    }
-
-    #[test]
-    fn an_entry_this_build_does_not_have_does_nothing() {
-        assert_eq!(tray_action(&item("settings")), None);
-        assert_eq!(tray_action(&item("")), None);
-    }
-
-    #[test]
     fn a_shell_with_a_tray_goes_on_without_a_window() {
         assert!(goes_on(true, WindowState::Absent, true));
         assert!(goes_on(true, WindowState::Open, true));
     }
 
+    /// A shell goes on without a window only while it has a tray or has not attached yet; a
+    /// trayless shell whose window is gone ends, so it does not hold the service's one desktop slot
+    /// with nothing to show (commit 14c3174b).
     #[test]
     fn a_shell_without_a_tray_ends_when_its_window_is_gone_once_it_has_attached() {
         assert!(!goes_on(false, WindowState::Absent, true));
         assert!(goes_on(false, WindowState::Open, true));
         assert!(goes_on(false, WindowState::Replacing, true));
+
+        a_shell_with_a_tray_goes_on_without_a_window();
+        a_shell_that_has_not_attached_yet_goes_on_without_a_window_or_a_tray();
     }
 
-    #[test]
     fn a_shell_that_has_not_attached_yet_goes_on_without_a_window_or_a_tray() {
         assert!(goes_on(false, WindowState::Absent, false));
     }
@@ -1110,14 +1077,12 @@ mod tests {
         }
     }
 
-    #[test]
     fn a_computer_with_everything_runs_every_launch() {
         for launch in [Launch::Person, Launch::Tray, Launch::Updating] {
             assert_eq!(preflight(launch, &Place::FULL), Ok(()));
         }
     }
 
-    #[test]
     fn no_display_is_exit_code_three_whatever_else_is_missing() {
         let nothing = Place {
             display: false,
@@ -1131,7 +1096,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn no_web_view_runtime_is_its_own_exit_code_for_every_launch() {
         let place = Place {
             webview: false,
@@ -1146,16 +1110,24 @@ mod tests {
         assert_ne!(EXIT_NO_WEBVIEW, EXIT_FAILURE);
     }
 
+    /// Before it opens, the shell names what the computer is missing with its own exit code, so
+    /// status and doctor can say why: no display comes first whatever else is missing, no web view
+    /// runtime has its own code for every launch, and no tray host ends only a tray shell, with
+    /// success (ACCEPTANCE, desktop 13; ARCHITECTURE, the unavailable reasons).
     #[test]
-    fn no_tray_host_ends_only_a_tray_shell_and_ends_it_with_status_zero() {
+    fn the_shell_names_what_this_computer_is_missing() {
         let place = Place {
             tray_host: false,
             ..Place::FULL
         };
         let missing = preflight(Launch::Tray, &place).unwrap_err();
         assert_eq!(missing.reason, UnavailableReason::NoTray);
-        assert_eq!(missing.exit, 0);
+        assert_eq!(missing.exit, EXIT_NO_TRAY);
         assert_eq!(preflight(Launch::Person, &place), Ok(()));
         assert_eq!(preflight(Launch::Updating, &place), Ok(()));
+
+        a_computer_with_everything_runs_every_launch();
+        no_display_is_exit_code_three_whatever_else_is_missing();
+        no_web_view_runtime_is_its_own_exit_code_for_every_launch();
     }
 }
