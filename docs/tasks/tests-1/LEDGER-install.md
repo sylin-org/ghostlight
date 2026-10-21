@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 575 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 567 |
 | `crates/desktop` | 161 | 20 | 161 |
 
 ## Slices
@@ -33,6 +33,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I9 | `install/apps.rs`: three location tests fold into one; the wrapper list goes to `provenance.rs`'s source test, which walks the wrappers | 596 | 593 | promise 1 (ADR-0161 connection source) | landed (this commit) |
 | T-I10 | `install/browser_profiles.rs`: nine tests of the extension scan fold into one; four that restated the name cleaning and the key limit go | 593 | 581 | promise 1 (Desktop 23, 24; defect 68aa9656) | landed (this commit) |
 | T-I11 | `install/user_assets.rs`: four tests fold into one; a content restatement and two routing arms go | 581 | 575 | defect 1 (00c6eccf), promise (owned bytes) | landed (this commit) |
+| T-I12 | `install/desktop_entry.rs`: eight tests fold into one, a block per case; a routing arm goes | 575 | 567 | promise 1 (Desktop 15) | landed (this commit) |
 
 ## Notes
 

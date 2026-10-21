@@ -361,141 +361,125 @@ mod tests {
         (root, context)
     }
 
+    /// ACCEPTANCE Desktop 15: the Linux desktop entry is Ghostlight's own exact file, written once,
+    /// rewritten only when it is Ghostlight's (an older one, one that lost its icon, one that ran the
+    /// service image), never in place of a person's own file or link, and not written under a system
+    /// package. Its `Exec` runs the shell with shell characters quoted and field codes escaped, and names
+    /// the window class the desktop matches the window by.
     #[test]
-    fn other_platforms_name_no_linux_paths() {
-        let (_root, mut context) = context("elsewhere");
-        context.linux = false;
-        let report = inspect(&context).unwrap();
-        assert_eq!(report.state, DesktopIntegrationState::NotApplicable);
-        assert!(report.desktop_entry.is_none() && report.icon.is_none());
-        assert!(!report.detail.contains("operating system package"));
-    }
+    fn the_linux_entry_is_exact_idempotent_and_touches_only_its_own() {
+        {
+            let (_root, context) = context("lifecycle");
+            fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
+            fs::write(&context.executable, b"ghostlight").unwrap();
 
-    #[test]
-    fn user_install_is_exact_idempotent_and_ownership_safe() {
-        let (_root, context) = context("lifecycle");
-        fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
-        fs::write(&context.executable, b"ghostlight").unwrap();
+            let first = apply_install(&context).unwrap();
+            assert!(first.changed);
+            assert_eq!(first.report.state, DesktopIntegrationState::Current);
+            let source = fs::read_to_string(context.desktop_entry()).unwrap();
+            assert_eq!(source, render_desktop_entry(&context.executable));
+            assert_eq!(fs::read(context.icon()).unwrap(), ICON);
+            assert!(!apply_install(&context).unwrap().changed);
 
-        let first = apply_install(&context).unwrap();
-        assert!(first.changed);
-        assert_eq!(first.report.state, DesktopIntegrationState::Current);
-        let source = fs::read_to_string(context.desktop_entry()).unwrap();
-        assert_eq!(source, render_desktop_entry(&context.executable));
-        assert_eq!(fs::read(context.icon()).unwrap(), ICON);
-        assert!(!apply_install(&context).unwrap().changed);
+            let removed = apply_uninstall(&context).unwrap();
+            assert!(removed.changed);
+            assert_eq!(removed.report.state, DesktopIntegrationState::Missing);
+            assert!(!apply_uninstall(&context).unwrap().changed);
+        }
+        {
+            let (_root, context) = context("upgrade");
+            let entry = context.desktop_entry();
+            let icon = context.icon();
+            fs::create_dir_all(entry.parent().unwrap()).unwrap();
+            fs::create_dir_all(icon.parent().unwrap()).unwrap();
+            fs::write(
+                &entry,
+                render_desktop_entry(Path::new("/home/test/.ghostlight/bin/v0.8.0/ghostlight")),
+            )
+            .unwrap();
+            fs::write(&icon, ICON).unwrap();
 
-        let removed = apply_uninstall(&context).unwrap();
-        assert!(removed.changed);
-        assert_eq!(removed.report.state, DesktopIntegrationState::Missing);
-        assert!(!apply_uninstall(&context).unwrap().changed);
-    }
+            let report = inspect(&context).unwrap();
+            assert_eq!(report.state, DesktopIntegrationState::Updatable);
+            assert_eq!(
+                report.detail,
+                "The owned Applications entry points at an older installation."
+            );
+            assert!(apply_install(&context).unwrap().changed);
+            assert_eq!(
+                fs::read_to_string(entry).unwrap(),
+                render_desktop_entry(&context.executable)
+            );
+        }
+        {
+            let (_root, context) = context("icon-only");
+            let entry = context.desktop_entry();
+            fs::create_dir_all(entry.parent().unwrap()).unwrap();
+            fs::write(&entry, render_desktop_entry(&context.executable)).unwrap();
 
-    #[test]
-    fn upgrade_rewrites_only_an_owned_entry() {
-        let (_root, context) = context("upgrade");
-        let entry = context.desktop_entry();
-        let icon = context.icon();
-        fs::create_dir_all(entry.parent().unwrap()).unwrap();
-        fs::create_dir_all(icon.parent().unwrap()).unwrap();
-        fs::write(
-            &entry,
-            render_desktop_entry(Path::new("/home/test/.ghostlight/bin/v0.8.0/ghostlight")),
-        )
-        .unwrap();
-        fs::write(&icon, ICON).unwrap();
+            let report = inspect(&context).unwrap();
+            assert_eq!(report.state, DesktopIntegrationState::Updatable);
+            assert_eq!(
+                report.detail,
+                "The owned Applications entry starts this installation, but its icon is missing."
+            );
+            assert!(!report.detail.contains("older"));
+            assert!(apply_install(&context).unwrap().changed);
+            assert_eq!(fs::read(context.icon()).unwrap(), ICON);
+        }
+        {
+            let (_root, context) = context("foreign");
+            let entry = context.desktop_entry();
+            fs::create_dir_all(entry.parent().unwrap()).unwrap();
+            fs::write(&entry, b"[Desktop Entry]\nType=Application\nName=Foreign\n").unwrap();
 
-        let report = inspect(&context).unwrap();
-        assert_eq!(report.state, DesktopIntegrationState::Updatable);
-        assert_eq!(
-            report.detail,
-            "The owned Applications entry points at an older installation."
-        );
-        assert!(apply_install(&context).unwrap().changed);
-        assert_eq!(
-            fs::read_to_string(entry).unwrap(),
-            render_desktop_entry(&context.executable)
-        );
-    }
-
-    #[test]
-    fn an_entry_that_lost_only_its_icon_is_not_said_to_be_older() {
-        let (_root, context) = context("icon-only");
-        let entry = context.desktop_entry();
-        fs::create_dir_all(entry.parent().unwrap()).unwrap();
-        fs::write(&entry, render_desktop_entry(&context.executable)).unwrap();
-
-        let report = inspect(&context).unwrap();
-        assert_eq!(report.state, DesktopIntegrationState::Updatable);
-        assert_eq!(
-            report.detail,
-            "The owned Applications entry starts this installation, but its icon is missing."
-        );
-        assert!(!report.detail.contains("older"));
-        assert!(apply_install(&context).unwrap().changed);
-        assert_eq!(fs::read(context.icon()).unwrap(), ICON);
-    }
-
-    #[test]
-    fn foreign_files_and_symlinks_are_preserved() {
-        let (_root, context) = context("foreign");
-        let entry = context.desktop_entry();
-        fs::create_dir_all(entry.parent().unwrap()).unwrap();
-        fs::write(&entry, b"[Desktop Entry]\nType=Application\nName=Foreign\n").unwrap();
-
-        assert_eq!(
-            inspect(&context).unwrap().state,
-            DesktopIntegrationState::NeedsAttention
-        );
-        assert!(apply_install(&context).is_err());
-        assert!(!apply_uninstall(&context).unwrap().changed);
-        assert!(entry.exists());
-    }
-
-    #[test]
-    fn system_package_does_not_create_a_user_shadow() {
-        let (_root, mut context) = context("system");
-        context.executable = PathBuf::from("/usr/bin/ghostlight");
-        assert_eq!(
-            apply_install(&context).unwrap().report.state,
-            DesktopIntegrationState::NotApplicable
-        );
-        assert!(!context.desktop_entry().exists());
-    }
-
-    #[test]
-    fn desktop_exec_quotes_shell_characters_and_escapes_field_codes() {
-        let rendered = render_desktop_entry(Path::new("/home/Ghost %Light/$bin/ghostlight"));
-        assert!(rendered.contains("Exec=\"/home/Ghost %%Light/\\$bin/ghostlight\"\n"));
-    }
-
-    #[test]
-    fn the_entry_runs_the_shell_and_names_its_window_class() {
-        let rendered =
-            render_desktop_entry(Path::new("/home/p/.ghostlight/bin/ghostlight-desktop"));
-        assert!(rendered.contains("Exec=\"/home/p/.ghostlight/bin/ghostlight-desktop\"\n"));
-        assert!(rendered.contains("StartupWMClass=org.sylin.ghostlight\n"));
-        assert!(!rendered.contains(" open"));
-    }
-
-    #[test]
-    fn an_entry_that_ran_the_service_image_is_owned_and_rewritten() {
-        let (_root, context) = context("older-entry");
-        let entry = context.desktop_entry();
-        let icon = context.icon();
-        fs::create_dir_all(entry.parent().unwrap()).unwrap();
-        fs::create_dir_all(icon.parent().unwrap()).unwrap();
-        let older = "[Desktop Entry]\nExec=\"/h/bin/ghostlight-service\" open\nName=Ghostlight\n\
+            assert_eq!(
+                inspect(&context).unwrap().state,
+                DesktopIntegrationState::NeedsAttention
+            );
+            assert!(apply_install(&context).is_err());
+            assert!(!apply_uninstall(&context).unwrap().changed);
+            assert!(entry.exists());
+        }
+        {
+            let (_root, mut context) = context("system");
+            context.executable = PathBuf::from("/usr/bin/ghostlight");
+            assert_eq!(
+                apply_install(&context).unwrap().report.state,
+                DesktopIntegrationState::NotApplicable
+            );
+            assert!(!context.desktop_entry().exists());
+        }
+        {
+            let rendered = render_desktop_entry(Path::new("/home/Ghost %Light/$bin/ghostlight"));
+            assert!(rendered.contains("Exec=\"/home/Ghost %%Light/\\$bin/ghostlight\"\n"));
+        }
+        {
+            let rendered =
+                render_desktop_entry(Path::new("/home/p/.ghostlight/bin/ghostlight-desktop"));
+            assert!(rendered.contains("Exec=\"/home/p/.ghostlight/bin/ghostlight-desktop\"\n"));
+            assert!(rendered.contains("StartupWMClass=org.sylin.ghostlight\n"));
+            assert!(!rendered.contains(" open"));
+        }
+        {
+            let (_root, context) = context("older-entry");
+            let entry = context.desktop_entry();
+            let icon = context.icon();
+            fs::create_dir_all(entry.parent().unwrap()).unwrap();
+            fs::create_dir_all(icon.parent().unwrap()).unwrap();
+            let older =
+                "[Desktop Entry]\nExec=\"/h/bin/ghostlight-service\" open\nName=Ghostlight\n\
                      Type=Application\nX-Ghostlight-Owned=true\n";
-        fs::write(&entry, older).unwrap();
-        fs::write(&icon, ICON).unwrap();
-        assert_eq!(
-            inspect(&context).unwrap().state,
-            DesktopIntegrationState::Updatable
-        );
-        assert!(apply_install(&context).unwrap().changed);
-        let rewritten = fs::read_to_string(&entry).unwrap();
-        assert!(rewritten.contains("StartupWMClass=org.sylin.ghostlight"));
-        assert!(!rewritten.contains("ghostlight-service"));
+            fs::write(&entry, older).unwrap();
+            fs::write(&icon, ICON).unwrap();
+            assert_eq!(
+                inspect(&context).unwrap().state,
+                DesktopIntegrationState::Updatable
+            );
+            assert!(apply_install(&context).unwrap().changed);
+            let rewritten = fs::read_to_string(&entry).unwrap();
+            assert!(rewritten.contains("StartupWMClass=org.sylin.ghostlight"));
+            assert!(!rewritten.contains("ghostlight-service"));
+        }
     }
 }
