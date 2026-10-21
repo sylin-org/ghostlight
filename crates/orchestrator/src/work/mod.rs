@@ -56,10 +56,9 @@ use crate::language::{
     field_problem::ControlRef,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
-        CheckFailure, ExtensionAdvice, FileProblem, Observed, Outcome, PrimitiveCause, Refusal,
-        StaleHelp, TargetRole, WorkspaceReason, BROWSER_PINNED_FACT, CANDIDATE_TABS_FACT,
-        HANDLE_TAB_FACT, IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT,
-        STALE_FACT,
+        CheckFailure, ExtensionAdvice, FileProblem, Observed, Outcome, Refusal, StaleHelp,
+        TargetRole, WorkspaceReason, BROWSER_PINNED_FACT, CANDIDATE_TABS_FACT, HANDLE_TAB_FACT,
+        IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
     },
     page_refusal::{PageGesture, PageRefusal},
     Operation, Record, RecordAction, TakeScreenshot,
@@ -2649,15 +2648,17 @@ fn routing_refusal(
             Refusal::BrowserPinned,
             json!({"reason":BROWSER_PINNED_FACT}),
         )),
-        BrowserError::Primitive { detail, .. } | BrowserError::CaptureTooLarge { detail } => {
-            Some((
-                Refusal::BrowserPrimitive {
-                    detail: detail.clone(),
-                    cause: PrimitiveCause::Refused,
-                },
-                json!({"reason":"browser_primitive_failed","detail":detail}),
-            ))
-        }
+        BrowserError::Primitive { detail, cause } => Some((
+            Refusal::BrowserPrimitive {
+                detail: detail.clone(),
+                cause: *cause,
+            },
+            json!({"reason":cause.as_str(),"detail":detail}),
+        )),
+        BrowserError::CaptureTooLarge { detail } => Some((
+            Refusal::CaptureTooLarge,
+            json!({"reason":Refusal::CaptureTooLarge.reason(),"detail":detail}),
+        )),
         BrowserError::RecoveryManual { browsers } => Some((
             Refusal::BrowserStartupManual {
                 browsers: browsers.clone(),

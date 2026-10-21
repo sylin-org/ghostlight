@@ -5,6 +5,7 @@ use crate::browser::adapter::{
     PhysicalClick, PhysicalFill, PhysicalPointClick, PhysicalPointDrop, PhysicalSemantic,
     PhysicalTypeFocused, PhysicalViewPoint, PhysicalWait,
 };
+use crate::language::outcome::Refusal;
 
 /// A primitive adapter error routes to an honest refusal that carries the browser's own
 /// detail, instead of falling through to the browser-stopped rendering.
@@ -20,6 +21,59 @@ fn primitive_adapter_errors_route_to_an_honest_refusal_with_detail() {
     assert_eq!(detail, "no such frame");
     assert_eq!(facts["reason"], "browser_primitive_failed");
     assert_eq!(facts["detail"], "no such frame");
+}
+
+/// A refusal the browser names with a closed cause reads that cause's own sentence and model
+/// code, and keeps the browser's words only in the detail (ADR-0203 Decision 5.2).
+#[test]
+fn a_debugger_refusal_reads_its_own_sentence_and_keeps_the_browser_text_in_detail() {
+    use crate::language::outcome::PrimitiveCause;
+    const BROWSER_TEXT: &str = "Cannot attach to this page.";
+    for (cause, code) in [
+        (PrimitiveCause::DebuggerUnavailable, "debugger_unavailable"),
+        (PrimitiveCause::SessionLost, "session_lost"),
+    ] {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.push(Err(BrowserError::Primitive {
+            detail: BROWSER_TEXT.into(),
+            cause,
+        }));
+        let result = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            &CancellationToken::default(),
+        );
+        let refusal = Refusal::BrowserPrimitive {
+            detail: BROWSER_TEXT.into(),
+            cause,
+        };
+        assert_eq!(result.summary, refusal.summary(), "{code}");
+        assert!(!result.summary.contains(BROWSER_TEXT), "{code}");
+        assert_eq!(result.facts["reason"], code);
+        assert_eq!(result.facts["detail"], BROWSER_TEXT);
+    }
+}
+
+/// A capture the browser could not fit in any quality of its budget reads the same refusal as
+/// one over the service's own bound, with its next step (ADR-0203 Decision 5.2).
+#[test]
+fn a_capture_over_the_budget_says_capture_too_large_with_its_step() {
+    let (executor, browser, _, workspace, _) = fixture();
+    super::documents::open(&executor, &browser, &workspace);
+    browser.push(Err(BrowserError::CaptureTooLarge {
+        detail: "No quality in the budget fits the size limit.".into(),
+    }));
+    let result = executor.execute(
+        &workspace,
+        "browser_screenshot",
+        json!({}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.summary, Refusal::CaptureTooLarge.summary());
+    assert_eq!(result.facts["reason"], Refusal::CaptureTooLarge.reason());
+    assert_eq!(result.facts["reason"], "screenshot_too_large");
+    assert!(!result.next_steps.is_empty());
 }
 
 /// Only a true pre-dispatch disconnection may claim disconnection in the reason vocabulary,
