@@ -122,7 +122,7 @@ C3c), then the rows below.
 | --- | --- | --- | --- | --- |
 | U-D1 | fix(workbench): a policy draft near the limit gets the policy-size sentence | - | SURF-5's size defect; one web test; test-01 | landed (this commit) |
 | U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | landed (this commit) |
-| U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | todo |
+| U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | landed (this commit) |
 | U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first; test-01 | landed (this commit) |
 | U-D5 | fix(workbench): a window with the bearer always finds room among the workbench's connections | - | found by test-01's tests-1 classification, 2026-10-21 (Notes, second sweep); test-01 took it first in `workbench/` | landed (9db6e896) |
 | U-D6 | fix(workbench): a refused HEAD request carries no body | - | the same classification; test-01 | landed (dc1c4fbf) |
@@ -183,3 +183,9 @@ C3c), then the rows below.
   details for rows the feed does not hold go, which also bounds the list. The proof is a block of
   rows in the kept store test "each published change moves the cache it names": 250 records,
   Clear, a rebuild, one live change, and the oldest held row still has its coverage (51 kept).
+- U-D3 as landed: applying a person's rules answers `language::workbench::RULES_APPLIED`, "Your
+  rules are applied.", instead of the call-site format "Your rules are applied: {name}
+  {version}.", which read "Your rules are applied: Your rules 2026-10-20." because the page names
+  its document "Your rules". The proof is a row in the kept workbench test that applies the rules
+  and reads the policy hints; the preview server's fake answer reads the same sentence, as the
+  surface fake already did. "Your rules are removed." stays for S4b, which takes those lines.

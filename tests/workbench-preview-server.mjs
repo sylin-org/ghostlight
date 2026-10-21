@@ -931,7 +931,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
         summary: "3 of the last 42 recorded actions would have been refused."
       };
     }
-    if (command === "apply_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are applied: Your rules 2026-08-14." };
+    if (command === "apply_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are applied." };
     if (command === "remove_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are removed." };
     if (command === "apply_runtime_intent") {
       const state = args.intent === "end_session" ? "ended" : args.intent === "hold" ? "held" : "active";

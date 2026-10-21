@@ -1967,7 +1967,9 @@ fn a_change_reaches_the_live_parts_without_a_pull_and_only_once() {
     assert_eq!(runtime_changes(), changed);
 
     let tag = super::parts::policy_etag(&facade.policy());
-    facade.apply_user_policy_if(READ_ONLY_POLICY, &tag).unwrap();
+    let applied = facade.apply_user_policy_if(READ_ONLY_POLICY, &tag).unwrap();
+    // U-D3: the toast says its words once, not "Your rules are applied: Your rules <date>.".
+    assert_eq!(applied.message, crate::language::workbench::RULES_APPLIED);
     assert_eq!(policy_hints(), [governance.snapshot().id().to_owned()]);
     assert_eq!(policy_hints()[0], facade.policy().id);
     // The refresher has nothing new to say about an authority the person just applied.

@@ -1254,12 +1254,9 @@ impl WorkbenchFacade {
         &self,
         document: &str,
     ) -> Result<WorkbenchIntentResult, AuthoringError> {
-        let policy = self.governance.apply_user_policy(document)?;
+        self.governance.apply_user_policy(document)?;
         self.live.policy_changed();
-        Ok(self.policy_result(format!(
-            "Your rules are applied: {} {}.",
-            policy.name, policy.version
-        )))
+        Ok(self.policy_result(words::RULES_APPLIED.to_owned()))
     }
 
     /// Remove the user policy only if the rules on disk still have the tag the caller read.
