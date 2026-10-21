@@ -9,7 +9,9 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 Every slice landed: P10, P1, P2, P3, P4, P9, P5, P6, P7 and P8. The lane is closed. S4a is
 unblocked, P5 unblocks C10c and S3, and P7 and P8 unblock S4b.
 
-The second sweep (2026-10-20) opens this lane again, after core-work: see its section below.
+The second sweep (2026-10-20) opened this lane again on test-03. Its rows have all landed
+(WORK-15, WORK-11 and P-lock; parked 2026-10-21). WORK-10's backoff names in
+`governance/managed/mod.rs` ride with core-work's WORK-10.
 
 ## Slices
 
@@ -180,7 +182,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-03 (Alpine), after core-work. A
 slice's specification is its finding in [sweep-2026-10-20/work.md](sweep-2026-10-20/work.md), read
-with its skeptic's corrections. WORK-15 has landed. WORK-15, WORK-11 and P-lock have landed; this lane's second-sweep rows are done.
+with its skeptic's corrections. WORK-15, WORK-11 and P-lock have landed; this lane's second-sweep
+rows are done.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
