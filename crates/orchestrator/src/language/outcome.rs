@@ -2106,6 +2106,13 @@ impl Refusal {
             Self::IncompatibleReceipt | Self::BrowserAdapterOutdated | Self::BrowserContract => {
                 vec![update_extension_then_repeat()]
             }
+            // A session whose browser left can move to a connected one by naming it (W-D5).
+            Self::BrowserUnavailable {
+                reason: BrowserUnavailableReason::WrongProfile,
+            } => vec![
+                "Ask the user to reopen the browser profile this session started in, then repeat the call.".into(),
+                MOVE_TO_CONNECTED_BROWSER.into(),
+            ],
             Self::BrowserUnavailable { reason } => vec![match reason {
                 BrowserUnavailableReason::NotAnswering => {
                     "Check that the browser window is open and responsive, then repeat the call."
@@ -2113,10 +2120,9 @@ impl Refusal {
                 BrowserUnavailableReason::NotConnected => {
                     "Ask the user to reopen that browser, then repeat the call."
                 }
-                BrowserUnavailableReason::WrongProfile => {
-                    "Ask the user to reopen the browser profile this session started in, then repeat the call."
+                BrowserUnavailableReason::Busy | BrowserUnavailableReason::WrongProfile => {
+                    "Repeat the call."
                 }
-                BrowserUnavailableReason::Busy => "Repeat the call.",
             }
             .into()],
             Self::BrowserPrimitive {
@@ -2555,6 +2561,10 @@ fn page_recovered_summary(host: Option<&str>) -> String {
         None => "That tab was gone; opened the requested page in a new tab.".into(),
     }
 }
+
+/// The step that moves a session whose browser left to a connected one: naming it is the only
+/// thing that moves a session to another browser (W-D5).
+pub(crate) const MOVE_TO_CONNECTED_BROWSER: &str = "To work in a connected browser instead, call browser_tabs with action list, then browser_navigate with new_tab true and that browser.";
 
 /// Authored sentence for closing a handle this session does not hold.
 fn tab_not_held_summary() -> String {
@@ -4120,10 +4130,6 @@ Changes are \"unsaved\".".into()),
             (
                 BrowserUnavailableReason::NotConnected,
                 "Ask the user to reopen that browser, then repeat the call.",
-            ),
-            (
-                BrowserUnavailableReason::WrongProfile,
-                "Ask the user to reopen the browser profile this session started in, then repeat the call.",
             ),
             (BrowserUnavailableReason::Busy, "Repeat the call."),
         ] {

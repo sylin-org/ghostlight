@@ -785,9 +785,14 @@ fn a_pinned_browser_absent_while_another_is_connected_is_the_wrong_profile() {
     );
     assert_eq!(
         refused.next_steps,
-        vec![
-            "Ask the user to reopen the browser profile this session started in, then repeat the call."
-        ]
+        crate::language::outcome::Refusal::BrowserUnavailable {
+            reason: crate::language::outcome::BrowserUnavailableReason::WrongProfile
+        }
+        .next_steps()
+    );
+    assert_eq!(
+        refused.next_steps[1],
+        crate::language::outcome::MOVE_TO_CONNECTED_BROWSER
     );
     assert!(browser.routed().is_empty());
     assert_eq!(
@@ -1121,4 +1126,33 @@ fn a_pinned_session_is_never_rebound() {
         workspaces.browser_of(workspace.as_str()).as_deref(),
         Some("browser_chrome")
     );
+}
+
+/// W-D5: a session's browser left for good (its extension was removed) while another browser is
+/// connected. Naming that browser moves the session there: the call goes through in it, and the
+/// gone browser's tab reads as no longer open in this session.
+#[test]
+fn a_session_whose_browser_left_moves_to_the_browser_the_agent_names() {
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    bind_tab(&workspaces, &workspace, "browser_chrome");
+    browser.connect(vec![summary("browser_edge", true)]);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+
+    let moved = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com","new_tab":true,"browser":"browser_edge"}),
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(moved.status, Status::Succeeded, "{}", moved.summary);
+    assert_eq!(browser.routed(), vec!["browser_edge".to_owned()]);
+    assert_eq!(
+        workspaces.browser_of(workspace.as_str()).as_deref(),
+        Some("browser_edge")
+    );
+    assert_eq!(workspaces.physical_tabs(workspace.as_str()), vec![7]);
 }

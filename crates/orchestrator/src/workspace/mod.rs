@@ -1333,6 +1333,21 @@ impl WorkspaceStore {
             .and_then(|state| state.browser.clone())
     }
 
+    /// Let `workspace` leave the browser it works in, after that browser left and the agent named
+    /// another connected one (W-D5). The caller holds the workspace's lease.
+    ///
+    /// Every binding goes, so the old browser's tabs read as no longer open in this session, and
+    /// the next tab binds the browser the agent named. The tabs themselves stay where they are.
+    pub fn leave_browser(&self, workspace: &str) {
+        if let Some(state) = self.lock().workspaces.get_mut(workspace) {
+            let handles: Vec<TabHandle> = state.tabs.keys().cloned().collect();
+            for handle in handles {
+                state.forget_tab(&handle);
+            }
+            state.browser = None;
+        }
+    }
+
     /// The recording `workspace` holds in its browser, if any.
     ///
     /// A workspace lives in one browser, so a recording another browser held is not this

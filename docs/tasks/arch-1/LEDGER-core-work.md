@@ -41,8 +41,8 @@ In order. "After" names what a slice waits for.
 | WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5 | todo |
 | WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | workspace half landed (ec6ae3fd); `work/mod.rs`'s stage locks ride with C10c |
 | D52(c) | fix(work): `routing_refusal` passes the browser's cause through, and `capture_too_large` reaches `Refusal::CaptureTooLarge` | C12b-2, D52 | Decision 5.2's third part | taken by test-02 (109e30c3) |
-| W-D4 | fix(work): closing a handle this service does not hold says it no longer holds the tab, not that the tab is gone | C16 | Found 2026-10-21 by test-02, confirmed by leo-desktop-02 with UI Automation; goes with WORK-3's already-closed tab | landed |
-| W-D5 | fix(work): a session whose browser left for good moves to the browser the agent names | - | Found 2026-10-21 on the owner's machine (Notes) | todo |
+| W-D4 | fix(work): closing a handle this service does not hold says it no longer holds the tab, not that the tab is gone | C16 | Found 2026-10-21 by test-02, confirmed by leo-desktop-02 with UI Automation; goes with WORK-3's already-closed tab | landed (eac543ea) |
+| W-D5 | fix(work): a session whose browser left for good moves to the browser the agent names | - | Found 2026-10-21 on the owner's machine (Notes) | landed |
 
 ## Notes
 
@@ -183,3 +183,16 @@ succeeds without touching the browser", which stays true but should not imply th
 already-gone test and opens the tab under one service, then closes it from a fresh one. Cross-lane
 in test-01's `language/outcome.rs`, `audit.rs` and `self_check/hints.rs` under its hold. It also
 covers Decision 4.5's already-closed half of WORK-3: the step reaches the agent.
+
+W-D5, landed 2026-10-21: when the browser a session works in is not connected and the agent names
+a connected one (`browser_navigate` with `new_tab` and `browser`), `target_browser` lets the
+session leave its browser (`WorkspaceStore::leave_browser` forgets every binding, so the old tabs
+read as no longer open, and the next tab binds the named browser), and the call goes through
+there. While the session's browser is connected, naming another stays `browser_pinned`. The session
+does not move on its own when the agent names none: ADR-0084 D4 keeps silently finishing work in
+another browser profile out, so `browser_wrong_profile` stays the answer, and it now carries a second
+step, `MOVE_TO_CONNECTED_BROWSER`: "To work in a connected browser instead, call browser_tabs with
+action list, then browser_navigate with new_tab true and that browser." Model-visible, for the
+docs (LANGUAGE.md's wrong-profile row). `a_session_whose_browser_left_moves_to_the_browser_the_agent_names`
+reproduces it; without the move it is refused as pinned. Cross-lane in test-01's
+`language/outcome.rs` under its hold.

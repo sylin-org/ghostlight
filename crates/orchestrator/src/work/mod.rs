@@ -1474,15 +1474,25 @@ impl ApplicationExecutor {
         if !self.workspaces.contains(context.workspace.as_str()) {
             return Err(BrowserError::CancelledBeforeDispatch);
         }
-        let pinned = self
+        let mut pinned = self
             .workspaces
             .browser_of(context.workspace.as_str())
             .or_else(|| context.findings.targeted());
-        let chosen = match choose_browser(
-            context.requested_browser,
-            pinned.as_deref(),
-            &self.browser.browsers(),
-        ) {
+        // The agent named a connected browser while the one this session works in is gone: the
+        // session moves there, since it can never work in a browser that left (W-D5). While that
+        // browser is connected, naming another stays refused, so a workspace lives in one browser.
+        let connected = self.browser.browsers();
+        if let (Some(requested), Some(gone)) = (context.requested_browser, pinned.as_deref()) {
+            if requested != gone
+                && connected.iter().any(|browser| browser.id == requested)
+                && !connected.iter().any(|browser| browser.id == gone)
+            {
+                self.workspaces.leave_browser(context.workspace.as_str());
+                pinned = None;
+            }
+        }
+        let chosen = match choose_browser(context.requested_browser, pinned.as_deref(), &connected)
+        {
             Ok(chosen) => chosen,
             Err(BrowserError::DisconnectedBeforeDispatch) => match pinned.as_deref() {
                 Some(pinned) => self.await_pinned_browser(context, pinned)?,
