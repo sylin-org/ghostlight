@@ -7,10 +7,11 @@
 //! Every reader is tolerant. No type uses `deny_unknown_fields`, and each closed enum the
 //! extension sends has an `Unknown` or `Other` arm, so a newer extension never breaks an older
 //! service. Within protocol 4 nothing is removed or renamed. The mirrors of the physical
-//! vocabulary (`DiagnosticEntry`, `RecordingSummary`, `Encoded`, `Delivery`, the presentation
-//! types and the runtime control state) convert in the one direction each crosses: what the
-//! service sends from the types the rest of the service uses, and what the extension sends into
-//! them, so the wire can stay tolerant while the service stays strict.
+//! vocabulary (`DiagnosticEntry`, `DiagnosticSource`, `DiagnosticDetail`, `RecordingSummary`,
+//! `Encoded`, `Delivery`, `Readiness`, the presentation types and the runtime control state)
+//! convert in the one direction each crosses: what the service sends from the types the rest of
+//! the service uses, and what the extension sends into them, so the wire can stay tolerant while
+//! the service stays strict.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

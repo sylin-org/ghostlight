@@ -68,9 +68,9 @@ const MESSAGE_MAX_CHARS: usize = 500;
 /// The description of an answer that is not an envelope.
 const MALFORMED_ENVELOPE: &str = "the page asset answered without an envelope";
 /// How long a filled value must keep its value before it counts as retained.
-const FILL_STABLE_MS: u64 = 250;
+const FILL_RETAINED_STABLE_MS: u64 = 250;
 /// How often a filled value is read back while it settles.
-const FILL_POLL_MS: u64 = 25;
+const FILL_RETAINED_POLL_MS: u64 = 25;
 /// The largest magnitude below which every whole number is exact as a float.
 const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
 
@@ -464,8 +464,8 @@ pub fn verify_fill_retained(
         json!({
             "fields": fields,
             "allow_credentials": allow_credentials,
-            "stable_ms": FILL_STABLE_MS,
-            "poll_ms": FILL_POLL_MS,
+            "stable_ms": FILL_RETAINED_STABLE_MS,
+            "poll_ms": FILL_RETAINED_POLL_MS,
             "limit_ms": limit_ms,
         }),
     )

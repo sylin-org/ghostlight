@@ -10,7 +10,7 @@ A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset 
 Notes).
 
 The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7,
-BROW-6, BROW-14 and BROW-8a have landed; BROW-15 is next.
+BROW-6, BROW-14, BROW-8a and BROW-11a have landed; BROW-15 is next.
 
 ## Slices
 
@@ -139,7 +139,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14 and BROW-8a have landed; BROW-15 is next.
+with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8a and BROW-11a have landed; BROW-15 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -152,7 +152,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14 and BRO
 | BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | todo |
 | BROW-15 | refactor(adapter): the command variants wrap their argument structs | BROW-4 | BROW-15 | todo |
 | BROW-3a | refactor(adapter): the closed vocabularies reach the adapter as types | LANG-3 | BROW-3's adapter half | todo |
-| BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | todo |
+| BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | landed (this commit) |
 
 ### Notes (second sweep)
 
@@ -231,3 +231,11 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14 and BRO
   BROW-8's other literals and the three poll loops sit in `browser/` outside the adapter, in
   core-service's BROW-8, whose row also names this check: it landed here because both constants
   are adapter files.
+- BROW-11a: `world.rs`'s `FILL_STABLE_MS` and `FILL_POLL_MS` (250 and 25) become
+  `FILL_RETAINED_STABLE_MS` and `FILL_RETAINED_POLL_MS`, the names `content.js` gives the same two
+  values; `content.js`'s own `FILL_STABLE_MS` is the 750 ms settle, a different wait. The world
+  message keys `stable_ms` and `poll_ms` stay. The `wire.rs` module doc now lists every mirror,
+  `DiagnosticSource`, `DiagnosticDetail` and `Readiness` included. BROW-11's other two items are
+  not adapter files: the `docs/1.0/ARCHITECTURE.md` line that still names the removed closed
+  `Family` is the docs lane's, and the one-line doc of `browser/mod.rs` is core-service's, after
+  BROW-1 settles what that file holds.
