@@ -8,11 +8,14 @@ entry in [ADR-0203](../../adr/0203-one-owner-for-each-fact.md)'s Rebuild plan. S
 
 ## RESUME HERE
 
-W-D2, W-D3, C19c, C10c, C12b-2 and WORK-12 have landed, with WORK-2b's workspace half and
-WORK-7's lease half. W-D1 moved to core-language (L-D5); D52(c) went to test-02. Next: C16,
-whose cross-lane holds are granted (test-02's five adapter files, test-04's `workbench/tests.rs`,
-the coordinator's `browser/mod.rs` and `service/mod.rs`). A slice's hash is
-filled in by the next slice's commit, since a rebase before the push changes it.
+Parked 2026-10-21. Landed: W-D2, W-D3, C19c, C10c, C12b-2, C16 and WORK-12, with WORK-2b's
+workspace half and WORK-7's lease half. W-D1 moved to core-language (L-D5) and D52(c) to test-02.
+Next, in order: W-D4 (the tab-truth defect, below), then WORK-3, WORK-1, WORK-10, the rest of WORK-7
+(`substitute_references`'s `Option`), WORK-9, WORK-13, WORK-6, WORK-5 and the rest of WORK-2b
+(`work/mod.rs`'s three `stage` locks). Pull first: test-01 holds `work/mod.rs` for BROW-2 and says
+when it lands. Build in `.target-lane-arch-core-work`; push through a rebase that retests when
+crate commits come in. A slice's hash is filled in by the next slice's commit, since a rebase
+before the push changes it.
 
 ## Slices
 
@@ -38,6 +41,7 @@ In order. "After" names what a slice waits for.
 | WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5 | todo |
 | WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | workspace half landed (ec6ae3fd); `work/mod.rs`'s stage locks ride with C10c |
 | D52(c) | fix(work): `routing_refusal` passes the browser's cause through, and `capture_too_large` reaches `Refusal::CaptureTooLarge` | C12b-2, D52 | Decision 5.2's third part | taken by test-02 (109e30c3) |
+| W-D4 | fix(work): closing a handle this service does not hold says it no longer holds the tab, not that the tab is gone | C16 | Found 2026-10-21 by test-02, confirmed by leo-desktop-02 with UI Automation; goes with WORK-3's already-closed tab | todo |
 
 ## Notes
 
@@ -142,3 +146,20 @@ Decision 6.7 says). `Link::new` and `Link::workspace` follow, as do the executor
 `close_released`, `presentation/mod.rs`'s two calls, and every fake port: four in `work/tests`, three
 in `workbench/tests.rs` (test-04's hold), the relay port's own and the contract tests'. Nothing on
 the wire changes.
+
+W-D4, found on 2026-10-21: with Preserve Ghostlight tabs on (the default), a session opens a tab, the
+person quits Ghostlight, and the tab stays open, released. `browser_tabs close` on that handle then
+starts a new service, which does not know the handle, and answers `succeeded` with
+`"already_gone": true` and "That tab was already closed." while the tab is still open (UI Automation
+before and after). The service only knows it no longer holds the handle. The fix is in
+`work/navigation.rs`'s `StaleTab` arm of the close (and `Outcome::TabAlreadyClosed`'s words in
+`language/outcome.rs`, core-language's), with a test, and the coordinator gets any word change for
+the docs.
+
+The cli journey after C16: `browser_record` status in a session that holds no recording now refuses
+at once with `not_found` ("This session has no recording."), asking no browser, as the tab list
+already did; before, it waited on the browser and gave a no-browser refusal. Model-visible, for the
+docs lines. The journey's no-browser language checks (`browser_startup_manual`,
+`native_host_unavailable`, `browser_absent` on the real machine's inventory) rode on that call. They
+need a call that asks a browser without starting one (for example a navigate under a `manual`
+startup policy in the journey home), which is the coordinator's lane to choose.

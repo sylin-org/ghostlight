@@ -133,32 +133,17 @@ try {
   assert.equal(answered.status, "succeeded");
   assert.deepEqual(answered.facts.tabs, []);
 
+  // A session also knows which recording it holds (ADR-0203 Decision 6.7). One that holds none
+  // answers at once that it has none, asks no browser and binds none; only a session that holds a
+  // recording asks its browser about it.
   const recording = call(["browser_record", RECORDING_STATUS]);
-  // A live read has nothing to read without a connected browser: it refuses instead of answering
-  // from remembered state. Which honest answer arrives depends on this machine's installed
-  // browsers, so the journey pins the closed language contract, not the inventory: plural evidence
-  // asks the person to open a named browser, unusable registrations name the choice-free remedy,
-  // and no refusal ever says Ghostlight declined to choose.
   assert.equal(recording.status, EXIT_FAILED, recording.stderr);
+  assert.equal(recording.stdout.trim().split("\n")[0], "This session has no recording.");
   const refused = call(["browser_record", RECORDING_STATUS, "--json"]);
   assert.equal(refused.status, EXIT_FAILED);
   const result = JSON.parse(refused.stdout.trim());
   assert.equal(result.status, "failed");
-  if (result.facts.reason === "browser_startup_manual") {
-    assert.match(
-      recording.stdout.trim(),
-      /^No browser is connected\. Ask the user to open a .+ browser window with the Ghostlight extension installed, then repeat the call\.$/
-    );
-    assert.ok(result.facts.browsers.length >= 1, recording.stdout);
-    if (result.facts.browsers.length === 1) assert.equal(result.facts.browser, result.facts.browsers[0]);
-  } else if (result.facts.reason === "native_host_unavailable") {
-    assert.equal(recording.stdout.trim(), "The browser cannot use Ghostlight's native messaging registration.");
-    assert.ok(result.facts.details.length >= 1, recording.stdout);
-  } else if (result.facts.reason === "browser_absent") {
-    assert.equal(recording.stdout.trim(), "No supported Chromium browser is installed.");
-  } else {
-    assert.fail(`unexpected no-browser reason: ${result.facts.reason}`);
-  }
+  assert.equal(result.facts.reason, "not_found");
 
   // A refusal must not look like success to a shell.
   const rejected = call(["browser_navigate", "{}"]);
