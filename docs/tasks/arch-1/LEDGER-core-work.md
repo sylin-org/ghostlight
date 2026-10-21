@@ -28,13 +28,14 @@ In order. "After" names what a slice waits for.
 | WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | todo |
 | WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | todo |
 | WORK-10 | refactor(work): timings and limits are named | - | WORK-10 | todo |
-| WORK-7 | refactor(work): dead code goes | C19c | WORK-7; the two unused lease methods go | todo |
+| WORK-7 | refactor(work): dead code goes | C19c | WORK-7; the two unused lease methods go | lease methods landed; `substitute_references`'s `Option` todo (after LANG-3) |
 | WORK-9 | refactor(work): one name per contract | - | WORK-9; no persisted word changes | todo |
 | WORK-13 | refactor(work): one finish for every wait | W-D3 | WORK-13 | todo |
 | WORK-6 | refactor(work): `work/mod.rs` splits on its seams | WORK-3 | WORK-6; the moves land alone | todo |
 | WORK-12 | refactor(workspace): its tests and its two books move out, and the lease helpers come in | - | WORK-12; the moves land alone | landed (8108ea82, 66a8842b, c65ec18d, dcb985e0) |
 | WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5 | todo |
-| WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | workspace half landed; `work/mod.rs`'s stage locks ride with C10c |
+| WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | workspace half landed (ec6ae3fd); `work/mod.rs`'s stage locks ride with C10c |
+| D52(c) | fix(work): `routing_refusal` passes the browser's cause through, and `capture_too_large` reaches `Refusal::CaptureTooLarge` | C12b-2, D52 | Decision 5.2's third part | taken by test-02 as its own slice (D52 landed as 696fa557) |
 
 ## Notes
 
@@ -85,3 +86,7 @@ the local suffix constant goes, and the base32 alphabet stays as the mint's own.
 checks each minted handle with `HandleKind::minted`. `WorkspaceStore::lock` calls
 `crate::sync::lock` (SERV-7); the two `Condvar` waits keep their inline recovery. `work/mod.rs`'s
 three `stage` locks change with C10c, the next slice in that file, after LANG-3's hold.
+
+WORK-7, the lease half: `WorkspaceLease::tab_owner` and `target_owner` had no caller and go; the
+executor asks the store's versions. CompletionGate went with C19c. Left: the `Option` layer of
+`substitute_references` in `work/flow.rs`, after LANG-3's hold.

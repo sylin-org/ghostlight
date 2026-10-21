@@ -1726,20 +1726,6 @@ impl WorkspaceLease {
         }
     }
 
-    /// The agent of another admitted workspace that owns the requested tab handle, as the window
-    /// names it ([`WorkspaceStore::tab_owner`]).
-    #[must_use]
-    pub fn tab_owner(&self, requested: &str) -> Option<String> {
-        self.store.tab_owner(&self.workspace, requested)
-    }
-
-    /// The agent of another admitted workspace that owns the requested target handle, as the
-    /// window names it ([`WorkspaceStore::target_owner`]).
-    #[must_use]
-    pub fn target_owner(&self, requested: &str) -> Option<String> {
-        self.store.target_owner(&self.workspace, requested)
-    }
-
     /// Add a physical tab of `browser` that the browser just opened or adopted, under a new opaque
     /// handle.
     ///
