@@ -587,3 +587,79 @@ fn a_read_that_holds_a_tab_announces_the_hold() {
         "{signals:?}"
     );
 }
+
+/// A presentation port that refuses every signal, as a browser that cannot draw would.
+struct RefusedSignals;
+
+impl PresentationPort for RefusedSignals {
+    fn present(&self, _: &str, _: PresentationSignal) -> Result<(), PresentationError> {
+        Err(PresentationError::Browser(
+            BrowserError::DisconnectedBeforeDispatch,
+        ))
+    }
+}
+
+/// ACCEPTANCE Presentation 3: a presentation failure changes nothing an agent or the audit sees.
+/// The same read, once drawn and once with every signal refused, gives the same result, sends the
+/// same browser commands and writes the same audit line.
+#[test]
+fn a_presentation_failure_changes_no_result_browser_command_or_audit_line() {
+    let (mut executor, browser, _, workspace, audit) = fixture();
+    let drawn = Arc::new(PageSignals::default());
+    executor.presentation = PresentationReactor::new(drawn.clone());
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(opened.status, Status::Succeeded);
+    let read = |executor: &ApplicationExecutor| {
+        browser.push(Ok(BrowserOutcome::Text {
+            tab_id: 7,
+            text: "Example Domain".into(),
+            truncated: false,
+            title: "Example".into(),
+            url: "https://example.com/".into(),
+        }));
+        let sent_before = browser.calls().len();
+        let lines_before = audit.0.lock().unwrap().len();
+        let result = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({"tab": opened.facts["tab"]}),
+            &CancellationToken::default(),
+        );
+        let sent = format!("{:?}", &browser.calls()[sent_before..]);
+        let lines: Vec<serde_json::Value> = audit.0.lock().unwrap()[lines_before..]
+            .iter()
+            .map(|record| {
+                let mut line = serde_json::to_value(record).unwrap();
+                for varies in ["timestamp_ms", "invocation", "duration_ms"] {
+                    line.as_object_mut().unwrap().remove(varies);
+                }
+                line
+            })
+            .collect();
+        (result, sent, lines)
+    };
+    let (shown, shown_sent, shown_lines) = read(&executor);
+    assert!(
+        !drawn.0.lock().unwrap().is_empty(),
+        "the first read was drawn"
+    );
+    executor.presentation = PresentationReactor::new(Arc::new(RefusedSignals));
+    let (refused, refused_sent, refused_lines) = read(&executor);
+    assert_eq!(refused.status, shown.status);
+    assert_eq!(refused.effect, shown.effect);
+    assert_eq!(refused.summary, shown.summary);
+    assert_eq!(refused.facts, shown.facts);
+    assert_eq!(refused.next_steps, shown.next_steps);
+    assert_eq!(refused_sent, shown_sent, "the same browser commands");
+    assert_eq!(refused_lines, shown_lines, "the same audit line");
+    assert_eq!(shown_lines.len(), 1);
+}

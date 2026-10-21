@@ -25,4 +25,9 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 
 ## Notes
 
-None yet.
+- From the coordinator (2026-10-21), out of the batch's reserve: `work/tests/presentation.rs` gains
+  `a_presentation_failure_changes_no_result_browser_command_or_audit_line`, the first real test of
+  ACCEPTANCE Presentation 3 (the old one in `presentation/mod.rs` only asserted that nothing
+  panics). The same read, drawn once and with every signal refused once, gives the same result,
+  browser commands and audit line. Keep it in this lane's cut; it counts against the reserve, not
+  this lane's budget.
