@@ -44,7 +44,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::environment::{run_by_full_path, Environment, OPEN_NEW_TERMINAL};
-use crate::install::native_host::STORE_EXTENSION_ID;
+use crate::install::native_host::{supported_browsers, BrowserIdentity, STORE_EXTENSION_ID};
 
 /// Where the Chrome Web Store lists an extension, before its id.
 const STORE_DETAIL_PAGE: &str = "https://chromewebstore.google.com/detail/ghostlight-in-browser/";
@@ -89,8 +89,6 @@ const SR_CURRENT: &str = ", current step";
 
 /// The id of the browser family the Get Google Chrome row stands for.
 const CHROME_ID: &str = "chrome";
-/// The name of the browser Ghostlight sends a person to when no supported browser is native.
-const CHROME_NAME: &str = "Google Chrome";
 /// What the eyebrow says while setup is under way.
 const EYEBROW_SETUP: &str = "Set up Ghostlight";
 /// What the eyebrow says once setup is done.
@@ -109,8 +107,8 @@ const LIVE_AGENT: &str = "Waiting for your agent.";
 const COPY_COMMAND: &str = "Copy command";
 /// The accessible and visible name of the copy button for the prompt.
 const COPY_PROMPT: &str = "Copy prompt";
-/// The label of the button that sends a person to the Chrome download.
-const GET_CHROME_LABEL: &str = "Get Google Chrome";
+/// What the button that sends a person to the Chrome download says before the browser's name.
+const GET_CHROME_LEAD: &str = "Get";
 /// The label of the button that adds the extension.
 const ADD_LABEL: &str = "Add";
 /// What an agent row says when its entry was written by an older Ghostlight. The Integrations page
@@ -683,6 +681,15 @@ fn connected_short(facts: &SetupFacts) -> Option<&str> {
         .map(|browser| browser.short.as_str())
 }
 
+/// The browser Ghostlight sends a person to when no supported browser is native, as the browser
+/// table names it.
+fn chrome() -> BrowserIdentity {
+    supported_browsers()
+        .into_iter()
+        .find(|browser| browser.id == CHROME_ID)
+        .expect("the browser table holds Google Chrome")
+}
+
 /// The installed browsers in the order the rows show them: connected ones first, then Google
 /// Chrome, then the rest in table order.
 fn ordered_browsers(browsers: &[BrowserFact]) -> Vec<&BrowserFact> {
@@ -748,9 +755,10 @@ fn browser_rows(facts: &SetupFacts) -> Vec<Row> {
         rows.push(row);
     }
     if rows.is_empty() {
+        let chrome = chrome();
         rows.push(Row {
-            id: CHROME_ID.to_owned(),
-            name: CHROME_NAME.to_owned(),
+            id: chrome.id.to_owned(),
+            name: chrome.name.to_owned(),
             detail: "Not installed".to_owned(),
             tone: RowTone::Todo,
             action: Some(get_chrome_action(true)),
@@ -828,10 +836,11 @@ fn sandboxed_row(browser: &BrowserFact, primary: bool) -> Row {
 }
 
 fn get_chrome_action(primary: bool) -> RowAction {
+    let label = format!("{GET_CHROME_LEAD} {}", chrome().name);
     RowAction {
         action: SetupAction::GetChrome,
-        label: GET_CHROME_LABEL.to_owned(),
-        name: GET_CHROME_LABEL.to_owned(),
+        name: label.clone(),
+        label,
         primary,
         external: true,
         pending: None,
@@ -1047,10 +1056,11 @@ fn next_line(facts: &InstallFacts, connected: bool, changed: &[&str]) -> String 
                 browser.short
             )
         }
-        (None, true) => "Next: get Google Chrome from the Ghostlight window.".to_owned(),
-        (None, false) => {
-            format!("Next: install Google Chrome, then add Ghostlight there: {STORE_LISTING_URL}")
-        }
+        (None, true) => format!("Next: get {} from the Ghostlight window.", chrome().name),
+        (None, false) => format!(
+            "Next: install {}, then add Ghostlight there: {STORE_LISTING_URL}",
+            chrome().name
+        ),
     }
 }
 
@@ -1408,7 +1418,9 @@ mod tests {
                 }
                 if act == get_chrome && tone.is_none() {
                     // The Get Google Chrome row of a computer with no supported browser.
-                    assert_eq!(shown.name, CHROME_NAME, "{case}");
+                    assert_eq!(shown.name, super::chrome().name, "{case}");
+                    let label = shown.action.as_ref().map(|button| button.label.as_str());
+                    assert_eq!(label, Some("Get Google Chrome"), "{case}");
                 }
             }
         }
@@ -1872,7 +1884,7 @@ mod tests {
                                 listing(next);
                             }
                             Some(SetupAction::GetChrome) => {
-                                assert!(next.contains(CHROME_NAME), "{case}: {next}");
+                                assert!(next.contains(super::chrome().name), "{case}: {next}");
                                 listing(next);
                             }
                             other => panic!("{case}: the window shows {other:?}"),

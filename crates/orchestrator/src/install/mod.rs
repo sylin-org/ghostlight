@@ -1701,6 +1701,15 @@ pub fn runs_inside(agent_id: &str, host_id: &str) -> bool {
         .any(|row| row.runs_inside.contains(&host_id))
 }
 
+/// Whether the roster row `harness_id`, one host of an agent, is known to run inside the app of
+/// the agent `host_id` ([`AgentRow::runs_inside`]). False for any id outside the roster.
+#[must_use]
+pub fn host_runs_inside(harness_id: &str, host_id: &str) -> bool {
+    ROSTER
+        .iter()
+        .any(|row| row.id == harness_id && row.runs_inside.contains(&host_id))
+}
+
 /// The packaged monogram tile of the catalog agent `agent_id`; none for an id outside the catalog.
 #[must_use]
 pub fn monogram_of(agent_id: &str) -> Option<Monogram> {

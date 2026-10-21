@@ -13,22 +13,28 @@
 //!
 //! It also carries out the two setup steps that start a browser ([`perform`]): add Ghostlight in
 //! it, or open it in the profile that holds the extension. The window asks, and the step is
-//! checked against what the computer shows now before anything starts.
+//! checked against what the computer shows now before anything starts. The start is recovery's
+//! own ([`crate::browser::recovery::start_browser`]), noted first in the port's launch guard
+//! ([`BrowserPort::note_start`]), so recovery never opens a second window of a browser setup
+//! started (ADR-0203 Decision 12.5).
 
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use ghostlight_relay::os;
 
 use super::{parts, BrowserInstanceSummary, SessionSummary, WorkbenchError};
 use crate::audit::AuditRecord;
-use crate::browser::session::graphical_session_environment;
+use crate::browser::{recovery, BrowserPort};
 use crate::install::browser_package::BrowserPackage;
 use crate::install::browser_profiles::{self, BrowserProfiles};
-use crate::install::native_host::{BrowserIdentity, NativeHostRegistry, NativeHostReport};
+use crate::install::native_host::{
+    browser_id_named, BrowserIdentity, NativeHostRegistry, NativeHostReport,
+};
 use crate::install::setup_state::{self, SetupRecord};
 use crate::install::{HarnessState, HarnessSummary};
 use crate::intake::session::IntakeChannel;
@@ -149,9 +155,11 @@ pub(crate) trait SetupMachine: Send + Sync {
     fn extension_profiles(&self) -> Vec<BrowserProfiles>;
     /// Whether the session is ending, so that nothing may be started.
     fn session_ending(&self) -> bool;
-    /// Start `program` with `arguments`, detached from this process, and return once it has been
-    /// created. It does not wait for the program to do anything.
-    fn start(&self, program: &Path, arguments: &[String]) -> io::Result<()>;
+    /// Start the browser at `program` with `arguments` in the person's graphical session, and
+    /// return its process id once it has been created; `None` when no display is reachable, so
+    /// nothing started. It does not wait for the browser to do anything, and notes nothing:
+    /// [`perform`] notes the start in the launch guard first.
+    fn start(&self, program: &Path, arguments: &[String]) -> io::Result<Option<u32>>;
 }
 
 /// The machine the service runs on.
@@ -185,24 +193,11 @@ impl SetupMachine for ThisComputer {
         os::session::session_ending()
     }
 
-    /// The start is detached, so the browser holds nothing of the service: no handle, no pipe, no
-    /// socket. It needs a graphical session of this user, which is proved first; the browser
-    /// inherits this process's environment, which holds the display that proof found.
-    fn start(&self, program: &Path, arguments: &[String]) -> io::Result<()> {
-        graphical_session_environment()?.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "no verified graphical user session is available",
-            )
-        })?;
+    /// The one browser start recovery makes too: reaped, in a process group of its own on Unix,
+    /// and given the graphical session's environment.
+    fn start(&self, program: &Path, arguments: &[String]) -> io::Result<Option<u32>> {
         let arguments: Vec<&OsStr> = arguments.iter().map(OsStr::new).collect();
-        let home = self.0.user_home();
-        let directory = if home.as_os_str().is_empty() {
-            std::env::temp_dir()
-        } else {
-            home.to_owned()
-        };
-        os::spawn_detached(program, &arguments, &directory).map(drop)
+        recovery::start_browser(program, &arguments)
     }
 }
 
@@ -338,8 +333,15 @@ pub(crate) fn browsers_on_this_computer() -> BrowsersHere {
 /// be one the scan returns now, for that browser; anything else, and every kind of step that is
 /// not a browser start, is refused with nothing started. Nothing is started while the session is
 /// ending.
+///
+/// Every start is noted first in `browser_port`'s launch guard ([`BrowserPort::note_start`]).
+/// While a start of that browser, setup's or recovery's, is younger than
+/// [`recovery::LAUNCH_HANDSHAKE_WINDOW`] and the browser has not connected since, the step starts nothing and
+/// succeeds, because that browser is already on its way. A start that began no process is
+/// forgotten, so the next one may start it.
 pub(super) fn perform(
     machine: &dyn SetupMachine,
+    browser_port: &dyn BrowserPort,
     action: &SetupAction,
 ) -> Result<(), WorkbenchError> {
     if machine.session_ending() {
@@ -377,9 +379,16 @@ pub(super) fn perform(
             return Err(WorkbenchError::SetupStepNotOffered);
         }
     }
-    machine
-        .start(&executable, &arguments)
-        .map_err(|_| WorkbenchError::SetupBrowserNotStarted)
+    if !browser_port.note_start(browser, Instant::now(), recovery::LAUNCH_HANDSHAKE_WINDOW) {
+        return Ok(());
+    }
+    match machine.start(&executable, &arguments) {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) | Err(_) => {
+            browser_port.forget_start(browser);
+            Err(WorkbenchError::SetupBrowserNotStarted)
+        }
+    }
 }
 
 /// How a browser family is installed. `found` says whether an ordinary installation is found, and
@@ -401,13 +410,10 @@ fn form_of(package: Option<BrowserPackage>, found: impl FnOnce() -> bool) -> Bro
     }
 }
 
-/// Whether the browser name a connected browser reported is this family.
-fn names(identity: &BrowserIdentity, family: &str) -> bool {
-    family.eq_ignore_ascii_case(identity.name) || family.eq_ignore_ascii_case(identity.short)
-}
-
 /// One fact for every supported family, then one for each connected browser that is none of them.
-/// An unknown connected browser still completes the step; it is shown as Chromium.
+/// A connected browser is a family's when the name it goes by names that family the way the port
+/// maps it ([`browser_id_named`]), so an adapter that reports no name is Chromium's. An unknown
+/// connected browser still completes the step; it is shown as Chromium.
 fn browser_facts(
     identities: &[BrowserIdentity],
     connected: &[BrowserInstanceSummary],
@@ -424,15 +430,14 @@ fn browser_facts(
                 form,
                 connected: connected
                     .iter()
-                    .any(|browser| names(identity, &browser.family)),
+                    .any(|browser| browser_id_named(&browser.family) == Some(identity.id)),
                 extension,
             }
         })
         .collect();
     for browser in connected {
-        let known = identities
-            .iter()
-            .any(|identity| names(identity, &browser.family));
+        let known = browser_id_named(&browser.family)
+            .is_some_and(|id| identities.iter().any(|identity| identity.id == id));
         let listed = facts
             .iter()
             .any(|fact| fact.id == OTHER_BROWSER_ID && fact.name == browser.family);
@@ -508,10 +513,13 @@ pub(super) mod test_support {
         SetupMachine,
     };
     use crate::install::container::AppContainer;
+    use crate::install::native_host::supported_browsers;
     use crate::install::{HarnessState, HarnessSummary};
     use crate::intake::session::IntakeChannel;
+    use crate::provenance::ConnectionDetails;
 
-    /// A fake computer. Every browser family is known; none is installed until the test says.
+    /// A fake computer. Every browser family of the browser table is known; none is installed
+    /// until the test says.
     #[derive(Default)]
     pub struct Computer {
         report: Mutex<Option<NativeHostReport>>,
@@ -590,15 +598,7 @@ pub(super) mod test_support {
         }
 
         fn browsers(&self) -> Vec<BrowserIdentity> {
-            [
-                ("chrome", "Google Chrome", "Chrome"),
-                ("edge", "Microsoft Edge", "Edge"),
-                ("brave", "Brave", "Brave"),
-                ("chromium", "Chromium", "Chromium"),
-            ]
-            .into_iter()
-            .map(|(id, name, short)| BrowserIdentity { id, name, short })
-            .collect()
+            supported_browsers()
         }
 
         fn browser_executable(&self, browser_id: &str) -> Option<PathBuf> {
@@ -621,15 +621,13 @@ pub(super) mod test_support {
             self.ending.load(Ordering::SeqCst)
         }
 
-        fn start(&self, program: &Path, arguments: &[String]) -> io::Result<()> {
-            self.started
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(Started {
-                    program: program.to_owned(),
-                    arguments: arguments.to_vec(),
-                });
-            Ok(())
+        fn start(&self, program: &Path, arguments: &[String]) -> io::Result<Option<u32>> {
+            let mut started = self.started.lock().unwrap_or_else(PoisonError::into_inner);
+            started.push(Started {
+                program: program.to_owned(),
+                arguments: arguments.to_vec(),
+            });
+            Ok(u32::try_from(started.len()).ok())
         }
     }
 
@@ -676,7 +674,22 @@ pub(super) mod test_support {
         }
     }
 
-    /// A connected browser that reported `family`.
+    /// A session from the client that calls itself `reported`, over one connection Ghostlight saw
+    /// started by the installed app of the catalog agent `app`.
+    pub fn session_from(id: &str, reported: &str, app: &str) -> SessionSummary {
+        let mut session = session(id, reported);
+        session.connections.push(ConnectionDetails {
+            connection_id: Some(format!("connection_{id}")),
+            reported_application: Some(reported.into()),
+            channel: IntakeChannel::Mcp,
+            explanation: String::new(),
+            agent: session.agent.clone(),
+            source_agent: Some(crate::install::catalog_agent(app).expect("a catalog app")),
+        });
+        session
+    }
+
+    /// A connected browser that goes by `family`.
     pub fn connected(family: &str) -> BrowserInstanceSummary {
         BrowserInstanceSummary {
             id: format!("browser_{family}"),
@@ -693,8 +706,10 @@ mod tests {
     use std::fs;
     use std::sync::atomic::AtomicUsize;
 
-    use super::test_support::{connected, harness, session, Computer, Started};
+    use super::test_support::{connected, harness, session, session_from, Computer, Started};
     use super::*;
+    use crate::browser::testing::FakeBrowser;
+    use crate::browser::BrowserSummary;
     use crate::governance::{CapabilitySet, Decision};
     use crate::install::browser_profiles::{ExtensionProfile, ProfileScan};
     use crate::language::history::{CompositionKind, StepReceipt};
@@ -839,7 +854,8 @@ mod tests {
     }
 
     /// Protects desktop gate 23 and ADR-0200 Decision 8: each supported browser is read as
-    /// installed or not, connected by the family name it reports, and holding the extension in
+    /// installed or not, connected by the name it goes by as the port maps it (ADR-0203 Decision
+    /// 12.5), so an adapter that reports no name reads as Chromium, and holding the extension in
     /// the profile the scan found; an unknown connected browser still counts, once; and an app
     /// container's private view is said.
     #[test]
@@ -882,11 +898,30 @@ mod tests {
             })
         );
 
-        for family in ["Google Chrome", "chrome"] {
+        for family in ["Google Chrome", "Chrome"] {
             let here = browsers_here(&computer, &[connected(family)]);
             assert!(fact(&here, "chrome").connected, "{family}");
             assert!(others(&here).is_empty(), "{family}");
         }
+
+        // an_unnamed_adapter_reads_as_chromium_the_way_the_port_maps_it
+        let unnamed = BrowserSummary {
+            id: "browser_unnamed".into(),
+            name: None,
+            adapter_version: "1.0.0".into(),
+            attended: true,
+        };
+        let here = browsers_here(&computer, &[connected(&unnamed.display_name())]);
+        assert_eq!(
+            here.facts
+                .iter()
+                .filter(|fact| fact.connected)
+                .map(|fact| fact.id.as_str())
+                .collect::<Vec<_>>(),
+            [browser_id_named(&unnamed.display_name()).expect("a family")],
+            "an unnamed adapter is the Chromium row and no other"
+        );
+        assert_eq!(fact(&here, "chromium").short, OTHER_BROWSER_SHORT);
 
         let vivaldi = "Vivaldi";
         let here = browsers_here(&computer, &[connected(vivaldi), connected(vivaldi)]);
@@ -929,8 +964,9 @@ mod tests {
     /// the agents found, in roster order, and a row reads Connected only while a live session of
     /// its agent is there with that row's entry in place, or, for a copy-only agent, while its
     /// session is live; one Cline session marks only the Cline host that has the entry, and a
-    /// Codex session matches the Codex row. With no agent found, the roster's command is the
-    /// action.
+    /// Codex session matches the Codex row. A session Ghostlight saw start inside an app marks
+    /// only the hosts inside that app (ADR-0203 Decision 9, G3-04), and one from the agent's own
+    /// app marks its rows as before. With no agent found, the roster's command is the action.
     #[test]
     fn an_agent_row_reads_connected_only_while_that_agent_is_in_use() {
         use crate::install::HarnessState::{
@@ -992,6 +1028,32 @@ mod tests {
         assert_eq!(
             connected_rows(&in_use),
             ["cline-cli", "claude-code", "codex", "goose"]
+        );
+
+        // cline_in_vs_code_marks_only_its_row_in_use
+        // claude_code_from_a_terminal_still_marks_its_row
+        let entries = [
+            cline("cline-cli", Installed),
+            cline("cline-vscode", Installed),
+            harness("claude-code", "Claude Code", Installed),
+        ];
+        let inside = [
+            session_from("workspace_1", "cline", "vscode"),
+            session_from("workspace_2", "claude-code", "claude-code"),
+        ];
+        assert_eq!(
+            connected_rows(&incomplete(&computer, &browsers, &inside, &entries)),
+            ["cline-vscode", "claude-code"]
+        );
+        assert_eq!(
+            connected_rows(&incomplete(
+                &computer,
+                &browsers,
+                &[session("workspace_1", "cline")],
+                &entries
+            )),
+            ["cline-cli", "cline-vscode"],
+            "a session that says no host marks every host with an entry"
         );
 
         let unseen = incomplete(&computer, &browsers, &[], &roster);
@@ -1093,7 +1155,8 @@ mod tests {
     /// returns now; any other browser, profile or step is refused and starts nothing, so a request
     /// cannot make the service start another program or pass another argument. Once the session is
     /// ending, even a step the computer offers starts nothing, and that refusal comes before the
-    /// step is checked.
+    /// step is checked. Every start is noted in the port's launch guard (ADR-0203 Decision 12.5):
+    /// a browser setup started is not started again, by setup or by recovery, until it connects.
     #[test]
     fn a_setup_step_starts_only_what_this_computer_offers_now_and_nothing_once_the_session_ends() {
         let computer = Computer::default();
@@ -1149,12 +1212,18 @@ mod tests {
                 agent: "goose".into(),
             },
         ];
+        // Each offered step over a port that has noted no start yet.
         for (action, _) in &offered {
-            assert_eq!(perform(&computer, action), Ok(()), "{action:?}");
+            assert_eq!(
+                perform(&computer, &FakeBrowser::default(), action),
+                Ok(()),
+                "{action:?}"
+            );
         }
+        let port = FakeBrowser::default();
         for action in &not_offered {
             assert_eq!(
-                perform(&computer, action),
+                perform(&computer, &port, action),
                 Err(WorkbenchError::SetupStepNotOffered),
                 "{action:?}"
             );
@@ -1162,17 +1231,35 @@ mod tests {
         let started: Vec<Started> = offered.iter().map(|(_, start)| start.clone()).collect();
         assert_eq!(computer.started(), started);
 
+        // opening_chrome_from_setup_is_never_followed_by_a_second_window
+        let (open_chrome, opened) = &offered[2];
+        assert_eq!(perform(&computer, &port, open_chrome), Ok(()));
+        for (again, _) in &offered[..] {
+            assert_eq!(perform(&computer, &port, again), Ok(()), "{again:?}");
+        }
+        let mut once = started.clone();
+        once.extend([opened.clone(), at_the_listing("brave")]);
+        assert_eq!(
+            computer.started(),
+            once,
+            "Chrome started once while it has not connected; Brave is its own browser"
+        );
+        assert!(
+            !port.note_start("chrome", Instant::now(), recovery::LAUNCH_HANDSHAKE_WINDOW),
+            "recovery's claim on the started browser is refused"
+        );
+
         computer.end_the_session(true);
         for action in offered.iter().map(|(action, _)| action).chain(&not_offered) {
             assert_eq!(
-                perform(&computer, action),
+                perform(&computer, &port, action),
                 Err(WorkbenchError::SetupSessionEnding),
                 "{action:?}"
             );
         }
         assert_eq!(
             computer.started(),
-            started,
+            once,
             "nothing started once the session ended"
         );
     }

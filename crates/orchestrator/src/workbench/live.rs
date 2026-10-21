@@ -609,10 +609,11 @@ impl Live {
         })
     }
 
-    /// Carry out one setup step that starts a browser, over this computer as it is now.
+    /// Carry out one setup step that starts a browser, over this computer as it is now, noted in
+    /// this service's launch guard.
     pub fn perform_setup_act(&self, action: &SetupAction) -> Result<(), WorkbenchError> {
         let machine = Arc::clone(&lock(&self.sources).machine);
-        setup::perform(machine.as_ref(), action)
+        setup::perform(machine.as_ref(), self.browser.as_ref(), action)
     }
 
     /// What decides whether the setup part is built again.

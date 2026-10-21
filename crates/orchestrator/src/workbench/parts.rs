@@ -228,15 +228,35 @@ pub struct ConnectionsPart {
 }
 
 /// Whether the roster row `harness` is in use now: a live session of its agent, with the row's
-/// entry in place. A copy-only row's file is never read, so for it the session is the only sign of
-/// the entry. A session says its agent, not the host it runs on ([`is_agent_of`]), so a session
-/// of an agent marks each of that agent's rows with an entry, and none without one.
+/// entry in place, that may run on the row's host ([`runs_on`]). A copy-only row's file is never
+/// read, so for it the session is the only sign of the entry. A session says its agent, not the
+/// host it runs on ([`is_agent_of`]), so a session that says no host marks each of that agent's
+/// rows with an entry, and none without one.
 ///
 /// The one rule the setup view and the Integrations page both read.
 #[must_use]
 pub(crate) fn in_use(harness: &HarnessSummary, sessions: &[SessionSummary]) -> bool {
     (harness.copy_only || harness.state == HarnessState::Installed)
-        && sessions.iter().any(|session| is_agent_of(session, harness))
+        && sessions
+            .iter()
+            .any(|session| is_agent_of(session, harness) && runs_on(session, harness))
+}
+
+/// Whether `session` may run on the host the roster row `harness` sets up. A connection
+/// Ghostlight saw start inside an app its agent is known to run inside
+/// ([`crate::install::runs_inside`]), such as Cline in Visual Studio Code, runs on the hosts
+/// inside that app only ([`crate::install::host_runs_inside`]). A session none of whose
+/// connections says so, one seen from the agent's own app or from no app at all, may run on any
+/// host of its agent (ADR-0203 Decision 9).
+fn runs_on(session: &SessionSummary, harness: &HarnessSummary) -> bool {
+    let mut apps = session
+        .connections
+        .iter()
+        .filter_map(|connection| connection.source_agent.as_ref())
+        .map(|app| app.id.as_str())
+        .filter(|app| crate::install::runs_inside(&session.agent.id, app))
+        .peekable();
+    apps.peek().is_none() || apps.any(|app| crate::install::host_runs_inside(&harness.id, app))
 }
 
 /// Whether `session` is a session of the agent `harness` sets up: both carry the same catalog id.

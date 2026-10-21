@@ -52,7 +52,7 @@ use crate::sync::lock;
 /// How long a browser start Ghostlight made holds the launch guard while no connection of that
 /// browser has arrived: the longest wait any call can give a handshake. A request inside it waits
 /// for that start instead of starting the browser again.
-const LAUNCH_HANDSHAKE_WINDOW: Duration = Duration::from_millis(MAX_TIMEOUT_MS);
+pub(crate) const LAUNCH_HANDSHAKE_WINDOW: Duration = Duration::from_millis(MAX_TIMEOUT_MS);
 
 /// One browser installation that can inform a recovery decision.
 #[derive(Clone, Debug, Eq, PartialEq)]
