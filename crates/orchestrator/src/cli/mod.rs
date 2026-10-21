@@ -10,6 +10,7 @@ pub mod deployment;
 pub mod desktop;
 pub mod diagnostics;
 pub mod doctor;
+pub mod machine;
 pub mod parse;
 pub mod session;
 pub mod session_end;

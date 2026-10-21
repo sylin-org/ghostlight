@@ -10,14 +10,10 @@
 //! variant plus its phrases rather than a new branch at every call site. A guard test proves every
 //! row has every phrase.
 
-use std::env;
-use std::fs;
 use std::path::Path;
 
 /// The pinned marker that identifies a WSL kernel, matched case-insensitively.
 const WSL_KERNEL_MARKER: &str = "microsoft";
-/// Where a Linux kernel reports its release string.
-const KERNEL_RELEASE_PATH: &str = "/proc/sys/kernel/osrelease";
 
 /// What the service says when it is started with an elevated Windows token.
 pub const ELEVATED_SERVICE: &str = "Ghostlight does not run with administrator rights. Start it from a regular terminal or from the Start menu.";
@@ -142,7 +138,8 @@ impl Environment {
 
 /// The raw observations a row is resolved from.
 ///
-/// Separated from resolution so the table can be tested without a real machine.
+/// Separated from resolution so the table can be tested without a real machine; the command line
+/// reads them (`cli::machine`), and this module does no machine I/O.
 #[derive(Debug, Default, Clone)]
 pub struct EnvironmentFacts {
     /// Whether this build is running on Windows.
@@ -156,17 +153,6 @@ pub struct EnvironmentFacts {
 }
 
 impl EnvironmentFacts {
-    /// Read the facts from this process's environment.
-    #[must_use]
-    pub fn observe() -> Self {
-        Self {
-            windows: cfg!(windows),
-            wsl_distro: env::var("WSL_DISTRO_NAME").ok(),
-            kernel_release: fs::read_to_string(KERNEL_RELEASE_PATH).ok(),
-            current_desktop: env::var("XDG_CURRENT_DESKTOP").ok(),
-        }
-    }
-
     fn is_wsl(&self) -> bool {
         if self
             .wsl_distro
@@ -206,12 +192,6 @@ pub fn resolve(facts: &EnvironmentFacts) -> Environment {
             _ => None,
         })
         .unwrap_or(Environment::LinuxUnknown)
-}
-
-/// Resolve the row for the machine this process is running on.
-#[must_use]
-pub fn current() -> Environment {
-    resolve(&EnvironmentFacts::observe())
 }
 
 #[cfg(test)]

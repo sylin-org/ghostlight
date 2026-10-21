@@ -32,7 +32,7 @@ In order. "After" names what a slice waits for.
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | landed (test f54e2469, block 512ad4d1) |
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | landed (01cc55e6) |
-| LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | landed |
+| LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | landed (d15f5ba5) |
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
 | LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
 | LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed (ec0166d5) |
@@ -40,6 +40,7 @@ In order. "After" names what a slice waits for.
 | LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | landed (0b6c3817) |
 | LANG-11 | docs(language): the item docs match the code | - | LANG-11 | landed (df9e4cac) |
 | LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | landed (fb359bf5) |
+| LANG-12b | refactor(cli): the command line reads the machine, and language/ does no I/O | LANG-12 | LANG-12's environment part, given by the coordinator; cross-lane into `cli/` | landed |
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | todo |
 
 ## Notes
@@ -187,3 +188,7 @@ In order. "After" names what a slice waits for.
   `interaction.rs`, `mod.rs`, `navigation.rs`, `pointer.rs`, `reading.rs`, `recording.rs`. Left:
   `Outcome::HistoryTraversed` still carries its direction as a String, and the modifiers stay
   strings (BROW-3).
+- LANG-12b: `cli/machine.rs` (now the install lane's file) reads the environment facts and
+  resolves the row (`machine::environment()`); `language/environment.rs` keeps
+  `EnvironmentFacts`, `Environment` and `resolve` and does no machine I/O. The three call sites
+  in `cli/doctor.rs` and `cli/setup.rs` follow, under test-04's hold.

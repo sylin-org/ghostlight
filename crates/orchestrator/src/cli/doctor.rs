@@ -99,7 +99,6 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     use crate::install::desktop_entry::DesktopIntegration;
     use crate::install::native_host::NativeHostRegistry;
     use crate::install::HarnessRegistry;
-    use crate::language::environment;
 
     let layout = Layout::current()?;
     let binaries = installed_binaries(&layout);
@@ -120,7 +119,7 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         home: layout.home().to_path_buf(),
         // Same module as the install summary, so the two can never describe this machine
         // differently.
-        environment: environment::current(),
+        environment: super::machine::environment(),
         binaries,
         sibling_set_ready,
         native_host: NativeHostRegistry::discover().check()?,
@@ -358,7 +357,7 @@ mod tests {
         DoctorObservation {
             home: PathBuf::from("home"),
             installed: None,
-            environment: crate::language::environment::current(),
+            environment: crate::cli::machine::environment(),
             binaries: Vec::new(),
             sibling_set_ready: true,
             native_host: NativeHostReport {

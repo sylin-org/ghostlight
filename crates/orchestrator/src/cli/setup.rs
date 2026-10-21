@@ -38,7 +38,7 @@ use crate::install::{
     HarnessAction, HarnessActionResult, HarnessRegistry, HarnessState, HarnessSummary,
 };
 use crate::language::deployment::{self as deployment_words, NativeHostRun};
-use crate::language::environment::{self, Environment};
+use crate::language::environment::Environment;
 use crate::language::setup::{
     self as setup_words, BrowserFact, InstallAgent, InstallFacts, RunningAfterUninstall,
     UninstallFacts,
@@ -840,7 +840,7 @@ fn finish_setup(
     let facts = install_facts(
         collected,
         installed_version(&layout),
-        environment::current(),
+        super::machine::environment(),
         || crate::workbench::setup::browsers_on_this_computer().facts,
         setup_complete,
         window_shown,
