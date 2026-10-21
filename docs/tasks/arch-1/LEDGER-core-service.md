@@ -12,6 +12,9 @@ Statuses: `todo`, `landed` (with commits), `blocked` (with the reason).
 
 ## RESUME HERE
 
+From 2026-10-21 (the owner: finish the pass before 2.0.1): test-02 takes BROW-1, BROW-5, BROW-8,
+BROW-11 and BROW-13; the coordinator takes C3b, C3c, C19b and the SERV rows, C3b first.
+
 S-D1, S-D2, SERV-7, S-D3 and S-D4 have landed. S-D2 fixed the update case, S-D3 the start on demand
 after a Quit, and S-D4 the service an agent's tree kill took with it (Notes). Next: C19c-s, once C16
 has landed in service/mod.rs.

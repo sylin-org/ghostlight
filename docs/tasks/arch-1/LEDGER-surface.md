@@ -6,6 +6,11 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
+From 2026-10-21 (the owner: finish the pass before 2.0.1), this lane runs in two halves: test-01
+takes the workbench rows (S3, S4b, S5, S6, U-D1, U-D4, SURF-1, SURF-8, SURF-9, SURF-10, SURF-12),
+test-02 the window and desktop rows (S7, S8, U-D2, U-D3, SURF-4, SURF-6, SURF-7, SURF-11, SURF-13,
+SURF-14). Fixes first in each half.
+
 S1, S2, S4a and S9 landed. Next: S8 and S7, which can start now.
 
 The second sweep (2026-10-20) adds its slices below, on leo-desktop-02 after install; the order there includes S3 to S8.
