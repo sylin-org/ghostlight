@@ -110,6 +110,9 @@
     completed: "completed"
   });
 
+  /** The chevron that marks a fold or a disclosure; it turns over once open. */
+  const CHEVRON = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg>';
+
   /** The runtime states the service publishes (`RuntimeControlState`). */
   const RUNTIME = Object.freeze({
     active: "active",
@@ -1221,7 +1224,7 @@
 
   return Object.freeze({ FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, VIEWS, SEARCH_ADDRESSES, HIT_KIND, SEARCH_FOUND_NOTHING, searchAll,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
-    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME, OUTCOME_WORD, PHASE, PHASE_WORD, RUNTIME, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
+    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME, OUTCOME_WORD, PHASE, PHASE_WORD, RUNTIME, CHEVRON, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, POLICY_IN_WINDOW, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES, CARD, browserChipTitle,

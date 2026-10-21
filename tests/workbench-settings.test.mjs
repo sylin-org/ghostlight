@@ -22,7 +22,12 @@ const Settings = require(join(ui, "kit", "settings.js"));
 const Words = require(join(ui, "lib", "words.js"));
 require(join(ui, "lib", "entries.js"));
 require(join(ui, "lib", "transport.js"));
+require(join(ui, "lib", "agents-view.js"));
+require(join(ui, "lib", "policy-view.js"));
 const View = require(join(ui, "lib", "view.js"));
+/** The source of everything the view draws: the view and the panes it delegates to. */
+const VIEW_SOURCE = ["view.js", "agents-view.js", "policy-view.js"]
+  .map((name) => readFileSync(join(ui, "lib", name), "utf8")).join("\n");
 const markup = readFileSync(join(ui, "index.html"), "utf8");
 const styles = readFileSync(join(ui, "styles.css"), "utf8") + readFileSync(join(ui, "kit", "kit.css"), "utf8");
 
@@ -2225,8 +2230,7 @@ test("the refusal row and the card name one organization, in the service's words
   assert.deepEqual(unnamed.failures, []);
   assert.ok(refusal(unnamed).startsWith("Refused by your organization, rule support-sites."), refusal(unnamed));
   assert.equal(drawn(unnamed.el("policy-organization").innerHTML).root.children[0].textContent, "Your organization");
-  const view = readFileSync(join(ui, "lib", "view.js"), "utf8");
-  assert.doesNotMatch(view, /[Yy]our organization/, "the page names no organization of its own");
+  assert.doesNotMatch(VIEW_SOURCE, /[Yy]our organization/, "the page names no organization of its own");
 });
 
 // WorkbenchDestination in workbench/mod.rs, less get_chrome, which only the setup view offers. The
@@ -3383,7 +3387,7 @@ test("Policy's restrictions are a plain list, never the kit's Settings grid", ()
 });
 
 test("the view draws none of the kit's layout containers", () => {
-  const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
+  const source = VIEW_SOURCE;
   const drawnClasses = [...source.matchAll(/class="([^"]*)"/g)].flatMap(([, names]) => names.split(/\s+/));
   assert.ok(drawnClasses.length > 0, "the view draws no classes at all");
   for (const name of KIT_LAYOUT) assert.equal(drawnClasses.includes(name), false, `view.js draws .${name}`);
@@ -3400,7 +3404,7 @@ test("a disclosure is quiet ink with the agents fold's chevron, and opens to ink
   assert.ok(summary.classes.has("disclosure"));
   assert.ok(summary.children.some((node) => node.tag === "svg"), "the disclosure has no chevron");
 
-  const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
+  const source = VIEW_SOURCE;
   const summaries = [...source.matchAll(/<summary class="([^"]*)"/g)].map(([, names]) => names);
   assert.equal(summaries.length, [...source.matchAll(/<summary/g)].length, "a summary is drawn with no class");
   assert.deepEqual(summaries.filter((names) => names !== "disclosure" && names !== "glance-pill"), []);

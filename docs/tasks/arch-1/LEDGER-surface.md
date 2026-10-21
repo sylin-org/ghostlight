@@ -134,7 +134,7 @@ C3c), then the rows below.
 | SURF-12 | refactor(workbench): watching, everywhere | - | SURF-12; the route path changes with the preview server | todo |
 | SURF-13 | refactor(window): the setup flow is one object and the click handler a table | - | SURF-13 | todo |
 | SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | todo |
-| SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | todo |
+| SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | landed (this commit) |
 | SURF-9 | refactor(workbench): `workbench/mod.rs` splits on its seams | S3 | SURF-9; no `kit.css` rename | todo |
 | SURF-11 | refactor(window): the palette has tokens, and the desktop one module | - | SURF-11; colour values stay | todo |
 - U-D4, found by tests-1's pilot cut of `service/mod.rs` on 2026-10-21: the service test
@@ -209,3 +209,15 @@ C3c), then the rows below.
   test's read of `CONTEXT_CLOSED` went, because the next line already checks the service's token.
   The page journey (`node tests/workbench-surface.mjs`) passes with the page's real module
   order. The page's "completed" fallback word in `view.js` is visible text, left for SURF-3.
+- SURF-7 as landed: the agents pane moves to `ui/lib/agents-view.js` (468 lines) and the policy
+  editor, with the band's `policyAccess`, to `ui/lib/policy-view.js` (785 lines); `view.js` goes
+  from 2,708 to 1,533 lines. Each module follows the sibling pattern (one installer, a `create`
+  that takes what it reads and returns what the view calls), and the code moved verbatim. Its
+  inputs are the skeptic's inventory, checked by parsing `view.js` with acorn: the agents pane
+  takes `el`, `can`, `opensLinks`, `continueMarkup`, `replaceHistoryMarkup`, `ifChanged`,
+  `drawnOnce` and getters for `access` and the page shown; the editor takes `el`, `can`,
+  `continueMarkup` and `drawnOnce`. Each is created where its code sat, so listeners register in
+  the same order as before; `drawnOnce` moves to the top of `create()`, and `CHEVRON`, which all
+  three draw, to `words.js`. `view.js` drops the 37 word imports only the panes used. Updated: the
+  script list in `index.html`, `ASSETS`, and the settings tests, which load both modules and read
+  all three files where they read the view's source. Page tests 226 and the page journey pass.
