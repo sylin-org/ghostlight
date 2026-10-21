@@ -507,8 +507,10 @@ pub enum Outcome {
     PageReused { host: Option<String> },
     /// A manually closed page was restored in a new controlled tab.
     PageRecovered { host: Option<String> },
-    /// The requested controlled tab was already absent.
-    TabAlreadyClosed,
+    /// A close named a handle this session does not hold. Its tab may have closed, or a service
+    /// before this one held it and it may still be open, so nothing is said about the tab
+    /// (W-D4).
+    TabNotHeld,
     /// An existing controlled page was navigated.
     PageNavigated { host: Option<String> },
     /// Browser history was traversed.
@@ -736,7 +738,7 @@ impl Outcome {
                 None => "Reused the existing tab.".to_string(),
             },
             Self::PageRecovered { host } => page_recovered_summary(host.as_deref()),
-            Self::TabAlreadyClosed => tab_already_closed_summary(),
+            Self::TabNotHeld => tab_not_held_summary(),
             Self::PageNavigated { host } => {
                 format!("Navigated to {}.", place(host, "the requested page"))
             }
@@ -1066,8 +1068,8 @@ impl Outcome {
     pub fn next_steps(&self) -> Vec<String> {
         match self {
             Self::TabsListed { count: 0 } => vec![OPEN_FIRST_TAB.into()],
-            Self::TabAlreadyClosed => vec![
-                "Call browser_tabs with action list to see remaining open tabs.".into(),
+            Self::TabNotHeld => vec![
+                "Call browser_tabs with action list to see this session's tabs.".into(),
             ],
             Self::TargetsListed { count: 0, .. } => vec![
                 "Try a different search term, scroll to reveal content, or use browser_inspect to view available page controls.".into(),
@@ -1272,7 +1274,7 @@ impl Outcome {
             },
             Self::DialogOpened { action, .. } => action.measurements(),
             Self::TabClosed
-            | Self::TabAlreadyClosed
+            | Self::TabNotHeld
             | Self::DialogHandled { .. }
             | Self::DialogObserved { .. }
             | Self::StepNotStarted
@@ -2554,10 +2556,9 @@ fn page_recovered_summary(host: Option<&str>) -> String {
     }
 }
 
-/// Authored sentence for closing what was already closed.
-#[must_use]
-fn tab_already_closed_summary() -> String {
-    "That tab was already closed.".into()
+/// Authored sentence for closing a handle this session does not hold.
+fn tab_not_held_summary() -> String {
+    "This session no longer holds that tab, so nothing was closed.".into()
 }
 
 /// Content-free observations about one action.
@@ -4472,8 +4473,8 @@ Changes are \"unsaved\".".into()),
         );
         assert!(Outcome::TabsListed { count: 2 }.next_steps().is_empty());
         assert_eq!(
-            Outcome::TabAlreadyClosed.next_steps(),
-            vec!["Call browser_tabs with action list to see remaining open tabs."]
+            Outcome::TabNotHeld.next_steps(),
+            vec!["Call browser_tabs with action list to see this session's tabs."]
         );
         let opened = Outcome::PageScrolled {
             host: None,

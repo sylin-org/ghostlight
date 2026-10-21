@@ -185,7 +185,7 @@ impl Outcome {
             | Self::PageOpened { .. }
             | Self::PageReused { .. }
             | Self::PageRecovered { .. }
-            | Self::TabAlreadyClosed
+            | Self::TabNotHeld
             | Self::PageNavigated { .. }
             | Self::HistoryTraversed { .. }
             | Self::PageReloaded { .. }

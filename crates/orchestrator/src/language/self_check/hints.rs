@@ -307,7 +307,7 @@ variant_names!(outcome_variant, OUTCOME_VARIANTS, Outcome:
     PageOpened,
     PageReused,
     PageRecovered,
-    TabAlreadyClosed,
+    TabNotHeld,
     PageNavigated,
     HistoryTraversed,
     PageReloaded,
@@ -678,7 +678,7 @@ fn outcome_samples() -> Vec<Outcome> {
         Outcome::PageOpened { host: host() },
         Outcome::PageReused { host: host() },
         Outcome::PageRecovered { host: None },
-        Outcome::TabAlreadyClosed,
+        Outcome::TabNotHeld,
         Outcome::PageNavigated { host: host() },
         Outcome::HistoryTraversed {
             direction: "back".into(),

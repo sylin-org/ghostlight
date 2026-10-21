@@ -41,7 +41,7 @@ In order. "After" names what a slice waits for.
 | WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5 | todo |
 | WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | workspace half landed (ec6ae3fd); `work/mod.rs`'s stage locks ride with C10c |
 | D52(c) | fix(work): `routing_refusal` passes the browser's cause through, and `capture_too_large` reaches `Refusal::CaptureTooLarge` | C12b-2, D52 | Decision 5.2's third part | taken by test-02 (109e30c3) |
-| W-D4 | fix(work): closing a handle this service does not hold says it no longer holds the tab, not that the tab is gone | C16 | Found 2026-10-21 by test-02, confirmed by leo-desktop-02 with UI Automation; goes with WORK-3's already-closed tab | todo |
+| W-D4 | fix(work): closing a handle this service does not hold says it no longer holds the tab, not that the tab is gone | C16 | Found 2026-10-21 by test-02, confirmed by leo-desktop-02 with UI Automation; goes with WORK-3's already-closed tab | landed |
 | W-D5 | fix(work): a session whose browser left for good moves to the browser the agent names | - | Found 2026-10-21 on the owner's machine (Notes) | todo |
 
 ## Notes
@@ -172,3 +172,14 @@ startup policy in the journey home), which is the coordinator's lane to choose.
   already works in a different browser. A session whose browser is not connected should move to the
   browser the agent names, or the only one connected, and its tabs in the gone browser read as no
   longer open.
+
+W-D4, landed 2026-10-21: closing a handle the session does not hold answers through `succeeded`
+with `Outcome::TabNotHeld` (was `TabAlreadyClosed`): "This session no longer holds that tab, so
+nothing was closed.", next step "Call browser_tabs with action list to see this session's tabs.",
+facts `{"tab", "closed": false}` (the false `already_gone` goes). Nothing is sent to the browser.
+Model-visible, for the docs: `docs/1.0/LANGUAGE.md` says "Closing a handle whose tab is already gone
+succeeds without touching the browser", which stays true but should not imply the tab is gone.
+`closing_a_handle_this_service_does_not_hold_claims_nothing_about_the_tab` replaces the old
+already-gone test and opens the tab under one service, then closes it from a fresh one. Cross-lane
+in test-01's `language/outcome.rs`, `audit.rs` and `self_check/hints.rs` under its hold. It also
+covers Decision 4.5's already-closed half of WORK-3: the step reaches the agent.

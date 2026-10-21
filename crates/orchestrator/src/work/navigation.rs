@@ -13,7 +13,7 @@ use crate::workspace::{Opener, SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
     observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect, InvocationContext,
-    InvocationResult, Readiness, Status, Terminal,
+    Readiness, Status, Terminal,
 };
 
 /// How the governed tab came to exist, which the receipt reports truthfully (ADR-0137).
@@ -679,7 +679,9 @@ impl ApplicationExecutor {
         // A held tab may be closed: closing takes it away from the page that held it.
         let selected = match lease.select_tab_to_leave(Some(requested)) {
             Ok(tab) => tab,
-            // Closing what is already gone is the desired state achieved, not an error.
+            // This session does not hold the handle: its tab closed, or a service before this one
+            // held it and the tab may still be open (W-D4). Nothing is sent and nothing is
+            // claimed about the tab.
             Err(WorkspaceError::StaleTab) => {
                 let decision = self.authorize_tab_close(context, None);
                 if !decision.allowed {
@@ -692,22 +694,16 @@ impl ApplicationExecutor {
                         json!({"tab":requested}),
                     );
                 }
-                return Terminal {
-                    result: InvocationResult::new(
-                        context.invocation,
-                        Status::Succeeded,
-                        Effect::None,
-                        Readiness::NotApplicable,
-                        true,
-                        Outcome::TabAlreadyClosed.summary().as_str(),
-                        json!({"tab":requested,"closed":false,"already_gone":true}),
-                        vec![],
-                    ),
+                return self.succeeded(
+                    context,
                     decision,
-                    physical_id: None,
-                    observed: Default::default(),
-                    audit: Outcome::TabAlreadyClosed.audit(),
-                };
+                    None,
+                    Effect::None,
+                    Readiness::NotApplicable,
+                    true,
+                    Outcome::TabNotHeld,
+                    json!({"tab":requested,"closed":false}),
+                );
             }
             Err(error) => return self.workspace_failure(context, error),
         };

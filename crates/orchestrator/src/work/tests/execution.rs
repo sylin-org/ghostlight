@@ -5,7 +5,7 @@ use crate::browser::adapter::{
     PhysicalClick, PhysicalFill, PhysicalPointClick, PhysicalPointDrop, PhysicalSemantic,
     PhysicalTypeFocused, PhysicalViewPoint, PhysicalWait,
 };
-use crate::language::outcome::Refusal;
+use crate::language::outcome::{Outcome, Refusal};
 use crate::language::ReadMode;
 
 /// A primitive adapter error routes to an honest refusal that carries the browser's own
@@ -677,24 +677,43 @@ fn navigating_to_a_dead_tab_recreates_it_under_the_same_handle() {
     assert!(matches!(browser.calls()[0], BrowserCommand::OpenTab { .. }));
 }
 
-/// Closing an already-gone tab achieves the desired state without touching the browser.
+/// W-D4: a tab a service before this one opened can still be open after a quit, so closing a
+/// handle this session does not hold claims nothing about the tab. It sends nothing to the
+/// browser, says only that this session no longer holds the tab, and gives the agent its step.
 #[test]
-fn closing_an_already_gone_tab_succeeds_without_touching_the_browser() {
+fn closing_a_handle_this_service_does_not_hold_claims_nothing_about_the_tab() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
-
-    let closed = executor.execute(
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
         &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        &CancellationToken::default(),
+    );
+    let handle = opened.facts["tab"].clone();
+
+    // A new service: the same browser, still showing the tab, and a store that never held it.
+    let restarted = WorkspaceStore::default();
+    let (next, next_workspace, _) =
+        executor_on(GovernanceFacade::new(None), &restarted, browser.clone());
+    let calls_before = browser.calls().len();
+    let closed = next.execute(
+        &next_workspace,
         "browser_tabs",
-        json!({"action":"close","tab":"tab_gone"}),
+        json!({"action":"close","tab":handle}),
         &CancellationToken::default(),
     );
 
     assert_eq!(closed.status, Status::Succeeded);
     assert_eq!(closed.effect, Effect::None);
-    assert_eq!(closed.summary, "That tab was already closed.");
-    assert_eq!(closed.facts["already_gone"], true);
-    assert_eq!(browser.calls().len(), 0);
+    assert_eq!(closed.summary, Outcome::TabNotHeld.summary());
+    assert_eq!(closed.next_steps, Outcome::TabNotHeld.next_steps());
+    assert_eq!(closed.facts["closed"], false);
+    assert_eq!(browser.calls().len(), calls_before, "nothing is sent");
 }
 
 /// An adapter's honest effect-unknown receipt renders as unknown with the browser's own
