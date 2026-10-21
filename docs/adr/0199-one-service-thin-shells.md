@@ -753,3 +753,40 @@ agents" and "Resume agents" on the band, in the tray and in Settings, the browse
 Decision 19's "MCPB's final release carries 2.0.0" no longer holds: the Claude Desktop bundle ships
 with every release, as a carrier, unchanged otherwise. The reason is in the ADR-0197 amendment of
 the same day, "The MCPB keeps shipping".
+
+## Amendment (2026-10-20): a ready service wakes the edges that wait for it
+
+Found in the second sweep (BROW-9's open half, in the core-service ledger's Notes) and settled with
+the owner on 2026-10-20: event-driven, with a check fallback. The owner left the timing to the
+coordinator, and it lands now as slice S-D3.
+
+An edge that lost its service looked for the next one only on the relay's backoff, which slows to
+a look every 30 s, and a browser relay never starts one while it waits (Decision 10). A start on
+demand after a Quit almost always fell between two looks, so the agent's first call found no
+browser. On Windows recovery then opened a second Chrome window and the call usually timed out; on
+Linux the call read `browser_startup_manual`.
+
+This amends Decision 10. Who may start the service, and the quit latch, are unchanged.
+
+1. **A waiting edge registers a wake endpoint.** An edge that finds no service, or loses the one
+   it had, registers a wake endpoint of its own and keeps it until it exits. Its name carries a
+   random id: on Windows a pipe named after the service's endpoint with `-wake-` and the id, and an
+   empty file named by the id in `run/wake/`; on Linux a socket named by the id in `run/wake/`.
+   Both ends check each other as they do at the service's endpoint.
+2. **A ready service wakes every registered edge.** Once its endpoint accepts openings, the
+   service connects to each wake endpoint listed in `run/wake/` and waits up to a second for the
+   edge to close the connection. Nothing is written either way: the connection only means "look
+   now". A registration whose edge has gone is removed.
+3. **A woken edge looks at once.** The browser relay then exits as before, so the extension
+   reconnects with a fresh hello. An MCP relay connects without starting the service, so the
+   workbench counts every agent again.
+4. **The checks stay as the fallback.** The backoff is unchanged, so a wake that never comes costs
+   what it always cost. The edge's diagnostics name each wake (`service_ready`) and the service's
+   name what it woke (`edges_woken`), so a broken wake cannot hide behind the checks.
+5. **Relay revision 5.** The edge and the relay change, and the connectors guard keeps a published
+   revision's source fixed, so revision 5 replaces 4 and both crates move to 5.0.0. Frames and
+   openings do not change. The service admits revisions 4 and 5, so the edges of the service it
+   replaced keep working until they restart. A revision 4 edge is never woken and keeps its
+   checks. The installer replaces the edge because the revision changed.
+
+ADR-0203 Decision 13's lock on `crates/relay` and `crates/edge` is amended for this one change.

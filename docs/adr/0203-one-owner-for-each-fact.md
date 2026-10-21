@@ -1786,3 +1786,12 @@ skeptic's corrections, is the specification of the slice that takes it.
 
 The lanes stand, with core split in three for the second sweep: core-language, core-work and
 core-service. [BOOTSTRAP.md](../tasks/arch-1/BOOTSTRAP.md) names their files, machines and order.
+
+## Amendment (2026-10-20): relay revision 5 for the wake
+
+The ADR-0199 amendment of the same day changes `crates/relay` and `crates/edge` to fix one defect:
+an edge waiting after a Quit missed the next service. So Decision 13's "this ADR changes no relay
+or edge source" is amended once more, for that change alone. It bumps `RELAY` to 5, and the
+service admits revisions 4 and 5. The running 2.0.x edges that the second sweep's Decision 19
+protects therefore keep working. EXT-3 and EXT-4 stay out: nothing else moves into the relay or
+the edge.
