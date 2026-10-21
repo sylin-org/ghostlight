@@ -1764,169 +1764,6 @@ mod tests {
         fixture
     }
 
-    #[test]
-    fn a_development_custody_record_plans_every_move_deletion_and_stop() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        let policy = fixture.path("user/AppData/Local/Ghostlight");
-        let state = fixture.home.join("state");
-        let moves = |from: &Path, name: &str, to: &Path| Move {
-            from: from.join(name),
-            to: to.join(name),
-        };
-        assert_eq!(
-            plan.moves,
-            vec![
-                moves(&policy, USER_POLICY_FILE_NAME, &fixture.home.join("policy")),
-                moves(
-                    &policy,
-                    MANAGED_CACHE_FILE_NAME,
-                    &fixture.home.join("policy")
-                ),
-                moves(
-                    &policy,
-                    MANAGED_STATUS_FILE_NAME,
-                    &fixture.home.join("policy")
-                ),
-                moves(
-                    &fixture.path("user/AppData/Roaming/ghostlight"),
-                    HARNESS_LOCATIONS_NAME,
-                    &state
-                ),
-            ]
-        );
-        assert_eq!(
-            plan.audit_archive,
-            Some(Move {
-                from: fixture.home.join(AUDIT_FILE_NAME),
-                to: state.join("audit-pre-2.0.jsonl"),
-            })
-        );
-        assert_eq!(plan.setup_record, Some(state.join("setup.json")));
-        assert_eq!(
-            plan.deletions,
-            vec![
-                fixture.home.join(LEGACY_STARTUP_NAME),
-                fixture.home.join(LEGACY_DEPLOY_LOCK_NAME),
-                fixture
-                    .path("repo/target/release")
-                    .join(LEGACY_DEPLOY_LOCK_NAME),
-                fixture.home.join(LEGACY_INSTALLATION_LOCK_NAME),
-                fixture
-                    .path("user/AppData/Local/Ghostlight")
-                    .join(HANDOFF_MARKER_NAME),
-                fixture.home.join("bin").join(&retired_connector_names()[0]),
-                fixture.home.join("bin").join(&retired_connector_names()[1]),
-                fixture.home.join(LEGACY_RECORD_NAME),
-            ]
-        );
-        let repo_release = fixture.path("repo/target/release");
-        let bin = fixture.home.join("bin");
-        let expected: Vec<PathBuf> = [repo_release, bin]
-            .iter()
-            .flat_map(|directory| {
-                legacy_image_names()
-                    .into_iter()
-                    .map(|name| directory.join(name))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        assert_eq!(plan.images_to_stop, expected);
-        assert!(plan.virtualized_sources.is_empty());
-    }
-
-    #[test]
-    fn no_record_reads_the_default_roots_on_windows() {
-        let fixture = Fixture::new(true);
-        let policy = fixture.path("user/AppData/Local/Ghostlight");
-        fixture.write(&policy.join(USER_POLICY_FILE_NAME), "policy");
-        fixture.write(&fixture.home.join(AUDIT_FILE_NAME), AUDIT);
-        let plan = fixture.plan();
-        assert_eq!(
-            plan.moves,
-            vec![Move {
-                from: policy.join(USER_POLICY_FILE_NAME),
-                to: fixture.home.join("policy").join(USER_POLICY_FILE_NAME),
-            }]
-        );
-        assert_eq!(
-            plan.audit_archive.map(|archive| archive.from),
-            Some(fixture.home.join(AUDIT_FILE_NAME))
-        );
-        assert!(plan.deletions.is_empty());
-        assert!(plan.images_to_stop.is_empty());
-    }
-
-    #[test]
-    fn no_record_reads_the_default_roots_on_linux() {
-        let mut fixture = Fixture::new(false);
-        fixture.roots.xdg_config_home = Some(fixture.path("user/xdg-config"));
-        let policy = fixture.path("user/.local/state/ghostlight");
-        fixture.write(&policy.join(USER_POLICY_FILE_NAME), "policy");
-        fixture.write(
-            &fixture.path("user/xdg-config/ghostlight/harness-locations.json"),
-            "{}",
-        );
-        let cache = fixture.path("user/.cache/ghostlight");
-        fixture.write(&cache.join(AUDIT_FILE_NAME), AUDIT);
-        let plan = fixture.plan();
-        assert_eq!(plan.moves.len(), 2);
-        assert_eq!(
-            plan.audit_archive.map(|archive| archive.from),
-            Some(cache.join(AUDIT_FILE_NAME))
-        );
-    }
-
-    #[test]
-    fn a_state_directory_beside_the_old_serving_binary_is_adopted() {
-        let fixture = Fixture::new(true);
-        let serving = fixture.path("old/v0.9.2");
-        fixture.executables(&serving);
-        fixture.write(&serving.join(AUDIT_FILE_NAME), AUDIT);
-        fixture.record(&json!({
-            "schema": 1,
-            "serving_directory": serving,
-            "release_directory": serving,
-            "state_directory": serving,
-            "policy_directory": fixture.path("user/AppData/Local/Ghostlight"),
-        }));
-        let plan = fixture.plan();
-        assert_eq!(
-            plan.audit_archive,
-            Some(Move {
-                from: serving.join(AUDIT_FILE_NAME),
-                to: fixture.home.join("state").join("audit-pre-0.9.2.jsonl"),
-            })
-        );
-    }
-
-    #[test]
-    fn a_policy_directory_inside_a_packaged_apps_storage_is_read_where_it_is() {
-        let fixture = Fixture::new(true);
-        let virtualized =
-            fixture.path("user/AppData/Local/Packages/OpenAI.Codex_x/LocalCache/Local/Ghostlight");
-        fixture.write(&virtualized.join(USER_POLICY_FILE_NAME), "policy");
-        fixture.record(&json!({
-            "schema": 1,
-            "serving_directory": fixture.home.join("bin"),
-            "state_directory": fixture.home,
-            "policy_directory": virtualized,
-        }));
-        let plan = fixture.plan();
-        assert_eq!(
-            plan.moves,
-            vec![Move {
-                from: virtualized.join(USER_POLICY_FILE_NAME),
-                to: fixture.home.join("policy").join(USER_POLICY_FILE_NAME),
-            }]
-        );
-        assert_eq!(plan.virtualized_sources, vec![virtualized]);
-        execute(&plan).unwrap();
-        let policy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
-        assert_eq!(fs::read_to_string(&policy).unwrap(), "policy");
-        assert!(!is_virtualized(&policy));
-    }
-
     /// Put the policy files in `home/policy`, record `spell(home/policy)` as the 1.x policy
     /// directory, and check that nothing moves and nothing is lost.
     fn assert_policy_already_home(spell: impl Fn(&Path) -> PathBuf) {
@@ -1954,235 +1791,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_policy_directory_that_is_already_the_new_home_keeps_its_files() {
-        assert_policy_already_home(Path::to_path_buf);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_verbatim_or_recased_spelling_of_the_new_policy_directory_keeps_its_files() {
-        assert_policy_already_home(|policy| PathBuf::from(format!(r"\?\{}", policy.display())));
-        assert_policy_already_home(|policy| PathBuf::from(policy.to_string_lossy().to_uppercase()));
-    }
-
-    #[test]
-    fn a_move_from_a_file_to_itself_leaves_the_file() {
-        let fixture = Fixture::new(true);
-        let file = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
-        fixture.write(&file, "policy");
-        let plan = MigrationPlan {
-            moves: vec![Move {
-                from: file.clone(),
-                to: file.clone(),
-            }],
-            ..MigrationPlan::default()
-        };
-        execute(&plan).unwrap();
-        assert_eq!(fs::read_to_string(&file).unwrap(), "policy");
-    }
-
-    #[test]
-    fn a_packaged_environment_root_falls_back_to_the_real_profile() {
-        let mut fixture = Fixture::new(true);
-        fixture.roots.local_app_data =
-            Some(fixture.path("user/AppData/Local/Packages/OpenAI.Codex_x/LocalCache/Local"));
-        assert_eq!(
-            fixture.roots.policy_directory(),
-            fixture.path("user/AppData/Local/Ghostlight")
-        );
-    }
-
-    #[test]
-    fn a_home_inside_packaged_storage_is_refused() {
-        let fixture = Fixture::new(true);
-        let home = fixture.path("user/AppData/Local/Packages/X_y/LocalCache/Local/.ghostlight");
-        assert!(matches!(
-            plan(&home, &fixture.legacy()),
-            Err(MigrationError::VirtualizedHome(_))
-        ));
-    }
-
-    #[test]
-    fn executing_moves_archives_and_deletes_then_nothing_is_left_to_do() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        execute(&plan).unwrap();
-        let policy = fixture.home.join("policy");
-        let state = fixture.home.join("state");
-        assert_eq!(
-            fs::read_to_string(policy.join(USER_POLICY_FILE_NAME)).unwrap(),
-            "user policy"
-        );
-        assert_eq!(
-            fs::read_to_string(policy.join(MANAGED_CACHE_FILE_NAME)).unwrap(),
-            "cache"
-        );
-        assert!(!state.join(HANDOFF_MARKER_NAME).exists());
-        let record = state.join("setup.json");
-        let recorded = setup_state::read(&record).expect("the migration wrote the setup record");
-        assert!(recorded.first_request_ms > 0);
-        assert!(state.join(HARNESS_LOCATIONS_NAME).is_file());
-        assert_eq!(
-            fs::read_to_string(state.join("audit-pre-2.0.jsonl")).unwrap(),
-            AUDIT
-        );
-        for gone in [
-            fixture.home.join(AUDIT_FILE_NAME),
-            fixture.home.join(LEGACY_RECORD_NAME),
-            fixture.home.join(LEGACY_STARTUP_NAME),
-            fixture.home.join(LEGACY_DEPLOY_LOCK_NAME),
-            fixture.home.join(LEGACY_INSTALLATION_LOCK_NAME),
-            fixture
-                .path("repo/target/release")
-                .join(LEGACY_DEPLOY_LOCK_NAME),
-            fixture
-                .path("user/AppData/Local/Ghostlight")
-                .join(USER_POLICY_FILE_NAME),
-            fixture
-                .path("user/AppData/Local/Ghostlight")
-                .join(HANDOFF_MARKER_NAME),
-        ] {
-            assert!(!gone.exists(), "{}", gone.display());
-        }
-
-        let again = fixture.plan();
-        assert!(again.is_empty(), "{again:?}");
-        execute(&again).unwrap();
-        assert_eq!(
-            fs::read_to_string(policy.join(USER_POLICY_FILE_NAME)).unwrap(),
-            "user policy"
-        );
-    }
-
-    #[test]
-    fn an_existing_setup_record_is_left_untouched() {
-        let fixture = development_custody();
-        let record = fixture.home.join("state").join("setup.json");
-        fixture.write(&record, r#"{"first_request_ms":5}"#);
-        let plan = fixture.plan();
-        assert_eq!(plan.setup_record, None);
-        execute(&plan).unwrap();
-        assert_eq!(
-            setup_state::read(&record),
-            Some(SetupRecord {
-                first_request_ms: 5
-            })
-        );
-    }
-
-    #[test]
-    fn a_home_with_no_earlier_installation_gets_no_setup_record() {
-        let fixture = Fixture::new(true);
-        let plan = fixture.plan();
-        assert!(plan.is_empty(), "{plan:?}");
-        assert_eq!(plan.setup_record, None);
-    }
-
-    #[test]
-    fn a_failing_move_names_the_path_and_leaves_everything_in_place() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        // The last file in the plan cannot be placed: its destination holds other content.
-        let blocked = fixture.home.join("state").join(HARNESS_LOCATIONS_NAME);
-        fixture.write(&blocked, "something else");
-        let error = execute(&plan).unwrap_err();
-        assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
-        assert!(error.to_string().contains(&blocked.display().to_string()));
-        assert!(fixture.home.join(LEGACY_RECORD_NAME).is_file());
-        assert!(fixture.home.join(AUDIT_FILE_NAME).is_file());
-        assert!(fixture
-            .path("user/AppData/Local/Ghostlight")
-            .join(USER_POLICY_FILE_NAME)
-            .is_file());
-        assert!(!fixture
-            .home
-            .join("policy")
-            .join(USER_POLICY_FILE_NAME)
-            .exists());
-        assert_eq!(fs::read_to_string(&blocked).unwrap(), "something else");
-    }
-
-    #[test]
-    fn a_destination_that_cannot_be_made_is_named() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        fixture.write(&fixture.home.join("policy"), "a file, not a directory");
-        let error = execute(&plan).unwrap_err();
-        assert!(matches!(error, MigrationError::Prepare { .. }), "{error}");
-        assert!(error
-            .to_string()
-            .contains(&fixture.home.join("policy").display().to_string()));
-        assert!(fixture.home.join(LEGACY_RECORD_NAME).is_file());
-        assert!(fixture.home.join(AUDIT_FILE_NAME).is_file());
-    }
-
-    #[test]
-    fn a_rerun_after_a_partial_success_continues() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        // The first file was moved, and the second was copied but its original not yet removed.
-        let policy = fixture.path("user/AppData/Local/Ghostlight");
-        let destination = fixture.home.join("policy");
-        fs::create_dir_all(&destination).unwrap();
-        fs::rename(
-            policy.join(USER_POLICY_FILE_NAME),
-            destination.join(USER_POLICY_FILE_NAME),
-        )
-        .unwrap();
-        fs::copy(
-            policy.join(MANAGED_CACHE_FILE_NAME),
-            destination.join(MANAGED_CACHE_FILE_NAME),
-        )
-        .unwrap();
-        execute(&plan).unwrap();
-        assert_eq!(
-            fs::read_to_string(destination.join(USER_POLICY_FILE_NAME)).unwrap(),
-            "user policy"
-        );
-        assert!(!policy.join(MANAGED_CACHE_FILE_NAME).exists());
-        assert_eq!(
-            fs::read_to_string(destination.join(MANAGED_CACHE_FILE_NAME)).unwrap(),
-            "cache"
-        );
-        assert!(!fixture.home.join(LEGACY_RECORD_NAME).exists());
-    }
-
-    #[test]
-    fn a_destination_that_appears_after_the_check_keeps_the_original() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        prepare(&plan).unwrap();
-        let policy = fixture.path("user/AppData/Local/Ghostlight");
-        let cache = fixture.home.join("policy").join(MANAGED_CACHE_FILE_NAME);
-        fixture.write(&cache, "a bundle written by a 2.0 service");
-        let error = copy_state(&plan).unwrap_err();
-        assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
-        assert!(error.to_string().contains(&cache.display().to_string()));
-        assert_eq!(
-            fs::read_to_string(policy.join(MANAGED_CACHE_FILE_NAME)).unwrap(),
-            "cache"
-        );
-        assert_eq!(
-            fs::read_to_string(&cache).unwrap(),
-            "a bundle written by a 2.0 service"
-        );
-    }
-
-    #[test]
-    fn the_audit_log_is_archived_apart_from_the_early_copies() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        let archive = fixture.home.join("state").join("audit-pre-2.0.jsonl");
-        prepare(&plan).unwrap();
-        copy_state(&plan).unwrap();
-        assert!(fixture.home.join(AUDIT_FILE_NAME).is_file());
-        assert!(!archive.exists());
-        archive_audit(&plan).unwrap();
-        assert!(!fixture.home.join(AUDIT_FILE_NAME).exists());
-        assert_eq!(fs::read_to_string(archive).unwrap(), AUDIT);
-    }
-
     /// Every path under `directory`, directories included.
     #[cfg(unix)]
     fn everything_under(directory: &Path) -> Vec<PathBuf> {
@@ -2197,358 +1805,11 @@ mod tests {
         found
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn what_the_migration_creates_in_the_home_is_private_whatever_the_originals_were() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        for transfer in plan.transfers() {
-            fs::set_permissions(&transfer.from, fs::Permissions::from_mode(0o644)).unwrap();
-        }
-        let archive = fixture.home.join("state").join("audit-pre-2.0.jsonl");
-        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        let assert_private = || {
-            for directory in ["policy", "state"] {
-                let directory = fixture.home.join(directory);
-                assert_eq!(mode(&directory), 0o700, "{}", directory.display());
-                for path in everything_under(&directory) {
-                    let expected = if path.is_dir() { 0o700 } else { 0o600 };
-                    assert_eq!(mode(&path), expected, "{}", path.display());
-                }
-            }
-        };
-
-        prepare(&plan).unwrap();
-        copy_state(&plan).unwrap();
-        assert!(everything_under(&fixture.home.join("state"))
-            .iter()
-            .any(|path| path.to_string_lossy().contains(COPY_BASE_SUFFIX)));
-        assert_private();
-        archive_audit(&plan).unwrap();
-        assert!(archive.is_file());
-        assert_private();
-    }
-
     /// The 1.x user policy of `development_custody`.
     fn legacy_user_policy(fixture: &Fixture) -> PathBuf {
         fixture
             .path("user/AppData/Local/Ghostlight")
             .join(USER_POLICY_FILE_NAME)
-    }
-
-    #[test]
-    fn copying_leaves_every_original_for_the_service_that_still_runs() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        prepare(&plan).unwrap();
-        let copied = copy_state(&plan).unwrap();
-        assert_eq!(copied.len(), plan.moves.len());
-        for transfer in &plan.moves {
-            assert!(transfer.from.is_file(), "{}", transfer.from.display());
-            assert_eq!(
-                fs::read(&transfer.from).unwrap(),
-                fs::read(&transfer.to).unwrap()
-            );
-        }
-        retire_state(&copied).unwrap();
-        for transfer in &plan.moves {
-            assert!(!transfer.from.exists(), "{}", transfer.from.display());
-            assert!(transfer.to.is_file());
-        }
-    }
-
-    #[test]
-    fn an_original_rewritten_between_the_copy_and_the_retire_wins() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        prepare(&plan).unwrap();
-        let copied = copy_state(&plan).unwrap();
-        let original = legacy_user_policy(&fixture);
-        fs::write(&original, "saved by the 1.x workbench").unwrap();
-        retire_state(&copied).unwrap();
-        assert!(!original.exists());
-        assert_eq!(
-            fs::read_to_string(fixture.home.join("policy").join(USER_POLICY_FILE_NAME)).unwrap(),
-            "saved by the 1.x workbench"
-        );
-        assert!(fixture.plan().moves.is_empty());
-    }
-
-    #[test]
-    fn a_copy_that_a_2_0_service_changed_is_kept_when_the_original_did_not_change() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        prepare(&plan).unwrap();
-        let copied = copy_state(&plan).unwrap();
-        let status = fixture.home.join("policy").join(MANAGED_STATUS_FILE_NAME);
-        fs::write(&status, "written by a 2.0 service").unwrap();
-        retire_state(&copied).unwrap();
-        assert_eq!(
-            fs::read_to_string(&status).unwrap(),
-            "written by a 2.0 service"
-        );
-        assert!(!fixture
-            .path("user/AppData/Local/Ghostlight")
-            .join(MANAGED_STATUS_FILE_NAME)
-            .exists());
-    }
-
-    #[test]
-    fn an_original_and_a_copy_that_both_changed_keep_both_and_never_block_the_next_run() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        prepare(&plan).unwrap();
-        let copied = copy_state(&plan).unwrap();
-        let original = legacy_user_policy(&fixture);
-        let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
-        fs::write(&original, "edited in the 1.x workbench").unwrap();
-        fs::write(&copy, "edited by a 2.0 service").unwrap();
-        let error = retire_state(&copied).unwrap_err();
-        let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
-        assert!(
-            matches!(
-                &error,
-                MigrationError::Conflict {
-                    disposition: Disposition::SetAside(kept),
-                    ..
-                } if *kept == aside
-            ),
-            "{error}"
-        );
-        assert!(error.to_string().contains(&aside.display().to_string()));
-        assert!(!original.exists());
-        assert_eq!(
-            fs::read_to_string(&aside).unwrap(),
-            "edited in the 1.x workbench"
-        );
-        assert_eq!(
-            fs::read_to_string(&copy).unwrap(),
-            "edited by a 2.0 service"
-        );
-        // Every other original was still retired, and the next install has nothing to refuse.
-        let again = fixture.plan();
-        assert!(again.moves.is_empty(), "{:?}", again.moves);
-        execute(&again).unwrap();
-        assert_eq!(
-            fs::read_to_string(&copy).unwrap(),
-            "edited by a 2.0 service"
-        );
-    }
-
-    #[test]
-    fn the_record_beside_a_copy_goes_when_its_original_is_retired() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        prepare(&plan).unwrap();
-        let copied = copy_state(&plan).unwrap();
-        let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
-        assert!(record_path(&copy).is_file());
-        retire_state(&copied).unwrap();
-        for transfer in &plan.moves {
-            assert!(!record_path(&transfer.to).exists());
-        }
-    }
-
-    #[test]
-    fn a_copy_that_a_failed_run_left_is_adopted_whichever_side_changed_since() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        prepare(&plan).unwrap();
-        copy_state(&plan).unwrap();
-        let original = legacy_user_policy(&fixture);
-        let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
-        let status = fixture.home.join("policy").join(MANAGED_STATUS_FILE_NAME);
-        fs::write(&original, "saved by a 1.x workbench").unwrap();
-        fs::write(&status, "written by a 2.0 service").unwrap();
-
-        // The failed run never retired anything, and the next plan lists the same files.
-        let again = fixture.plan();
-        assert_eq!(again.moves, plan.moves);
-        execute(&again).unwrap();
-        assert!(!original.exists());
-        assert_eq!(
-            fs::read_to_string(&copy).unwrap(),
-            "saved by a 1.x workbench"
-        );
-        assert_eq!(
-            fs::read_to_string(&status).unwrap(),
-            "written by a 2.0 service"
-        );
-        for transfer in &plan.moves {
-            assert!(!transfer.from.exists(), "{}", transfer.from.display());
-            assert!(!record_path(&transfer.to).exists());
-        }
-    }
-
-    #[test]
-    fn a_different_destination_without_a_record_is_refused_and_nothing_is_copied() {
-        let fixture = development_custody();
-        let plan = fixture.plan();
-        let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
-        fs::create_dir_all(copy.parent().unwrap()).unwrap();
-        fs::write(&copy, "somebody else's file").unwrap();
-        let error = prepare(&plan).unwrap_err();
-        assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
-        assert!(!record_path(&copy).exists());
-    }
-
-    #[test]
-    fn set_aside_names_never_overwrite_an_earlier_one() {
-        let scratch = Scratch::new();
-        let file = scratch.path().join("user-policy.json");
-        fs::write(&file, "first").unwrap();
-        let first = set_aside(&file).unwrap();
-        fs::write(&file, "second").unwrap();
-        let second = set_aside(&file).unwrap();
-        assert_ne!(first, second);
-        assert_eq!(fs::read_to_string(first).unwrap(), "first");
-        assert_eq!(fs::read_to_string(second).unwrap(), "second");
-    }
-
-    #[test]
-    fn a_copy_is_published_only_when_it_matches() {
-        let scratch = Scratch::new();
-        let from = scratch.path().join("from.json");
-        let to = scratch.path().join("to").join("copy.json");
-        fs::write(&from, "content").unwrap();
-        assert!(copy_verified(&from, &to).is_err());
-        fs::create_dir_all(to.parent().unwrap()).unwrap();
-        copy_verified(&from, &to).unwrap();
-        assert_eq!(fs::read_to_string(&to).unwrap(), "content");
-        assert!(from.is_file());
-        assert_eq!(fs::read_dir(to.parent().unwrap()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn the_plan_serializes_the_same_way_every_time() {
-        let fixture = development_custody();
-        let first = serde_json::to_string(&fixture.plan()).unwrap();
-        let second = serde_json::to_string(&fixture.plan()).unwrap();
-        assert_eq!(first, second);
-        let value: serde_json::Value = serde_json::from_str(&first).unwrap();
-        let object = value.as_object().unwrap();
-        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        assert_eq!(
-            keys,
-            [
-                "audit_archive",
-                "deletions",
-                "flatpak",
-                "images_to_stop",
-                "leftovers",
-                "moves",
-                "registrations_to_reclaim",
-                "setup_record",
-                "virtualized_sources"
-            ]
-        );
-        assert_eq!(
-            value["moves"][0],
-            json!({
-                "from": fixture
-                    .path("user/AppData/Local/Ghostlight")
-                    .join(USER_POLICY_FILE_NAME),
-                "to": fixture.home.join("policy").join(USER_POLICY_FILE_NAME),
-            })
-        );
-    }
-
-    #[test]
-    fn a_plan_carries_the_registrations_that_were_found() {
-        let fixture = Fixture::new(true);
-        let mut legacy = fixture.legacy();
-        legacy.registrations = vec![Registration {
-            kind: RegistrationKind::NativeHost,
-            id: "chrome".into(),
-            names: fixture.path("old/ghostlight-browser-connector"),
-        }];
-        let plan = plan(&fixture.home, &legacy).unwrap();
-        assert!(!plan.is_empty());
-        assert_eq!(
-            serde_json::to_value(&plan.registrations_to_reclaim).unwrap(),
-            json!([{
-                "kind": "native_host",
-                "id": "chrome",
-                "names": fixture.path("old/ghostlight-browser-connector"),
-            }])
-        );
-    }
-
-    #[test]
-    fn registrations_are_matched_by_directory() {
-        let directory = PathBuf::from(if cfg!(windows) {
-            r"C:\Repo\target\release"
-        } else {
-            "/repo/target/release"
-        });
-        let within = |path: &Path| lies_within(path, &directory, cfg!(windows));
-        let inside = directory.join("ghostlight-browser-connector");
-        assert!(within(&inside));
-        assert!(within(&directory));
-        assert!(!within(
-            &directory.with_file_name("release-old").join("connector")
-        ));
-        assert!(mentions_directory(
-            &format!("{{\"command\": \"{}\"}}", inside.display()).replace('\\', "\\\\"),
-            std::slice::from_ref(&directory)
-        ));
-        assert!(!mentions_directory(
-            "{\"command\": \"/elsewhere/connector\"}",
-            std::slice::from_ref(&directory)
-        ));
-        if cfg!(windows) {
-            assert!(within(Path::new(r"\\?\c:\repo\TARGET\release\x.exe")));
-        }
-    }
-
-    #[test]
-    fn the_record_reads_tolerantly_and_a_broken_one_stops_the_plan() {
-        let fixture = Fixture::new(true);
-        fixture.record(&json!({ "serving_directory": "relative/path", "other": 7 }));
-        let record = LegacyInstallation::read(&fixture.home.join(LEGACY_RECORD_NAME))
-            .unwrap()
-            .unwrap();
-        assert_eq!(record.schema, 0);
-        assert!(record.directories().is_empty());
-        assert!(fixture.plan().images_to_stop.is_empty());
-
-        fixture.write(&fixture.home.join(LEGACY_RECORD_NAME), "not json");
-        let error = LegacyInstallation::read(&fixture.home.join(LEGACY_RECORD_NAME)).unwrap_err();
-        assert!(error.to_string().contains(LEGACY_RECORD_NAME), "{error}");
-    }
-
-    #[test]
-    fn the_old_version_comes_from_the_serving_install_record_or_directory_name() {
-        let fixture = Fixture::new(true);
-        let serving = fixture.path("old/bin");
-        InstallRecord {
-            service_version: "1.3.4".into(),
-            relay_revision: "2".into(),
-            service_sha256: "00".into(),
-            edge_sha256: None,
-            channel: record::Channel::Release,
-        }
-        .write(&serving.join(INSTALL_RECORD_NAME))
-        .unwrap();
-        let mut legacy = fixture.legacy();
-        legacy.installation = Some(LegacyInstallation {
-            serving_directory: Some(serving),
-            ..LegacyInstallation::default()
-        });
-        assert_eq!(legacy.old_version().as_deref(), Some("1.3.4"));
-        legacy.installation = Some(LegacyInstallation {
-            serving_directory: Some(fixture.path("old/v0.8.1")),
-            ..LegacyInstallation::default()
-        });
-        assert_eq!(legacy.old_version().as_deref(), Some("0.8.1"));
-        legacy.installation = Some(LegacyInstallation {
-            serving_directory: Some(fixture.path("old/plain")),
-            ..LegacyInstallation::default()
-        });
-        assert_eq!(legacy.old_version(), None);
     }
 
     /// The override file of a person who had their own settings before the 1.x route.
@@ -2603,263 +1864,823 @@ mod tests {
             .collect()
     }
 
+    /// Protects ACCEPTANCE C14 and Desktop 24, with defects b4a5ad79, fafb0cb5 and 58cf6cc1: a 1.x
+    /// installation, found by its record or by the default roots on Windows and Linux, and its state
+    /// beside the serving binary or in a packaged app's storage, reaches the 2.0 home. Executing the
+    /// plan moves, archives and deletes, after which nothing is left to do; files the record already
+    /// placed in the new home, under any spelling, stay; what the migration creates is private whatever
+    /// the originals were; a process that exits before its kill counts as stopped; and a home that had
+    /// an earlier installation keeps its setup record while a fresh home gets none.
     #[test]
-    fn what_1x_left_is_removed_on_any_install_and_anything_else_is_left() {
-        let fixture = Fixture::new(false);
-        let policy = fixture.path("user/.local/state/ghostlight");
-        let window = fixture.path("user/.local/share/org.sylin.ghostlight");
-        fs::create_dir_all(&policy).unwrap();
-        for entry in ["CacheStorage", "WebKitCache", "mediakeys", "storage"] {
-            fs::create_dir_all(window.join(entry)).unwrap();
+    fn a_1x_home_reaches_the_2_0_home_and_a_rerun_does_nothing() {
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            let policy = fixture.path("user/AppData/Local/Ghostlight");
+            let state = fixture.home.join("state");
+            let moves = |from: &Path, name: &str, to: &Path| Move {
+                from: from.join(name),
+                to: to.join(name),
+            };
+            assert_eq!(
+                plan.moves,
+                vec![
+                    moves(&policy, USER_POLICY_FILE_NAME, &fixture.home.join("policy")),
+                    moves(
+                        &policy,
+                        MANAGED_CACHE_FILE_NAME,
+                        &fixture.home.join("policy")
+                    ),
+                    moves(
+                        &policy,
+                        MANAGED_STATUS_FILE_NAME,
+                        &fixture.home.join("policy")
+                    ),
+                    moves(
+                        &fixture.path("user/AppData/Roaming/ghostlight"),
+                        HARNESS_LOCATIONS_NAME,
+                        &state
+                    ),
+                ]
+            );
+            assert_eq!(
+                plan.audit_archive,
+                Some(Move {
+                    from: fixture.home.join(AUDIT_FILE_NAME),
+                    to: state.join("audit-pre-2.0.jsonl"),
+                })
+            );
+            assert_eq!(plan.setup_record, Some(state.join("setup.json")));
+            assert_eq!(
+                plan.deletions,
+                vec![
+                    fixture.home.join(LEGACY_STARTUP_NAME),
+                    fixture.home.join(LEGACY_DEPLOY_LOCK_NAME),
+                    fixture
+                        .path("repo/target/release")
+                        .join(LEGACY_DEPLOY_LOCK_NAME),
+                    fixture.home.join(LEGACY_INSTALLATION_LOCK_NAME),
+                    fixture
+                        .path("user/AppData/Local/Ghostlight")
+                        .join(HANDOFF_MARKER_NAME),
+                    fixture.home.join("bin").join(&retired_connector_names()[0]),
+                    fixture.home.join("bin").join(&retired_connector_names()[1]),
+                    fixture.home.join(LEGACY_RECORD_NAME),
+                ]
+            );
+            let repo_release = fixture.path("repo/target/release");
+            let bin = fixture.home.join("bin");
+            let expected: Vec<PathBuf> = [repo_release, bin]
+                .iter()
+                .flat_map(|directory| {
+                    legacy_image_names()
+                        .into_iter()
+                        .map(|name| directory.join(name))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            assert_eq!(plan.images_to_stop, expected);
+            assert!(plan.virtualized_sources.is_empty());
         }
-        fixture.write(&window.join("hsts-storage.sqlite"), "");
-        let plan = fixture.plan();
-        assert!(
-            plan.is_empty(),
-            "leftovers need no migration and no restart"
-        );
-        assert_eq!(plan.leftovers, [policy.clone(), window.clone()]);
-        assert_eq!(retire_leftovers(&plan), [policy.clone(), window.clone()]);
-        assert!(!policy.exists() && !window.exists());
-        assert!(
-            fixture.plan().leftovers.is_empty(),
-            "a second install finds nothing"
-        );
+        {
+            let fixture = Fixture::new(true);
+            let policy = fixture.path("user/AppData/Local/Ghostlight");
+            fixture.write(&policy.join(USER_POLICY_FILE_NAME), "policy");
+            fixture.write(&fixture.home.join(AUDIT_FILE_NAME), AUDIT);
+            let plan = fixture.plan();
+            assert_eq!(
+                plan.moves,
+                vec![Move {
+                    from: policy.join(USER_POLICY_FILE_NAME),
+                    to: fixture.home.join("policy").join(USER_POLICY_FILE_NAME),
+                }]
+            );
+            assert_eq!(
+                plan.audit_archive.map(|archive| archive.from),
+                Some(fixture.home.join(AUDIT_FILE_NAME))
+            );
+            assert!(plan.deletions.is_empty());
+            assert!(plan.images_to_stop.is_empty());
+        }
+        {
+            let mut fixture = Fixture::new(false);
+            fixture.roots.xdg_config_home = Some(fixture.path("user/xdg-config"));
+            let policy = fixture.path("user/.local/state/ghostlight");
+            fixture.write(&policy.join(USER_POLICY_FILE_NAME), "policy");
+            fixture.write(
+                &fixture.path("user/xdg-config/ghostlight/harness-locations.json"),
+                "{}",
+            );
+            let cache = fixture.path("user/.cache/ghostlight");
+            fixture.write(&cache.join(AUDIT_FILE_NAME), AUDIT);
+            let plan = fixture.plan();
+            assert_eq!(plan.moves.len(), 2);
+            assert_eq!(
+                plan.audit_archive.map(|archive| archive.from),
+                Some(cache.join(AUDIT_FILE_NAME))
+            );
+        }
+        {
+            let fixture = Fixture::new(true);
+            let serving = fixture.path("old/v0.9.2");
+            fixture.executables(&serving);
+            fixture.write(&serving.join(AUDIT_FILE_NAME), AUDIT);
+            fixture.record(&json!({
+                "schema": 1,
+                "serving_directory": serving,
+                "release_directory": serving,
+                "state_directory": serving,
+                "policy_directory": fixture.path("user/AppData/Local/Ghostlight"),
+            }));
+            let plan = fixture.plan();
+            assert_eq!(
+                plan.audit_archive,
+                Some(Move {
+                    from: serving.join(AUDIT_FILE_NAME),
+                    to: fixture.home.join("state").join("audit-pre-0.9.2.jsonl"),
+                })
+            );
+        }
+        {
+            let fixture = Fixture::new(true);
+            let virtualized = fixture
+                .path("user/AppData/Local/Packages/OpenAI.Codex_x/LocalCache/Local/Ghostlight");
+            fixture.write(&virtualized.join(USER_POLICY_FILE_NAME), "policy");
+            fixture.record(&json!({
+                "schema": 1,
+                "serving_directory": fixture.home.join("bin"),
+                "state_directory": fixture.home,
+                "policy_directory": virtualized,
+            }));
+            let plan = fixture.plan();
+            assert_eq!(
+                plan.moves,
+                vec![Move {
+                    from: virtualized.join(USER_POLICY_FILE_NAME),
+                    to: fixture.home.join("policy").join(USER_POLICY_FILE_NAME),
+                }]
+            );
+            assert_eq!(plan.virtualized_sources, vec![virtualized]);
+            execute(&plan).unwrap();
+            let policy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+            assert_eq!(fs::read_to_string(&policy).unwrap(), "policy");
+            assert!(!is_virtualized(&policy));
+        }
+        {
+            assert_policy_already_home(Path::to_path_buf);
+        }
+        #[cfg(windows)]
+        {
+            assert_policy_already_home(|policy| PathBuf::from(format!(r"\?\{}", policy.display())));
+            assert_policy_already_home(|policy| {
+                PathBuf::from(policy.to_string_lossy().to_uppercase())
+            });
+        }
+        {
+            let fixture = Fixture::new(true);
+            let file = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+            fixture.write(&file, "policy");
+            let plan = MigrationPlan {
+                moves: vec![Move {
+                    from: file.clone(),
+                    to: file.clone(),
+                }],
+                ..MigrationPlan::default()
+            };
+            execute(&plan).unwrap();
+            assert_eq!(fs::read_to_string(&file).unwrap(), "policy");
+        }
+        {
+            let mut fixture = Fixture::new(true);
+            fixture.roots.local_app_data =
+                Some(fixture.path("user/AppData/Local/Packages/OpenAI.Codex_x/LocalCache/Local"));
+            assert_eq!(
+                fixture.roots.policy_directory(),
+                fixture.path("user/AppData/Local/Ghostlight")
+            );
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            execute(&plan).unwrap();
+            let policy = fixture.home.join("policy");
+            let state = fixture.home.join("state");
+            assert_eq!(
+                fs::read_to_string(policy.join(USER_POLICY_FILE_NAME)).unwrap(),
+                "user policy"
+            );
+            assert_eq!(
+                fs::read_to_string(policy.join(MANAGED_CACHE_FILE_NAME)).unwrap(),
+                "cache"
+            );
+            assert!(!state.join(HANDOFF_MARKER_NAME).exists());
+            let record = state.join("setup.json");
+            let recorded =
+                setup_state::read(&record).expect("the migration wrote the setup record");
+            assert!(recorded.first_request_ms > 0);
+            assert!(state.join(HARNESS_LOCATIONS_NAME).is_file());
+            assert_eq!(
+                fs::read_to_string(state.join("audit-pre-2.0.jsonl")).unwrap(),
+                AUDIT
+            );
+            for gone in [
+                fixture.home.join(AUDIT_FILE_NAME),
+                fixture.home.join(LEGACY_RECORD_NAME),
+                fixture.home.join(LEGACY_STARTUP_NAME),
+                fixture.home.join(LEGACY_DEPLOY_LOCK_NAME),
+                fixture.home.join(LEGACY_INSTALLATION_LOCK_NAME),
+                fixture
+                    .path("repo/target/release")
+                    .join(LEGACY_DEPLOY_LOCK_NAME),
+                fixture
+                    .path("user/AppData/Local/Ghostlight")
+                    .join(USER_POLICY_FILE_NAME),
+                fixture
+                    .path("user/AppData/Local/Ghostlight")
+                    .join(HANDOFF_MARKER_NAME),
+            ] {
+                assert!(!gone.exists(), "{}", gone.display());
+            }
 
-        // A policy folder that still holds a file, and window data beside something else, stay.
-        fixture.write(&policy.join("notes.txt"), "mine");
-        fs::create_dir_all(window.join("CacheStorage")).unwrap();
-        fixture.write(&window.join("unrelated.txt"), "mine");
-        assert!(retire_leftovers(&fixture.plan()).is_empty());
-        assert!(policy.join("notes.txt").is_file() && window.join("unrelated.txt").is_file());
+            let again = fixture.plan();
+            assert!(again.is_empty(), "{again:?}");
+            execute(&again).unwrap();
+            assert_eq!(
+                fs::read_to_string(policy.join(USER_POLICY_FILE_NAME)).unwrap(),
+                "user policy"
+            );
+        }
+        {
+            let fixture = development_custody();
+            let record = fixture.home.join("state").join("setup.json");
+            fixture.write(&record, r#"{"first_request_ms":5}"#);
+            let plan = fixture.plan();
+            assert_eq!(plan.setup_record, None);
+            execute(&plan).unwrap();
+            assert_eq!(
+                setup_state::read(&record),
+                Some(SetupRecord {
+                    first_request_ms: 5
+                })
+            );
+        }
+        {
+            let fixture = Fixture::new(true);
+            let plan = fixture.plan();
+            assert!(plan.is_empty(), "{plan:?}");
+            assert_eq!(plan.setup_record, None);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
 
-        let windows = Fixture::new(true);
-        fs::create_dir_all(windows.path("user/.local/state/ghostlight")).unwrap();
-        assert!(
-            windows.plan().leftovers.is_empty(),
-            "the Linux folders only"
-        );
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            for transfer in plan.transfers() {
+                fs::set_permissions(&transfer.from, fs::Permissions::from_mode(0o644)).unwrap();
+            }
+            let archive = fixture.home.join("state").join("audit-pre-2.0.jsonl");
+            let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            let assert_private = || {
+                for directory in ["policy", "state"] {
+                    let directory = fixture.home.join(directory);
+                    assert_eq!(mode(&directory), 0o700, "{}", directory.display());
+                    for path in everything_under(&directory) {
+                        let expected = if path.is_dir() { 0o700 } else { 0o600 };
+                        assert_eq!(mode(&path), expected, "{}", path.display());
+                    }
+                }
+            };
+
+            prepare(&plan).unwrap();
+            copy_state(&plan).unwrap();
+            assert!(everything_under(&fixture.home.join("state"))
+                .iter()
+                .any(|path| path.to_string_lossy().contains(COPY_BASE_SUFFIX)));
+            assert_private();
+            archive_audit(&plan).unwrap();
+            assert!(archive.is_file());
+            assert_private();
+        }
+        {
+            assert_eq!(stop_outcome(true, false), StopOutcome::Stopping);
+            assert_eq!(stop_outcome(false, true), StopOutcome::AlreadyGone);
+            assert_eq!(stop_outcome(false, false), StopOutcome::Failed);
+        }
     }
 
+    /// Protects defect 64164332 and the promise that a migration never overwrites what is not its own:
+    /// a home inside packaged storage, a broken 1.x record, a destination that cannot be made or holds
+    /// different content without a record, and a move that fails are each refused with the path named
+    /// before anything changes, and a destination that appears after the check keeps the original.
     #[test]
-    fn what_1x_left_in_local_app_data_is_removed_on_windows_and_anything_else_is_left() {
-        let fixture = Fixture::new(true);
-        let policy = fixture.path("user/AppData/Local/Ghostlight");
-        let window = fixture.path("user/AppData/Local/org.sylin.ghostlight");
-        let managed = fixture.path("ProgramData/Ghostlight");
-        fs::create_dir_all(&policy).unwrap();
-        fs::create_dir_all(&managed).unwrap();
-        fixture.write(&window.join("EBWebView/Default/Preferences"), "{}");
-        fixture.write(&window.join("EBWebView/Local State"), "{}");
-        let plan = fixture.plan();
-        assert!(
-            plan.is_empty(),
-            "leftovers need no migration and no restart"
-        );
-        assert_eq!(plan.leftovers, [policy.clone(), window.clone()]);
-        assert_eq!(retire_leftovers(&plan), [policy.clone(), window.clone()]);
-        assert!(!policy.exists() && !window.exists());
-        assert!(managed.is_dir(), "the managed bootstrap is never named");
-        assert!(
-            fixture.plan().leftovers.is_empty(),
-            "a second install finds nothing"
-        );
+    fn a_migration_that_cannot_finish_safely_refuses_before_changing_anything() {
+        {
+            let fixture = Fixture::new(true);
+            let home = fixture.path("user/AppData/Local/Packages/X_y/LocalCache/Local/.ghostlight");
+            assert!(matches!(
+                plan(&home, &fixture.legacy()),
+                Err(MigrationError::VirtualizedHome(_))
+            ));
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            // The last file in the plan cannot be placed: its destination holds other content.
+            let blocked = fixture.home.join("state").join(HARNESS_LOCATIONS_NAME);
+            fixture.write(&blocked, "something else");
+            let error = execute(&plan).unwrap_err();
+            assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
+            assert!(error.to_string().contains(&blocked.display().to_string()));
+            assert!(fixture.home.join(LEGACY_RECORD_NAME).is_file());
+            assert!(fixture.home.join(AUDIT_FILE_NAME).is_file());
+            assert!(fixture
+                .path("user/AppData/Local/Ghostlight")
+                .join(USER_POLICY_FILE_NAME)
+                .is_file());
+            assert!(!fixture
+                .home
+                .join("policy")
+                .join(USER_POLICY_FILE_NAME)
+                .exists());
+            assert_eq!(fs::read_to_string(&blocked).unwrap(), "something else");
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            fixture.write(&fixture.home.join("policy"), "a file, not a directory");
+            let error = execute(&plan).unwrap_err();
+            assert!(matches!(error, MigrationError::Prepare { .. }), "{error}");
+            assert!(error
+                .to_string()
+                .contains(&fixture.home.join("policy").display().to_string()));
+            assert!(fixture.home.join(LEGACY_RECORD_NAME).is_file());
+            assert!(fixture.home.join(AUDIT_FILE_NAME).is_file());
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            prepare(&plan).unwrap();
+            let policy = fixture.path("user/AppData/Local/Ghostlight");
+            let cache = fixture.home.join("policy").join(MANAGED_CACHE_FILE_NAME);
+            fixture.write(&cache, "a bundle written by a 2.0 service");
+            let error = copy_state(&plan).unwrap_err();
+            assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
+            assert!(error.to_string().contains(&cache.display().to_string()));
+            assert_eq!(
+                fs::read_to_string(policy.join(MANAGED_CACHE_FILE_NAME)).unwrap(),
+                "cache"
+            );
+            assert_eq!(
+                fs::read_to_string(&cache).unwrap(),
+                "a bundle written by a 2.0 service"
+            );
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+            fs::create_dir_all(copy.parent().unwrap()).unwrap();
+            fs::write(&copy, "somebody else's file").unwrap();
+            let error = prepare(&plan).unwrap_err();
+            assert!(matches!(error, MigrationError::Conflict { .. }), "{error}");
+            assert!(!record_path(&copy).exists());
+        }
+        {
+            let fixture = Fixture::new(true);
+            fixture.record(&json!({ "serving_directory": "relative/path", "other": 7 }));
+            let record = LegacyInstallation::read(&fixture.home.join(LEGACY_RECORD_NAME))
+                .unwrap()
+                .unwrap();
+            assert_eq!(record.schema, 0);
+            assert!(record.directories().is_empty());
+            assert!(fixture.plan().images_to_stop.is_empty());
 
-        // A policy folder that still holds a file, and web view data beside something else, stay.
-        fixture.write(&policy.join("notes.txt"), "mine");
-        fs::create_dir_all(window.join("EBWebView")).unwrap();
-        fixture.write(&window.join("unrelated.txt"), "mine");
-        assert!(retire_leftovers(&fixture.plan()).is_empty());
-        assert!(policy.join("notes.txt").is_file() && window.join("unrelated.txt").is_file());
+            fixture.write(&fixture.home.join(LEGACY_RECORD_NAME), "not json");
+            let error =
+                LegacyInstallation::read(&fixture.home.join(LEGACY_RECORD_NAME)).unwrap_err();
+            assert!(error.to_string().contains(LEGACY_RECORD_NAME), "{error}");
+        }
     }
 
+    /// Protects defects 83aa61f0 and 80810b08: copying leaves every original for the 1.x service that
+    /// still runs, and the retire rule then settles each original against its copy. An original
+    /// rewritten after the copy wins, a copy a 2.0 service changed is kept, both changing keeps both
+    /// and never blocks the next run, the record beside a copy goes with its original, a copy a failed
+    /// run left is adopted whichever side changed, a rerun after partial success continues, and a set
+    /// aside name never overwrites an earlier one.
     #[test]
-    fn inside_an_app_container_the_1x_folders_are_left_for_the_next_install_outside() {
-        let mut fixture = Fixture::new(true);
-        fixture.roots.in_container = true;
-        let policy = fixture.path("user/AppData/Local/Ghostlight");
-        let window = fixture.path("user/AppData/Local/org.sylin.ghostlight/EBWebView");
-        fs::create_dir_all(&policy).unwrap();
-        fs::create_dir_all(&window).unwrap();
-        let plan = fixture.plan();
-        assert!(plan.leftovers.is_empty());
-        assert!(retire_leftovers(&plan).is_empty());
-        assert!(policy.is_dir() && window.is_dir());
+    fn the_retire_rule_settles_each_original_against_its_copy() {
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            // The first file was moved, and the second was copied but its original not yet removed.
+            let policy = fixture.path("user/AppData/Local/Ghostlight");
+            let destination = fixture.home.join("policy");
+            fs::create_dir_all(&destination).unwrap();
+            fs::rename(
+                policy.join(USER_POLICY_FILE_NAME),
+                destination.join(USER_POLICY_FILE_NAME),
+            )
+            .unwrap();
+            fs::copy(
+                policy.join(MANAGED_CACHE_FILE_NAME),
+                destination.join(MANAGED_CACHE_FILE_NAME),
+            )
+            .unwrap();
+            execute(&plan).unwrap();
+            assert_eq!(
+                fs::read_to_string(destination.join(USER_POLICY_FILE_NAME)).unwrap(),
+                "user policy"
+            );
+            assert!(!policy.join(MANAGED_CACHE_FILE_NAME).exists());
+            assert_eq!(
+                fs::read_to_string(destination.join(MANAGED_CACHE_FILE_NAME)).unwrap(),
+                "cache"
+            );
+            assert!(!fixture.home.join(LEGACY_RECORD_NAME).exists());
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            prepare(&plan).unwrap();
+            let copied = copy_state(&plan).unwrap();
+            assert_eq!(copied.len(), plan.moves.len());
+            for transfer in &plan.moves {
+                assert!(transfer.from.is_file(), "{}", transfer.from.display());
+                assert_eq!(
+                    fs::read(&transfer.from).unwrap(),
+                    fs::read(&transfer.to).unwrap()
+                );
+            }
+            retire_state(&copied).unwrap();
+            for transfer in &plan.moves {
+                assert!(!transfer.from.exists(), "{}", transfer.from.display());
+                assert!(transfer.to.is_file());
+            }
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            prepare(&plan).unwrap();
+            let copied = copy_state(&plan).unwrap();
+            let original = legacy_user_policy(&fixture);
+            fs::write(&original, "saved by the 1.x workbench").unwrap();
+            retire_state(&copied).unwrap();
+            assert!(!original.exists());
+            assert_eq!(
+                fs::read_to_string(fixture.home.join("policy").join(USER_POLICY_FILE_NAME))
+                    .unwrap(),
+                "saved by the 1.x workbench"
+            );
+            assert!(fixture.plan().moves.is_empty());
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            prepare(&plan).unwrap();
+            let copied = copy_state(&plan).unwrap();
+            let status = fixture.home.join("policy").join(MANAGED_STATUS_FILE_NAME);
+            fs::write(&status, "written by a 2.0 service").unwrap();
+            retire_state(&copied).unwrap();
+            assert_eq!(
+                fs::read_to_string(&status).unwrap(),
+                "written by a 2.0 service"
+            );
+            assert!(!fixture
+                .path("user/AppData/Local/Ghostlight")
+                .join(MANAGED_STATUS_FILE_NAME)
+                .exists());
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            prepare(&plan).unwrap();
+            let copied = copy_state(&plan).unwrap();
+            let original = legacy_user_policy(&fixture);
+            let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+            fs::write(&original, "edited in the 1.x workbench").unwrap();
+            fs::write(&copy, "edited by a 2.0 service").unwrap();
+            let error = retire_state(&copied).unwrap_err();
+            let aside = original.with_file_name(format!("{USER_POLICY_FILE_NAME}.pre-2.0"));
+            assert!(
+                matches!(
+                    &error,
+                    MigrationError::Conflict {
+                        disposition: Disposition::SetAside(kept),
+                        ..
+                    } if *kept == aside
+                ),
+                "{error}"
+            );
+            assert!(error.to_string().contains(&aside.display().to_string()));
+            assert!(!original.exists());
+            assert_eq!(
+                fs::read_to_string(&aside).unwrap(),
+                "edited in the 1.x workbench"
+            );
+            assert_eq!(
+                fs::read_to_string(&copy).unwrap(),
+                "edited by a 2.0 service"
+            );
+            // Every other original was still retired, and the next install has nothing to refuse.
+            let again = fixture.plan();
+            assert!(again.moves.is_empty(), "{:?}", again.moves);
+            execute(&again).unwrap();
+            assert_eq!(
+                fs::read_to_string(&copy).unwrap(),
+                "edited by a 2.0 service"
+            );
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            prepare(&plan).unwrap();
+            let copied = copy_state(&plan).unwrap();
+            let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+            assert!(record_path(&copy).is_file());
+            retire_state(&copied).unwrap();
+            for transfer in &plan.moves {
+                assert!(!record_path(&transfer.to).exists());
+            }
+        }
+        {
+            let fixture = development_custody();
+            let plan = fixture.plan();
+            prepare(&plan).unwrap();
+            copy_state(&plan).unwrap();
+            let original = legacy_user_policy(&fixture);
+            let copy = fixture.home.join("policy").join(USER_POLICY_FILE_NAME);
+            let status = fixture.home.join("policy").join(MANAGED_STATUS_FILE_NAME);
+            fs::write(&original, "saved by a 1.x workbench").unwrap();
+            fs::write(&status, "written by a 2.0 service").unwrap();
+
+            // The failed run never retired anything, and the next plan lists the same files.
+            let again = fixture.plan();
+            assert_eq!(again.moves, plan.moves);
+            execute(&again).unwrap();
+            assert!(!original.exists());
+            assert_eq!(
+                fs::read_to_string(&copy).unwrap(),
+                "saved by a 1.x workbench"
+            );
+            assert_eq!(
+                fs::read_to_string(&status).unwrap(),
+                "written by a 2.0 service"
+            );
+            for transfer in &plan.moves {
+                assert!(!transfer.from.exists(), "{}", transfer.from.display());
+                assert!(!record_path(&transfer.to).exists());
+            }
+        }
+        {
+            let scratch = Scratch::new();
+            let file = scratch.path().join("user-policy.json");
+            fs::write(&file, "first").unwrap();
+            let first = set_aside(&file).unwrap();
+            fs::write(&file, "second").unwrap();
+            let second = set_aside(&file).unwrap();
+            assert_ne!(first, second);
+            assert_eq!(fs::read_to_string(first).unwrap(), "first");
+            assert_eq!(fs::read_to_string(second).unwrap(), "second");
+        }
     }
 
+    /// Protects defects dbd52fa6, 816806e9 and da955857 and the ADR-0199 Flatpak retirement: the
+    /// folders 1.x left go on any install, Windows included, only while they hold nothing else, and
+    /// are left for an install outside an app container. The Flatpak route goes and the override it
+    /// made is restored or deleted, while a person's change, a permission that was already there and
+    /// anything that was never Ghostlight's are left and reported; a second run does nothing and is
+    /// not reported as a change.
     #[test]
-    fn the_flatpak_route_is_removed_and_the_override_restored_then_a_second_run_does_nothing() {
-        let fixture = Fixture::new(false);
-        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
-        let plan = fixture.plan();
-        assert!(!plan.is_empty());
-        assert!(!plan.has_earlier_installation());
-        assert_eq!(plan.flatpak.as_ref(), Some(&route));
+    fn what_1x_left_outside_the_home_goes_only_while_it_is_still_ghostlights() {
+        {
+            let fixture = Fixture::new(false);
+            let policy = fixture.path("user/.local/state/ghostlight");
+            let window = fixture.path("user/.local/share/org.sylin.ghostlight");
+            fs::create_dir_all(&policy).unwrap();
+            for entry in ["CacheStorage", "WebKitCache", "mediakeys", "storage"] {
+                fs::create_dir_all(window.join(entry)).unwrap();
+            }
+            fixture.write(&window.join("hsts-storage.sqlite"), "");
+            let plan = fixture.plan();
+            assert!(
+                plan.is_empty(),
+                "leftovers need no migration and no restart"
+            );
+            assert_eq!(plan.leftovers, [policy.clone(), window.clone()]);
+            assert_eq!(retire_leftovers(&plan), [policy.clone(), window.clone()]);
+            assert!(!policy.exists() && !window.exists());
+            assert!(
+                fixture.plan().leftovers.is_empty(),
+                "a second install finds nothing"
+            );
 
-        let steps = retire_flatpak_route(&plan);
-        assert_eq!(
-            results(&steps),
-            [
-                (FlatpakPart::Manifest, FlatpakResult::Removed),
-                (FlatpakPart::Registration, FlatpakResult::Removed),
-                (FlatpakPart::PermissionOverride, FlatpakResult::Restored),
-                (FlatpakPart::Custody, FlatpakResult::Removed),
-            ]
-        );
-        assert!(!route.manifest.exists());
-        assert!(!route.registration.exists());
-        assert!(!route.custody.exists());
-        assert_eq!(
-            fs::read_to_string(&route.permission_override).unwrap(),
-            OVERRIDE_BEFORE
-        );
+            // A policy folder that still holds a file, and window data beside something else, stay.
+            fixture.write(&policy.join("notes.txt"), "mine");
+            fs::create_dir_all(window.join("CacheStorage")).unwrap();
+            fixture.write(&window.join("unrelated.txt"), "mine");
+            assert!(retire_leftovers(&fixture.plan()).is_empty());
+            assert!(policy.join("notes.txt").is_file() && window.join("unrelated.txt").is_file());
 
-        assert!(fixture.plan().is_empty());
-        assert!(retire_flatpak_route(&fixture.plan()).is_empty());
-        assert!(retire_flatpak_route(&plan).is_empty());
-    }
+            let windows = Fixture::new(true);
+            fs::create_dir_all(windows.path("user/.local/state/ghostlight")).unwrap();
+            assert!(
+                windows.plan().leftovers.is_empty(),
+                "the Linux folders only"
+            );
+        }
+        {
+            let fixture = Fixture::new(true);
+            let policy = fixture.path("user/AppData/Local/Ghostlight");
+            let window = fixture.path("user/AppData/Local/org.sylin.ghostlight");
+            let managed = fixture.path("ProgramData/Ghostlight");
+            fs::create_dir_all(&policy).unwrap();
+            fs::create_dir_all(&managed).unwrap();
+            fixture.write(&window.join("EBWebView/Default/Preferences"), "{}");
+            fixture.write(&window.join("EBWebView/Local State"), "{}");
+            let plan = fixture.plan();
+            assert!(
+                plan.is_empty(),
+                "leftovers need no migration and no restart"
+            );
+            assert_eq!(plan.leftovers, [policy.clone(), window.clone()]);
+            assert_eq!(retire_leftovers(&plan), [policy.clone(), window.clone()]);
+            assert!(!policy.exists() && !window.exists());
+            assert!(managed.is_dir(), "the managed bootstrap is never named");
+            assert!(
+                fixture.plan().leftovers.is_empty(),
+                "a second install finds nothing"
+            );
 
-    #[test]
-    fn an_override_the_route_created_is_deleted() {
-        let fixture = Fixture::new(false);
-        let route = flatpak_route(&fixture, None);
-        let steps = retire_flatpak_route(&fixture.plan());
-        assert!(
-            results(&steps).contains(&(FlatpakPart::PermissionOverride, FlatpakResult::Removed))
-        );
-        assert!(!route.permission_override.exists());
-    }
+            // A policy folder that still holds a file, and web view data beside something else, stay.
+            fixture.write(&policy.join("notes.txt"), "mine");
+            fs::create_dir_all(window.join("EBWebView")).unwrap();
+            fixture.write(&window.join("unrelated.txt"), "mine");
+            assert!(retire_leftovers(&fixture.plan()).is_empty());
+            assert!(policy.join("notes.txt").is_file() && window.join("unrelated.txt").is_file());
+        }
+        {
+            let mut fixture = Fixture::new(true);
+            fixture.roots.in_container = true;
+            let policy = fixture.path("user/AppData/Local/Ghostlight");
+            let window = fixture.path("user/AppData/Local/org.sylin.ghostlight/EBWebView");
+            fs::create_dir_all(&policy).unwrap();
+            fs::create_dir_all(&window).unwrap();
+            let plan = fixture.plan();
+            assert!(plan.leftovers.is_empty());
+            assert!(retire_leftovers(&plan).is_empty());
+            assert!(policy.is_dir() && window.is_dir());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+            let plan = fixture.plan();
+            assert!(!plan.is_empty());
+            assert!(!plan.has_earlier_installation());
+            assert_eq!(plan.flatpak.as_ref(), Some(&route));
 
-    #[test]
-    fn an_override_a_person_changed_since_is_left_and_reported() {
-        let fixture = Fixture::new(false);
-        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
-        let changed = format!("{OVERRIDE_AFTER}[Environment]\nKEY=value\n");
-        fixture.write(&route.permission_override, &changed);
-        let steps = retire_flatpak_route(&fixture.plan());
-        assert_eq!(
-            results(&steps),
-            [
-                (FlatpakPart::Manifest, FlatpakResult::Removed),
-                (FlatpakPart::Registration, FlatpakResult::Removed),
-                (FlatpakPart::PermissionOverride, FlatpakResult::LeftChanged),
-                (FlatpakPart::Custody, FlatpakResult::Removed),
-            ]
-        );
-        assert_eq!(
-            fs::read_to_string(&route.permission_override).unwrap(),
-            changed
-        );
-        assert!(fixture.plan().is_empty());
-    }
+            let steps = retire_flatpak_route(&plan);
+            assert_eq!(
+                results(&steps),
+                [
+                    (FlatpakPart::Manifest, FlatpakResult::Removed),
+                    (FlatpakPart::Registration, FlatpakResult::Removed),
+                    (FlatpakPart::PermissionOverride, FlatpakResult::Restored),
+                    (FlatpakPart::Custody, FlatpakResult::Removed),
+                ]
+            );
+            assert!(!route.manifest.exists());
+            assert!(!route.registration.exists());
+            assert!(!route.custody.exists());
+            assert_eq!(
+                fs::read_to_string(&route.permission_override).unwrap(),
+                OVERRIDE_BEFORE
+            );
 
-    #[test]
-    fn a_manifest_or_registration_that_is_not_ghostlights_is_left_and_reported() {
-        let fixture = Fixture::new(false);
-        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
-        let plan = fixture.plan();
-        fixture.write(&route.manifest, "{\"name\":\"org.example.other\"}");
-        fixture.write(
-            &route.registration,
-            "[D-BUS Service]\nName=org.sylin.ghostlight\nExec=\"/usr/bin/other\"\n",
-        );
-        let steps = retire_flatpak_route(&plan);
-        assert_eq!(
-            results(&steps),
-            [
-                (FlatpakPart::Manifest, FlatpakResult::LeftForeign),
-                (FlatpakPart::Registration, FlatpakResult::LeftForeign),
-                (FlatpakPart::PermissionOverride, FlatpakResult::Restored),
-                (FlatpakPart::Custody, FlatpakResult::Removed),
-            ]
-        );
-        assert!(route.manifest.is_file() && route.registration.is_file());
-        assert!(fixture.plan().is_empty());
-    }
-
-    #[test]
-    fn files_that_were_never_ghostlights_do_not_plan_anything() {
-        let fixture = Fixture::new(false);
-        let route = FlatpakLeftovers::below(&fixture.roots.user_home);
-        fixture.write(&route.manifest, "{\"name\":\"org.example.other\"}");
-        fixture.write(
-            &route.registration,
-            "[D-BUS Service]\nName=org.example.other\n",
-        );
-        fixture.write(&route.permission_override, OVERRIDE_AFTER);
-        fixture.write(&route.custody, "not a record");
-        let plan = fixture.plan();
-        assert!(plan.is_empty());
-        assert!(retire_flatpak_route(&plan).is_empty());
-        assert!(route.manifest.is_file() && route.permission_override.is_file());
-    }
-
-    #[test]
-    fn a_permission_that_was_already_there_is_left_alone() {
-        let fixture = Fixture::new(false);
-        let route = flatpak_route(&fixture, Some(OVERRIDE_AFTER));
-        fixture.write(&route.custody, &custody(Some(OVERRIDE_AFTER), false));
-        let steps = retire_flatpak_route(&fixture.plan());
-        assert!(!results(&steps)
-            .iter()
-            .any(|(part, _)| *part == FlatpakPart::PermissionOverride));
-        assert_eq!(
-            fs::read_to_string(&route.permission_override).unwrap(),
-            OVERRIDE_AFTER
-        );
-        assert!(!route.custody.exists());
-    }
-
-    #[test]
-    fn an_override_an_earlier_run_already_restored_is_not_reported_as_changed() {
-        let fixture = Fixture::new(false);
-        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
-        // An earlier run restored the override and then failed a later step, so the record stays.
-        fixture.write(&route.permission_override, OVERRIDE_BEFORE);
-        let steps = retire_flatpak_route(&fixture.plan());
-        assert_eq!(
-            results(&steps),
-            [
-                (FlatpakPart::Manifest, FlatpakResult::Removed),
-                (FlatpakPart::Registration, FlatpakResult::Removed),
-                (FlatpakPart::Custody, FlatpakResult::Removed),
-            ]
-        );
-        assert_eq!(
-            fs::read_to_string(&route.permission_override).unwrap(),
-            OVERRIDE_BEFORE
-        );
-        assert!(fixture.plan().is_empty());
-    }
-
-    #[test]
-    fn nothing_is_granted_when_the_override_is_gone() {
-        let fixture = Fixture::new(false);
-        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
-        fs::remove_file(&route.permission_override).unwrap();
-        retire_flatpak_route(&fixture.plan());
-        assert!(!route.permission_override.exists());
-    }
-
-    #[test]
-    fn a_directory_at_a_route_path_is_foreign() {
-        let fixture = Fixture::new(false);
-        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
-        let plan = fixture.plan();
-        fs::remove_file(&route.manifest).unwrap();
-        fs::create_dir(&route.manifest).unwrap();
-        let steps = retire_flatpak_route(&plan);
-        assert_eq!(
-            results(&steps)[0],
-            (FlatpakPart::Manifest, FlatpakResult::LeftForeign)
-        );
-        assert!(route.manifest.is_dir());
-    }
-
-    #[test]
-    fn a_process_that_exits_before_its_kill_counts_as_stopped() {
-        assert_eq!(stop_outcome(true, false), StopOutcome::Stopping);
-        assert_eq!(stop_outcome(false, true), StopOutcome::AlreadyGone);
-        assert_eq!(stop_outcome(false, false), StopOutcome::Failed);
+            assert!(fixture.plan().is_empty());
+            assert!(retire_flatpak_route(&fixture.plan()).is_empty());
+            assert!(retire_flatpak_route(&plan).is_empty());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = flatpak_route(&fixture, None);
+            let steps = retire_flatpak_route(&fixture.plan());
+            assert!(results(&steps)
+                .contains(&(FlatpakPart::PermissionOverride, FlatpakResult::Removed)));
+            assert!(!route.permission_override.exists());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+            let changed = format!("{OVERRIDE_AFTER}[Environment]\nKEY=value\n");
+            fixture.write(&route.permission_override, &changed);
+            let steps = retire_flatpak_route(&fixture.plan());
+            assert_eq!(
+                results(&steps),
+                [
+                    (FlatpakPart::Manifest, FlatpakResult::Removed),
+                    (FlatpakPart::Registration, FlatpakResult::Removed),
+                    (FlatpakPart::PermissionOverride, FlatpakResult::LeftChanged),
+                    (FlatpakPart::Custody, FlatpakResult::Removed),
+                ]
+            );
+            assert_eq!(
+                fs::read_to_string(&route.permission_override).unwrap(),
+                changed
+            );
+            assert!(fixture.plan().is_empty());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+            let plan = fixture.plan();
+            fixture.write(&route.manifest, "{\"name\":\"org.example.other\"}");
+            fixture.write(
+                &route.registration,
+                "[D-BUS Service]\nName=org.sylin.ghostlight\nExec=\"/usr/bin/other\"\n",
+            );
+            let steps = retire_flatpak_route(&plan);
+            assert_eq!(
+                results(&steps),
+                [
+                    (FlatpakPart::Manifest, FlatpakResult::LeftForeign),
+                    (FlatpakPart::Registration, FlatpakResult::LeftForeign),
+                    (FlatpakPart::PermissionOverride, FlatpakResult::Restored),
+                    (FlatpakPart::Custody, FlatpakResult::Removed),
+                ]
+            );
+            assert!(route.manifest.is_file() && route.registration.is_file());
+            assert!(fixture.plan().is_empty());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = FlatpakLeftovers::below(&fixture.roots.user_home);
+            fixture.write(&route.manifest, "{\"name\":\"org.example.other\"}");
+            fixture.write(
+                &route.registration,
+                "[D-BUS Service]\nName=org.example.other\n",
+            );
+            fixture.write(&route.permission_override, OVERRIDE_AFTER);
+            fixture.write(&route.custody, "not a record");
+            let plan = fixture.plan();
+            assert!(plan.is_empty());
+            assert!(retire_flatpak_route(&plan).is_empty());
+            assert!(route.manifest.is_file() && route.permission_override.is_file());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = flatpak_route(&fixture, Some(OVERRIDE_AFTER));
+            fixture.write(&route.custody, &custody(Some(OVERRIDE_AFTER), false));
+            let steps = retire_flatpak_route(&fixture.plan());
+            assert!(!results(&steps)
+                .iter()
+                .any(|(part, _)| *part == FlatpakPart::PermissionOverride));
+            assert_eq!(
+                fs::read_to_string(&route.permission_override).unwrap(),
+                OVERRIDE_AFTER
+            );
+            assert!(!route.custody.exists());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+            // An earlier run restored the override and then failed a later step, so the record stays.
+            fixture.write(&route.permission_override, OVERRIDE_BEFORE);
+            let steps = retire_flatpak_route(&fixture.plan());
+            assert_eq!(
+                results(&steps),
+                [
+                    (FlatpakPart::Manifest, FlatpakResult::Removed),
+                    (FlatpakPart::Registration, FlatpakResult::Removed),
+                    (FlatpakPart::Custody, FlatpakResult::Removed),
+                ]
+            );
+            assert_eq!(
+                fs::read_to_string(&route.permission_override).unwrap(),
+                OVERRIDE_BEFORE
+            );
+            assert!(fixture.plan().is_empty());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+            fs::remove_file(&route.permission_override).unwrap();
+            retire_flatpak_route(&fixture.plan());
+            assert!(!route.permission_override.exists());
+        }
+        {
+            let fixture = Fixture::new(false);
+            let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+            let plan = fixture.plan();
+            fs::remove_file(&route.manifest).unwrap();
+            fs::create_dir(&route.manifest).unwrap();
+            let steps = retire_flatpak_route(&plan);
+            assert_eq!(
+                results(&steps)[0],
+                (FlatpakPart::Manifest, FlatpakResult::LeftForeign)
+            );
+            assert!(route.manifest.is_dir());
+        }
     }
 }
