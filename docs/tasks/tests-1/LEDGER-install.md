@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 127 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 125 |
 | `crates/desktop` | 161 | 20 | moved to the adapter lane (2026-10-21) |
 
 ## Slices
@@ -55,6 +55,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I31 | `cli/status.rs`: nine tests fold into one: status says what runs, who watches and why there is no window | 144 | 136 | the status words, as the spec gives them | landed (this commit) |
 | T-I32 | `cli/mod.rs`: five tests fold into one: a call takes one tool and its exit code never claims an uncertain effect | 136 | 132 | the `ghostlight call` contract | landed (this commit) |
 | T-I33 | `cli/deployment.rs`: six tests fold into one, an install report says what happened and shows what needs a person, which also proves finding 2 fixed: `registration_lines` now puts an entry left as it is, one that cannot be changed, the new-terminal line and a container's kept-private lines on standard error, which get.sh and get.ps1 show, instead of standard output, which they discard | 132 | 127 | the install report; finding 2 | landed (this commit) |
+| T-I34 | `cli/diagnostics.rs`: its two tests go: one restated the list of log writers, the other a two-word formatter | 127 | 125 | none here | landed (this commit) |
 
 ## Notes
 

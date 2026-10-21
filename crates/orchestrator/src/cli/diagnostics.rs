@@ -329,26 +329,3 @@ fn parse_window(text: &str) -> anyhow::Result<u128> {
     };
     Ok(value * seconds * 1000)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{op_and_detail, writers};
-
-    #[test]
-    fn show_names_the_service_and_each_edge_log_once() {
-        assert_eq!(
-            writers().collect::<Vec<_>>(),
-            ["orchestrator", "edge-mcp", "edge-browser"]
-        );
-    }
-
-    #[test]
-    fn the_operation_and_its_detail_read_as_two_words() {
-        assert_eq!(
-            op_and_detail("invocation_1", "browser_tabs succeeded none 2ms"),
-            "invocation_1 browser_tabs succeeded none 2ms"
-        );
-        assert_eq!(op_and_detail("", "session_end"), "session_end");
-        assert_eq!(op_and_detail("invocation_1", ""), "invocation_1");
-    }
-}
