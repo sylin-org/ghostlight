@@ -12,7 +12,7 @@ Statuses: `todo`, `landed` (with commits), `blocked` (with the reason).
 
 ## RESUME HERE
 
-Nothing has landed. Start with S-D1.
+S-D1 has landed. Next: S-D2.
 
 ## Slices
 
@@ -20,7 +20,7 @@ In order. "After" names what a slice waits for.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| S-D1 | fix(intake): an opening that carries the largest resume token is accepted | - | SERV-1; the opening cap rises above the token cap, with a const assert, so tokens 2.0.0 edges hold pass too | todo |
+| S-D1 | fix(intake): an opening that carries the largest resume token is accepted | - | SERV-1; the opening cap rises above the token cap, with a const assert, so tokens 2.0.0 edges hold pass too | landed (this commit) |
 | S-D2 | test(browser): the relay's return window covers its backoff after an update | - | BROW-9; a fix follows if the test fails | todo |
 | SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | todo |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |

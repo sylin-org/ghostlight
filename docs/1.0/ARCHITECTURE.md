@@ -650,7 +650,9 @@ of each kept tab's browser, when one life covers them, and whether the session s
 published with the `initialize` answer, after each call, on a promotion and on the session watch's
 one-second tick, so a close or a commit outside a call reaches it, and it is never written past
 64 KiB (`MAX_RESUME_TOKEN_BYTES`, what the reader accepts): a token too large keeps its first tabs,
-and a tab left out reads as no longer open after a restart. A resumed session's tabs enter as
+and a tab left out reads as no longer open after a restart. The opening that carries a token back
+is read up to `MAX_OPENING_BYTES`, the token's cap plus room for the opening's other fields, so any
+token the service wrote can come back. A resumed session's tabs enter as
 pending bindings, each with its own browser. A token written before digests resumes with every tab
 stale, and a token that does not decode still resumes an initialized session at the oldest supported
 revision with no claim and no tabs, with a diagnostics line. The token stays unsigned: it is a hint

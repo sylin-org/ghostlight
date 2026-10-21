@@ -12,9 +12,21 @@ use thiserror::Error;
 
 use ghostlight_relay::endpoint::Connection;
 use ghostlight_relay::protocol::Opening;
+use ghostlight_relay::MAX_FRAME_BYTES;
 
-/// Largest opening frame the service reads, in bytes: 64 KiB.
-pub const MAX_OPENING_BYTES: usize = 64 * 1024;
+use super::mcp::MAX_RESUME_TOKEN_BYTES;
+
+/// Room for everything an opening carries besides its resume token, in bytes. The program and its
+/// version, the role, the channel, the origin and the session marker are all short.
+const OPENING_FIELDS_BYTES: usize = 8 * 1024;
+
+/// Largest opening frame the service reads, in bytes: the largest resume token the service hands
+/// out, and room for the opening's other fields. An opening that carries any token the service
+/// minted is read, whatever else it says, so a long session can always reconnect.
+pub const MAX_OPENING_BYTES: usize = MAX_RESUME_TOKEN_BYTES + OPENING_FIELDS_BYTES;
+
+// The edge writes its opening as one relay frame, so the opening cap stays within the frame cap.
+const _: () = assert!(MAX_OPENING_BYTES <= MAX_FRAME_BYTES);
 
 /// Why an opening could not be read.
 #[derive(Debug, Error)]
@@ -125,6 +137,30 @@ mod tests {
         client.write_all(&[40, 0, 0, 0, b'{']).unwrap();
         let error = read_opening(&server, Duration::from_millis(100)).unwrap_err();
         assert!(matches!(error, OpeningError::Deadline));
+    }
+
+    #[test]
+    fn an_opening_that_carries_the_largest_resume_token_is_read() {
+        // A session with a few hundred tabs mints a token at its cap. The opening around it, with
+        // its channel, an extension origin and a session marker, is read all the same; it used to
+        // be refused as too large, so such a session could never reconnect.
+        let mut sent = opening();
+        sent.resume = Some("t".repeat(MAX_RESUME_TOKEN_BYTES));
+        sent.channel = Some("mcp".into());
+        sent.origin = Some(format!("chrome-extension://{}/", "a".repeat(32)));
+        sent.session = Some(serde_json::json!({ "marker": "s".repeat(512) }));
+        let size = serde_json::to_vec(&sent).unwrap().len();
+        assert!(
+            size > MAX_RESUME_TOKEN_BYTES && size <= MAX_OPENING_BYTES,
+            "{size}"
+        );
+        let expected = sent.clone();
+        let (mut client, server) = pair().unwrap();
+        // The frame is larger than a pipe's buffer, so it is written while it is read.
+        let writer = thread::spawn(move || write_frame(&mut client, &sent).unwrap());
+        let read = read_opening(&server, Duration::from_secs(5)).unwrap();
+        writer.join().unwrap();
+        assert_eq!(read, expected);
     }
 
     #[test]
