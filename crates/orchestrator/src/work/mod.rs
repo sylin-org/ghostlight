@@ -2106,7 +2106,7 @@ impl ApplicationExecutor {
             WorkspaceError::Held(hold) => Some(self.held_decision(context, hold)),
             _ => None,
         };
-        let (mut refusal, _) = language::outcome::workspace_refusal(error);
+        let mut refusal = language::outcome::workspace_refusal(error);
         let mut facts = json!({});
         if let Some(denial) = held {
             facts = with_denial_facts(denial, facts);

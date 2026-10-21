@@ -2478,15 +2478,10 @@ pub const BROWSER_PINNED_FACT: &str = "browser_pinned";
 /// session works in is the session's browser binding, so it is refused as the browser choice is.
 /// Every other error is an unusable workspace resource, for its own reason.
 #[must_use]
-pub fn workspace_refusal(error: WorkspaceError) -> (Refusal, &'static str) {
+pub fn workspace_refusal(error: WorkspaceError) -> Refusal {
     let reason = match error {
-        WorkspaceError::Held(hold) => {
-            return (
-                Refusal::TabHeld { host: hold.host() },
-                WorkspaceReason::TabHeld.as_fact(),
-            )
-        }
-        WorkspaceError::BrowserPinned => return (Refusal::BrowserPinned, BROWSER_PINNED_FACT),
+        WorkspaceError::Held(hold) => return Refusal::TabHeld { host: hold.host() },
+        WorkspaceError::BrowserPinned => return Refusal::BrowserPinned,
         WorkspaceError::NoTab => WorkspaceReason::NoTab,
         WorkspaceError::AmbiguousTab => WorkspaceReason::AmbiguousTab,
         WorkspaceError::StaleTab => WorkspaceReason::TabUnavailable,
@@ -2509,8 +2504,7 @@ pub fn workspace_refusal(error: WorkspaceError) -> (Refusal, &'static str) {
         | WorkspaceError::PhysicalTabOwned => WorkspaceReason::OwnershipMismatch { owner: None },
         WorkspaceError::UnknownWorkspace => WorkspaceReason::WorkspaceClosed,
     };
-    let fact = reason.as_fact();
-    (Refusal::WorkspaceUnusable { reason }, fact)
+    Refusal::WorkspaceUnusable { reason }
 }
 
 /// The label that introduces the safe next steps in a result's model-facing text.
@@ -4752,14 +4746,14 @@ Changes are \"unsaved\".".into()),
             ),
         ];
         for (error, expected) in examples {
-            let (refusal, fact) = workspace_refusal(error);
+            let refusal = workspace_refusal(error);
             let expected_fact = match &expected {
                 Refusal::WorkspaceUnusable { reason } => reason.as_fact(),
                 Refusal::TabHeld { .. } => "tab_held",
                 _ => "browser_pinned",
             };
             assert_eq!(refusal, expected);
-            assert_eq!(fact, expected_fact);
+            assert_eq!(refusal.reason(), expected_fact);
         }
         assert_eq!(WorkspaceReason::TabUnavailable.as_fact(), "tab_unavailable");
         assert_eq!(WorkspaceReason::NoTab.as_fact(), "no_tab");
