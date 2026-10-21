@@ -26,6 +26,7 @@ use crate::workbench::parts::{Audience, Part, Projection};
 use crate::workbench::{
     validate_policy_document, validate_search_query, HarnessActError, PageAddress,
     PolicyWriteError, RuntimeSource, WorkbenchDestination, WorkbenchRuntimeIntent,
+    POLICY_DOCUMENT_LIMIT,
 };
 
 /// The prefix of every route that carries data or takes a change.
@@ -46,8 +47,13 @@ const JSON_RESPONSE_TYPE: &str = "application/json; charset=utf-8";
 /// The most a small request body holds.
 pub(super) const SMALL_BODY: usize = 4 * 1024;
 
-/// The most a request body holding a policy document holds.
-pub(super) const POLICY_BODY: usize = 256 * 1024;
+/// The room a policy document's envelope, `{"document":""}`, takes in its body, with spare.
+const DOCUMENT_ENVELOPE: usize = 64;
+
+/// The most a request body holding a policy document holds: a document at
+/// [`POLICY_DOCUMENT_LIMIT`] with every byte escaped as two, as JSON writes a quote, a backslash
+/// or a line break, in its envelope. So the document's own limit, and its sentence, decide (U-D1).
+pub(super) const POLICY_BODY: usize = POLICY_DOCUMENT_LIMIT * 2 + DOCUMENT_ENVELOPE;
 
 /// The value of Sec-Fetch-Site for a request from the same origin.
 const FETCH_SAME_ORIGIN: &str = "same-origin";

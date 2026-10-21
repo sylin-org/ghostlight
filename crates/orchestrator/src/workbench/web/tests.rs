@@ -34,6 +34,7 @@ use crate::workbench::PageAddress;
 use crate::workbench::WorkbenchDestination;
 use crate::workbench::WorkbenchPresentationPort;
 use crate::workbench::WorkbenchQuitPort;
+use crate::workbench::POLICY_DOCUMENT_LIMIT;
 use crate::workbench::{WorkbenchNotification, WorkbenchPresentationError, WorkbenchProjection};
 
 const EXCLUDED_HOST: &str = "private-frame.invalid";
@@ -1150,6 +1151,18 @@ fn a_request_the_gate_does_not_admit_is_answered_before_any_route_runs() {
         assert_eq!(reply.status, 413, "{path}");
         assert_eq!(reply.message(), words::TOO_LARGE, "{path}");
     }
+
+    // U-D1: a policy document is refused for its size by its own limit and sentence, which a
+    // document a byte over the limit reaches even with its quotes escaped.
+    let over = "\"".repeat(POLICY_DOCUMENT_LIMIT + 1);
+    let reply = fixture.control(post(
+        "/api/policy/preview",
+        &json!({ "document": over }).to_string(),
+    ));
+    assert_eq!(
+        reply.message(),
+        words::policy_too_large(POLICY_DOCUMENT_LIMIT).as_str()
+    );
 
     assert_eq!(runtime_state(&fixture), RuntimeControlState::Active);
     assert_eq!(watched.quit.asked(), 0);

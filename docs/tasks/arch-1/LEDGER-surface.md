@@ -120,7 +120,7 @@ C3c), then the rows below.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
-| U-D1 | fix(workbench): a policy draft near the limit gets the policy-size sentence | - | SURF-5's size defect; one web test | todo |
+| U-D1 | fix(workbench): a policy draft near the limit gets the policy-size sentence | - | SURF-5's size defect; one web test; test-01 | landed (this commit) |
 | U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | todo |
 | U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | todo |
 | U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first | todo |
