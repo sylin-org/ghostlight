@@ -18,7 +18,7 @@ added there in the commit that deletes it. `governance/` moved to the language l
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 373 | 55 | 278 |
+| `work/` and `workspace/` | 373 | 55 | 251 |
 | `governance/` | 136 | 40 | moved to the language lane (2026-10-21) |
 
 ## Slices
@@ -40,7 +40,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | W9 | `tests/presentation.rs`: four feedback and notice tests are one, where feedback lands and what a refusal draws; the per-step receipt count goes (execution.rs keeps one receipt per step) | 315 | 312 | promise 3 (Presentation 1, 2, 3, 5) | landed (cc8f6580) |
 | W10 | `tests/findings.rs`: five record tests are one, each record holds only what its frame reached; three flow-step tests are one, each step now compared with the same call made alone | 312 | 306 | 2 (ADR-0202 D9-13; 77952a37, b0436754, b411e6ad, 0c9bb755) | landed (6926865b) |
 | W11 | `tests/replacement.rs`: sixteen tests are one, every sentence and step now read from `WorkspaceReason::StaleTarget` instead of literals | 306 | 291 | promise 1 (Exec 6, LANGUAGE stale handles; 43eff032) | landed (84ce58df) |
-| W12 | `tests/restarts.rs`: fourteen tests are one; `reconnect_soon`'s fixed 150 ms sleep is gone: a `Restarting` port brings the browser back the first time a call looks for it, and the rows assert the call met it away; the inert-binding rows come with `workspace/tests.rs` | 291 | 278 | promise 1 (Contract 19, ADR-0203 D1; 1d10bf74, 8a16343f, c4e382aa) | landed |
+| W12 | `tests/restarts.rs`: fourteen tests are one; `reconnect_soon`'s fixed 150 ms sleep is gone: a `Restarting` port brings the browser back the first time a call looks for it, and the rows assert the call met it away; the inert-binding rows come with `workspace/tests.rs` | 291 | 278 | promise 1 (Contract 19, ADR-0203 D1; 1d10bf74, 8a16343f, c4e382aa) | landed (890ef2c3) |
+| W13 | `tests/availability.rs`: 31 tests are four (waited for or started again; no browser waits only while one returns; the store only while it helps, with S-D7; binding and W-D5); `attach_later`'s sleeps are gone: an `ArrivesWhenAwaited` port runs the arrival when the call starts waiting; the written-record row moves to findings; the other record tests were findings' rows already | 278 | 251 | promise 4 (Contract 17, 19, 20; ADR-0196 D12; S-D7; W-D5) | landed |
 
 ## Notes
 

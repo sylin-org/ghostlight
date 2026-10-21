@@ -1386,7 +1386,7 @@ fn update_extension_then_repeat() -> String {
 
 /// The one recovery step when the selected browser did not start or its adapter did not arrive.
 /// It speaks to the model, which cannot open a browser for the person (ADR-0147 Decision 3).
-const ASK_FOR_THAT_BROWSER: &str = "Ask the user to open a window of that browser with the Ghostlight extension installed, then repeat the call.";
+pub(crate) const ASK_FOR_THAT_BROWSER: &str = "Ask the user to open a window of that browser with the Ghostlight extension installed, then repeat the call.";
 
 /// Whether a refusal that sends the person to the browser also says where the extension comes
 /// from.

@@ -61,7 +61,8 @@ fn step_result(flow: &crate::work::result::InvocationResult, index: usize) -> &V
 ///   checks and coverage; the flow's summary is qualified once.
 /// - A flow's record names the browser its last browser step reached; a step that reached none
 ///   names none.
-/// - An invalid request records no capability, no check and no browser.
+/// - An invalid request records no capability, no check and no browser; a command written to the
+///   browser names it whatever the failure, and one never written names none.
 /// - Two calls running at once in one workspace keep their own coverage, browser and checks.
 #[test]
 fn each_record_holds_only_what_its_own_frame_reached() {
@@ -166,6 +167,37 @@ fn each_record_holds_only_what_its_own_frame_reached() {
         assert_eq!(records[0].capabilities, CapabilitySet::EMPTY);
         assert!(records[0].permissions.checks.is_empty());
         assert_eq!(records[0].browser, None);
+    }
+
+    // A command written to the browser names it whatever the failure; one never written does not.
+    for (written, failure) in [
+        (true, BrowserError::DeadlineBeforeDispatch),
+        (true, BrowserError::DocumentUnavailable),
+        (false, BrowserError::DisconnectedBeforeDispatch),
+    ] {
+        let (executor, browser, workspaces, workspace, audit) = fixture();
+        workspaces
+            .acquire(&workspace)
+            .unwrap()
+            .add_tab(FAKE_BROWSER, &tab(7, "https://example.com/"))
+            .unwrap();
+        if written {
+            browser.push(Err(failure.clone()));
+        } else {
+            browser.push_unwritten(Err(failure.clone()));
+        }
+        let listed = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(listed.status, Status::Failed, "{failure:?}");
+        assert_eq!(
+            audit.0.lock().unwrap()[0].browser,
+            written.then(|| summary(FAKE_BROWSER, true).display_name()),
+            "{failure:?}"
+        );
     }
 
     // Two calls at once in one workspace.

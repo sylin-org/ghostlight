@@ -16,8 +16,10 @@ use crate::browser::adapter::chromium::protocol4::fake::{FakeExtension, Reply};
 use super::protocol4::ordinary;
 use super::*;
 use crate::browser::{
-    BrowserPort, HeartbeatSettings, RelayBrowserPort, RELAY_RETURN_WINDOW, RETURN_GRACE,
+    BrowserPort, BrowserSummary, HeartbeatSettings, RelayBrowserPort, RELAY_RETURN_WINDOW,
+    RETURN_GRACE,
 };
+use crate::language::outcome::{BrowserUnavailableReason, Refusal};
 
 /// The browser identity every scripted extension here announces.
 const RELAY_BROWSER: &str = "browser_relay";
@@ -37,22 +39,112 @@ fn attach(port: &RelayBrowserPort, attended: bool) -> FakeExtension {
     fake
 }
 
-/// Attach one scripted extension from another thread after `delay`, as a relay reconnects.
-fn attach_later(
-    port: &Arc<RelayBrowserPort>,
-    delay: Duration,
-) -> thread::JoinHandle<FakeExtension> {
-    let port = Arc::clone(port);
-    thread::spawn(move || {
-        thread::sleep(delay);
-        attach(&port, false)
-    })
+/// A port that forwards to `inner` and runs its armed arrival the moment a call starts waiting
+/// for a browser, so a test proves the call waited instead of timing a reconnect.
+struct ArrivesWhenAwaited {
+    inner: Arc<dyn BrowserPort>,
+    arrival: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl ArrivesWhenAwaited {
+    fn over(inner: Arc<dyn BrowserPort>) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            arrival: Mutex::new(None),
+        })
+    }
+
+    fn arm(&self, arrival: impl FnOnce() + Send + 'static) {
+        *self.arrival.lock().unwrap() = Some(Box::new(arrival));
+    }
+
+    /// Whether the armed arrival ran, because a call waited.
+    fn arrived(&self) -> bool {
+        self.arrival.lock().unwrap().is_none()
+    }
+
+    fn arrive(&self) {
+        let arrival = self.arrival.lock().unwrap().take();
+        if let Some(arrival) = arrival {
+            arrival();
+        }
+    }
+}
+
+impl BrowserPort for ArrivesWhenAwaited {
+    fn call(
+        &self,
+        browser: &str,
+        command: BrowserCommand,
+        deadline: Instant,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        self.inner.call(browser, command, deadline, cancelled)
+    }
+    fn call_guarded(
+        &self,
+        browser: &str,
+        command: BrowserCommand,
+        dispatch: crate::browser::BrowserDispatch<'_>,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        self.inner.call_guarded(browser, command, dispatch)
+    }
+    fn browsers(&self) -> Vec<BrowserSummary> {
+        self.inner.browsers()
+    }
+    fn last_connected_browser(&self) -> Option<String> {
+        self.inner.last_connected_browser()
+    }
+    fn installed_browser_of(&self, browser: &str) -> Option<String> {
+        self.inner.installed_browser_of(browser)
+    }
+    fn arrivals_of(&self, installed: &str) -> u64 {
+        self.inner.arrivals_of(installed)
+    }
+    fn life_of(&self, browser: &str) -> Option<String> {
+        self.inner.life_of(browser)
+    }
+    fn await_available(
+        &self,
+        browser: &str,
+        until: Instant,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> crate::browser::Availability {
+        self.arrive();
+        self.inner.await_available(browser, until, cancelled)
+    }
+    fn await_returning(
+        &self,
+        browser: &str,
+        until: Instant,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> crate::browser::Availability {
+        self.arrive();
+        self.inner.await_returning(browser, until, cancelled)
+    }
+    fn await_any(
+        &self,
+        until: Instant,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Vec<BrowserSummary> {
+        self.arrive();
+        self.inner.await_any(until, cancelled)
+    }
+    fn browser_returning(&self) -> bool {
+        self.inner.browser_returning()
+    }
+    fn publish_control_state(
+        &self,
+        state: crate::browser::adapter::RuntimeControlState,
+    ) -> Result<(), BrowserError> {
+        self.inner.publish_control_state(state)
+    }
 }
 
 /// An executor over a real relay port, with fixed installed-browser facts so recovery, if it
 /// ran, would never inspect or launch anything on this machine.
 fn relay_fixture(
-    port: Arc<RelayBrowserPort>,
+    port: Arc<dyn BrowserPort>,
     governance: GovernanceFacade,
 ) -> (
     ApplicationExecutor,
@@ -170,151 +262,6 @@ fn await_unregistered(port: &RelayBrowserPort) {
     }
 }
 
-/// The same browser reconnecting, as when its extension worker restarts the native port, is
-/// waited for. A session pinned to it continues there; it is never told about another profile.
-#[test]
-fn a_pinned_browser_that_reconnects_takes_the_call() {
-    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (executor, workspaces, workspace) =
-        relay_fixture(Arc::clone(&port), GovernanceFacade::new(None));
-
-    let first = attach(&port, false);
-    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
-    first.close();
-    await_unregistered(&port);
-    let second = attach_later(&port, Duration::from_millis(300));
-
-    let listed = list_tabs(&executor, &workspace);
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    assert_eq!(listed.facts["browsers"][0]["browser"], json!(RELAY_BROWSER));
-    drop(second.join().unwrap());
-}
-
-/// A pinned browser whose liveness lapsed is waited for, and the call goes through as soon as it
-/// answers a heartbeat again.
-#[test]
-fn a_silent_pinned_browser_that_answers_again_takes_the_call() {
-    let port = Arc::new(RelayBrowserPort::with_heartbeat_settings(
-        "service_test".into(),
-        page_assets(),
-        HeartbeatSettings {
-            interval: Duration::from_millis(20),
-            timeout: Duration::from_millis(150),
-        },
-    ));
-    let (executor, workspaces, workspace) =
-        relay_fixture(Arc::clone(&port), GovernanceFacade::new(None));
-    let fake = Arc::new(attach(&port, false));
-    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
-
-    fake.acknowledge_heartbeats(false);
-    let until = Instant::now() + Duration::from_secs(5);
-    while !port.browsers().is_empty() {
-        assert!(Instant::now() < until, "silence never hid the browser");
-        thread::sleep(Duration::from_millis(10));
-    }
-    let answering = {
-        let fake = Arc::clone(&fake);
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(300));
-            fake.acknowledge_heartbeats(true);
-        })
-    };
-
-    let listed = list_tabs(&executor, &workspace);
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    answering.join().unwrap();
-}
-
-/// Right after a service start, the browser's relay is still reconnecting. A session with no
-/// browser yet waits for it inside the grace when it opens its first tab, and recovery never
-/// runs. Its list before that answers at once and binds nothing.
-#[test]
-fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
-    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, _policy) = manual_startup();
-    let (executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
-
-    let reconnecting = attach_later(&port, Duration::from_millis(300));
-
-    let listed = list_tabs(&executor, &workspace);
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
-
-    let opened = navigate(&executor, &workspace);
-    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
-    assert_eq!(
-        workspaces.browser_of(workspace.as_str()).as_deref(),
-        Some(RELAY_BROWSER)
-    );
-    drop(reconnecting.join().unwrap());
-}
-
-/// A browser the person used and then closed is not on its way back. Once its departure is
-/// older than the grace, a session with no browser goes straight to browser startup, which keeps
-/// its whole launch budget instead of the second or so the grace would have left it. Attention
-/// the browser reported while it was open is not evidence.
-#[test]
-fn a_browser_closed_longer_ago_than_the_grace_is_not_waited_for() {
-    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, _policy) = manual_startup();
-    let (executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
-    // Long past the port's own reconnect window, so the departure is the only evidence.
-    port.backdate(RETURN_GRACE);
-
-    let fake = attach(&port, true);
-    assert!(
-        port.browsers()[0].attended,
-        "the browser reported attention"
-    );
-    fake.close();
-    await_unregistered(&port);
-    assert!(
-        port.browser_returning(),
-        "a connection that ended moments ago may come back"
-    );
-
-    port.backdate(RETURN_GRACE);
-    assert!(!port.browser_returning());
-    let started = Instant::now();
-    let refused = navigate(&executor, &workspace);
-    assert_eq!(refused.status, Status::Failed);
-    assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "browser startup ran at once instead of after a wait, took {:?}",
-        started.elapsed()
-    );
-}
-
-/// Publishing the endpoint opens a short window for relays that served an earlier service. When
-/// none arrives, the call stops waiting at the end of that window, not at the end of the grace,
-/// so a cold start with no browser leaves browser startup most of the deadline.
-#[test]
-fn a_freshly_published_port_with_no_relay_stops_waiting_after_the_reconnect_window() {
-    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, _policy) = manual_startup();
-    let (executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
-    port.backdate(RETURN_GRACE);
-    assert!(!port.browser_returning(), "an old port with no relay");
-
-    let published = Instant::now();
-    port.endpoint_published();
-    assert!(port.browser_returning(), "relays may be reconnecting");
-    let refused = navigate(&executor, &workspace);
-    assert_eq!(refused.status, Status::Failed);
-    assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
-    assert!(
-        published.elapsed() >= RELAY_RETURN_WINDOW,
-        "the call waited out the reconnect window"
-    );
-    assert!(
-        published.elapsed() < RETURN_GRACE / 2,
-        "the wait ended with the reconnect window, not the grace, took {:?}",
-        published.elapsed()
-    );
-}
-
 /// Governance that starts a browser on demand, the Windows default, written out so the tests
 /// read the same on every platform.
 fn on_demand_startup() -> (GovernanceFacade, Scratch) {
@@ -344,84 +291,6 @@ fn chrome_installed() -> Vec<RecoveryCandidate> {
         ordinary_executable: Some(PathBuf::from("chrome")),
         extension: true,
     }]
-}
-
-/// The session's browser closed long ago. Under `on_demand`, the call does not spend the grace
-/// on it: Ghostlight starts that browser at once, and the call goes through when the same
-/// browser connects again.
-#[test]
-fn a_pinned_browser_closed_long_ago_is_started_again_and_takes_the_call() {
-    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, _policy) = on_demand_startup();
-    let (mut executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
-    executor.recovery.set_test_candidates(chrome_installed());
-    let launches = Arc::new(AtomicUsize::new(0));
-    let started = Arc::new(Mutex::new(Vec::new()));
-    {
-        let (port, launches, started) = (
-            Arc::clone(&port),
-            Arc::clone(&launches),
-            Arc::clone(&started),
-        );
-        executor.recovery.set_test_launch(move || {
-            launches.fetch_add(1, Ordering::SeqCst);
-            started.lock().unwrap().push(attach(&port, false));
-        });
-    }
-
-    let first = attach(&port, false);
-    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
-    assert_eq!(
-        port.installed_browser_of(RELAY_BROWSER).as_deref(),
-        Some(RELAY_INSTALLED)
-    );
-    first.close();
-    await_unregistered(&port);
-    port.backdate(RETURN_GRACE);
-    assert!(!port.browser_returning());
-
-    let began = Instant::now();
-    let listed = list_tabs(&executor, &workspace);
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    assert_eq!(listed.facts["browsers"][0]["browser"], json!(RELAY_BROWSER));
-    assert_eq!(launches.load(Ordering::SeqCst), 1);
-    assert!(
-        began.elapsed() < RETURN_GRACE / 2,
-        "the start did not wait out the grace, took {:?}",
-        began.elapsed()
-    );
-    assert_eq!(
-        workspaces.browser_of(workspace.as_str()).as_deref(),
-        Some(RELAY_BROWSER)
-    );
-}
-
-/// A session's browser that comes back inside the grace takes the call, and nothing is
-/// started, even when Ghostlight could start it.
-#[test]
-fn a_pinned_browser_that_returns_within_the_grace_starts_nothing() {
-    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, _policy) = on_demand_startup();
-    let (mut executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
-    executor.recovery.set_test_candidates(chrome_installed());
-    let launches = Arc::new(AtomicUsize::new(0));
-    {
-        let launches = Arc::clone(&launches);
-        executor.recovery.set_test_launch(move || {
-            launches.fetch_add(1, Ordering::SeqCst);
-        });
-    }
-
-    let first = attach(&port, false);
-    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
-    first.close();
-    await_unregistered(&port);
-    let second = attach_later(&port, Duration::from_millis(300));
-
-    let listed = list_tabs(&executor, &workspace);
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    assert_eq!(launches.load(Ordering::SeqCst), 0);
-    drop(second.join().unwrap());
 }
 
 /// A fake-port executor whose session works in `browser_chrome`, a browser that connected as
@@ -458,10 +327,126 @@ fn navigate_within_a_second(
     navigate_for(executor, workspace, 1000)
 }
 
-/// The session's browser is started again while a different browser stays connected, and the
-/// call goes to the session's browser once it is back.
+/// A relay port and its waiting wrapper.
+fn relay_pair() -> (Arc<RelayBrowserPort>, Arc<ArrivesWhenAwaited>) {
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
+    let waiting = ArrivesWhenAwaited::over(port.clone());
+    (port, waiting)
+}
+
+/// Count launches into `launches`, attaching a scripted browser to `port` on each when `port`
+/// is given.
+fn counting_launches(
+    executor: &mut ApplicationExecutor,
+    port: Option<Arc<RelayBrowserPort>>,
+) -> (Arc<AtomicUsize>, Arc<Mutex<Vec<FakeExtension>>>) {
+    let launches = Arc::new(AtomicUsize::new(0));
+    let started = Arc::new(Mutex::new(Vec::new()));
+    let (counted, kept) = (Arc::clone(&launches), Arc::clone(&started));
+    executor.recovery.set_test_launch(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+        if let Some(port) = &port {
+            kept.lock().unwrap().push(attach(port, false));
+        }
+    });
+    (launches, started)
+}
+
+/// ADR-0196 Decision 12 and its 2026-10-17 amendment (ACCEPTANCE Contract 17, 20): a session's
+/// browser that left is waited for while it is on its way back, and started again only when
+/// Ghostlight knows which installed browser it is and may start it.
+///
+/// - Back within the grace, by reconnecting or answering a heartbeat again: the call waits and
+///   goes through there, and nothing is started even under on-demand startup.
+/// - Gone longer than the grace under on-demand startup: it is started at once, without spending
+///   the grace, and the call goes through in it, also beside another connected browser.
+/// - Started but connecting as another profile: the call waits out its deadline for its own
+///   profile and is the wrong profile, sending nothing; when the other profile only comes
+///   first, the call goes to its own. Started and never connecting: the handshake timeout.
+/// - Never started under manual startup, or when this service never saw which installed browser
+///   it is: not connected, or the wrong profile when another browser is connected, each with its
+///   own sentence and steps, nothing sent, the session not moved, and no browser in the record.
 #[test]
-fn a_pinned_browser_started_again_beside_another_browser_takes_the_call() {
+fn a_session_browser_that_left_is_waited_for_or_started_again_only_when_known() {
+    // Back within the grace: by reconnecting, or by answering a heartbeat again.
+    let (governance, _policy) = on_demand_startup();
+    let (port, waiting) = relay_pair();
+    let (mut executor, workspaces, workspace) = relay_fixture(waiting.clone(), governance);
+    executor.recovery.set_test_candidates(chrome_installed());
+    let (launches, _) = counting_launches(&mut executor, None);
+    let first = attach(&port, false);
+    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
+    first.close();
+    await_unregistered(&port);
+    let second = Arc::new(Mutex::new(None));
+    {
+        let (port, second) = (port.clone(), second.clone());
+        waiting.arm(move || *second.lock().unwrap() = Some(attach(&port, false)));
+    }
+    let listed = list_tabs(&executor, &workspace);
+    assert!(waiting.arrived(), "the call waited for its browser");
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(listed.facts["browsers"][0]["browser"], json!(RELAY_BROWSER));
+    assert_eq!(launches.load(Ordering::SeqCst), 0);
+
+    let port = Arc::new(RelayBrowserPort::with_heartbeat_settings(
+        "service_test".into(),
+        page_assets(),
+        HeartbeatSettings {
+            interval: Duration::from_millis(20),
+            timeout: Duration::from_millis(150),
+        },
+    ));
+    let waiting = ArrivesWhenAwaited::over(port.clone());
+    let (executor, workspaces, workspace) =
+        relay_fixture(waiting.clone(), GovernanceFacade::new(None));
+    let fake = Arc::new(attach(&port, false));
+    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
+    fake.acknowledge_heartbeats(false);
+    let until = Instant::now() + Duration::from_secs(5);
+    while !port.browsers().is_empty() {
+        assert!(Instant::now() < until, "silence never hid the browser");
+        thread::sleep(Duration::from_millis(10));
+    }
+    {
+        let fake = Arc::clone(&fake);
+        waiting.arm(move || fake.acknowledge_heartbeats(true));
+    }
+    let listed = list_tabs(&executor, &workspace);
+    assert!(waiting.arrived());
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+
+    // Gone longer than the grace: started at once.
+    let (governance, _policy) = on_demand_startup();
+    let (port, waiting) = relay_pair();
+    let (mut executor, workspaces, workspace) = relay_fixture(waiting, governance);
+    executor.recovery.set_test_candidates(chrome_installed());
+    let (launches, _started) = counting_launches(&mut executor, Some(port.clone()));
+    let first = attach(&port, false);
+    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
+    assert_eq!(
+        port.installed_browser_of(RELAY_BROWSER).as_deref(),
+        Some(RELAY_INSTALLED)
+    );
+    first.close();
+    await_unregistered(&port);
+    port.backdate(RETURN_GRACE);
+    assert!(!port.browser_returning());
+    let began = Instant::now();
+    let listed = list_tabs(&executor, &workspace);
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(listed.facts["browsers"][0]["browser"], json!(RELAY_BROWSER));
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    assert!(
+        began.elapsed() < RETURN_GRACE / 2,
+        "took {:?}",
+        began.elapsed()
+    );
+    assert_eq!(
+        workspaces.browser_of(workspace.as_str()).as_deref(),
+        Some(RELAY_BROWSER)
+    );
+
     let (governance, _policy) = on_demand_startup();
     let (executor, browser, workspace, launches) = closed_session_browser(governance, |browser| {
         browser.connect(vec![
@@ -475,383 +460,215 @@ fn a_pinned_browser_started_again_beside_another_browser_takes_the_call() {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
-
     let opened = navigate_within_a_second(&executor, &workspace);
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert_eq!(browser.routed(), vec!["browser_chrome".to_owned()]);
-}
 
-/// When the start brings back another profile of the same browser instead, the call waits out
-/// its deadline for the session's own profile, then is refused as the wrong profile; nothing is
-/// sent and the session is not moved.
-#[test]
-fn a_started_browser_that_connects_as_another_profile_is_the_wrong_profile() {
+    // Started as another profile: the wrong profile after the deadline.
     let (governance, _policy) = on_demand_startup();
     let (executor, browser, workspace, launches) = closed_session_browser(governance, |browser| {
         browser.remember_installed("browser_other_profile", "chromium");
         browser.connect(vec![summary("browser_other_profile", true)]);
     });
-
     let began = Instant::now();
     let refused = navigate_within_a_second(&executor, &workspace);
     assert!(
         began.elapsed() >= Duration::from_millis(900),
-        "the call did not wait for its own profile, took {:?}",
+        "took {:?}",
         began.elapsed()
     );
-    assert_eq!(refused.status, Status::Failed);
     assert_eq!(refused.effect, Effect::None);
     assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert!(browser.routed().is_empty());
-}
 
-/// Another profile of the session's browser can connect before the session's own profile does.
-/// The call keeps waiting within its deadline and goes to its own profile once it arrives.
-#[test]
-fn a_started_browser_whose_other_profile_connects_first_takes_the_call_in_its_own() {
+    // Another profile first, then its own: the call goes to its own.
     let (governance, _policy) = on_demand_startup();
-    let (mut executor, browser, workspace, _) = closed_session_browser(governance, |_| {});
+    let (mut executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
+    browser.connect(vec![]);
+    browser.remember_installed("browser_chrome", "chromium");
     browser.remember_installed("browser_other_profile", "chromium");
-    let launches = Arc::new(AtomicUsize::new(0));
-    let own_profile = Arc::new(Mutex::new(None));
+    bind_tab(&workspaces, &workspace, "browser_chrome");
+    let waiting = ArrivesWhenAwaited::over(browser.clone());
     {
-        let (browser, launches, own_profile) = (
-            Arc::clone(&browser),
-            Arc::clone(&launches),
-            Arc::clone(&own_profile),
+        let (fake, waiting) = (Arc::clone(&browser), Arc::clone(&waiting));
+        executor.recovery = crate::browser::recovery::BrowserRecovery::discover(
+            executor.governance.clone(),
+            waiting.clone(),
         );
+        executor.browser = waiting.clone();
         executor.recovery.set_test_launch(move || {
-            launches.fetch_add(1, Ordering::SeqCst);
-            browser.connect(vec![summary("browser_other_profile", true)]);
-            let browser = Arc::clone(&browser);
-            *own_profile.lock().unwrap() = Some(thread::spawn(move || {
-                thread::sleep(Duration::from_millis(300));
-                browser.connect(vec![
+            fake.connect(vec![summary("browser_other_profile", true)]);
+            let fake = Arc::clone(&fake);
+            waiting.arm(move || {
+                fake.connect(vec![
                     summary("browser_other_profile", true),
                     summary("browser_chrome", false),
                 ]);
-            }));
+            });
         });
     }
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
-
     let opened = navigate_within_a_second(&executor, &workspace);
-    own_profile.lock().unwrap().take().unwrap().join().unwrap();
+    assert!(waiting.arrived(), "the call waited past the other profile");
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
-    assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert_eq!(browser.routed(), vec!["browser_chrome".to_owned()]);
-}
 
-/// When the started browser never connects, the call ends with the handshake timeout every
-/// browser start gets.
-#[test]
-fn a_started_browser_that_never_connects_is_the_handshake_timeout() {
+    // Started and never connecting: the handshake timeout.
     let (governance, _policy) = on_demand_startup();
     let (executor, browser, workspace, launches) = closed_session_browser(governance, |_| {});
-
     let refused = navigate_within_a_second(&executor, &workspace);
-    assert_eq!(refused.status, Status::Failed);
     assert_eq!(refused.effect, Effect::None);
-    assert_eq!(
-        refused.facts["reason"],
-        json!("browser_handshake_timeout"),
-        "{:?}",
-        refused.facts
-    );
+    assert_eq!(refused.facts["reason"], json!("browser_handshake_timeout"));
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert!(browser.routed().is_empty());
-}
 
-/// Under `manual`, the session's browser is never started: the refusals are the ones a session
-/// that waited for its browser always got.
-#[test]
-fn under_manual_startup_a_pinned_browser_is_never_started() {
-    let (governance, _policy) = manual_startup();
-    let (executor, browser, workspace, launches) = closed_session_browser(governance, |_| {});
-
-    let refused = navigate_within_a_second(&executor, &workspace);
-    assert_eq!(refused.facts["reason"], json!("browser_disconnected"));
-    browser.connect(vec![summary("browser_edge", true)]);
-    let refused = navigate_within_a_second(&executor, &workspace);
-    assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
-    assert_eq!(launches.load(Ordering::SeqCst), 0);
-}
-
-/// A session's browser this service never saw connect as one installed browser, as after a
-/// service restart or from a build that reports no name, is never started: the refusals are
-/// unchanged.
-#[test]
-fn a_pinned_browser_with_no_known_installed_browser_is_never_started() {
-    let (governance, _policy) = on_demand_startup();
-    let (executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
-    browser.connect(vec![]);
-    bind_tab(&workspaces, &workspace, "browser_chrome");
-    let mut executor = executor;
-    let launches = Arc::new(AtomicUsize::new(0));
-    {
-        let launches = Arc::clone(&launches);
-        executor.recovery.set_test_launch(move || {
-            launches.fetch_add(1, Ordering::SeqCst);
-        });
+    // Never started: under manual startup, or with no known installed browser.
+    for known in [true, false] {
+        let (governance, _policy) = if known {
+            manual_startup()
+        } else {
+            on_demand_startup()
+        };
+        let (mut executor, browser, workspaces, workspace, audit) =
+            fixture_with_governance(governance);
+        browser.connect(vec![]);
+        browser.set_returning(true);
+        if known {
+            browser.remember_installed("browser_chrome", "chromium");
+        }
+        bind_tab(&workspaces, &workspace, "browser_chrome");
+        let (launches, _) = counting_launches(&mut executor, None);
+        for (reason, connected) in [
+            (BrowserUnavailableReason::NotConnected, vec![]),
+            (
+                BrowserUnavailableReason::WrongProfile,
+                vec![summary("browser_edge", true)],
+            ),
+        ] {
+            browser.connect(connected);
+            let refused = navigate_within_a_second(&executor, &workspace);
+            let expected = Refusal::BrowserUnavailable { reason };
+            let label = format!("known={known} {reason:?}");
+            assert_eq!(refused.effect, Effect::None, "{label}");
+            assert!(refused.repeat_safe, "{label}");
+            assert_eq!(refused.summary, expected.summary(), "{label}");
+            assert_eq!(refused.next_steps, expected.next_steps(), "{label}");
+            assert!(browser.routed().is_empty(), "{label}");
+            assert_eq!(
+                workspaces.browser_of(workspace.as_str()).as_deref(),
+                Some("browser_chrome"),
+                "{label}"
+            );
+            assert_eq!(
+                audit.0.lock().unwrap().last().unwrap().browser,
+                None,
+                "{label}"
+            );
+        }
+        assert_eq!(launches.load(Ordering::SeqCst), 0, "known={known}");
     }
-
-    let refused = navigate_within_a_second(&executor, &workspace);
-    assert_eq!(refused.facts["reason"], json!("browser_disconnected"));
-    browser.connect(vec![summary("browser_edge", true)]);
-    let refused = navigate_within_a_second(&executor, &workspace);
-    assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
-    assert_eq!(launches.load(Ordering::SeqCst), 0);
 }
 
-/// A call that reaches its session's connected browser names that browser in the record.
+/// ADR-0196 Decision 12 (ACCEPTANCE Contract 17): a session with no browser waits only while
+/// one is evidently returning.
+///
+/// Right after a service start a reconnecting relay is waited for and recovery never runs; the
+/// empty session's list before that answers at once and binds nothing, with or without a
+/// browser on its way. A browser closed longer ago than the grace is not waited for, even if it
+/// once reported attention; a freshly published port stops waiting at the end of its reconnect
+/// window; and evidence that never turns into a browser falls back to recovery.
 #[test]
-fn a_call_that_reaches_the_session_browser_names_it_in_the_record() {
-    let (executor, browser, workspaces, workspace, audit) = fixture();
-    let mut chrome = summary("browser_chrome", true);
-    chrome.name = Some("Google Chrome".into());
-    browser.connect(vec![chrome]);
-    bind_tab(&workspaces, &workspace, "browser_chrome");
-    browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
-
-    let listed = executor.execute(
-        &workspace,
-        "browser_tabs",
-        json!({"action":"list"}),
-        &CancellationToken::default(),
+fn a_session_with_no_browser_waits_only_while_one_is_returning() {
+    let (governance, _policy) = manual_startup();
+    let (port, waiting) = relay_pair();
+    let (executor, workspaces, workspace) = relay_fixture(waiting.clone(), governance);
+    port.endpoint_published();
+    let began = Instant::now();
+    let listed = list_tabs(&executor, &workspace);
+    assert!(
+        began.elapsed() < RETURN_GRACE / 2,
+        "the list waited {:?}",
+        began.elapsed()
     );
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(listed.facts["tabs"], json!([]));
     assert_eq!(
-        audit.0.lock().unwrap()[0].browser.as_deref(),
-        Some("Google Chrome")
+        listed.next_steps,
+        crate::language::outcome::Outcome::TabsListed { count: 0 }.next_steps()
     );
-}
-
-/// A session whose one tab binds it to a connected browser, as the record tests below need it:
-/// the browser is named, so a record that names it would say so.
-fn pinned_to_chrome() -> (
-    ApplicationExecutor,
-    Arc<FakeBrowser>,
-    crate::workspace::WorkspaceId,
-    Arc<MemoryAudit>,
-) {
-    let (executor, browser, workspaces, workspace, audit) = fixture();
-    let mut chrome = summary("browser_chrome", true);
-    chrome.name = Some("Google Chrome".into());
-    browser.connect(vec![chrome]);
-    bind_tab(&workspaces, &workspace, "browser_chrome");
-    (executor, browser, workspace, audit)
-}
-
-/// Explaining the policy sends nothing to a browser, so its record names none although the
-/// session works in a connected one.
-#[test]
-fn policy_explain_names_no_browser_in_the_record() {
-    let (executor, browser, workspace, audit) = pinned_to_chrome();
-
-    let explained = executor.execute(
-        &workspace,
-        "policy_explain",
-        json!({}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(explained.status, Status::Succeeded, "{}", explained.summary);
-    assert!(browser.routed().is_empty());
-    assert_eq!(audit.0.lock().unwrap()[0].browser, None);
-}
-
-/// Input refused before the call starts never reaches the session's connected browser, and its
-/// record names none.
-#[test]
-fn invalid_input_names_no_browser_in_the_record() {
-    let (executor, browser, workspace, audit) = pinned_to_chrome();
-
-    let refused = executor.execute(
-        &workspace,
-        "browser_tabs",
-        json!({"action":"juggle"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(refused.status, Status::Failed, "{}", refused.summary);
-    assert_eq!(refused.facts["reason"], "invalid_input");
-    assert!(browser.routed().is_empty());
-    assert_eq!(audit.0.lock().unwrap()[0].browser, None);
-}
-
-/// Each flow step records its own browser: the step that reached the browser names it, a later
-/// step that reached none names none, and the flow's own record names the browser its steps
-/// reached.
-#[test]
-fn a_flow_names_the_browser_only_on_the_records_of_work_that_reached_it() {
-    let (executor, browser, workspace, audit) = pinned_to_chrome();
-    browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
-
-    let flowed = executor.execute(
-        &workspace,
-        "browser_flow",
-        json!({"on_error":"continue","steps":[
-            {"id":"tabs","tool":"browser_tabs","arguments":{"action":"list"}},
-            {"id":"policy","tool":"policy_explain","arguments":{}}
-        ]}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(flowed.status, Status::Succeeded, "{}", flowed.summary);
-    let records = audit.0.lock().unwrap();
-    let named: Vec<_> = records
-        .iter()
-        .map(|record| (record.tool.as_str(), record.browser.as_deref()))
-        .collect();
-    assert_eq!(
-        named,
-        vec![
-            ("browser_tabs", Some("Google Chrome")),
-            ("policy_explain", None),
-            ("browser_flow", Some("Google Chrome")),
-        ]
-    );
-}
-
-/// A record names the browser a command was written to, whatever the failure: a read whose
-/// deadline ran out while the browser held it, or a page that changed under it, fails before any
-/// effect and still reached the browser. A command that failed before any of it was written names
-/// none.
-#[test]
-fn a_record_names_the_browser_a_command_was_written_to_whatever_the_failure() {
-    for (written, failure, named) in [
-        (
-            true,
-            BrowserError::DeadlineBeforeDispatch,
-            Some("Google Chrome"),
-        ),
-        (
-            true,
-            BrowserError::DocumentUnavailable,
-            Some("Google Chrome"),
-        ),
-        (false, BrowserError::DisconnectedBeforeDispatch, None),
-    ] {
-        let (executor, browser, workspace, audit) = pinned_to_chrome();
-        if written {
-            browser.push(Err(failure.clone()));
-        } else {
-            browser.push_unwritten(Err(failure.clone()));
-        }
-
-        let listed = executor.execute(
-            &workspace,
-            "browser_tabs",
-            json!({"action":"list"}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(
-            listed.status,
-            Status::Failed,
-            "{failure:?}: {}",
-            listed.summary
-        );
-        assert_eq!(browser.routed(), vec!["browser_chrome"], "{failure:?}");
-        assert_eq!(
-            audit.0.lock().unwrap()[0].browser.as_deref(),
-            named,
-            "{failure:?}"
-        );
+    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
+    let returned = Arc::new(Mutex::new(None));
+    {
+        let (port, returned) = (port.clone(), returned.clone());
+        waiting.arm(move || *returned.lock().unwrap() = Some(attach(&port, false)));
     }
-}
-
-/// A pinned browser that stays gone while a different browser is connected is the one case
-/// that names another profile. Nothing is sent, the session is not moved, and the record names
-/// no browser, because none was reached.
-#[test]
-fn a_pinned_browser_absent_while_another_is_connected_is_the_wrong_profile() {
-    let (executor, browser, workspaces, workspace, audit) = fixture();
-    browser.connect(vec![summary("browser_edge", true)]);
-    bind_tab(&workspaces, &workspace, "browser_chrome");
-
-    let refused = executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com","new_tab":true,"timeout_ms":1000}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(refused.status, Status::Failed);
-    assert_eq!(refused.effect, Effect::None);
-    assert!(refused.repeat_safe);
-    assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
-    assert_eq!(
-        refused.summary,
-        "This session works in a browser that is not connected; a different browser is."
-    );
-    assert_eq!(
-        refused.next_steps,
-        crate::language::outcome::Refusal::BrowserUnavailable {
-            reason: crate::language::outcome::BrowserUnavailableReason::WrongProfile
-        }
-        .next_steps()
-    );
-    assert_eq!(
-        refused.next_steps[1],
-        crate::language::outcome::MOVE_TO_CONNECTED_BROWSER
-    );
-    assert!(browser.routed().is_empty());
+    let opened = navigate(&executor, &workspace);
+    assert!(waiting.arrived(), "the first open waited for the relay");
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
     assert_eq!(
         workspaces.browser_of(workspace.as_str()).as_deref(),
-        Some("browser_chrome")
+        Some(RELAY_BROWSER)
     );
-    assert_eq!(audit.0.lock().unwrap()[0].browser, None);
-}
 
-/// A pinned browser that stays gone with nothing else connected is reported as not connected.
-/// This service never saw it connect as an installed browser, so nothing is started for it, and
-/// the record names no browser.
-#[test]
-fn a_pinned_browser_absent_with_nothing_connected_is_not_connected_and_never_recovered() {
-    let (executor, browser, workspaces, workspace, audit) = fixture();
-    browser.connect(vec![]);
-    browser.set_returning(true);
-    bind_tab(&workspaces, &workspace, "browser_chrome");
+    // Closed longer ago than the grace.
+    let (governance, _policy) = manual_startup();
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
+    let (executor, _, workspace) = relay_fixture(port.clone(), governance);
+    port.backdate(RETURN_GRACE);
+    let fake = attach(&port, true);
+    assert!(
+        port.browsers()[0].attended,
+        "the browser reported attention"
+    );
+    fake.close();
+    await_unregistered(&port);
+    assert!(
+        port.browser_returning(),
+        "a connection that ended moments ago may come back"
+    );
+    port.backdate(RETURN_GRACE);
+    assert!(!port.browser_returning());
+    let started = Instant::now();
+    let refused = navigate(&executor, &workspace);
+    assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "took {:?}",
+        started.elapsed()
+    );
 
-    let refused = executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com","new_tab":true,"timeout_ms":1000}),
-        &CancellationToken::default(),
+    // A freshly published port with no relay.
+    let (governance, _policy) = manual_startup();
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
+    let (executor, _, workspace) = relay_fixture(port.clone(), governance);
+    port.backdate(RETURN_GRACE);
+    assert!(!port.browser_returning(), "an old port with no relay");
+    let published = Instant::now();
+    port.endpoint_published();
+    assert!(port.browser_returning(), "relays may be reconnecting");
+    let refused = navigate(&executor, &workspace);
+    assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
+    assert!(
+        published.elapsed() >= RELAY_RETURN_WINDOW,
+        "the call waited out the window"
     );
-    assert_eq!(refused.status, Status::Failed);
-    assert_eq!(refused.effect, Effect::None);
-    assert!(refused.repeat_safe);
-    assert_eq!(refused.facts["reason"], json!("browser_disconnected"));
-    assert_eq!(
-        refused.summary,
-        "The browser this session works in is not connected. Nothing was sent."
+    assert!(
+        published.elapsed() < RETURN_GRACE / 2,
+        "the wait ended with the window, took {:?}",
+        published.elapsed()
     );
-    assert_eq!(
-        refused.next_steps,
-        vec!["Ask the user to reopen that browser, then repeat the call."]
-    );
-    assert!(browser.routed().is_empty());
-    assert_eq!(audit.0.lock().unwrap()[0].browser, None);
-}
 
-/// Evidence of a returning browser earns a wait, not a different answer: when nothing arrives
-/// inside the grace, recovery runs as it always did.
-#[test]
-fn a_returning_browser_that_never_arrives_falls_back_to_recovery() {
+    // Evidence that never arrives.
     let (governance, _policy) = manual_startup();
     let (executor, browser, _, workspace, _) = fixture_with_governance(governance);
     browser.connect(vec![]);
     browser.set_returning(true);
-
-    let refused = executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com","new_tab":true,"timeout_ms":1000}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(refused.status, Status::Failed);
+    let refused = navigate_within_a_second(&executor, &workspace);
     assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
 }
 
@@ -874,7 +691,7 @@ fn manual_refusal(
     }
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (governance, policy) = manual_startup();
-    let (mut executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
+    let (mut executor, _, workspace) = relay_fixture(port.clone(), governance);
     executor
         .workbench
         .attach_setup(crate::workbench::setup::SetupProgress::load(&record));
@@ -884,29 +701,6 @@ fn manual_refusal(
     drop(policy);
     assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
     refused
-}
-
-/// While setup is incomplete and no profile has the extension, the no-browser answer says where
-/// the extension comes from. The summary is the one it always was.
-#[test]
-fn the_no_browser_answer_names_the_store_while_setup_is_incomplete_and_no_profile_has_it() {
-    let refused = manual_refusal(false, false);
-    assert!(refused.summary.starts_with("No browser is connected."));
-    assert_eq!(refused.next_steps.len(), 1, "{:?}", refused.next_steps);
-    assert!(
-        refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL),
-        "{}",
-        refused.next_steps[0]
-    );
-    assert!(refused.next_steps[0].contains("Ghostlight window"));
-}
-
-/// An extension in some profile, or a finished setup, leaves the answer as it was.
-#[test]
-fn the_no_browser_answer_is_unchanged_with_an_extension_or_a_finished_setup() {
-    assert!(manual_refusal(false, true).next_steps.is_empty());
-    assert!(manual_refusal(true, false).next_steps.is_empty());
-    assert!(manual_refusal(true, true).next_steps.is_empty());
 }
 
 /// Governance that starts a browser on demand, the Windows default, and an executor whose launch
@@ -936,7 +730,7 @@ fn launch_without_adapter(
     .unwrap();
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (mut executor, _, workspace) = relay_fixture(
-        Arc::clone(&port),
+        port.clone(),
         GovernanceFacade::new(Some(policy.to_path_buf())),
     );
     executor
@@ -959,11 +753,28 @@ fn launch_without_adapter(
     refused
 }
 
-/// S-D7: a browser Ghostlight started whose profiles hold no Ghostlight extension is the missing
-/// extension, not an adapter that was late, and the step names the store whether or not setup
-/// finished.
+/// ADR-0196 Decision 12 and S-D7: a no-browser answer names where the extension comes from only
+/// while it can help.
+///
+/// Under manual startup, the answer names the store and the Ghostlight window while setup is
+/// incomplete and no profile has the extension, with its usual summary, and is unchanged with an
+/// extension in a profile or a finished setup. A browser Ghostlight started whose profiles hold
+/// no extension is the missing extension and names the store whether or not setup finished; with
+/// the extension in a profile, a missing adapter is the handshake timeout with its own step.
 #[test]
-fn a_launched_browser_without_the_extension_names_the_store() {
+fn the_no_browser_answers_name_the_store_only_while_it_can_help() {
+    let refused = manual_refusal(false, false);
+    assert!(refused.summary.starts_with("No browser is connected."));
+    assert_eq!(refused.next_steps.len(), 1, "{:?}", refused.next_steps);
+    assert!(refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL));
+    assert!(refused.next_steps[0].contains("Ghostlight window"));
+    for (complete, extension) in [(false, true), (true, false), (true, true)] {
+        assert!(
+            manual_refusal(complete, extension).next_steps.is_empty(),
+            "complete={complete} extension={extension}"
+        );
+    }
+
     for complete in [false, true] {
         let refused = launch_without_adapter(complete, false);
         assert_eq!(
@@ -973,31 +784,13 @@ fn a_launched_browser_without_the_extension_names_the_store() {
             refused.facts
         );
         assert_eq!(refused.next_steps.len(), 1, "{:?}", refused.next_steps);
-        assert!(
-            refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL),
-            "{}",
-            refused.next_steps[0]
-        );
-    }
-}
+        assert!(refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL));
 
-/// With the extension in a profile of the started browser, a missing adapter is the handshake
-/// timeout, with its own step.
-#[test]
-fn a_launched_browser_that_timed_out_keeps_its_own_step_with_an_extension_or_a_finished_setup() {
-    for complete in [false, true] {
         let refused = launch_without_adapter(complete, true);
-        assert_eq!(
-            refused.facts["reason"],
-            json!("browser_handshake_timeout"),
-            "{:?}",
-            refused.facts
-        );
+        assert_eq!(refused.facts["reason"], json!("browser_handshake_timeout"));
         assert_eq!(
             refused.next_steps,
-            vec![
-                "Ask the user to open a window of that browser with the Ghostlight extension installed, then repeat the call."
-            ]
+            vec![crate::language::outcome::ASK_FOR_THAT_BROWSER]
         );
     }
 }
@@ -1010,69 +803,36 @@ fn opened_tab(id: u64, url: &str) -> Result<BrowserOutcome, BrowserError> {
     })
 }
 
-/// Listing the tabs of a session that holds none asks no browser and binds none, so the
-/// browser the list names can still be chosen for the first tab.
+/// ADR-0196 Decision 12 and W-D5 (ACCEPTANCE Contract 19): a session binds its browser with its
+/// first tab and leaves it only when it is gone and the agent names another.
+///
+/// An empty session's list and recording status ask no browser and bind none, so it opens its
+/// first tab in the browser it names. Once bound, it stays: after that tab closes a call naming
+/// another browser is refused as pinned, and neither a list nor a later open moves it. When its
+/// browser is gone and another is connected, naming that one moves the session there, and the
+/// gone browser's tab reads as no longer open.
 #[test]
-fn listing_tabs_in_an_empty_session_binds_no_browser() {
-    let (executor, browser, workspaces, workspace, _) = fixture();
-    browser.connect(vec![summary(FAKE_BROWSER, true)]);
-
-    let listed = list_tabs(&executor, &workspace);
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    assert_eq!(listed.facts["tabs"], json!([]));
-    assert_eq!(
-        listed.facts["browsers"],
-        json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
-    );
-    assert!(browser.routed().is_empty(), "the list asked a browser");
-    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
-}
-
-/// An empty session's list is known without a browser. With none connected, one said to be on
-/// its way back, and browser startup left to the person, it still answers at once: no wait, no
-/// recovery, and the next step is to open the first tab.
-#[test]
-fn an_empty_session_lists_at_once_without_a_browser() {
-    let (governance, _policy) = manual_startup();
-    let (executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
-    browser.connect(vec![]);
-    browser.set_returning(true);
-
-    let began = Instant::now();
-    let listed = list_tabs(&executor, &workspace);
-    assert!(
-        began.elapsed() < RETURN_GRACE / 2,
-        "the list waited {:?}",
-        began.elapsed()
-    );
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
-    assert_eq!(listed.facts["tabs"], json!([]));
-    assert_eq!(listed.facts["browsers"], json!([]));
-    assert_eq!(
-        listed.next_steps,
-        crate::language::outcome::Outcome::TabsListed { count: 0 }.next_steps()
-    );
-    assert!(browser.calls().is_empty());
-    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
-}
-
-/// A session that listed first opens its first tab in the browser it then names, even when the
-/// list would have chosen another one, and that tab binds the session there.
-#[test]
-fn an_empty_session_opens_in_the_browser_its_list_named() {
+fn a_session_binds_its_browser_with_its_first_tab_and_leaves_it_only_when_it_is_gone() {
     let (executor, browser, workspaces, workspace, _) = fixture();
     browser.connect(vec![
         summary("browser_chrome", true),
         summary("browser_edge", false),
     ]);
-
     let listed = list_tabs(&executor, &workspace);
-    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(listed.facts["tabs"], json!([]));
     assert_eq!(
         listed.facts["browsers"][1]["browser"],
         json!("browser_edge")
     );
-
+    let status = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"status"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(status.facts["reason"], "not_found", "{}", status.summary);
+    assert!(browser.routed().is_empty(), "nothing asked a browser");
+    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
     browser.push(opened_tab(7, "https://example.com/"));
     let opened = executor.execute(
         &workspace,
@@ -1086,86 +846,36 @@ fn an_empty_session_opens_in_the_browser_its_list_named() {
         workspaces.browser_of(workspace.as_str()).as_deref(),
         Some("browser_edge")
     );
-}
 
-/// A recording status crosses to a browser but binds no tab, so it binds no browser either.
-#[test]
-fn recording_status_in_an_empty_session_binds_no_browser() {
-    let (executor, browser, workspaces, workspace, _) = fixture();
-    browser.connect(vec![summary(FAKE_BROWSER, true)]);
-
-    let status = executor.execute(
-        &workspace,
-        "browser_record",
-        json!({"action":"status"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(status.facts["reason"], "not_found", "{}", status.summary);
-    // A session that holds no recording has nothing to ask a browser about.
-    assert!(browser.routed().is_empty());
-    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
-}
-
-/// The browser a session's first tab bound stays its browser, after that tab closes too: a call
-/// that names another browser is refused, and neither a list nor a later open moves it.
-#[test]
-fn a_pinned_session_is_never_rebound() {
-    let (executor, browser, workspaces, workspace, _) = fixture();
-    browser.connect(vec![
-        summary("browser_chrome", true),
-        summary("browser_edge", false),
-    ]);
-    browser.push(opened_tab(7, "https://example.com/"));
-    let opened = navigate(&executor, &workspace);
-    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
-    assert_eq!(
-        workspaces.browser_of(workspace.as_str()).as_deref(),
-        Some("browser_chrome")
-    );
-    workspaces.apply_browser_close("browser_chrome", 7);
-
+    // Pinned: never rebound while its browser is there.
+    workspaces.apply_browser_close("browser_edge", 7);
     let listed = list_tabs(&executor, &workspace);
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
     let refused = executor.execute(
         &workspace,
         "browser_navigate",
-        json!({"url":"https://example.com","new_tab":true,"browser":"browser_edge"}),
+        json!({"url":"https://example.com","new_tab":true,"browser":"browser_chrome"}),
         &CancellationToken::default(),
     );
-    assert_eq!(refused.status, Status::Failed);
     assert_eq!(refused.effect, Effect::None);
     assert_eq!(refused.facts["reason"], json!("browser_pinned"));
-
-    browser.connect(vec![summary("browser_edge", true)]);
-    let elsewhere = navigate_within_a_second(&executor, &workspace);
-    assert_eq!(elsewhere.facts["reason"], json!("browser_wrong_profile"));
-    assert_eq!(browser.routed(), vec!["browser_chrome"]);
+    assert_eq!(browser.routed(), vec!["browser_edge"]);
     assert_eq!(
         workspaces.browser_of(workspace.as_str()).as_deref(),
-        Some("browser_chrome")
+        Some("browser_edge")
     );
-}
 
-/// W-D5: a session's browser left for good (its extension was removed) while another browser is
-/// connected. Naming that browser moves the session there: the call goes through in it, and the
-/// gone browser's tab reads as no longer open in this session.
-#[test]
-fn a_session_whose_browser_left_moves_to_the_browser_the_agent_names() {
+    // Gone, and another named: the session moves.
     let (executor, browser, workspaces, workspace, _) = fixture();
     bind_tab(&workspaces, &workspace, "browser_chrome");
     browser.connect(vec![summary("browser_edge", true)]);
-    browser.push(Ok(BrowserOutcome::TabOpened {
-        tab: tab(7, "https://example.com/"),
-        committed_urls: vec!["https://example.com/".into()],
-    }));
-
+    browser.push(opened_tab(7, "https://example.com/"));
     let moved = executor.execute(
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true,"browser":"browser_edge"}),
         &CancellationToken::default(),
     );
-
     assert_eq!(moved.status, Status::Succeeded, "{}", moved.summary);
     assert_eq!(browser.routed(), vec!["browser_edge".to_owned()]);
     assert_eq!(
