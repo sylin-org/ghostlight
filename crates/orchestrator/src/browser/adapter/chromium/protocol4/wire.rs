@@ -37,6 +37,8 @@ pub const TRANSFER_MAX_CHUNKS: u16 = 64;
 const NATIVE_MESSAGE_BYTES: usize = 1024 * 1024;
 const _: () = assert!(4 * CHUNK_PAYLOAD_BYTES.div_ceil(3) < NATIVE_MESSAGE_BYTES);
 const _: () = assert!(TRANSFER_MAX_BYTES <= CHUNK_PAYLOAD_BYTES * TRANSFER_MAX_CHUNKS as usize);
+// A recording GIF returned to a client travels base64-encoded inside one transfer.
+const _: () = assert!(4 * physical::RECORDING_TRANSFER_MAX_BYTES.div_ceil(3) < TRANSFER_MAX_BYTES);
 /// Most world calls one `call` primitive carries. A route sends one call per document, so the
 /// limit is never below the document limit and a route never splits. The wire fixes the number;
 /// the assertion below only keeps the document limit from passing it.

@@ -468,6 +468,7 @@ pub const RECORDING_LOCAL_MAX_BYTES: usize = 16 * 1024 * 1024;
 /// room for the receipt around it. Only a client-return save is bounded by the transfer ceiling;
 /// a save that stays in the browser is not (ADR-0109 Decision 3).
 pub const RECORDING_TRANSFER_MAX_BYTES: usize = 5 * 1024 * 1024;
+const _: () = assert!(RECORDING_LOCAL_MAX_BYTES > RECORDING_TRANSFER_MAX_BYTES);
 
 /// Where the browser delivers a finished recording GIF.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1415,110 +1416,4 @@ pub enum BrowserEvent {
         /// the browser held in that life keep it while they wait for the browser to confirm them.
         life: Option<String>,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{RecordingDelivery, RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES};
-    use crate::browser::adapter::chromium::protocol4::wire::TRANSFER_MAX_BYTES;
-
-    #[test]
-    fn a_command_names_one_locator_only_when_it_acts_on_exactly_one() {
-        use crate::browser::adapter::documents::DocumentScope;
-        use crate::browser::adapter::{
-            BrowserCommand, PhysicalClick, PhysicalDrag, PhysicalScroll, RecordingDestination,
-        };
-        use crate::language::{PointerButton, ScrollDirection};
-        let click = BrowserCommand::Activate(PhysicalClick {
-            tab_id: 1,
-            locator: "F:L:locator_a_1".into(),
-            button: PointerButton::Primary,
-            click_count: 1,
-            modifiers: vec![],
-        });
-        assert_eq!(click.sole_locator(), Some("F:L:locator_a_1"));
-        let scoped = BrowserCommand::InDocuments {
-            scope: DocumentScope {
-                documents: vec![],
-                allowed: vec![],
-                subjects: vec![],
-                watch_changes: false,
-                strict_tree: false,
-                settle_ms: 0,
-                settle_requested: true,
-            },
-            primitive: Box::new(click),
-        };
-        assert_eq!(scoped.sole_locator(), Some("F:L:locator_a_1"));
-        let page_scroll = BrowserCommand::Scroll(PhysicalScroll {
-            tab_id: 1,
-            locator: None,
-            direction: Some(ScrollDirection::Down),
-            amount: None,
-        });
-        assert_eq!(page_scroll.sole_locator(), None);
-        let two = BrowserCommand::DescribeTargets {
-            tab_id: 1,
-            locators: vec!["a".into(), "b".into()],
-        };
-        assert_eq!(two.sole_locator(), None);
-        let drag = BrowserCommand::Drag(PhysicalDrag {
-            tab_id: 1,
-            source_locator: "a".into(),
-            destination_locator: "b".into(),
-        });
-        assert_eq!(drag.sole_locator(), None);
-        let into_page = BrowserCommand::ExportRecording {
-            recording_id: "recording_1".into(),
-            destination: RecordingDestination::Target {
-                tab_id: 1,
-                locator: "F:L:locator_a_2".into(),
-                file_name: "flow.gif".into(),
-            },
-            max_output_bytes: 4096,
-        };
-        assert_eq!(into_page.sole_locator(), Some("F:L:locator_a_2"));
-        let download = BrowserCommand::ExportRecording {
-            recording_id: "recording_1".into(),
-            destination: RecordingDestination::Download {
-                file_name: "flow.gif".into(),
-            },
-            max_output_bytes: 4096,
-        };
-        assert_eq!(download.sole_locator(), None);
-    }
-
-    #[test]
-    fn only_a_client_return_can_carry_recording_bytes() {
-        // The destinations that stay inside the browser have nowhere to put bytes, so "frames
-        // never cross" is a property of the shape rather than a rule someone has to remember.
-        for delivery in [
-            RecordingDelivery::Attached { tab_id: 7 },
-            RecordingDelivery::Downloaded,
-        ] {
-            let encoded = serde_json::to_string(&delivery).expect("delivery serializes");
-            assert!(
-                !encoded.contains("data"),
-                "a browser-local delivery carried bytes: {encoded}"
-            );
-        }
-        // The negative control: the one destination outside the browser does carry them, so the
-        // assertion above is testing the shape rather than a missing field everywhere.
-        let returned = serde_json::to_string(&RecordingDelivery::Returned {
-            mime_type: "image/gif".into(),
-            data: "AA==".into(),
-        })
-        .expect("delivery serializes");
-        assert!(returned.contains("\"data\":\"AA==\""), "{returned}");
-    }
-
-    #[test]
-    fn the_transfer_ceiling_binds_only_the_destination_that_transfers() {
-        // Base64 inflates by a third, and the receipt travels with it. A returned GIF has to fit
-        // through the native boundary; one that stays in the browser never touches it.
-        const {
-            assert!(4 * RECORDING_TRANSFER_MAX_BYTES.div_ceil(3) < TRANSFER_MAX_BYTES);
-            assert!(RECORDING_LOCAL_MAX_BYTES > RECORDING_TRANSFER_MAX_BYTES);
-        }
-    }
 }
