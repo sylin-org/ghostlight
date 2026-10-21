@@ -300,22 +300,6 @@ fn translate(
             locator,
             button,
             click_count,
-        } => pointer::activate(
-            l,
-            reach(scope)?,
-            Click {
-                tab_id,
-                locator: &locator,
-                button: &button,
-                click_count,
-                modifiers: &[],
-            },
-        ),
-        BrowserCommand::ActivateModified {
-            tab_id,
-            locator,
-            button,
-            click_count,
             modifiers,
         } => pointer::activate(
             l,
@@ -421,26 +405,6 @@ fn translate(
             max_result_chars,
         } => script::evaluate(l, reach(scope)?, tab_id, &script, max_result_chars),
         BrowserCommand::ActivatePoint {
-            tab_id,
-            point,
-            expected_viewport,
-            button,
-            click_count,
-        } => points::activate(
-            l,
-            reach(scope)?,
-            PointClick {
-                at: ViewPoint {
-                    tab_id,
-                    point,
-                    expected: &expected_viewport,
-                },
-                button: &button,
-                click_count,
-                modifiers: &[],
-            },
-        ),
-        BrowserCommand::ActivatePointModified {
             tab_id,
             point,
             expected_viewport,

@@ -65,21 +65,12 @@ impl ApplicationExecutor {
                         button: value.button.clone(),
                     }),
                 );
-                let command = if value.modifiers.is_empty() {
-                    BrowserCommand::Activate {
-                        tab_id: tab.physical_id,
-                        locator: target.locator,
-                        button: value.button.clone(),
-                        click_count: value.click_count,
-                    }
-                } else {
-                    BrowserCommand::ActivateModified {
-                        tab_id: tab.physical_id,
-                        locator: target.locator,
-                        button: value.button.clone(),
-                        click_count: value.click_count,
-                        modifiers: value.modifiers.clone(),
-                    }
+                let command = BrowserCommand::Activate {
+                    tab_id: tab.physical_id,
+                    locator: target.locator,
+                    button: value.button.clone(),
+                    click_count: value.click_count,
+                    modifiers: value.modifiers.clone(),
                 };
                 (
                     command,
@@ -88,23 +79,13 @@ impl ApplicationExecutor {
                 )
             }
             ResolvedLocation::Point { tab, view, point } => {
-                let command = if value.modifiers.is_empty() {
-                    BrowserCommand::ActivatePoint {
-                        tab_id: tab.physical_id,
-                        point,
-                        expected_viewport: view.viewport,
-                        button: value.button.clone(),
-                        click_count: value.click_count,
-                    }
-                } else {
-                    BrowserCommand::ActivatePointModified {
-                        tab_id: tab.physical_id,
-                        point,
-                        expected_viewport: view.viewport,
-                        button: value.button.clone(),
-                        click_count: value.click_count,
-                        modifiers: value.modifiers.clone(),
-                    }
+                let command = BrowserCommand::ActivatePoint {
+                    tab_id: tab.physical_id,
+                    point,
+                    expected_viewport: view.viewport,
+                    button: value.button.clone(),
+                    click_count: value.click_count,
+                    modifiers: value.modifiers.clone(),
                 };
                 (
                     command,

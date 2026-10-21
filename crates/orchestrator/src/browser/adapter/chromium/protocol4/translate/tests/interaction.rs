@@ -158,6 +158,7 @@ fn activate(locator: &str) -> BrowserCommand {
         locator: locator.into(),
         button: "left".into(),
         click_count: 1,
+        modifiers: vec![],
     }
 }
 
@@ -280,7 +281,7 @@ fn a_modified_click_holds_its_modifiers() {
         &port,
         scoped(
             all_open(),
-            BrowserCommand::ActivateModified {
+            BrowserCommand::Activate {
                 tab_id: 12,
                 locator: TOP_LOCATOR.into(),
                 button: "left".into(),

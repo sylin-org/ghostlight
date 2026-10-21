@@ -9,8 +9,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset waited on (see
 Notes).
 
-The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10 has landed;
-BROW-4 is next.
+The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10 and BROW-4
+have landed; BROW-7 is next.
 
 ## Slices
 
@@ -139,12 +139,12 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10 has landed; BROW-4 is next.
+with its skeptic's corrections. BROW-10 and BROW-4 have landed; BROW-7 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | BROW-10 | refactor(assets): one table of the page's error codes, tested against what `content.js` throws, and `visualIdentity` derived from its beats | - | BROW-10 as corrected; `assets.sha256` regenerates | landed (this commit) |
-| BROW-4 | refactor(adapter): one activate variant each, with a modifier list | - | BROW-4 | todo |
+| BROW-4 | refactor(adapter): one activate variant each, with a modifier list | - | BROW-4 | landed (this commit) |
 | BROW-7 | refactor(adapter): one call request in place of seven arguments | - | BROW-7 | todo |
 | BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | todo |
 | BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | todo |
@@ -177,3 +177,13 @@ with its skeptic's corrections. BROW-10 has landed; BROW-4 is next.
 - BROW-10, owed to docs: `docs/design/visual-language.md:87` credits `visualIdentity` with the
   workwheel (2400 ms), waiting-light (1050 ms) and keyboard (1150 ms) beats. It holds none of them;
   they are looping CSS animations. The file is the docs lane's.
+- BROW-4: `Activate` and `ActivatePoint` carry `modifiers`, empty for none, and
+  `ActivateModified` and `ActivatePointModified` go. The executor builds one variant whatever the
+  modifiers, and the translator passes the list through. The input frames are unchanged:
+  `keys::modifier_mask` of an empty list is 0, the mask the plain variants sent. The mask 0 of a
+  click without modifiers is pinned by `a_click_in_the_top_document_needs_no_owner_box` and
+  `an_open_scope_sends_a_point_click_without_routing_it`, and a held mask by
+  `a_modified_click_holds_its_modifiers` and `a_modified_point_click_holds_its_modifiers`, all in
+  `protocol4/translate/tests/`. Cross-lane edits, one arm or one construction each: core-work's
+  `work/pointer.rs` and `work/documents.rs`, and core-service's `browser/mod.rs`
+  (`addressed_tab`). Neither lane had landed a slice in those files.

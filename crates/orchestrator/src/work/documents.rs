@@ -56,9 +56,6 @@ impl RequestScope {
             BrowserCommand::Activate {
                 tab_id, locator, ..
             }
-            | BrowserCommand::ActivateModified {
-                tab_id, locator, ..
-            }
             | BrowserCommand::Hover { tab_id, locator }
             | BrowserCommand::TypeText {
                 tab_id, locator, ..
@@ -70,7 +67,6 @@ impl RequestScope {
                 *tab_id
             }
             BrowserCommand::ActivatePoint { tab_id, point, .. }
-            | BrowserCommand::ActivatePointModified { tab_id, point, .. }
             | BrowserCommand::WheelAt { tab_id, point, .. }
             | BrowserCommand::HoverPoint { tab_id, point, .. }
             | BrowserCommand::DropImageAt { tab_id, point, .. } => {

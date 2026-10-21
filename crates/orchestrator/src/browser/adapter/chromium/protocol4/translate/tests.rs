@@ -830,6 +830,7 @@ fn a_content_command_without_a_scope_is_a_protocol_error() {
             locator: locator.into(),
             button: "left".into(),
             click_count: 1,
+            modifiers: vec![],
         },
         BrowserCommand::TypeText {
             tab_id: 12,

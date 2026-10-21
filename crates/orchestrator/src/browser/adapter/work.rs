@@ -762,31 +762,17 @@ pub enum BrowserCommand {
         /// The most targets to return across every document.
         max_results: usize,
     },
-    /// Activate one target.
+    /// Activate one target, holding `modifiers` (none when empty).
     Activate {
-        tab_id: u64,
-        locator: String,
-        button: String,
-        click_count: u8,
-    },
-    /// Activate one page point resolved from a governed view handle.
-    ActivatePoint {
-        tab_id: u64,
-        point: PhysicalPoint,
-        expected_viewport: ViewportGeometry,
-        button: String,
-        click_count: u8,
-    },
-    /// Activate one target with held keyboard modifiers.
-    ActivateModified {
         tab_id: u64,
         locator: String,
         button: String,
         click_count: u8,
         modifiers: Vec<String>,
     },
-    /// Activate one page point with held keyboard modifiers.
-    ActivatePointModified {
+    /// Activate one page point resolved from a governed view handle, holding `modifiers` (none
+    /// when empty).
+    ActivatePoint {
         tab_id: u64,
         point: PhysicalPoint,
         expected_viewport: ViewportGeometry,
@@ -963,7 +949,6 @@ impl BrowserCommand {
             | Self::PressKey { locator, .. }
             | Self::Observe { locator, .. } => locator.as_deref(),
             Self::Activate { locator, .. }
-            | Self::ActivateModified { locator, .. }
             | Self::Hover { locator, .. }
             | Self::TypeText { locator, .. }
             | Self::UploadFiles { locator, .. }
@@ -1327,6 +1312,7 @@ mod tests {
             locator: "F:L:locator_a_1".into(),
             button: "left".into(),
             click_count: 1,
+            modifiers: vec![],
         };
         assert_eq!(click.sole_locator(), Some("F:L:locator_a_1"));
         let scoped = BrowserCommand::InDocuments {

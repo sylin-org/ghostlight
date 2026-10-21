@@ -128,8 +128,6 @@ pub fn addressed_tab(command: &Work) -> Option<u64> {
         | Work::QuerySemantic { tab_id, .. }
         | Work::Activate { tab_id, .. }
         | Work::ActivatePoint { tab_id, .. }
-        | Work::ActivateModified { tab_id, .. }
-        | Work::ActivatePointModified { tab_id, .. }
         | Work::WheelAt { tab_id, .. }
         | Work::Scroll { tab_id, .. }
         | Work::SetZoom { tab_id, .. }

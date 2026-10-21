@@ -258,6 +258,7 @@ fn click_at(point: (f64, f64)) -> BrowserCommand {
         expected_viewport: expected_view(),
         button: "left".into(),
         click_count: 1,
+        modifiers: vec![],
     }
 }
 
@@ -365,7 +366,7 @@ fn a_modified_point_click_holds_its_modifiers() {
         &port,
         scoped(
             all_open(),
-            BrowserCommand::ActivatePointModified {
+            BrowserCommand::ActivatePoint {
                 tab_id: 12,
                 point: at(OVER_E.0, OVER_E.1),
                 expected_viewport: expected_view(),
@@ -532,6 +533,7 @@ fn a_restricted_click_on_a_target_lands_when_the_point_is_where_the_target_is() 
                     locator: "T:t1:locator_a1_2".into(),
                     button: "left".into(),
                     click_count: 1,
+                    modifiers: vec![],
                 },
             ),
         )
@@ -559,6 +561,7 @@ fn a_restricted_click_covered_by_a_denied_document_is_refused_before_input() {
                     locator: "T:t1:locator_a1_9".into(),
                     button: "left".into(),
                     click_count: 1,
+                    modifiers: vec![],
                 },
             ),
         );
