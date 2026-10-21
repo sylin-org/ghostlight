@@ -6,23 +6,17 @@ Machine: test-02 (Bluefin). Paths without a crate are under `crates/orchestrator
 
 ## RESUME HERE
 
-Opened on 2026-10-21. Every test of `browser/adapter/` was classified first, read-only, against
-ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (`wire.rs`), A2
-(`keys/tests.rs`) A3 (`world/tests.rs`), A4
-(`assets.rs`), A5 (`work.rs`), A6
-(`geometry/tests.rs`), A7 (`locator.rs`), A8
-(`scope/tests.rs`), A9 (`tree/tests.rs`),
-A10 (`merge/tests.rs`), A11 (`link/tests.rs`), A12 (`connection/tests.rs`), A13
-(`golden.rs`), A14 (`translate/script.rs`), A15 (`translate/tests/forms.rs`) ,
-A16 (`translate/tests/points.rs`), A17 (`translate/tests/interaction.rs`) and A18
-(`translate/tests.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
-read; keep them.
+The `browser/adapter/` area is cut: 337 Rust tests at opening, 55 now (24 promise, 16 contract, 15
+defect), in slices A1 to A19, all on dev. Every test was classified first, read-only, against
+ADR-0204's four reasons (see Notes). Next for this lane: the page assets' node tests, once the owner
+sets the JavaScript ceiling. The protocol 4 goldens and the pins in `protocol4/golden.rs` are
+contracts both sides read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 56 |
+| `browser/adapter/` | 337 | 55 | 55 |
 
 ## Slices
 
@@ -48,7 +42,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A15 | `protocol4/translate/tests/forms.rs`: a fill's order, its refusals and its partial outcomes | 20 | 3 | promise 2, defect 1 | landed (1a4ccfed) |
 | A16 | `protocol4/translate/tests/points.rs`: where a point or a target may land | 22 | 3 | promise 2, defect 1 | landed (f64971b8) |
 | A17 | `protocol4/translate/tests/interaction.rs` (and `world`'s removed lookup): input refusals, unknown effects, capture and scripts | 37 + 1 | 4 | promise 3, defect 1 | landed (fa3d1e60) |
-| A18 | `protocol4/translate/tests.rs`: no unguarded content, the diagnostics binding and a changed document | 18 | 4 | contract 1, defect 3 | landed (this commit) |
+| A18 | `protocol4/translate/tests.rs`: no unguarded content, the diagnostics binding and a changed document | 18 | 4 | contract 1, defect 3 | landed (8be0e02c) |
+| A19 | `protocol4/tree/tests.rs`: an inventory decodes to a tree or to a refusal | 2 | 1 | contract 1 | landed (this commit) |
 
 ## Notes
 
@@ -202,6 +197,14 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   (scope's guard test), admission and coverage (scope's tests), the read and tree merges (merge's
   tables), the recording-start shape (the request golden), and call-position wire fields (points'
   routed-point case).
+- A19: `tree`'s two tests become one, as the recount at A16 planned: the inventory decodes to one
+  tree or to a refusal, and the refusal cases run as a named function of that test.
+- The close: 337 to 55. By kind: 24 promise, 16 contract, 15 defect, 0 unsafe. Kept tests that
+  waited on fixed sleeps or tight real-time bounds were rewritten to wait on conditions (the
+  heartbeat test in A12, the fill's spent budget in A15, the deadline lateness bound in A11).
+  Product code only deleted tests used went (`Message::payload`), test-only budgets became
+  build-time assertions beside their constants (A1, A5), and three translator failure sentences
+  became `pub(super)` so tests compare against them (A15).
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden

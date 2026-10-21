@@ -45,11 +45,13 @@ fn nested_inventory() -> FrameInventory {
     )
 }
 
-/// The service builds one tree from the extension's frame inventory: documents in depth-first
+/// The extension's frame inventory decodes to one tree or to a refusal: documents in depth-first
 /// order, with each out-of-process subtree under its parent though the extension lists it last,
 /// so `nth` and form numbers count in one stable order; a frame the extension cannot see as a
-/// placeholder under the top that is never addressable; and only a real web page addressable,
-/// never `about:blank` or a frame that did not load.
+/// placeholder under the top that is never addressable; only a real web page addressable, never
+/// `about:blank` or a frame that did not load; and an inventory that is not one tree, or holds
+/// more documents than the protocol allows, refused, so a malformed answer never gives a frame the
+/// wrong parent or another's authority.
 #[test]
 fn an_inventory_becomes_one_tree_in_document_order_with_only_web_pages_addressable() {
     let tree = FrameTree::from_inventory(&inventory(
@@ -95,12 +97,13 @@ fn an_inventory_becomes_one_tree_in_document_order_with_only_web_pages_addressab
         assert_eq!(pages.supported_ref(id).is_some(), addressable, "{id}");
         assert!(pages.real_ref(id).is_some(), "{id} is still in the tree");
     }
+
+    an_inventory_that_is_not_one_tree_is_refused();
 }
 
 /// An inventory that is not one tree, or that holds more documents than the protocol allows, is
 /// refused, so a malformed answer never gives a frame the wrong parent or the authority of
 /// another.
-#[test]
 fn an_inventory_that_is_not_one_tree_is_refused() {
     let top = frame("T", "t1", None, "https://top.test/");
     let child = |id: &str, parent: &str| frame(id, "l1", Some(parent), "https://c.test/");
