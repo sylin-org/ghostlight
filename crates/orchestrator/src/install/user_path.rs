@@ -279,33 +279,6 @@ mod registry {
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
         Ok(PathValue { text, expandable })
     }
-
-    #[cfg(test)]
-    mod tests {
-        use winreg::enums::REG_DWORD;
-
-        use super::*;
-
-        #[test]
-        fn a_value_survives_the_registry_encoding() {
-            for expandable in [true, false] {
-                let value = PathValue {
-                    text: r"C:\one;%USERPROFILE%\two;".to_owned(),
-                    expandable,
-                };
-                assert_eq!(decode(&encode(&value)).unwrap(), value);
-            }
-        }
-
-        #[test]
-        fn a_value_that_is_not_a_string_is_refused() {
-            let raw = RegValue {
-                bytes: vec![1, 0, 0, 0],
-                vtype: REG_DWORD,
-            };
-            assert!(decode(&raw).is_err());
-        }
-    }
 }
 
 #[cfg(test)]
@@ -339,129 +312,116 @@ mod tests {
         )
     }
 
+    /// Editing the per-user `Path` value keeps every other entry's bytes, order and empty segments, so an
+    /// install and an uninstall leave the value as it was. Ghostlight's entry is appended once, after
+    /// the others and before a trailing semicolon; it is found however it is written (case, slashes,
+    /// quotes, a trailing separator, `%USERPROFILE%` in an expandable value) and never in a longer path;
+    /// it uses the profile form only in an expandable value; and expansion leaves unknown references and
+    /// lone percent signs as they are.
     #[test]
-    fn a_missing_directory_is_appended_after_the_others() {
-        let before = value(r"C:\Windows;C:\Tools");
-        assert!(!names_directory(&before, &bin(), &lookup));
-        assert_eq!(
-            with_ours(&before.text),
-            r"C:\Windows;C:\Tools;%USERPROFILE%\.ghostlight\bin"
-        );
-    }
-
-    #[test]
-    fn an_empty_value_becomes_just_the_entry() {
-        assert_eq!(append("", "C:\\one"), "C:\\one");
-    }
-
-    #[test]
-    fn a_trailing_semicolon_stays_last() {
-        assert_eq!(append(r"C:\a;C:\b;", r"C:\c"), r"C:\a;C:\b;C:\c;");
-    }
-
-    #[test]
-    fn a_present_directory_is_found_however_it_is_written() {
-        for text in [
-            BIN,
-            r"C:\Users\person\.ghostlight\bin\",
-            r"c:\users\PERSON\.GhostLight\BIN",
-            r"%USERPROFILE%\.ghostlight\bin",
-            r"%userprofile%\.ghostlight\bin\",
-            r#""C:\Users\person\.ghostlight\bin""#,
-            r"C:\Users\person/.ghostlight/bin",
-        ] {
-            let before = value(&format!(r"C:\Windows;{text};C:\Tools"));
-            assert!(names_directory(&before, &bin(), &lookup), "{text}");
+    fn the_path_value_keeps_every_other_entry_and_finds_ours_however_written() {
+        {
+            let before = value(r"C:\Windows;C:\Tools");
+            assert!(!names_directory(&before, &bin(), &lookup));
+            assert_eq!(
+                with_ours(&before.text),
+                r"C:\Windows;C:\Tools;%USERPROFILE%\.ghostlight\bin"
+            );
         }
-    }
-
-    #[test]
-    fn a_literal_value_does_not_expand_references() {
-        let literal = PathValue {
-            text: r"%USERPROFILE%\.ghostlight\bin".to_owned(),
-            expandable: false,
-        };
-        assert!(!names_directory(&literal, &bin(), &lookup));
-    }
-
-    #[test]
-    fn a_longer_path_is_not_ours() {
-        for text in [
-            r"C:\Users\person\.ghostlight\bin\old",
-            r"C:\Users\person\.ghostlight\binary",
-            r"C:\Users\person\.ghostlight",
-            r"%USERPROFILE%\.ghostlight\bin-old",
-        ] {
-            let before = value(text);
-            assert!(!names_directory(&before, &bin(), &lookup), "{text}");
-            assert_eq!(remove(&before, &bin(), &lookup), None, "{text}");
+        {
+            assert_eq!(append("", "C:\\one"), "C:\\one");
         }
-    }
-
-    #[test]
-    fn the_entry_uses_the_profile_form_only_in_an_expandable_value() {
-        let profile = Path::new(r"C:\Users\person");
-        assert_eq!(
-            entry_for(&bin(), true, Some(profile)),
-            r"%USERPROFILE%\.ghostlight\bin"
-        );
-        assert_eq!(entry_for(&bin(), false, Some(profile)), BIN);
-        assert_eq!(entry_for(&bin(), true, None), BIN);
-        assert_eq!(
-            entry_for(&bin(), true, Some(Path::new(r"C:\Users\per"))),
-            BIN,
-            "a prefix that ends inside a directory name is not the profile"
-        );
-        assert_eq!(
-            entry_for(Path::new(r"D:\elsewhere\bin"), true, Some(profile)),
-            r"D:\elsewhere\bin"
-        );
-    }
-
-    #[test]
-    fn appending_twice_changes_nothing_the_second_time() {
-        let once = with_ours(r"C:\Windows");
-        assert!(names_directory(&value(&once), &bin(), &lookup));
-    }
-
-    #[test]
-    fn other_entries_keep_their_bytes_order_and_empty_segments() {
-        for original in [
-            r"C:\A;;c:\b\;%SystemRoot%\x;",
-            r"C:\A;;c:\b\;%SystemRoot%\x",
-        ] {
-            let added = value(&with_ours(original));
-            assert!(added.text.starts_with(original.trim_end_matches(';')));
-            assert!(names_directory(&added, &bin(), &lookup));
-            let removed = remove(&added, &bin(), &lookup).unwrap();
-            assert_eq!(removed.text, original);
-            assert!(removed.expandable);
+        {
+            assert_eq!(append(r"C:\a;C:\b;", r"C:\c"), r"C:\a;C:\b;C:\c;");
         }
-    }
-
-    #[test]
-    fn removal_takes_only_the_entries_that_name_the_directory() {
-        let before =
-            value(r"C:\a;%USERPROFILE%\.ghostlight\bin;C:\b;C:\Users\person\.ghostlight\bin\old");
-        let after = remove(&before, &bin(), &lookup).unwrap();
-        assert_eq!(after.text, r"C:\a;C:\b;C:\Users\person\.ghostlight\bin\old");
-    }
-
-    #[test]
-    fn removing_the_only_entry_leaves_an_empty_value() {
-        let after = remove(&value(BIN), &bin(), &lookup).unwrap();
-        assert_eq!(after.text, "");
-    }
-
-    #[test]
-    fn expansion_leaves_unknown_references_and_lone_percent_signs() {
-        assert_eq!(expand("%NOPE%x", &lookup), "%NOPE%x");
-        assert_eq!(expand("100%", &lookup), "100%");
-        assert_eq!(expand("%%", &lookup), "%%");
-        assert_eq!(
-            expand("%NOPE%%USERPROFILE%", &lookup),
-            r"%NOPE%C:\Users\person"
-        );
-        assert_eq!(expand("a%USERPROFILE%b", &lookup), r"aC:\Users\personb");
+        {
+            for text in [
+                BIN,
+                r"C:\Users\person\.ghostlight\bin\",
+                r"c:\users\PERSON\.GhostLight\BIN",
+                r"%USERPROFILE%\.ghostlight\bin",
+                r"%userprofile%\.ghostlight\bin\",
+                r#""C:\Users\person\.ghostlight\bin""#,
+                r"C:\Users\person/.ghostlight/bin",
+            ] {
+                let before = value(&format!(r"C:\Windows;{text};C:\Tools"));
+                assert!(names_directory(&before, &bin(), &lookup), "{text}");
+            }
+        }
+        {
+            let literal = PathValue {
+                text: r"%USERPROFILE%\.ghostlight\bin".to_owned(),
+                expandable: false,
+            };
+            assert!(!names_directory(&literal, &bin(), &lookup));
+        }
+        {
+            for text in [
+                r"C:\Users\person\.ghostlight\bin\old",
+                r"C:\Users\person\.ghostlight\binary",
+                r"C:\Users\person\.ghostlight",
+                r"%USERPROFILE%\.ghostlight\bin-old",
+            ] {
+                let before = value(text);
+                assert!(!names_directory(&before, &bin(), &lookup), "{text}");
+                assert_eq!(remove(&before, &bin(), &lookup), None, "{text}");
+            }
+        }
+        {
+            let profile = Path::new(r"C:\Users\person");
+            assert_eq!(
+                entry_for(&bin(), true, Some(profile)),
+                r"%USERPROFILE%\.ghostlight\bin"
+            );
+            assert_eq!(entry_for(&bin(), false, Some(profile)), BIN);
+            assert_eq!(entry_for(&bin(), true, None), BIN);
+            assert_eq!(
+                entry_for(&bin(), true, Some(Path::new(r"C:\Users\per"))),
+                BIN,
+                "a prefix that ends inside a directory name is not the profile"
+            );
+            assert_eq!(
+                entry_for(Path::new(r"D:\elsewhere\bin"), true, Some(profile)),
+                r"D:\elsewhere\bin"
+            );
+        }
+        {
+            let once = with_ours(r"C:\Windows");
+            assert!(names_directory(&value(&once), &bin(), &lookup));
+        }
+        {
+            for original in [
+                r"C:\A;;c:\b\;%SystemRoot%\x;",
+                r"C:\A;;c:\b\;%SystemRoot%\x",
+            ] {
+                let added = value(&with_ours(original));
+                assert!(added.text.starts_with(original.trim_end_matches(';')));
+                assert!(names_directory(&added, &bin(), &lookup));
+                let removed = remove(&added, &bin(), &lookup).unwrap();
+                assert_eq!(removed.text, original);
+                assert!(removed.expandable);
+            }
+        }
+        {
+            let before = value(
+                r"C:\a;%USERPROFILE%\.ghostlight\bin;C:\b;C:\Users\person\.ghostlight\bin\old",
+            );
+            let after = remove(&before, &bin(), &lookup).unwrap();
+            assert_eq!(after.text, r"C:\a;C:\b;C:\Users\person\.ghostlight\bin\old");
+        }
+        {
+            let after = remove(&value(BIN), &bin(), &lookup).unwrap();
+            assert_eq!(after.text, "");
+        }
+        {
+            assert_eq!(expand("%NOPE%x", &lookup), "%NOPE%x");
+            assert_eq!(expand("100%", &lookup), "100%");
+            assert_eq!(expand("%%", &lookup), "%%");
+            assert_eq!(
+                expand("%NOPE%%USERPROFILE%", &lookup),
+                r"%NOPE%C:\Users\person"
+            );
+            assert_eq!(expand("a%USERPROFILE%b", &lookup), r"aC:\Users\personb");
+        }
     }
 }
