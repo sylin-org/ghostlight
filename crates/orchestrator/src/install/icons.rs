@@ -41,7 +41,7 @@ use sha2::{Digest, Sha256};
 use super::apps::is_wrapper;
 use super::packaged::{is_family_of, PACKAGES_DIRECTORY};
 use super::record::atomic_replace;
-use super::{user_dirs, HOME_VARIABLE, USER_PROFILE_VARIABLE};
+use super::user_dirs::UserDirs;
 use crate::sync::lock;
 
 /// The longest a look at every agent's sources takes before it stops; agents it did not reach
@@ -74,18 +74,6 @@ const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 /// The extension of a PNG file.
 const PNG_EXTENSION: &str = "png";
-
-/// The Windows variable that names the per-user application data folder.
-const LOCAL_APP_DATA_VARIABLE: &str = "LOCALAPPDATA";
-
-/// The Windows variable that names the machine-wide program folder.
-const PROGRAM_FILES_VARIABLE: &str = "ProgramFiles";
-
-/// The variable that lists the directories commands are found in.
-const PATH_VARIABLE: &str = "PATH";
-
-/// The Linux variable that names the person's own data directory (XDG base directories).
-const XDG_DATA_HOME_VARIABLE: &str = "XDG_DATA_HOME";
 
 /// The Linux variable that lists the system data directories, separated by colons.
 const XDG_DATA_DIRS_VARIABLE: &str = "XDG_DATA_DIRS";
@@ -313,24 +301,13 @@ impl IconPlaces {
     #[must_use]
     pub fn system() -> Self {
         let windows = cfg!(target_os = "windows");
-        let home = if windows {
-            user_dirs::directory(USER_PROFILE_VARIABLE)
-                .or_else(|| user_dirs::directory(HOME_VARIABLE))
-        } else {
-            user_dirs::directory(HOME_VARIABLE)
-        }
-        .unwrap_or_default();
-        let path_entries = env::var_os(PATH_VARIABLE)
-            .map(|path| env::split_paths(&path).collect())
-            .unwrap_or_default();
+        let dirs = UserDirs::system();
+        let path_entries = dirs.path_entries().to_vec();
         if windows {
             Self {
                 windows,
-                local_app_data: Some(
-                    user_dirs::directory(LOCAL_APP_DATA_VARIABLE)
-                        .unwrap_or_else(|| home.join("AppData").join("Local")),
-                ),
-                program_files: user_dirs::directory(PROGRAM_FILES_VARIABLE),
+                local_app_data: Some(dirs.local()),
+                program_files: dirs.program_files().first().cloned(),
                 path_entries,
                 data_dirs: Vec::new(),
                 packages: Some(ghostlight_win_peer::package_install_folders),
@@ -342,8 +319,9 @@ impl IconPlaces {
                 program_files: None,
                 path_entries,
                 data_dirs: linux_data_dirs(
-                    &home,
-                    env::var_os(XDG_DATA_HOME_VARIABLE),
+                    dirs.home(),
+                    dirs.named_xdg_data()
+                        .map(|path| path.as_os_str().to_owned()),
                     env::var_os(XDG_DATA_DIRS_VARIABLE),
                 ),
                 packages: None,

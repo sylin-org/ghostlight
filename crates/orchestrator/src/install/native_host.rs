@@ -27,10 +27,7 @@ use super::container::{AppContainer, Residence};
 use super::entry::{canonical_path, same_location_on};
 use super::layout::{Layout, EDGE_COMMAND_NAME, MANIFESTS_DIRECTORY_NAME};
 use super::record;
-use super::user_dirs;
-use super::{
-    HOME_VARIABLE, LOCAL_APP_DATA_VARIABLE, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE,
-};
+use super::user_dirs::{self, UserDirs};
 use crate::language::deployment as words;
 
 /// Stable native-messaging identity used by every supported Chromium browser.
@@ -327,16 +324,14 @@ struct NativeHostContext {
 
 impl NativeHostContext {
     fn system() -> Self {
-        let home = user_dirs::directory(USER_PROFILE_VARIABLE)
-            .or_else(|| user_dirs::directory(HOME_VARIABLE))
-            .unwrap_or_default();
+        let dirs = UserDirs::system();
         let platform = if cfg!(target_os = "windows") {
             NativeHostPlatform::Windows
         } else {
             NativeHostPlatform::Linux
         };
         let (home, local, config, registry_isolated) =
-            environment_native_host_roots(&|name| env::var_os(name), &home);
+            environment_native_host_roots(&dirs, &|name| env::var_os(name));
         let layout = Layout::current().unwrap_or_else(|_| Layout::new(PathBuf::new()));
         let connector = layout
             .bin()
@@ -354,9 +349,9 @@ impl NativeHostContext {
             Residence::detect()
         };
         let browser_packages =
-            BrowserPackageContext::system(&home, platform == NativeHostPlatform::Linux);
+            BrowserPackageContext::system(&dirs, platform == NativeHostPlatform::Linux);
         let windows_browser_roots = if platform == NativeHostPlatform::Windows {
-            windows_browser_roots(&local)
+            windows_browser_roots(&local, dirs.program_files())
         } else {
             Vec::new()
         };
@@ -397,18 +392,19 @@ impl NativeHostContext {
     }
 }
 
-/// The manifest roots and the registry scope the variables `lookup` reads name. An empty
-/// variable names none ([`user_dirs`]): an empty explicit root isolates nothing, and an empty
-/// per-user root falls back below `home` instead of the working directory.
+/// The manifest roots and the registry scope of the person's directories `dirs`, with the
+/// explicit root `lookup` names. A variable that is empty or relative names none ([`user_dirs`]):
+/// such an explicit root isolates nothing, and the per-user roots fall back below the home
+/// instead of the working directory.
 fn environment_native_host_roots(
+    dirs: &UserDirs,
     lookup: user_dirs::Lookup<'_>,
-    home: &Path,
 ) -> (PathBuf, PathBuf, PathBuf, bool) {
     native_host_roots(
         user_dirs::directory_in(lookup, NATIVE_HOST_DIR_VARIABLE),
-        user_dirs::directory_in(lookup, LOCAL_APP_DATA_VARIABLE),
-        user_dirs::directory_in(lookup, XDG_CONFIG_HOME_VARIABLE),
-        home,
+        Some(dirs.local()),
+        Some(dirs.xdg_config()),
+        dirs.home(),
     )
 }
 
@@ -552,17 +548,13 @@ fn user_data_directory(context: &NativeHostContext, browser: &BrowserSpec) -> Pa
     }
 }
 
-fn windows_browser_roots(local: &Path) -> Vec<PathBuf> {
+/// Where a Windows browser may be installed: the local application data directory, then each
+/// program folder that is not that directory.
+fn windows_browser_roots(local: &Path, program_files: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots = vec![local.to_path_buf()];
-    for variable in ["PROGRAMFILES", "PROGRAMFILES(X86)"] {
-        let Some(root) = env::var_os(variable)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-        else {
-            continue;
-        };
-        if !roots.contains(&root) {
-            roots.push(root);
+    for root in program_files {
+        if !roots.contains(root) {
+            roots.push(root.clone());
         }
     }
     roots
@@ -1736,20 +1728,29 @@ mod tests {
 
     #[test]
     fn empty_native_host_variables_resolve_below_the_home_and_isolate_nothing() {
-        let empty = |name: &str| {
-            [
-                NATIVE_HOST_DIR_VARIABLE,
-                LOCAL_APP_DATA_VARIABLE,
-                XDG_CONFIG_HOME_VARIABLE,
-            ]
-            .contains(&name)
-            .then(std::ffi::OsString::new)
+        use super::user_dirs::{
+            HOME_VARIABLE, LOCAL_APP_DATA_VARIABLE, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE,
         };
-        let (home, local, config, isolated) =
-            environment_native_host_roots(&empty, Path::new("/home/test"));
-        assert_eq!(home, PathBuf::from("/home/test"));
-        assert_eq!(local, PathBuf::from("/home/test/AppData/Local"));
-        assert_eq!(config, PathBuf::from("/home/test/.config"));
+        use std::ffi::OsString;
+
+        let home = if cfg!(windows) {
+            "C:/Users/test"
+        } else {
+            "/home/test"
+        };
+        let lookup = |name: &str| match name {
+            USER_PROFILE_VARIABLE | HOME_VARIABLE => Some(OsString::from(home)),
+            NATIVE_HOST_DIR_VARIABLE | LOCAL_APP_DATA_VARIABLE | XDG_CONFIG_HOME_VARIABLE => {
+                Some(OsString::new())
+            }
+            _ => None,
+        };
+        let dirs = UserDirs::from_lookup(&lookup, cfg!(windows));
+        let (resolved, local, config, isolated) = environment_native_host_roots(&dirs, &lookup);
+        let home = Path::new(home);
+        assert_eq!(resolved, home);
+        assert_eq!(local, home.join("AppData").join("Local"));
+        assert_eq!(config, home.join(".config"));
         assert!(!isolated);
     }
 

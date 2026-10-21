@@ -56,6 +56,7 @@ use icons::{AgentIconSources, IconSource, KnownFolder, ProgramPlace};
 use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
 use packaged::{CopyPlace, DataRoots, Packages, SettingsCopy};
 use record::{Access, Link, Replace};
+use user_dirs::UserDirs;
 
 const SERVER_NAME: &str = "ghostlight";
 /// The key of the program an entry starts, in every dialect.
@@ -79,16 +80,6 @@ const CODEX_PACKAGE: &str = "OpenAI.Codex";
 /// The age past which a replace's temporary file beside a configuration is no write in flight
 /// but one an interrupted write left behind. A write takes milliseconds.
 const STRAY_TEMPORARY_AGE: Duration = Duration::from_secs(60);
-/// The Windows variable that names the person's home, read before `HOME`.
-const USER_PROFILE_VARIABLE: &str = "USERPROFILE";
-/// The variable that names the person's home where `USERPROFILE` is not set, and on Linux.
-const HOME_VARIABLE: &str = "HOME";
-/// The Windows variable that names the roaming application data directory.
-const APP_DATA_VARIABLE: &str = "APPDATA";
-/// The Windows variable that names the local application data directory.
-const LOCAL_APP_DATA_VARIABLE: &str = "LOCALAPPDATA";
-/// The Linux variable that names the configuration directory (XDG base directories).
-const XDG_CONFIG_HOME_VARIABLE: &str = "XDG_CONFIG_HOME";
 /// The variable that names Codex's own directory, which holds its `config.toml`.
 const CODEX_HOME_VARIABLE: &str = "CODEX_HOME";
 /// The variable that names Claude Code's own directory: Claude Code reads its [`CLAUDE_CODE_FILE`]
@@ -748,31 +739,21 @@ impl HarnessContext {
 
     fn system() -> Self {
         let windows = cfg!(target_os = "windows");
-        let home = if windows {
-            user_dirs::directory(USER_PROFILE_VARIABLE)
-                .or_else(|| user_dirs::directory(HOME_VARIABLE))
-        } else {
-            user_dirs::directory(HOME_VARIABLE)
-        }
-        .unwrap_or_default();
-        let roots = environment_roots(&home, &|name| env::var_os(name), windows);
+        let dirs = UserDirs::system();
+        let home = dirs.home().to_path_buf();
+        let roots = environment_roots(&dirs, &|name| env::var_os(name), windows);
         let layout = layout::Layout::current();
         let edge = layout
             .as_ref()
             .map(layout::Layout::bin)
             .unwrap_or_default()
             .join(executable_name(EDGE_COMMAND_NAME, windows));
-        let path_entries = env::var_os("PATH")
-            .map(|path| env::split_paths(&path).collect())
-            .unwrap_or_default();
+        let path_entries = dirs.path_entries().to_vec();
         let locations = layout.map_or_else(
             |_| PathBuf::from(layout::HARNESS_LOCATIONS_NAME),
             |layout| layout.harness_locations(),
         );
-        let local_app_data = windows.then(|| {
-            user_dirs::directory(LOCAL_APP_DATA_VARIABLE)
-                .unwrap_or_else(|| home.join("AppData/Local"))
-        });
+        let local_app_data = windows.then(|| dirs.local());
         let private_view = local_app_data.as_ref().and_then(|local| {
             Residence::detect()
                 .container()
@@ -853,14 +834,18 @@ fn stored_variable(_name: &str) -> Option<user_path::PathValue> {
     None
 }
 
-/// The configuration roots the variables `lookup` reads name, below `home` where they name none.
-/// An empty variable names none ([`user_dirs`]), so no client's file lands in the working
-/// directory.
-fn environment_roots(home: &Path, lookup: user_dirs::Lookup<'_>, windows: bool) -> HarnessRoots {
+/// The configuration roots of the person's directories `dirs`, with Codex's own directory where
+/// `lookup` names one. A variable that is empty or relative names none ([`user_dirs`]), so no
+/// client's file lands in the working directory.
+fn environment_roots(
+    dirs: &UserDirs,
+    lookup: user_dirs::Lookup<'_>,
+    windows: bool,
+) -> HarnessRoots {
     harness_roots(
-        home,
-        user_dirs::directory_in(lookup, XDG_CONFIG_HOME_VARIABLE),
-        user_dirs::directory_in(lookup, APP_DATA_VARIABLE),
+        dirs.home(),
+        Some(dirs.xdg_config()),
+        Some(dirs.roaming()),
         user_dirs::directory_in(lookup, CODEX_HOME_VARIABLE),
         windows,
     )
@@ -3254,6 +3239,7 @@ pub enum HarnessError {
 
 #[cfg(test)]
 mod tests {
+    use super::user_dirs::{self, UserDirs};
     use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -3274,9 +3260,8 @@ mod tests {
         mcp_command_line, packaged, remove_stray_temporaries_in, replace_with_backup, AppContainer,
         Attention, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
         HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, LauncherPin,
-        NpmLauncher, Packages, PrivateView, RegistrationState, APP_DATA_VARIABLE, CLINE_SETTINGS,
-        CODEX_HOME_VARIABLE, EDGE_COMMAND_NAME, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME, ROSTER,
-        SERVER_NAME, XDG_CONFIG_HOME_VARIABLE,
+        NpmLauncher, Packages, PrivateView, RegistrationState, CLINE_SETTINGS, CODEX_HOME_VARIABLE,
+        EDGE_COMMAND_NAME, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -3417,35 +3402,38 @@ mod tests {
 
     #[test]
     fn empty_root_variables_resolve_below_the_home_not_the_working_directory() {
-        let empty = |name: &str| {
-            [
-                XDG_CONFIG_HOME_VARIABLE,
-                APP_DATA_VARIABLE,
-                CODEX_HOME_VARIABLE,
-            ]
-            .contains(&name)
-            .then(OsString::new)
+        let home = if cfg!(windows) {
+            "C:/Users/test"
+        } else {
+            "/home/test"
         };
-
-        let linux = environment_roots(Path::new("/home/test"), &empty, false);
-        assert_eq!(
-            linux,
-            HarnessRoots {
-                config: PathBuf::from("/home/test/.config"),
-                roaming: PathBuf::from("/home/test/.config"),
-                codex_config: PathBuf::from("/home/test/.codex/config.toml"),
+        let lookup = |name: &str| match name {
+            user_dirs::USER_PROFILE_VARIABLE | user_dirs::HOME_VARIABLE => {
+                Some(OsString::from(home))
             }
-        );
+            user_dirs::XDG_CONFIG_HOME_VARIABLE
+            | user_dirs::APP_DATA_VARIABLE
+            | CODEX_HOME_VARIABLE => Some(OsString::new()),
+            _ => None,
+        };
+        let home = Path::new(home);
 
-        let windows = environment_roots(Path::new("C:/Users/test"), &empty, true);
-        assert_eq!(
-            windows,
-            HarnessRoots {
-                config: PathBuf::from("C:/Users/test/AppData/Roaming"),
-                roaming: PathBuf::from("C:/Users/test/AppData/Roaming"),
-                codex_config: PathBuf::from("C:/Users/test/.codex/config.toml"),
-            }
-        );
+        for windows in [false, true] {
+            let dirs = UserDirs::from_lookup(&lookup, windows);
+            let config = if windows {
+                home.join("AppData").join("Roaming")
+            } else {
+                home.join(".config")
+            };
+            assert_eq!(
+                environment_roots(&dirs, &lookup, windows),
+                HarnessRoots {
+                    config: config.clone(),
+                    roaming: config,
+                    codex_config: home.join(".codex").join("config.toml"),
+                }
+            );
+        }
     }
 
     #[test]
@@ -3959,7 +3947,8 @@ mod tests {
     fn claude_code_directory_comes_from_the_process_else_the_person() {
         use std::ffi::OsString;
 
-        use super::{claude_config_dir, user_path, USER_PROFILE_VARIABLE};
+        use super::user_dirs::USER_PROFILE_VARIABLE;
+        use super::{claude_config_dir, user_path};
 
         let lookup = |name: &str| (name == USER_PROFILE_VARIABLE).then(|| r"C:\Users\a".to_owned());
         let stored = |text: &str, expandable| {

@@ -462,7 +462,9 @@ fn shortcut_target(layout: &Layout) -> PathBuf {
 
 /// The Start-menu shortcut path, when this user has a roaming profile.
 fn shortcut_path() -> Option<PathBuf> {
-    let app_data = super::user_dirs::directory("APPDATA")?;
+    let app_data = super::user_dirs::UserDirs::system()
+        .named_roaming()?
+        .to_path_buf();
     let folder = PROGRAMS_FOLDER
         .iter()
         .fold(app_data, |path, part| path.join(part));

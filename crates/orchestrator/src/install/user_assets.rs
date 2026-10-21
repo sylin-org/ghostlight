@@ -175,14 +175,12 @@ struct UserAssetContext {
 
 impl UserAssetContext {
     fn system() -> Self {
-        let home = super::user_dirs::directory("HOME").unwrap_or_default();
         Self {
             linux: cfg!(target_os = "linux"),
             executable: super::layout::Layout::current()
                 .map(|layout| layout.service_executable())
                 .unwrap_or_default(),
-            data_home: super::user_dirs::directory("XDG_DATA_HOME")
-                .unwrap_or_else(|| home.join(".local/share")),
+            data_home: super::user_dirs::UserDirs::system().xdg_data(),
         }
     }
 

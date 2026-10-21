@@ -12,10 +12,11 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use toml_edit::{DocumentMut, Table};
 
+use super::user_dirs::{APP_DATA_VARIABLE, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE};
 use super::{
     harness_roots, manual_json_setup, manual_setup, AgentRow, ConfigDialect, HarnessContext,
-    JsonDialect, Packages, APP_DATA_VARIABLE, CLAUDE_CONFIG_VARIABLE, CODEX_HOME_VARIABLE,
-    CRUSH_CONFIG_VARIABLE, ROSTER, SERVER_NAME, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE,
+    JsonDialect, Packages, CLAUDE_CONFIG_VARIABLE, CODEX_HOME_VARIABLE, CRUSH_CONFIG_VARIABLE,
+    ROSTER, SERVER_NAME,
 };
 use crate::language::self_check::golden::{check_golden_with, repository_path};
 

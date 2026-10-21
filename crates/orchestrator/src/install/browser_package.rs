@@ -1,6 +1,5 @@
 //! Read-only Linux browser-package provenance for native-host usability.
 
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -55,14 +54,12 @@ pub(crate) struct BrowserPackageContext {
 }
 
 impl BrowserPackageContext {
-    pub(crate) fn system(home: &Path, linux: bool) -> Self {
-        let data_home = super::user_dirs::directory("XDG_DATA_HOME")
-            .unwrap_or_else(|| home.join(".local/share"));
+    /// The package places of the person's directories `dirs`, on Linux when `linux`.
+    pub(super) fn system(dirs: &super::user_dirs::UserDirs, linux: bool) -> Self {
+        let data_home = dirs.xdg_data();
         Self {
             linux,
-            path_entries: env::var_os("PATH")
-                .map(|path| env::split_paths(&path).collect())
-                .unwrap_or_default(),
+            path_entries: dirs.path_entries().to_vec(),
             snap_bin: PathBuf::from("/snap/bin"),
             user_flatpak_applications: data_home.join("flatpak/exports/share/applications"),
             system_flatpak_applications: PathBuf::from(

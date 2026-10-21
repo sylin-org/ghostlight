@@ -36,9 +36,6 @@ pub(super) const PACKAGE_FIELD_SEPARATOR: char = '_';
 /// The prefix of the probe file the detection writes below `%LOCALAPPDATA%`.
 const PROBE_PREFIX: &str = "ghostlight-residence-probe-";
 
-/// The variable that names this person's `%LOCALAPPDATA%`.
-const LOCAL_APP_DATA_VARIABLE: &str = "LOCALAPPDATA";
-
 /// The state `doctor --json` gives a registration whose state only another app can see.
 pub const NOT_VISIBLE_STATE: &str = "not_visible";
 
@@ -95,14 +92,13 @@ impl Residence {
                 if !cfg!(target_os = "windows") {
                     return Self::Regular;
                 }
-                super::user_dirs::directory(LOCAL_APP_DATA_VARIABLE).map_or(
-                    Self::Regular,
-                    |local| {
-                        Probe::write_in(local)
+                super::user_dirs::UserDirs::system()
+                    .named_local()
+                    .map_or(Self::Regular, |local| {
+                        Probe::write_in(local.to_path_buf())
                             .as_ref()
                             .map_or(Self::Regular, Self::of_probe)
-                    },
-                )
+                    })
             })
             .clone()
     }

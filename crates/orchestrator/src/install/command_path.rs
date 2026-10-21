@@ -37,14 +37,11 @@ use super::user_path::{self, PathValue, UserPathStore};
 /// The command name a person types.
 const COMMAND_NAME: &str = "ghostlight";
 
-/// The variable that holds the directories a shell finds commands in.
-const SEARCH_PATH_VARIABLE: &str = "PATH";
-
 /// What an install calls the command's `Path` entry when an app container kept it private.
 pub const PATH_ENTRY_REGISTRATION: &str = "PATH entry";
 
 /// The variable whose value the home-relative form of a `Path` entry names.
-const PROFILE_VARIABLE: &str = "USERPROFILE";
+const PROFILE_VARIABLE: &str = super::user_dirs::USER_PROFILE_VARIABLE;
 
 /// The subcommand of the installed edge that puts the command on the `Path`.
 const FIXING_SUBCOMMAND: &str = "install";
@@ -166,19 +163,17 @@ struct CommandPathContext {
 
 impl CommandPathContext {
     fn system(residence: &Residence) -> Self {
-        let home = super::user_dirs::directory("HOME").unwrap_or_default();
+        let dirs = super::user_dirs::UserDirs::system();
         Self {
             unix: cfg!(unix),
             executable: super::layout::Layout::current()
                 .map(|layout| layout.edge())
                 .unwrap_or_default(),
-            bin_home: home.join(".local/bin"),
+            bin_home: dirs.home().join(".local/bin"),
             user_path: system_user_path(),
             profile: super::user_dirs::directory(PROFILE_VARIABLE),
             container: residence.container().cloned(),
-            search_path: env::var_os(SEARCH_PATH_VARIABLE)
-                .map(|value| env::split_paths(&value).collect())
-                .unwrap_or_default(),
+            search_path: dirs.path_entries().to_vec(),
         }
     }
 

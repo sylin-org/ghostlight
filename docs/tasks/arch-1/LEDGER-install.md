@@ -406,7 +406,7 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
 | I-D2 | fix(cli): uninstall waits as long as a quit may take | - | SERV-2; the waits derive from `lifetime.rs` | landed (this commit); see Notes, second sweep |
 | I-D3 | fix(cli): `ghostlight call` reads its arguments without panicking | - | SERV-4, without the output changes its skeptic named | landed (this commit); see Notes, second sweep |
 | INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | landed (this commit); see Notes, second sweep |
-| INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | todo |
+| INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | landed (this commit); see Notes, second sweep |
 | INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | todo |
 | INST-9 | refactor(install): the install's sentences move to `language/deployment.rs` | - | INST-9; some reach the agent, so model-visible text stays byte-equal | todo |
 | INST-8 | refactor(install): `inspect` reads its state once | - | INST-8 | todo |
@@ -463,3 +463,19 @@ with its skeptic's corrections. Nothing has landed yet; start with I-D1.
   persisted byte is unchanged; the writer goldens pass untouched.
 - SERV-6c: test-01 took SERV-6 whole as a cross-lane slice (15b38451), so this lane has nothing
   left of it.
+- INST-4: `install/user_dirs.rs` now holds `UserDirs`, read once per context from one lookup
+  under the Ghostlight home's own rule (`ghostlight_relay::home`): the home is `USERPROFILE` on
+  Windows and `HOME` elsewhere, and a variable names a directory only when it is set, not empty
+  and absolute. It owns the variable names (`USERPROFILE`, `HOME`, `APPDATA`, `LOCALAPPDATA`,
+  `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `ProgramFiles`, `ProgramFiles(x86)`, `PATH`) and the
+  profile-relative defaults, which were spelled in up to seven files. The harness context, the
+  native host (and its browser-package and program-folder roots), the icon places, the desktop
+  entry, the user assets, the command path, the Start-menu shortcut and the container probe all
+  take their directories from it. Deliberate rule changes, all in unusual environments: a
+  relative value is now ignored everywhere (I-D1 already ignored an empty one); on Windows an
+  unset `USERPROFILE` no longer falls back to `HOME`; the native host on Linux no longer reads
+  `USERPROFILE`. The variables one client defines for its own file (`CODEX_HOME`,
+  `CRUSH_GLOBAL_CONFIG`, `GHOSTLIGHT_NATIVE_HOST_DIR`) stay with their resolvers, under the same
+  rule. `LegacyRoots` keeps its 1.x-only rule, and `workbench/parts.rs` (surface) still reads
+  `USERPROFILE` itself. The writer goldens build their context by hand and are unchanged.
+  Linux-only paths compile only in CI from this machine.
