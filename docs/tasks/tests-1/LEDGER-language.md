@@ -23,7 +23,7 @@ every test read-only first, then cut one file per commit.
 | --- | --- | --- | --- |
 | `language/` | 349 | 55 | 55 |
 | `workbench/` | 252 | 35 + 2 reserve | 37 |
-| `governance/` | 136 | 40 | 112 |
+| `governance/` | 136 | 40 | 66 |
 
 ## Slices
 
@@ -62,7 +62,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TW5 | test(workbench): watching.rs keeps the marker rule | 3 | 1 | 1 promise | landed (3e477cde) |
 | TW6 | test(workbench): input.rs keeps the search bound, checked against the page | 2 | 1 | 1 promise | landed (f7b86902) |
 | TG1 | test(cli, governance): the policy subcommands parse in the completions test, and governance drops its copy | 1 | 0 | - (moved to cli/parse.rs) | landed (8bd564fc) |
-| TG2 | test(governance): managed policy keeps the 13 tests of its published claims | 36 | 13 | 10 promise, 1 contract, 2 defect | landed (this commit) |
+| TG2 | test(governance): managed policy keeps the 13 tests of its published claims | 36 | 13 | 10 promise, 1 contract, 2 defect | landed (1198b684) |
+| TG3 | test(governance): the authority keeps the 18 tests of what policy decides | 64 | 18 | 10 promise, 2 contract, 5 defect, 1 unsafe | landed (this commit) |
 
 ## Notes
 

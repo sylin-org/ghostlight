@@ -671,19 +671,18 @@ fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
 #[cfg(test)]
 mod tests {
     use super::{
-        compile, CapabilityState, ChipTone, Inputs, LayerKind, OrganizationIdentity, PolicyChip,
-        RuleNote, Situation, UserLayerSource,
+        compile, CapabilityState, Inputs, LayerKind, OrganizationIdentity, RuleNote, Situation,
+        UserLayerSource,
     };
     use std::sync::Arc;
 
     use crate::governance::{
-        assemble, manifest, AuthoringError, AuthoritySnapshot, Capability, CapabilitySet,
-        ManagedPolicyPassport, OwnOrigin,
+        assemble, manifest, AuthoritySnapshot, Capability, CapabilitySet, ManagedPolicyPassport,
+        OwnOrigin, PROBE_LABEL,
     };
-    use crate::language::capability_map;
     use crate::language::catalog_for;
     use crate::language::channel_switch::ChannelsOff;
-    use crate::language::outcome::{PolicyAuthor, OWN_CONTROL_PAGE_CEILING};
+    use crate::language::outcome::PolicyAuthor;
     use crate::language::policy;
 
     fn policy(text: &str) -> manifest::Manifest {
@@ -752,231 +751,455 @@ mod tests {
         }
     }
 
-    #[test]
-    fn all_open_answers_completely_and_still_states_the_permanent_boundaries() {
-        let view = compile(&inputs(None, None));
-        assert_eq!(view.situation, Situation::AllOpen);
-        assert_eq!(
-            view.headline,
-            "No rules apply. Agents may work on ordinary websites, within the limits below."
-        );
-        assert_eq!(view.capabilities.len(), 4);
-        assert!(view
-            .capabilities
-            .iter()
-            .all(|line| line.state == CapabilityState::Available && line.decided_by.is_empty()));
-        assert_eq!(
-            view.ceilings,
-            [
-                "Anything that is not an ordinary http or https address.",
-                OWN_CONTROL_PAGE_CEILING
-            ]
-        );
-        assert!(view.layers.is_empty());
-        assert!(view.user_layer.editable);
-
-        let mut restricted = inputs(None, None);
-        restricted.never_touch_hosts.push("localhost".into());
-        assert_eq!(
-            compile(&restricted).ceilings,
-            [
-                "Anything that is not an ordinary http or https address.",
-                "localhost, marked never-touch by policy.",
-                OWN_CONTROL_PAGE_CEILING
-            ]
-        );
+    /// One layer of a fixture: a policy with these grants and settings.
+    fn layer(grants: &str, config: &str) -> manifest::Manifest {
+        policy(&format!(
+            r#"{{"schema":4,"name":"fixture","version":"1","grants":{grants},"config":{config}}}"#
+        ))
     }
 
+    /// An organization layer named `name`, with these grants.
+    fn named(name: &str, grants: &str, config: &str) -> manifest::Manifest {
+        policy(&format!(
+            r#"{{"schema":4,"name":"org","version":"1","organization":{{"name":"{name}"}},"grants":{grants},"config":{config}}}"#
+        ))
+    }
+
+    /// One read grant over `hosts`.
+    fn read(hosts: &str) -> String {
+        format!(r#"[{{"id":"g","hosts":{hosts},"allowed":["read"]}}]"#)
+    }
+
+    /// The never-touch setting over `hosts`, a JSON list.
+    fn never_touch(hosts: &str) -> String {
+        format!(
+            r#"[{{"key":"{}","value":{hosts},"level":"mandatory"}}]"#,
+            manifest::PolicySetting::NeverTouch.key()
+        )
+    }
+
+    /// ADR-0122 Decision 2 and ACCEPTANCE Governance 4, as the Policy page and policy_explain read
+    /// it: the headline names the situation and any switched-off channel; each line says whether
+    /// its capability is available, refused except where allowed, or allowed except where
+    /// blocked, and names who narrowed it; a capability nothing admits says why -- allowed
+    /// nowhere, layers that do not overlap, or only never-touch sites -- and who. An invalid
+    /// policy says only that it is invalid (842ef606, e45f09ed, 3373e274).
     #[test]
-    fn one_channel_off_is_named_in_the_headline_and_on_every_usable_line() {
-        let mine = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write"]}]}"#,
-        );
-        let mut switched = inputs(None, Some(&mine));
-        switched.channels_off = ChannelsOff {
+    fn the_policy_page_says_what_each_capability_can_do_and_who_decided() {
+        use LayerKind::{Ghostlight, Organization, User};
+
+        /// What one capability's line says.
+        type Line = (Capability, CapabilityState, String, Vec<LayerKind>);
+        let every = |state: CapabilityState, detail: &str, decided_by: &[LayerKind]| -> Vec<Line> {
+            Capability::ALL
+                .into_iter()
+                .map(|capability| (capability, state, detail.to_owned(), decided_by.to_vec()))
+                .collect()
+        };
+        let one = |capability, state, detail: String, decided_by: &[LayerKind]| -> Line {
+            (capability, state, detail, decided_by.to_vec())
+        };
+        let read_line = |state, detail, decided_by: &[LayerKind]| {
+            vec![one(Capability::Read, state, detail, decided_by)]
+        };
+        let everything = r#"[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]"#;
+        let user_mcp_off = ChannelsOff {
             mcp: Some(PolicyAuthor::User),
             ..ChannelsOff::default()
         };
-        let view = compile(&switched);
-        assert_eq!(
-            view.headline,
-            "You set the rules on this machine. MCP agents are turned off. Command-line work may continue."
-        );
-        let read = &view.capabilities[0];
-        assert_eq!(read.state, CapabilityState::Available);
-        assert_eq!(
-            read.detail,
-            "Available on ordinary websites. Only command-line work may use it: MCP agents are turned off."
-        );
-        assert_eq!(read.decided_by, [LayerKind::User]);
-        // A capability nothing may use says only why, with no promise about who may use it.
-        let execute = &view.capabilities[3];
-        assert_eq!(execute.state, CapabilityState::Unavailable);
-        assert_eq!(
-            execute.detail,
-            "Not available. You do not allow it anywhere."
-        );
-    }
-
-    #[test]
-    fn both_channels_off_leave_nothing_available_and_say_whose_policy_did_it() {
-        let organization = policy(
-            r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
-        );
-        let mut switched = inputs(Some(&organization), None);
-        switched.channels_off = ChannelsOff {
+        let northwind_off = ChannelsOff {
             mcp: Some(PolicyAuthor::Organization),
             cli: Some(PolicyAuthor::Organization),
             organization: Some("Northwind"),
         };
-        let view = compile(&switched);
-        assert_eq!(
-            view.headline,
-            "Northwind sets the rules on this machine. MCP agents and the command line are turned off, so no agent may work."
+        let user_off_under_northwind = ChannelsOff {
+            mcp: Some(PolicyAuthor::User),
+            cli: None,
+            organization: Some("Northwind"),
+        };
+        let with_line = |said: String, switched: ChannelsOff<'_>| {
+            format!(
+                "{said} {}",
+                switched.policy_line().expect("a switch is off")
+            )
+        };
+        let usable = |said: &str, switched: ChannelsOff<'_>| {
+            format!(
+                "{said} {}",
+                switched.capability_line().expect("one switch is off")
+            )
+        };
+
+        /// (what, organization, user, switches, valid) -> (situation, headline, lines).
+        type Row<'a> = (
+            &'a str,
+            Option<manifest::Manifest>,
+            Option<manifest::Manifest>,
+            ChannelsOff<'a>,
+            bool,
+            Situation,
+            String,
+            Vec<Line>,
         );
-        for line in &view.capabilities {
-            assert_eq!(
-                line.state,
-                CapabilityState::Unavailable,
-                "{:?}",
-                line.capability
-            );
-            assert_eq!(
-                line.detail,
-                "Not available. Northwind's policy turns off work from MCP agents and the command line."
-            );
-            assert_eq!(line.decided_by, [LayerKind::Organization]);
+        let rows: Vec<Row<'_>> = vec![
+            (
+                "all-open",
+                None,
+                None,
+                ChannelsOff::default(),
+                true,
+                Situation::AllOpen,
+                policy::situation(Situation::AllOpen, None),
+                every(
+                    CapabilityState::Available,
+                    policy::AVAILABLE_UNNARROWED,
+                    &[],
+                ),
+            ),
+            (
+                "an open baseline the user carved",
+                None,
+                Some(layer(
+                    &read(r#"{"allow":["*"],"deny":["intranet.example"]}"#),
+                    "[]",
+                )),
+                ChannelsOff::default(),
+                true,
+                Situation::UserOnly,
+                policy::situation(Situation::UserOnly, None),
+                read_line(
+                    CapabilityState::SomeBlocked,
+                    policy::some_blocked(&policy::who(&[User], None)),
+                    &[User],
+                ),
+            ),
+            (
+                "a closed baseline the user opened",
+                None,
+                Some(layer(&read(r#"{"allow":["example.com"]}"#), "[]")),
+                ChannelsOff::default(),
+                true,
+                Situation::UserOnly,
+                policy::situation(Situation::UserOnly, None),
+                vec![
+                    one(
+                        Capability::Read,
+                        CapabilityState::SomeAllowed,
+                        policy::some_allowed(&policy::who(&[User], None)),
+                        &[User],
+                    ),
+                    one(
+                        Capability::Execute,
+                        CapabilityState::Unavailable,
+                        policy::allowed_nowhere(User, None),
+                        &[User],
+                    ),
+                ],
+            ),
+            (
+                "a named organization",
+                Some(named(
+                    "Example Organization",
+                    r#"[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]"#,
+                    "[]",
+                )),
+                None,
+                ChannelsOff::default(),
+                true,
+                Situation::OrganizationOnly,
+                policy::situation(Situation::OrganizationOnly, Some("Example Organization")),
+                vec![
+                    one(
+                        Capability::Read,
+                        CapabilityState::SomeAllowed,
+                        policy::some_allowed(&policy::who(
+                            &[Organization],
+                            Some("Example Organization"),
+                        )),
+                        &[Organization],
+                    ),
+                    one(
+                        Capability::Execute,
+                        CapabilityState::Unavailable,
+                        policy::allowed_nowhere(Organization, Some("Example Organization")),
+                        &[Organization],
+                    ),
+                ],
+            ),
+            (
+                "an organization with no name",
+                Some(layer(&read(r#"{"allow":["example.com"]}"#), "[]")),
+                None,
+                ChannelsOff::default(),
+                true,
+                Situation::OrganizationOnly,
+                policy::situation(Situation::OrganizationOnly, None),
+                vec![one(
+                    Capability::Execute,
+                    CapabilityState::Unavailable,
+                    policy::allowed_nowhere(Organization, None),
+                    &[Organization],
+                )],
+            ),
+            (
+                "the narrower of two layers, both named",
+                Some(layer(
+                    &read(r#"{"allow":["*"],"deny":["intranet.example"]}"#),
+                    "[]",
+                )),
+                Some(layer(&read(r#"{"allow":["example.com"]}"#), "[]")),
+                ChannelsOff::default(),
+                true,
+                Situation::Layered,
+                policy::situation(Situation::Layered, None),
+                read_line(
+                    CapabilityState::SomeAllowed,
+                    policy::some_allowed(&policy::who(&[Organization, User], None)),
+                    &[Organization, User],
+                ),
+            ),
+            (
+                "a grant whose deny cancels its own allow",
+                None,
+                Some(layer(
+                    &read(r#"{"allow":["*.example.com"],"deny":["*.example.com"]}"#),
+                    "[]",
+                )),
+                ChannelsOff::default(),
+                true,
+                Situation::UserOnly,
+                policy::situation(Situation::UserOnly, None),
+                read_line(
+                    CapabilityState::Unavailable,
+                    policy::allowed_nowhere(User, None),
+                    &[User],
+                ),
+            ),
+            (
+                "a deny that removes one host under a wildcard",
+                None,
+                Some(layer(
+                    &read(r#"{"allow":["*.example.com"],"deny":["admin.example.com"]}"#),
+                    "[]",
+                )),
+                ChannelsOff::default(),
+                true,
+                Situation::UserOnly,
+                policy::situation(Situation::UserOnly, None),
+                read_line(
+                    CapabilityState::SomeAllowed,
+                    policy::some_allowed(&policy::who(&[User], None)),
+                    &[User],
+                ),
+            ),
+            (
+                "a broader deny under a narrower allow",
+                None,
+                Some(layer(
+                    &read(r#"{"allow":["*.a.example.com"],"deny":["*.example.com"]}"#),
+                    "[]",
+                )),
+                ChannelsOff::default(),
+                true,
+                Situation::UserOnly,
+                policy::situation(Situation::UserOnly, None),
+                read_line(
+                    CapabilityState::SomeAllowed,
+                    policy::some_allowed(&policy::who(&[User], None)),
+                    &[User],
+                ),
+            ),
+            (
+                "layers whose sites do not overlap",
+                Some(named(
+                    "Northwind",
+                    &read(r#"{"allow":["a.example"]}"#),
+                    "[]",
+                )),
+                Some(layer(&read(r#"{"allow":["b.example"]}"#), "[]")),
+                ChannelsOff::default(),
+                true,
+                Situation::Layered,
+                policy::situation(Situation::Layered, Some("Northwind")),
+                read_line(
+                    CapabilityState::Unavailable,
+                    policy::disjoint(&policy::who(&[Organization, User], Some("Northwind"))),
+                    &[Organization, User],
+                ),
+            ),
+            (
+                "a deny that cancels a universal allow",
+                None,
+                Some(layer(&read(r#"{"allow":["*"],"deny":["*"]}"#), "[]")),
+                ChannelsOff::default(),
+                true,
+                Situation::UserOnly,
+                policy::situation(Situation::UserOnly, None),
+                read_line(
+                    CapabilityState::Unavailable,
+                    policy::allowed_nowhere(User, None),
+                    &[User],
+                ),
+            ),
+            (
+                "the user allows only sites the user marked never-touch",
+                None,
+                Some(layer(
+                    &read(r#"{"allow":["bank.example","*.vault.example"]}"#),
+                    &never_touch(r#"["bank.example","*.vault.example"]"#),
+                )),
+                ChannelsOff::default(),
+                true,
+                Situation::UserOnly,
+                policy::situation(Situation::UserOnly, None),
+                read_line(
+                    CapabilityState::Unavailable,
+                    policy::only_never_touch(&[User], &[User], None),
+                    &[User],
+                ),
+            ),
+            (
+                "the user allows only sites the organization marked never-touch",
+                Some(layer(
+                    &read(r#"{"allow":["*"]}"#),
+                    &never_touch(r#"["*.bank.example"]"#),
+                )),
+                Some(layer(&read(r#"{"allow":["*.bank.example"]}"#), "[]")),
+                ChannelsOff::default(),
+                true,
+                Situation::Layered,
+                policy::situation(Situation::Layered, None),
+                read_line(
+                    CapabilityState::Unavailable,
+                    policy::only_never_touch(&[User], &[Organization], None),
+                    &[Organization, User],
+                ),
+            ),
+            (
+                "the one site both layers share is never-touch",
+                Some(named(
+                    "Northwind",
+                    &read(r#"{"allow":["a.example","bank.example"]}"#),
+                    &never_touch(r#"["bank.example"]"#),
+                )),
+                Some(layer(
+                    &read(r#"{"allow":["b.example","bank.example"]}"#),
+                    "[]",
+                )),
+                ChannelsOff::default(),
+                true,
+                Situation::Layered,
+                policy::situation(Situation::Layered, Some("Northwind")),
+                read_line(
+                    CapabilityState::Unavailable,
+                    policy::only_never_touch(
+                        &[Organization, User],
+                        &[Organization],
+                        Some("Northwind"),
+                    ),
+                    &[Organization, User],
+                ),
+            ),
+            (
+                "the user turned MCP off",
+                None,
+                Some(policy(
+                    r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write"]}]}"#,
+                )),
+                user_mcp_off,
+                true,
+                Situation::UserOnly,
+                with_line(policy::situation(Situation::UserOnly, None), user_mcp_off),
+                vec![
+                    one(
+                        Capability::Read,
+                        CapabilityState::Available,
+                        usable(policy::AVAILABLE, user_mcp_off),
+                        &[User],
+                    ),
+                    // A capability nothing may use says only why, with no promise about who may
+                    // use it.
+                    one(
+                        Capability::Execute,
+                        CapabilityState::Unavailable,
+                        policy::allowed_nowhere(User, None),
+                        &[User],
+                    ),
+                ],
+            ),
+            (
+                "the user turned MCP off under Northwind",
+                Some(named("Northwind", everything, "[]")),
+                Some(layer(everything, "[]")),
+                user_off_under_northwind,
+                true,
+                Situation::Layered,
+                with_line(
+                    policy::situation(Situation::Layered, Some("Northwind")),
+                    user_off_under_northwind,
+                ),
+                every(
+                    CapabilityState::Available,
+                    &usable(policy::AVAILABLE, user_off_under_northwind),
+                    &[User],
+                ),
+            ),
+            (
+                "Northwind turned both channels off",
+                Some(named("Northwind", everything, "[]")),
+                None,
+                northwind_off,
+                true,
+                Situation::OrganizationOnly,
+                with_line(
+                    policy::situation(Situation::OrganizationOnly, Some("Northwind")),
+                    northwind_off,
+                ),
+                every(
+                    CapabilityState::Unavailable,
+                    &policy::not_available(&northwind_off.said().expect("both are off")),
+                    &[Organization],
+                ),
+            ),
+            (
+                "an invalid policy with both channels off",
+                Some(named("Northwind", everything, "[]")),
+                None,
+                northwind_off,
+                false,
+                Situation::FailingClosed,
+                policy::situation(Situation::FailingClosed, Some("Northwind")),
+                every(
+                    CapabilityState::Unavailable,
+                    policy::REFUSED_WHILE_INVALID,
+                    &[Ghostlight],
+                ),
+            ),
+        ];
+        for (what, organization, user, switched, valid, situation, headline, lines) in &rows {
+            let mut facts = inputs(organization.as_ref(), user.as_ref());
+            facts.channels_off = *switched;
+            facts.valid = *valid;
+            let view = compile(&facts);
+            assert_eq!(view.situation, *situation, "{what}");
+            assert_eq!(&view.headline, headline, "{what}");
+            for (capability, state, detail, decided_by) in lines {
+                let line = view
+                    .capabilities
+                    .iter()
+                    .find(|line| line.capability == *capability)
+                    .expect("every capability has a line");
+                assert_eq!(line.state, *state, "{what}: {capability:?}");
+                assert_eq!(&line.detail, detail, "{what}: {capability:?}");
+                assert_eq!(&line.decided_by, decided_by, "{what}: {capability:?}");
+            }
         }
-        // An invalid policy says only that it is invalid.
-        switched.valid = false;
-        assert!(!compile(&switched).headline.contains("turned off"));
     }
 
-    #[test]
-    fn every_narrowed_capability_names_the_layer_that_narrowed_it() {
-        let organization = policy(
-            r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Example Organization"},"grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
-        );
-        let view = compile(&inputs(Some(&organization), None));
-        assert_eq!(view.situation, Situation::OrganizationOnly);
-        assert_eq!(
-            view.headline,
-            "Example Organization sets the rules on this machine."
-        );
-
-        let read = &view.capabilities[0];
-        assert_eq!(read.state, CapabilityState::SomeAllowed);
-        assert_eq!(read.decided_by, vec![LayerKind::Organization]);
-        assert_eq!(
-            read.detail,
-            "Refused everywhere except the sites Example Organization allowed."
-        );
-
-        let execute = &view.capabilities[3];
-        assert_eq!(execute.state, CapabilityState::Unavailable);
-        assert!(execute.detail.contains("does not allow it"));
-    }
-
-    #[test]
-    fn polarity_is_stated_rather_than_flattened_into_some_sites() {
-        // An open baseline with holes cut in it, and a closed one with holes opened. Both leave a
-        // capability available on "some sites" and they are opposite situations.
-        let carved = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"everywhere-but","hosts":{"allow":["*"],"deny":["intranet.example"]},"allowed":["read"]}]}"#,
-        );
-        let view = compile(&inputs(None, Some(&carved)));
-        assert_eq!(view.capabilities[0].state, CapabilityState::SomeBlocked);
-        assert_eq!(
-            view.capabilities[0].detail,
-            "Available everywhere except the sites you blocked."
-        );
-
-        let opened = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"just-here","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
-        );
-        let view = compile(&inputs(None, Some(&opened)));
-        assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
-        assert_eq!(
-            view.capabilities[0].detail,
-            "Refused everywhere except the sites you allowed."
-        );
-
-        // The narrower of the two layers is the answer, and both are named as deciders.
-        let view = compile(&inputs(Some(&carved), Some(&opened)));
-        assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
-        assert_eq!(
-            view.capabilities[0].decided_by,
-            vec![LayerKind::Organization, LayerKind::User]
-        );
-    }
-
-    #[test]
-    fn a_grant_whose_own_deny_cancels_its_own_allow_admits_nothing() {
-        // The real decision engine's tie-break (evaluate_host: deny wins a specificity tie)
-        // means a deny pattern identical to its own grant's allow pattern refuses every host that
-        // grant would otherwise have admitted. The compiled view must say so -- "some sites
-        // allowed" here would tell a person a site is reachable that the real decision path
-        // refuses on every single call.
-        let self_canceling = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"pointless","hosts":{"allow":["*.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]}"#,
-        );
-        let view = compile(&inputs(None, Some(&self_canceling)));
-        assert_eq!(view.capabilities[0].state, CapabilityState::Unavailable);
-
-        // A deny that only removes ONE host under a wildcard allow does not cancel the rest:
-        // every other host under that suffix is still genuinely admitted.
-        let partly_canceling = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"minus-one","hosts":{"allow":["*.example.com"],"deny":["admin.example.com"]},"allowed":["read"]}]}"#,
-        );
-        let view = compile(&inputs(None, Some(&partly_canceling)));
-        assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
-
-        // A broader deny loses the specificity tie at every host the narrower allow matches --
-        // covering the same hosts is not the same as outranking them.
-        let broader_deny_never_wins = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"narrow-allow","hosts":{"allow":["*.a.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]}"#,
-        );
-        let view = compile(&inputs(None, Some(&broader_deny_never_wins)));
-        assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
-    }
-
-    #[test]
-    fn whoever_refused_is_named_in_their_own_grammar() {
-        let mine = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
-        );
-        let view = compile(&inputs(None, Some(&mine)));
-        let execute = &view.capabilities[3];
-        assert_eq!(execute.state, CapabilityState::Unavailable);
-        assert_eq!(
-            execute.detail,
-            "Not available. You do not allow it anywhere."
-        );
-        assert_eq!(execute.decided_by, vec![LayerKind::User]);
-
-        let anonymous = policy(
-            r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
-        );
-        let view = compile(&inputs(Some(&anonymous), None));
-        assert_eq!(
-            view.capabilities[3].detail,
-            "Not available. Your organization does not allow it anywhere."
-        );
-    }
-
-    #[test]
-    fn failing_closed_says_so_on_every_line() {
-        let mut broken = inputs(None, None);
-        broken.valid = false;
-        let view = compile(&broken);
-        assert_eq!(view.situation, Situation::FailingClosed);
-        assert!(view
-            .capabilities
-            .iter()
-            .all(|line| line.state == CapabilityState::Unavailable
-                && line.decided_by == vec![LayerKind::Ghostlight]));
-    }
-
+    /// ADR-0122 rule notes and 3373e274: a rule is marked only when Ghostlight can prove it does
+    /// nothing -- unreachable behind an earlier rule that covers it, or of no effect where the
+    /// organization refuses everything it allows -- and a wide rule that still works on a host
+    /// the organization allows is not marked.
     #[test]
     fn inert_rules_are_marked_only_when_they_can_be_proven_inert() {
         let organization = policy(
@@ -1004,174 +1227,18 @@ mod tests {
         assert_eq!(view.layers[1].rules[0].note, None);
     }
 
-    #[test]
-    fn a_user_file_ghostlight_does_not_own_is_shown_and_never_editable() {
-        let user = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"work","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
-        );
-        let mut named = inputs(None, Some(&user));
-        named.user_layer_source = UserLayerSource::Environment;
-        named.authoring = Err(AuthoringError::NotOwned);
-        let view = compile(&named);
-        assert!(!view.user_layer.editable);
-        assert_eq!(view.user_layer.path, None);
-        assert_eq!(
-            view.user_layer.blocked_reason.as_deref(),
-            Some(policy::NOT_OWNED)
-        );
-        // A wide-open grant narrows nothing, so no capability line invents a decider.
-        assert!(view
-            .capabilities
-            .iter()
-            .all(|line| line.state == CapabilityState::Available));
-        assert!(compile(&inputs(None, Some(&user))).user_layer.editable);
-    }
-
-    #[test]
-    fn an_organization_ceiling_pins_browser_startup() {
-        let organization = policy(
-            r#"{"schema":4,"name":"org","version":"1","grants":[],"config":[{"key":"browser.startup","value":"manual","level":"mandatory"}]}"#,
-        );
-        let user = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[],"config":[{"key":"browser.startup","value":"on_demand","level":"mandatory"}]}"#,
-        );
-        let mut facts = inputs(Some(&organization), Some(&user));
-        facts.windows = true;
-        let view = compile(&facts);
-        assert_eq!(view.browser_startup.value, manifest::BrowserStartup::Manual);
-        assert_eq!(
-            view.browser_startup.decided_by,
-            Some(LayerKind::Organization)
-        );
-        assert_eq!(
-            view.browser_startup.organization_ceiling,
-            Some(manifest::BrowserStartup::Manual)
-        );
-    }
-
-    #[test]
-    fn suffix_wildcards_cover_subdomains_and_never_the_bare_host() {
-        let pattern_covers = |broad: &str, narrow: &str| {
-            let parse = |text| crate::governance::host_pattern::HostPattern::parse(text).unwrap();
-            parse(broad).covers(&parse(narrow))
-        };
-        assert!(pattern_covers("*", "anything.test"));
-        assert!(pattern_covers("*.example.com", "a.example.com"));
-        assert!(pattern_covers("*.example.com", "*.a.example.com"));
-        assert!(!pattern_covers("*.example.com", "example.com"));
-        assert!(!pattern_covers("example.com", "a.example.com"));
-        assert!(pattern_covers("example.com", "EXAMPLE.com"));
-    }
-
-    /// Whether a tool needs nothing, so a policy that admits nothing still lists it.
-    fn needs_nothing(tool: &str) -> bool {
-        capability_map::variants(tool).any(|variant| variant.requirements.is_empty())
-    }
-
-    #[test]
-    fn disjoint_layer_grants_admit_nothing_and_advertise_nothing() {
-        let organization = policy(
-            r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"a","hosts":{"allow":["a.example"]},"allowed":["read"]}]}"#,
-        );
-        let user = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"b","hosts":{"allow":["b.example"]},"allowed":["read"]}]}"#,
-        );
-        let snapshot = snapshot(Some(&organization), Some(&user));
-        for host in ["a.example", "b.example", "c.example"] {
-            assert!(
-                !snapshot
-                    .authorize_landing(Capability::Read, &format!("https://{host}/"))
-                    .allowed,
-                "{host}"
-            );
-        }
-        assert!(!snapshot.could_admit(CapabilitySet::READ));
-        let listed = catalog_for(&snapshot);
-        assert!(listed.iter().all(|tool| needs_nothing(&tool.name)));
-        assert!(!listed.iter().any(|tool| tool.name == "browser_read"));
-
-        let read = &compile(&inputs(Some(&organization), Some(&user))).capabilities[0];
-        assert_eq!(read.state, CapabilityState::Unavailable);
-        assert_eq!(
-            read.detail,
-            "Not available. The sites Northwind and you allow do not overlap."
-        );
-        assert_eq!(read.decided_by, [LayerKind::Organization, LayerKind::User]);
-    }
-
-    #[test]
-    fn a_grant_whose_deny_cancels_its_universal_allow_reads_unavailable() {
-        let canceled = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"nothing","hosts":{"allow":["*"],"deny":["*"]},"allowed":["read"]}]}"#,
-        );
-        let snapshot = snapshot(None, Some(&canceled));
-        assert!(
-            !snapshot
-                .authorize_landing(Capability::Read, "https://example.com/")
-                .allowed
-        );
-        assert!(!snapshot.could_admit(CapabilitySet::READ));
-        let read = &compile(&inputs(None, Some(&canceled))).capabilities[0];
-        assert_eq!(read.state, CapabilityState::Unavailable);
-        assert_eq!(read.detail, "Not available. You do not allow it anywhere.");
-        assert_eq!(read.decided_by, [LayerKind::User]);
-    }
-
-    #[test]
-    fn a_grant_reaching_only_never_touch_hosts_advertises_nothing() {
-        let cases = [
-            // The user allows only hosts the user marked never-touch.
-            (
-                None,
-                r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"bank","hosts":{"allow":["bank.example","*.vault.example"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["bank.example","*.vault.example"],"level":"mandatory"}]}"#,
-                "Not available. The only sites you allow it on are marked never-touch by you.",
-                vec![LayerKind::User],
-            ),
-            // The organization allows every host and marks the only hosts the user allows
-            // never-touch: the user's rule is not what refuses it.
-            (
-                Some(
-                    r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["*.bank.example"],"level":"mandatory"}]}"#,
-                ),
-                r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"bank","hosts":{"allow":["*.bank.example"]},"allowed":["read"]}]}"#,
-                "Not available. The only sites you allow it on are marked never-touch by your organization.",
-                vec![LayerKind::Organization, LayerKind::User],
-            ),
-            // Each layer allows a site of its own, and the one site they share is never-touch,
-            // so their sites do overlap.
-            (
-                Some(
-                    r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"some","hosts":{"allow":["a.example","bank.example"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["bank.example"],"level":"mandatory"}]}"#,
-                ),
-                r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"some","hosts":{"allow":["b.example","bank.example"]},"allowed":["read"]}]}"#,
-                "Not available. The only sites Northwind and you allow it on are marked never-touch by Northwind.",
-                vec![LayerKind::Organization, LayerKind::User],
-            ),
-        ];
-        for (organization, user, detail, decided_by) in cases {
-            let organization = organization.map(policy);
-            let user = policy(user);
-            let snapshot = snapshot(organization.as_ref(), Some(&user));
-            assert!(!snapshot.could_admit(CapabilitySet::READ), "{detail}");
-            assert!(!catalog_for(&snapshot)
-                .iter()
-                .any(|tool| tool.name == "browser_read"));
-            let read = &compile(&inputs(organization.as_ref(), Some(&user))).capabilities[0];
-            assert_eq!(read.state, CapabilityState::Unavailable);
-            assert_eq!(read.detail, detail);
-            assert_eq!(read.decided_by, decided_by, "{detail}");
-        }
-    }
-
+    /// 3373e274 (ADR-0203 Decision 7.1, finding G-04) and e45f09ed: the catalog, the Policy page
+    /// and enforcement answer "can this capability be used anywhere" one way. For every fixture, a
+    /// line the page calls usable is one some hand-chosen host admits, and one the catalog can
+    /// list. The probes the answer is built from never collide with an authored pattern.
     #[test]
     fn the_catalog_the_policy_page_and_enforcement_agree_on_every_fixture() {
-        let layer = |grants: &str, config: &str| {
-            policy(&format!(
-                r#"{{"schema":4,"name":"fixture","version":"1","grants":{grants},"config":{config}}}"#
-            ))
-        };
-        let read = |hosts: &str| format!(r#"[{{"id":"g","hosts":{hosts},"allowed":["read"]}}]"#);
-        let never_touch_bank = r#"[{"key":"content.security.sacred_domains","value":["bank.example"],"level":"mandatory"}]"#;
+        let never_touch_bank = never_touch(r#"["bank.example"]"#);
+        // A probe that took an authored exact host's name would stand for that host alone, and
+        // the page would miss the hosts its class stands for.
+        let probe_collision =
+            format!(r#"{{"allow":["*.example.com"],"deny":["{PROBE_LABEL}.example.com"]}}"#);
+        let label_collision = format!(r#"{{"allow":["*"],"deny":["{PROBE_LABEL}"]}}"#);
         let fixtures = [
             (None, None),
             (None, Some(layer(&read(r#"{"allow":["*"]}"#), "[]"))),
@@ -1187,7 +1254,7 @@ mod tests {
                 None,
                 Some(layer(
                     &read(r#"{"allow":["bank.example"]}"#),
-                    never_touch_bank,
+                    &never_touch_bank,
                 )),
             ),
             (
@@ -1216,6 +1283,32 @@ mod tests {
                 Some(layer(&read(r#"{"allow":["*.example.com"]}"#), "[]")),
                 Some(layer(&read(r#"{"allow":["deep.a.example.com"]}"#), "[]")),
             ),
+            (
+                None,
+                Some(layer(
+                    &read(r#"{"allow":["*.example.com"],"deny":["*.example.com"]}"#),
+                    "[]",
+                )),
+            ),
+            (
+                Some(layer(
+                    &read(r#"{"allow":["*"]}"#),
+                    &never_touch(r#"["*.bank.example"]"#),
+                )),
+                Some(layer(&read(r#"{"allow":["*.bank.example"]}"#), "[]")),
+            ),
+            (
+                Some(layer(
+                    &read(r#"{"allow":["a.example","bank.example"]}"#),
+                    &never_touch_bank,
+                )),
+                Some(layer(
+                    &read(r#"{"allow":["b.example","bank.example"]}"#),
+                    "[]",
+                )),
+            ),
+            (None, Some(layer(&read(&probe_collision), "[]"))),
+            (None, Some(layer(&read(&label_collision), "[]"))),
         ];
         // Chosen by hand, apart from the probes, so enforcement is asked independently.
         let hosts = [
@@ -1226,6 +1319,7 @@ mod tests {
             "b.example",
             "intranet.example",
             "bank.example",
+            "www.bank.example",
             "unrelated.org",
         ];
         for (index, (organization, user)) in fixtures.iter().enumerate() {
@@ -1251,90 +1345,6 @@ mod tests {
                 view.capabilities[0].state != CapabilityState::Unavailable,
                 "fixture {index}"
             );
-        }
-    }
-
-    #[test]
-    fn the_chip_is_the_compiled_headline() {
-        let organization = policy(
-            r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
-        );
-        let user = policy(
-            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
-        );
-        let mut switched = inputs(Some(&organization), None);
-        switched.channels_off = ChannelsOff {
-            mcp: Some(PolicyAuthor::Organization),
-            cli: None,
-            organization: Some("Northwind"),
-        };
-        let mut stale = inputs(Some(&organization), Some(&user));
-        stale.passport.freshness = crate::governance::ManagedPolicyFreshness::LastKnownGood;
-        let mut broken = inputs(None, Some(&user));
-        broken.valid = false;
-        for (fixture, tone) in [
-            (inputs(None, None), ChipTone::Open),
-            (inputs(Some(&organization), None), ChipTone::Applied),
-            (inputs(None, Some(&user)), ChipTone::Applied),
-            (inputs(Some(&organization), Some(&user)), ChipTone::Applied),
-            (switched, ChipTone::Applied),
-            (stale, ChipTone::Warning),
-            (broken, ChipTone::Failing),
-        ] {
-            let view = compile(&fixture);
-            let chip = PolicyChip::of(&view);
-            assert_eq!(chip.detail, view.headline);
-            assert_eq!(chip.situation, view.situation);
-            assert_eq!(chip.tone, tone, "{:?}", view.situation);
-        }
-    }
-
-    #[test]
-    fn enforcement_and_the_view_name_the_same_audit_layer() {
-        let mode = |value: &str| {
-            policy(&format!(
-                r#"{{"schema":4,"name":"p","version":"1","grants":[],"config":[{{"key":"{}","value":"{value}","level":"mandatory"}}]}}"#,
-                manifest::PolicySetting::AuditAvailability.key()
-            ))
-        };
-        let choices = [
-            None,
-            Some(mode("keep_working")),
-            Some(mode("require_audit")),
-        ];
-        for organization in &choices {
-            for user in &choices {
-                let fixture = inputs(organization.as_ref(), user.as_ref());
-                let view = compile(&fixture);
-                let refused = fixture.snapshot.authorize_audit(false);
-                assert_eq!(
-                    !refused.allowed,
-                    fixture.snapshot.requires_audit(),
-                    "{organization:?} {user:?}"
-                );
-                if refused.allowed {
-                    assert_eq!(
-                        view.audit.mode,
-                        crate::governance::audit_requirement::AuditMode::KeepWorking
-                    );
-                    continue;
-                }
-                let (tier, _) = fixture.snapshot.attribution(refused).expect("attributed");
-                let named = match view.audit.source {
-                    Some(LayerKind::Organization) => PolicyAuthor::Organization,
-                    Some(LayerKind::User) => PolicyAuthor::User,
-                    other => panic!("no layer named: {other:?}"),
-                };
-                assert_eq!(
-                    tier,
-                    super::super::tier_word(named),
-                    "{organization:?} {user:?}"
-                );
-                assert_eq!(
-                    view.audit.mode,
-                    crate::governance::audit_requirement::AuditMode::RequireAudit
-                );
-            }
         }
     }
 }
