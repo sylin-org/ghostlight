@@ -1,8 +1,8 @@
 //! Model-facing policy explanation execution (ADR-0136).
 //!
-//! The one operation that crosses no browser seam: the authority in force is compiled by the
-//! governance facade's single projection -- the same one the workbench renders -- and handed to
-//! the model with machine-local document texts and paths withheld.
+//! The one operation that crosses no browser seam: the authority in force is the compiled answer
+//! of the publication the call's frame enforces -- the same answer the workbench renders -- handed
+//! to the model with machine-local document texts and paths withheld.
 
 use serde_json::{json, Value};
 
@@ -23,7 +23,7 @@ impl ApplicationExecutor {
             None,
             decision,
         ));
-        let mut authority = self.governance.effective_authority();
+        let mut authority = context.publication.authority().clone();
         // Machine-local reading aids stay out of model results (ADR-0136 Decision 2). The
         // person's workbench destination keeps rendering them.
         for layer in &mut authority.layers {

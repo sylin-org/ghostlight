@@ -397,7 +397,7 @@ mod tests {
     fn between_step_limits_do_not_fabricate_attempts_or_lose_prior_effects() {
         let store = WorkspaceStore::default();
         let workspace = store.admit("test".into(), IntakeChannel::Mcp);
-        let snapshot = GovernanceFacade::new(None).snapshot();
+        let publication = GovernanceFacade::new(None).published();
         for cancelled in [true, false] {
             let token = super::super::CancellationToken::default();
             if cancelled {
@@ -418,7 +418,8 @@ mod tests {
                 requested_target: None,
                 repeat_tool: None,
                 gesture: PageGesture::Other,
-                snapshot: &snapshot,
+                snapshot: publication.snapshot(),
+                publication: &publication,
                 deadline: Instant::now(),
                 deadline_adjustable: false,
                 cancellation: &token,
@@ -479,7 +480,7 @@ mod tests {
     fn the_parent_aggregates_limited_children_and_qualifies_its_summary() {
         let store = WorkspaceStore::default();
         let workspace = store.admit("test".into(), IntakeChannel::Mcp);
-        let snapshot = GovernanceFacade::new(None).snapshot();
+        let publication = GovernanceFacade::new(None).published();
         let token = super::super::CancellationToken::default();
         let context = InvocationContext {
             settlement_pending: &std::sync::atomic::AtomicBool::new(false),
@@ -493,7 +494,8 @@ mod tests {
             requested_target: None,
             repeat_tool: None,
             gesture: PageGesture::Other,
-            snapshot: &snapshot,
+            snapshot: publication.snapshot(),
+            publication: &publication,
             deadline: Instant::now(),
             deadline_adjustable: false,
             cancellation: &token,

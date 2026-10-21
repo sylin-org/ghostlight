@@ -148,7 +148,8 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         Arc::new(UnwritableAudit),
         executor.workbench.clone(),
     ));
-    let snapshot = executor.governance.snapshot();
+    let publication = executor.governance.published();
+    let snapshot = publication.snapshot();
     let cancellation = CancellationToken::default();
     let context = InvocationContext {
         settlement_pending: &std::sync::atomic::AtomicBool::new(false),
@@ -161,7 +162,8 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         requested_target: None,
         repeat_tool: None,
         gesture: crate::language::page_refusal::PageGesture::Other,
-        snapshot: &snapshot,
+        snapshot,
+        publication: &publication,
         requirements: CapabilitySet::READ,
         deadline: Instant::now() + Duration::from_secs(1),
         deadline_adjustable: false,

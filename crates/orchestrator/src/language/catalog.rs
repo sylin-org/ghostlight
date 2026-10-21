@@ -235,14 +235,23 @@ pub fn catalog() -> Vec<ToolDefinition> {
     ]
 }
 
+/// The tool a policy with screenshots off removes from the catalog: every call of it would be
+/// refused, and no other tool takes a screenshot.
+const SCREENSHOT_TOOL: &str = "browser_screenshot";
+
 /// Project the canonical catalog through one immutable authority snapshot.
+///
+/// A tool is listed when some host admits what one of its variants needs, and the screenshot
+/// tool only while the snapshot allows screenshots (ADR-0203 Decision 7.1).
 #[must_use]
 pub fn catalog_for(snapshot: &AuthoritySnapshot) -> Vec<ToolDefinition> {
+    let screenshots = snapshot.authorize_screenshot().allowed;
     catalog()
         .into_iter()
         .filter(|tool| {
-            super::capability_map::variants(&tool.name)
-                .any(|variant| snapshot.could_admit(variant.requirements))
+            (screenshots || tool.name != SCREENSHOT_TOOL)
+                && super::capability_map::variants(&tool.name)
+                    .any(|variant| snapshot.could_admit(variant.requirements))
         })
         .collect()
 }
@@ -1692,7 +1701,7 @@ mod tests {
 
     use super::{
         boolean, catalog, catalog_for, constant, enumeration, handle, integer, object, text, union,
-        CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES,
+        CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES, SCREENSHOT_TOOL,
     };
     use crate::governance::GovernanceFacade;
 
@@ -1751,6 +1760,24 @@ mod tests {
             input["expect"]["value"] = json!("unexpected");
             assert!(crate::language::decode(&tool.name, input).is_err());
         }
+    }
+
+    #[test]
+    fn screenshots_off_removes_browser_screenshot_from_the_catalog() {
+        let path = crate::scratch::Scratch::file("catalog-screenshots-off.json");
+        fs::write(
+            &path,
+            r#"{"schema":4,"name":"no screenshots","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}],"config":[{"key":"browser.screenshots.enabled","value":false,"level":"mandatory"}]}"#,
+        )
+        .unwrap();
+        let off = GovernanceFacade::new(Some(path.to_path_buf())).snapshot();
+        let listed: Vec<_> = catalog_for(&off)
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        let mut expected: Vec<_> = catalog().into_iter().map(|tool| tool.name).collect();
+        expected.retain(|name| name != SCREENSHOT_TOOL);
+        assert_eq!(listed, expected);
     }
 
     #[test]

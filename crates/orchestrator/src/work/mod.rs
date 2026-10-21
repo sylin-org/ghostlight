@@ -48,7 +48,8 @@ use crate::audit::AuditRecord;
 use crate::browser::adapter::{PhysicalSemantic, PhysicalWait};
 use crate::governance::manifest::BrowserStartup;
 use crate::governance::{
-    AuthoritySnapshot, Capability, CapabilitySet, Decision, GovernanceFacade, ReasonCode,
+    AuthoritySnapshot, Capability, CapabilitySet, Decision, GovernanceFacade, Publication,
+    ReasonCode,
 };
 use crate::language::{
     self,
@@ -397,9 +398,9 @@ impl ApplicationExecutor {
         } else {
             None
         };
-        let snapshot = self.governance.snapshot();
+        let publication = self.governance.published();
         let frame = Frame::of(operation);
-        let context = InvocationContext::of(prepared, operation, &snapshot, &frame);
+        let context = InvocationContext::of(prepared, operation, &publication, &frame);
         let mut terminal = if capacity_refused {
             let refusal = Refusal::Capacity;
             Terminal {
@@ -2421,6 +2422,9 @@ struct InvocationContext<'a> {
     /// carries its own.
     gesture: PageGesture,
     snapshot: &'a AuthoritySnapshot,
+    /// The publication `snapshot` came from, so what this frame reports of the authority in
+    /// force describes the snapshot it enforces (ADR-0203 Decision 7.5).
+    publication: &'a Publication,
     deadline: Instant,
     /// Whether the top-level call that set `deadline` could be repeated with a longer
     /// `timeout_ms`.
@@ -2434,11 +2438,12 @@ struct InvocationContext<'a> {
 }
 
 impl<'a> InvocationContext<'a> {
-    /// The top-level frame of `prepared`, running its decoded `operation` under `snapshot`.
+    /// The top-level frame of `prepared`, running its decoded `operation` under the snapshot of
+    /// `publication`.
     fn of(
         prepared: &'a PreparedInvocation,
         operation: &'a Operation,
-        snapshot: &'a AuthoritySnapshot,
+        publication: &'a Publication,
         frame: &'a Frame,
     ) -> Self {
         Self {
@@ -2453,7 +2458,8 @@ impl<'a> InvocationContext<'a> {
             requested_target: operation_target(operation),
             repeat_tool: repeatable_tool(operation),
             gesture: PageGesture::of(operation),
-            snapshot,
+            snapshot: publication.snapshot(),
+            publication,
             deadline: prepared.deadline,
             deadline_adjustable: prepared.deadline_adjustable,
             cancellation: &prepared.cancellation,
