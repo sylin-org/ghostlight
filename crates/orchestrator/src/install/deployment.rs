@@ -1900,6 +1900,11 @@ mod tests {
         (PathBuf::from("/bin/sleep"), &["60"])
     }
 
+    /// The name the copied [`sleeper`] is started under on Unix. Where `/bin/sleep` is BusyBox, as
+    /// on Alpine, the program picks what to run by this name, not by the copy's file name.
+    #[cfg(unix)]
+    const SLEEPER_NAME: &str = "sleep";
+
     /// How long a test waits for the stand-in to show in the process table.
     const STAND_IN_APPEARS_WITHIN: Duration = Duration::from_secs(20);
 
@@ -1927,14 +1932,17 @@ mod tests {
     fn start_stand_in(image: &Path) -> StandIn {
         let (sleeper, arguments) = sleeper();
         fs::copy(sleeper, image).unwrap();
+        let mut command = std::process::Command::new(image);
+        command
+            .args(arguments)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::arg0(&mut command, SLEEPER_NAME);
         let mut attempts = 1;
         loop {
-            let started = std::process::Command::new(image)
-                .args(arguments)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
+            let started = command.spawn();
             match started {
                 Ok(child) => return StandIn(child),
                 Err(error)
