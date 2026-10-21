@@ -655,56 +655,6 @@ mod tests {
         u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize
     }
 
-    #[test]
-    fn a_shortcut_names_its_target_and_working_directory() {
-        let target = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight\\bin\\ghostlight-service.exe");
-        let home = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight");
-        let id_list = [4, 0, 1, 2, 0, 0];
-        let bytes = shortcut_bytes(&id_list, target, home);
-        assert_eq!(read_u32(&bytes, 0), link::HEADER_SIZE as usize);
-        assert_eq!(&bytes[4..20], &link::CLASS_ID);
-        let start = link::HEADER_SIZE as usize;
-        assert_eq!(&bytes[start..start + 2], &[6, 0]);
-        assert_eq!(&bytes[start + 2..start + 8], &id_list);
-        let header = start + 8;
-        assert_eq!(
-            read_u32(&bytes, header + 4),
-            link::LINK_INFO_HEADER_SIZE as usize
-        );
-        let info = &bytes[header..];
-        let info_size = read_u32(info, 0);
-        let unicode_base = read_u32(info, 28);
-        let unicode_path: Vec<u16> = info[unicode_base..]
-            .chunks(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .take_while(|unit| *unit != 0)
-            .collect();
-        assert_eq!(
-            String::from_utf16(&unicode_path).unwrap(),
-            target.to_string_lossy()
-        );
-        let ansi_base = read_u32(info, 16);
-        assert!(info[ansi_base..].starts_with(b"C:\\Users\\Zoe ?\\"));
-        let strings = &bytes[header + info_size..];
-        let characters = usize::from(u16::from_le_bytes([strings[0], strings[1]]));
-        let directory: Vec<u16> = strings[2..2 + characters * 2]
-            .chunks(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .collect();
-        assert_eq!(
-            String::from_utf16(&directory).unwrap(),
-            home.to_string_lossy()
-        );
-        // What follows the strings is the property store block and then the terminal block.
-        let extra = &strings[2 + characters * 2..];
-        assert_eq!(&extra[extra.len() - 4..], &[0, 0, 0, 0]);
-        assert_eq!(
-            read_u32(extra, 0),
-            extra.len() - 4,
-            "the block fills the extra data"
-        );
-    }
-
     /// The AppUserModelID a shortcut's property store block holds, read back from its bytes.
     fn app_user_model_id_of(shortcut: &[u8]) -> Option<String> {
         let signature = link::PROPERTY_STORE_SIGNATURE.to_le_bytes();
@@ -746,49 +696,6 @@ mod tests {
         String::from_utf16(&text).ok()
     }
 
-    #[test]
-    fn a_shortcut_carries_the_app_user_model_id_and_it_reads_back() {
-        let target = Path::new("C:\\h\\bin\\ghostlight-desktop.exe");
-        let bytes = shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, Path::new("C:\\h"));
-        assert_eq!(
-            app_user_model_id_of(&bytes).as_deref(),
-            Some(APP_USER_MODEL_ID)
-        );
-    }
-
-    #[test]
-    fn a_shortcut_with_the_old_target_or_without_the_id_differs_from_the_one_written() {
-        let home = Path::new("C:\\h");
-        let list = [4, 0, 1, 2, 0, 0];
-        let shell = shortcut_bytes(&list, Path::new("C:\\h\\bin\\ghostlight-desktop.exe"), home);
-        let service = shortcut_bytes(&list, Path::new("C:\\h\\bin\\ghostlight-service.exe"), home);
-        assert_ne!(shell, service, "another target is rewritten");
-        // A shortcut without the AppUserModelID block ends its strings with the terminal block.
-        let end = shell.len() - app_user_model_id_block(APP_USER_MODEL_ID).len() - 4;
-        let mut without = shell[..end].to_vec();
-        without.extend(0u32.to_le_bytes());
-        assert_ne!(shell, without, "a shortcut without the id is rewritten");
-        assert_eq!(
-            app_user_model_id_of(&shell).as_deref(),
-            Some(APP_USER_MODEL_ID)
-        );
-    }
-
-    #[test]
-    fn the_id_is_the_one_the_shell_names_itself() {
-        assert_eq!(APP_USER_MODEL_ID, "Sylin.Ghostlight");
-    }
-
-    #[test]
-    fn the_shortcut_names_the_shell_when_bin_holds_one_and_the_service_when_it_does_not() {
-        let scratch = crate::scratch::Scratch::new();
-        let layout = Layout::new(scratch.path());
-        assert_eq!(shortcut_target(&layout), layout.service_executable());
-        std::fs::create_dir_all(layout.bin()).unwrap();
-        std::fs::write(layout.desktop_executable(), b"shell").unwrap();
-        assert_eq!(shortcut_target(&layout), layout.desktop_executable());
-    }
-
     /// A shortcut to `target` without the AppUserModelID block.
     fn shortcut_without_id(target: &Path, home: &Path) -> Vec<u8> {
         let full = shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, home);
@@ -796,42 +703,6 @@ mod tests {
         let mut bytes = full[..end].to_vec();
         bytes.extend(0u32.to_le_bytes());
         bytes
-    }
-
-    #[test]
-    fn a_shortcut_reads_back_its_target_and_its_id() {
-        let target = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight\\bin\\ghostlight-desktop.exe");
-        let home = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight");
-        let facts = read_shortcut(&shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, home));
-        assert_eq!(facts.target.as_deref(), Some(&*target.to_string_lossy()));
-        assert_eq!(facts.app_user_model_id.as_deref(), Some(APP_USER_MODEL_ID));
-        let older = read_shortcut(&shortcut_without_id(target, home));
-        assert_eq!(older.target, facts.target);
-        assert_eq!(older.app_user_model_id, None);
-        assert_eq!(read_shortcut(b"not a shell link"), ShortcutFacts::default());
-        let bytes = shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, home);
-        assert_eq!(
-            read_shortcut(&bytes[..bytes.len() / 2]).app_user_model_id,
-            None,
-            "a cut-short link names no id"
-        );
-    }
-
-    #[test]
-    fn a_path_is_inside_a_directory_by_whole_components_and_without_regard_to_case() {
-        let home = Path::new(r"C:\Users\Zoe\.ghostlight");
-        assert!(is_inside(r"C:\Users\Zoe\.ghostlight", home));
-        assert!(is_inside(r"c:/users/zoe/.GHOSTLIGHT/bin/x.exe", home));
-        assert!(is_inside(
-            r#""C:\Users\Zoe\.ghostlight\bin\ghostlight-service.exe" uninstall"#,
-            home
-        ));
-        assert!(is_inside(r"\\?\C:\Users\Zoe\.ghostlight\bin", home));
-        assert!(!is_inside(r"C:\Users\Zoe\.ghostlight-other\bin", home));
-        assert!(!is_inside(
-            r"C:\Program Files\Ghostlight\Ghostlight.exe",
-            home
-        ));
     }
 
     /// An in-memory Uninstall key.
@@ -877,40 +748,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn an_own_shortcut_and_an_own_key_are_removed_and_a_second_removal_changes_nothing() {
-        let scratch = crate::scratch::Scratch::new();
-        let layout = Layout::new(scratch.path().join("home"));
-        let shortcut = scratch.path().join("Ghostlight.lnk");
-        let list = [4, 0, 1, 2, 0, 0];
-        fs::write(
-            &shortcut,
-            shortcut_bytes(&list, &layout.desktop_executable(), layout.home()),
-        )
-        .unwrap();
-        let uninstall = uninstall_command(&layout.service_executable());
-        let key = FakeKey::with(&[(value::UNINSTALL_STRING, &uninstall)]);
-
-        let planned = settle(&layout, Some(&shortcut), &key, false);
-        assert_eq!(planned.shortcut, EntryFate::Removed);
-        assert_eq!(planned.uninstall_key, EntryFate::Removed);
-        assert!(shortcut.is_file() && key.exists(), "a plan changes nothing");
-
-        let removed = settle(&layout, Some(&shortcut), &key, true);
-        assert_eq!(removed.shortcut, EntryFate::Removed);
-        assert_eq!(removed.uninstall_key, EntryFate::Removed);
-        assert!(!shortcut.exists() && !key.exists());
-
-        let again = settle(&layout, Some(&shortcut), &key, true);
-        assert_eq!(again.shortcut, EntryFate::Absent);
-        assert_eq!(again.uninstall_key, EntryFate::Absent);
-        assert_eq!(
-            settle(&layout, None, &FakeKey::absent(), true).shortcut,
-            EntryFate::Absent,
-            "no profile folder, no shortcut"
-        );
-    }
-
     /// `bytes`, a link [`shortcut_bytes`] wrote, with its LinkInfo saying it holds no local path,
     /// so no target can be read from it.
     fn without_readable_target(mut bytes: Vec<u8>) -> Vec<u8> {
@@ -923,95 +760,215 @@ mod tests {
         bytes
     }
 
+    /// ACCEPTANCE Desktop 15: uninstall removes only this home's Start-menu shortcut and Uninstall key, and a
+    /// second removal changes nothing. The shortcut Ghostlight writes names its target, its working
+    /// directory and the AppUserModelID the shell names itself, and reads back; a shortcut is its own
+    /// by its target, or by that id only when it names no target; a key by its install location alone;
+    /// and a path lies inside a directory by whole components, without regard to case.
     #[test]
-    fn a_shortcut_is_own_by_its_target_and_by_its_id_only_when_it_names_none() {
-        let scratch = crate::scratch::Scratch::new();
-        let layout = Layout::new(scratch.path().join("home"));
-        let shortcut = scratch.path().join("Ghostlight.lnk");
-        let list = [4, 0, 1, 2, 0, 0];
-        let other_home = Path::new(r"C:\Other\.ghostlight\bin\ghostlight-desktop.exe");
-        fs::write(
-            &shortcut,
-            shortcut_without_id(&layout.service_executable(), layout.home()),
-        )
-        .unwrap();
-        assert_eq!(
-            settle_shortcut(&layout, Some(&shortcut), true),
-            EntryFate::Removed,
-            "an older shortcut that names the service in this bin"
-        );
-        let foreign = shortcut_bytes(&list, other_home, layout.home());
-        assert_eq!(
-            read_shortcut(&foreign).app_user_model_id.as_deref(),
-            Some(APP_USER_MODEL_ID)
-        );
-        fs::write(&shortcut, &foreign).unwrap();
-        assert_eq!(
-            settle_shortcut(&layout, Some(&shortcut), true),
-            EntryFate::Kept,
-            "another home's shortcut carries the same id, and its target decides"
-        );
-        let targetless = without_readable_target(foreign);
-        assert_eq!(read_shortcut(&targetless).target, None);
-        fs::write(&shortcut, targetless).unwrap();
-        assert_eq!(
-            settle_shortcut(&layout, Some(&shortcut), true),
-            EntryFate::Removed,
-            "with no readable target, the AppUserModelID alone"
-        );
-    }
+    fn uninstall_removes_only_this_homes_shortcut_and_key() {
+        {
+            let target =
+                Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight\\bin\\ghostlight-service.exe");
+            let home = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight");
+            let id_list = [4, 0, 1, 2, 0, 0];
+            let bytes = shortcut_bytes(&id_list, target, home);
+            assert_eq!(read_u32(&bytes, 0), link::HEADER_SIZE as usize);
+            assert_eq!(&bytes[4..20], &link::CLASS_ID);
+            let start = link::HEADER_SIZE as usize;
+            assert_eq!(&bytes[start..start + 2], &[6, 0]);
+            assert_eq!(&bytes[start + 2..start + 8], &id_list);
+            let header = start + 8;
+            assert_eq!(
+                read_u32(&bytes, header + 4),
+                link::LINK_INFO_HEADER_SIZE as usize
+            );
+            let info = &bytes[header..];
+            let info_size = read_u32(info, 0);
+            let unicode_base = read_u32(info, 28);
+            let unicode_path: Vec<u16> = info[unicode_base..]
+                .chunks(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .take_while(|unit| *unit != 0)
+                .collect();
+            assert_eq!(
+                String::from_utf16(&unicode_path).unwrap(),
+                target.to_string_lossy()
+            );
+            let ansi_base = read_u32(info, 16);
+            assert!(info[ansi_base..].starts_with(b"C:\\Users\\Zoe ?\\"));
+            let strings = &bytes[header + info_size..];
+            let characters = usize::from(u16::from_le_bytes([strings[0], strings[1]]));
+            let directory: Vec<u16> = strings[2..2 + characters * 2]
+                .chunks(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect();
+            assert_eq!(
+                String::from_utf16(&directory).unwrap(),
+                home.to_string_lossy()
+            );
+            // What follows the strings is the property store block and then the terminal block.
+            let extra = &strings[2 + characters * 2..];
+            assert_eq!(&extra[extra.len() - 4..], &[0, 0, 0, 0]);
+            assert_eq!(
+                read_u32(extra, 0),
+                extra.len() - 4,
+                "the block fills the extra data"
+            );
+        }
+        {
+            let target = Path::new("C:\\h\\bin\\ghostlight-desktop.exe");
+            let bytes = shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, Path::new("C:\\h"));
+            assert_eq!(
+                app_user_model_id_of(&bytes).as_deref(),
+                Some(APP_USER_MODEL_ID)
+            );
+        }
+        {
+            assert_eq!(APP_USER_MODEL_ID, "Sylin.Ghostlight");
+        }
+        {
+            let target =
+                Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight\\bin\\ghostlight-desktop.exe");
+            let home = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight");
+            let facts = read_shortcut(&shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, home));
+            assert_eq!(facts.target.as_deref(), Some(&*target.to_string_lossy()));
+            assert_eq!(facts.app_user_model_id.as_deref(), Some(APP_USER_MODEL_ID));
+            let older = read_shortcut(&shortcut_without_id(target, home));
+            assert_eq!(older.target, facts.target);
+            assert_eq!(older.app_user_model_id, None);
+            assert_eq!(read_shortcut(b"not a shell link"), ShortcutFacts::default());
+            let bytes = shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, home);
+            assert_eq!(
+                read_shortcut(&bytes[..bytes.len() / 2]).app_user_model_id,
+                None,
+                "a cut-short link names no id"
+            );
+        }
+        {
+            let home = Path::new(r"C:\Users\Zoe\.ghostlight");
+            assert!(is_inside(r"C:\Users\Zoe\.ghostlight", home));
+            assert!(is_inside(r"c:/users/zoe/.GHOSTLIGHT/bin/x.exe", home));
+            assert!(is_inside(
+                r#""C:\Users\Zoe\.ghostlight\bin\ghostlight-service.exe" uninstall"#,
+                home
+            ));
+            assert!(is_inside(r"\\?\C:\Users\Zoe\.ghostlight\bin", home));
+            assert!(!is_inside(r"C:\Users\Zoe\.ghostlight-other\bin", home));
+            assert!(!is_inside(
+                r"C:\Program Files\Ghostlight\Ghostlight.exe",
+                home
+            ));
+        }
+        {
+            let scratch = crate::scratch::Scratch::new();
+            let layout = Layout::new(scratch.path().join("home"));
+            let shortcut = scratch.path().join("Ghostlight.lnk");
+            let list = [4, 0, 1, 2, 0, 0];
+            fs::write(
+                &shortcut,
+                shortcut_bytes(&list, &layout.desktop_executable(), layout.home()),
+            )
+            .unwrap();
+            let uninstall = uninstall_command(&layout.service_executable());
+            let key = FakeKey::with(&[(value::UNINSTALL_STRING, &uninstall)]);
 
-    #[test]
-    fn a_shortcut_that_names_another_program_and_a_key_that_names_another_home_are_kept() {
-        let scratch = crate::scratch::Scratch::new();
-        let layout = Layout::new(scratch.path().join("home"));
-        let shortcut = scratch.path().join("Ghostlight.lnk");
-        let elsewhere = Path::new(r"C:\Program Files\Ghostlight\Ghostlight.exe");
-        fs::write(
-            &shortcut,
-            shortcut_without_id(elsewhere, Path::new(r"C:\x")),
-        )
-        .unwrap();
-        let before = fs::read(&shortcut).unwrap();
-        let other_home = r#""C:\Other\.ghostlight\bin\ghostlight-service.exe" uninstall"#;
-        let key = FakeKey::with(&[
-            (value::UNINSTALL_STRING, other_home),
-            (value::INSTALL_LOCATION, r"C:\Other\.ghostlight\bin"),
-        ]);
+            let planned = settle(&layout, Some(&shortcut), &key, false);
+            assert_eq!(planned.shortcut, EntryFate::Removed);
+            assert_eq!(planned.uninstall_key, EntryFate::Removed);
+            assert!(shortcut.is_file() && key.exists(), "a plan changes nothing");
 
-        let removal = settle(&layout, Some(&shortcut), &key, true);
+            let removed = settle(&layout, Some(&shortcut), &key, true);
+            assert_eq!(removed.shortcut, EntryFate::Removed);
+            assert_eq!(removed.uninstall_key, EntryFate::Removed);
+            assert!(!shortcut.exists() && !key.exists());
 
-        assert_eq!(removal.shortcut, EntryFate::Kept);
-        assert_eq!(removal.uninstall_key, EntryFate::Kept);
-        assert_eq!(fs::read(&shortcut).unwrap(), before);
-        assert!(key.exists());
-        fs::write(&shortcut, b"garbage").unwrap();
-        assert_eq!(
-            settle_shortcut(&layout, Some(&shortcut), true),
-            EntryFate::Kept,
-            "a file that is not a readable shell link is not provably Ghostlight's"
-        );
-        assert!(
-            settle_key(&layout, &FakeKey::with(&[]), true) == EntryFate::Kept,
-            "a key that names nothing is not provably Ghostlight's"
-        );
-    }
+            let again = settle(&layout, Some(&shortcut), &key, true);
+            assert_eq!(again.shortcut, EntryFate::Absent);
+            assert_eq!(again.uninstall_key, EntryFate::Absent);
+            assert_eq!(
+                settle(&layout, None, &FakeKey::absent(), true).shortcut,
+                EntryFate::Absent,
+                "no profile folder, no shortcut"
+            );
+        }
+        {
+            let scratch = crate::scratch::Scratch::new();
+            let layout = Layout::new(scratch.path().join("home"));
+            let shortcut = scratch.path().join("Ghostlight.lnk");
+            let list = [4, 0, 1, 2, 0, 0];
+            let other_home = Path::new(r"C:\Other\.ghostlight\bin\ghostlight-desktop.exe");
+            fs::write(
+                &shortcut,
+                shortcut_without_id(&layout.service_executable(), layout.home()),
+            )
+            .unwrap();
+            assert_eq!(
+                settle_shortcut(&layout, Some(&shortcut), true),
+                EntryFate::Removed,
+                "an older shortcut that names the service in this bin"
+            );
+            let foreign = shortcut_bytes(&list, other_home, layout.home());
+            assert_eq!(
+                read_shortcut(&foreign).app_user_model_id.as_deref(),
+                Some(APP_USER_MODEL_ID)
+            );
+            fs::write(&shortcut, &foreign).unwrap();
+            assert_eq!(
+                settle_shortcut(&layout, Some(&shortcut), true),
+                EntryFate::Kept,
+                "another home's shortcut carries the same id, and its target decides"
+            );
+            let targetless = without_readable_target(foreign);
+            assert_eq!(read_shortcut(&targetless).target, None);
+            fs::write(&shortcut, targetless).unwrap();
+            assert_eq!(
+                settle_shortcut(&layout, Some(&shortcut), true),
+                EntryFate::Removed,
+                "with no readable target, the AppUserModelID alone"
+            );
+        }
+        {
+            let scratch = crate::scratch::Scratch::new();
+            let layout = Layout::new(scratch.path().join("home"));
+            let shortcut = scratch.path().join("Ghostlight.lnk");
+            let elsewhere = Path::new(r"C:\Program Files\Ghostlight\Ghostlight.exe");
+            fs::write(
+                &shortcut,
+                shortcut_without_id(elsewhere, Path::new(r"C:\x")),
+            )
+            .unwrap();
+            let before = fs::read(&shortcut).unwrap();
+            let other_home = r#""C:\Other\.ghostlight\bin\ghostlight-service.exe" uninstall"#;
+            let key = FakeKey::with(&[
+                (value::UNINSTALL_STRING, other_home),
+                (value::INSTALL_LOCATION, r"C:\Other\.ghostlight\bin"),
+            ]);
 
-    #[test]
-    fn a_key_is_own_by_its_install_location_alone() {
-        let scratch = crate::scratch::Scratch::new();
-        let layout = Layout::new(scratch.path().join("home"));
-        let location = layout.bin().to_string_lossy().into_owned();
-        let key = FakeKey::with(&[(value::INSTALL_LOCATION, &location)]);
-        assert_eq!(settle_key(&layout, &key, true), EntryFate::Removed);
-        assert!(!key.exists());
-    }
+            let removal = settle(&layout, Some(&shortcut), &key, true);
 
-    #[test]
-    fn the_uninstall_command_runs_the_installed_service() {
-        assert_eq!(
-            uninstall_command(Path::new(r"C:\h\bin\ghostlight-service.exe")),
-            r#""C:\h\bin\ghostlight-service.exe" uninstall"#
-        );
+            assert_eq!(removal.shortcut, EntryFate::Kept);
+            assert_eq!(removal.uninstall_key, EntryFate::Kept);
+            assert_eq!(fs::read(&shortcut).unwrap(), before);
+            assert!(key.exists());
+            fs::write(&shortcut, b"garbage").unwrap();
+            assert_eq!(
+                settle_shortcut(&layout, Some(&shortcut), true),
+                EntryFate::Kept,
+                "a file that is not a readable shell link is not provably Ghostlight's"
+            );
+            assert!(
+                settle_key(&layout, &FakeKey::with(&[]), true) == EntryFate::Kept,
+                "a key that names nothing is not provably Ghostlight's"
+            );
+        }
+        {
+            let scratch = crate::scratch::Scratch::new();
+            let layout = Layout::new(scratch.path().join("home"));
+            let location = layout.bin().to_string_lossy().into_owned();
+            let key = FakeKey::with(&[(value::INSTALL_LOCATION, &location)]);
+            assert_eq!(settle_key(&layout, &key, true), EntryFate::Removed);
+            assert!(!key.exists());
+        }
     }
 }
