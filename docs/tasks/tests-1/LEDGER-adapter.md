@@ -12,15 +12,15 @@ ADR-0204's four reasons (see Notes); the cut then goes one file per commit. A1 (
 (`assets.rs`), A5 (`work.rs`), A6
 (`geometry/tests.rs`), A7 (`locator.rs`), A8
 (`scope/tests.rs`), A9 (`tree/tests.rs`),
-A10 (`merge/tests.rs`), A11 (`link/tests.rs`) and A12 (`connection/tests.rs`) have
-landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
+A10 (`merge/tests.rs`), A11 (`link/tests.rs`), A12 (`connection/tests.rs`) and A13
+(`golden.rs`) have landed; the plan below names the rest. The protocol 4 goldens and the pins in `protocol4/golden.rs` are contracts both sides
 read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `browser/adapter/` | 337 | 55 | 156 |
+| `browser/adapter/` | 337 | 55 | 141 |
 
 ## Slices
 
@@ -40,7 +40,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | A9 | `protocol4/tree/tests.rs`: the tree the service builds from the extension's inventory | 15 | 2 | contract 2 | landed (91439a0f) |
 | A10 | `protocol4/merge/tests.rs`: one answer across documents | 37 | 5 | promise 2, defect 3 | landed (72bdfc86) |
 | A11 | `protocol4/link/tests.rs`: what the Link promises the executor | 20 | 8 | promise 4, contract 2, defect 2 | landed (e7ab9fd6) |
-| A12 | `protocol4/connection/tests.rs`: one browser's connection, from hello to its end | 16 | 7 | promise 4, contract 1, defect 2 | landed (this commit) |
+| A12 | `protocol4/connection/tests.rs`: one browser's connection, from hello to its end | 16 | 7 | promise 4, contract 1, defect 2 | landed (dd3eded6) |
+| A13 | `protocol4/golden.rs`: the goldens both sides read, one test per contract | 19 | 4 | contract 4 | landed (this commit) |
 
 ## Notes
 
@@ -142,6 +143,13 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   a 10 ms receive on a closed channel is a `try_recv`; ten runs in a row passed. Cut: a writer
   test the link's cancel and notice tests prove through the real path, and a publish test the race
   test repeats.
+- A13: no assertion goes. The 19 pins are now named check functions, and four tests, one per
+  contract, run them: every fixture reads and writes as the extension's tests read it (requests,
+  receipts, frames, events, world messages); the tolerance fixtures decode to their catch-alls;
+  `vocabulary.json` says what the service says (closed names, scalars and limits, the longest
+  group title, the chunk limits, the unknown dialog type); and every closed word a page asset or
+  the extension spells is one the service knows. A failure still names the check that broke. No
+  golden file changes, and no active document cited the old names.
 - A1: 24 of `wire.rs`'s 25 tests repeated what `golden.rs` proves against the fixtures both sides
   read (each frame, request, receipt and closed name), or restated a constant. Kept: one test that a
   word a newer extension sends decodes to its type's catch-all, for the four types the golden

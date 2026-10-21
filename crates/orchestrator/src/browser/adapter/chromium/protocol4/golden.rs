@@ -241,7 +241,6 @@ fn typed_receipt(primitive: &str, frame: &Value) -> (wire::Receipt, Option<Value
     (receipt, ok)
 }
 
-#[test]
 fn every_request_serializes_back_to_its_fixture() {
     let requests = section("requests");
     assert!(!requests.is_empty());
@@ -269,7 +268,6 @@ fn name_of(primitive: &wire::Primitive) -> String {
         .to_owned()
 }
 
-#[test]
 fn every_receipt_decodes_into_its_primitives_outcome_or_names_its_failure() {
     for (stem, fixture) in section("receipts") {
         let (primitive, case) = stem.split_once('.').expect("primitive.case");
@@ -293,7 +291,6 @@ fn every_receipt_decodes_into_its_primitives_outcome_or_names_its_failure() {
     }
 }
 
-#[test]
 fn every_frame_round_trips_through_its_direction() {
     let vocabulary = vocabulary();
     let kinds = &vocabulary["frame_kinds"];
@@ -329,7 +326,6 @@ fn every_frame_round_trips_through_its_direction() {
     assert_eq!(seen, every, "every frame kind has a fixture");
 }
 
-#[test]
 fn every_event_decodes_and_round_trips() {
     let mut seen = BTreeSet::new();
     for (stem, fixture) in section("events") {
@@ -352,6 +348,9 @@ fn every_event_decodes_and_round_trips() {
     assert_eq!(seen, listed(&vocabulary(), "events"));
 }
 
+/// Every tolerance fixture, a frame, event, failure, answer, readiness or field a newer extension
+/// may send, decodes to its catch-all or is ignored, so an extension update never breaks the
+/// service.
 #[test]
 fn tolerance_fixtures_decode_with_unknowns_mapped() {
     let mut handled = BTreeSet::new();
@@ -444,7 +443,6 @@ fn at(pointer: &'static str) -> impl Fn(&Value) -> Vec<Value> {
     move |value| value.pointer(pointer).cloned().into_iter().collect()
 }
 
-#[test]
 fn closed_names_equal_the_vocabulary() {
     let vocabulary = vocabulary();
     let check = |key: &str, names: BTreeSet<String>| {
@@ -561,7 +559,6 @@ fn closed_names_equal_the_vocabulary() {
     check("call_answers", tags("receipts", "call", answers));
 }
 
-#[test]
 fn the_constants_and_limits_equal_the_vocabulary() {
     let vocabulary = vocabulary();
     let limits = &vocabulary["limits"];
@@ -583,7 +580,6 @@ fn the_constants_and_limits_equal_the_vocabulary() {
 }
 
 /// The extension refuses a longer group title, and the agent it names could open no tab.
-#[test]
 fn the_longest_group_title_fits_the_extensions_limit() {
     let longest = crate::language::provenance::group_title(&crate::agent::Agent::of(
         Some(&"\u{1F600}".repeat(200)),
@@ -618,7 +614,6 @@ fn quoted_between(source: &str, open: &str, close: &str) -> BTreeSet<String> {
         .collect()
 }
 
-#[test]
 fn asset_error_codes_agree_across_rust_the_vocabulary_and_world_js() {
     let vocabulary = vocabulary();
     let names = set(asset_error_codes());
@@ -634,7 +629,6 @@ fn asset_error_codes_agree_across_rust_the_vocabulary_and_world_js() {
     assert_eq!(pre_effect, listed(&vocabulary, "pre_effect_codes"));
 }
 
-#[test]
 fn every_problem_word_content_js_names_is_one_the_service_decodes() {
     let named = quoted_between(CONTENT_JS, PROBLEMS_OPEN, TABLE_CLOSE);
     assert!(!named.is_empty());
@@ -645,7 +639,6 @@ fn every_problem_word_content_js_names_is_one_the_service_decodes() {
     assert!(named.is_subset(&known), "{named:?} is not within {known:?}");
 }
 
-#[test]
 fn every_wrong_tool_route_content_js_names_is_one_the_service_decodes() {
     let named = quoted_between(CONTENT_JS, ROUTES_OPEN, TABLE_CLOSE);
     let known = set(names!(WrongToolRoute: File, Button, Widget));
@@ -661,13 +654,11 @@ fn quoted_after(source: &str, marker: &str) -> BTreeSet<String> {
         .collect()
 }
 
-#[test]
 fn content_js_dispatches_exactly_the_kinds_the_service_builds() {
     let dispatched = quoted_after(CONTENT_JS, DISPATCH_TEST);
     assert_eq!(dispatched, set(WorldKind::ALL.map(WorldKind::as_str)));
 }
 
-#[test]
 fn every_presentation_name_the_service_sends_is_one_the_page_draws() {
     let kinds = set(names!(PresentationKind: Start, Target, Progress, Completion, Denial));
     assert_eq!(
@@ -684,7 +675,6 @@ fn every_presentation_name_the_service_sends_is_one_the_page_draws() {
     );
 }
 
-#[test]
 fn every_area_and_tier_the_page_names_is_one_the_service_decodes() {
     assert_eq!(
         quoted_between(CONTENT_JS, AREAS_OPEN, LIST_CLOSE),
@@ -704,7 +694,6 @@ fn extension(relative: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path:?}: {error}"))
 }
 
-#[test]
 fn every_stop_reason_the_extension_sends_is_one_the_service_decodes() {
     let unknown = name(&RecordingStopReason::Unknown);
     let mut known = set(
@@ -726,7 +715,6 @@ fn every_stop_reason_the_extension_sends_is_one_the_service_decodes() {
     );
 }
 
-#[test]
 fn the_runtime_states_the_extension_reports_are_the_services_and_disconnected() {
     let vocabulary = vocabulary();
     let states = listed(&vocabulary, "runtime_states");
@@ -742,7 +730,6 @@ fn the_runtime_states_the_extension_reports_are_the_services_and_disconnected() 
     );
 }
 
-#[test]
 fn the_extensions_chunk_limits_equal_the_services() {
     let limits = &vocabulary()["chunk_limits"];
     assert_eq!(limits["chunk_payload_bytes"], wire::CHUNK_PAYLOAD_BYTES);
@@ -750,7 +737,6 @@ fn the_extensions_chunk_limits_equal_the_services() {
     assert_eq!(limits["transfer_max_chunks"], wire::TRANSFER_MAX_CHUNKS);
 }
 
-#[test]
 fn the_unknown_dialog_type_is_the_one_the_receipts_carry() {
     assert_eq!(
         vocabulary()["unknown_dialog_type"],
@@ -876,7 +862,6 @@ fn build(kind_name: &str, f: &Value) -> Message {
     }
 }
 
-#[test]
 fn every_world_constructor_builds_its_fixture() {
     let mut seen = BTreeSet::new();
     for (stem, fixture) in section("world") {
@@ -894,4 +879,45 @@ fn every_world_constructor_builds_its_fixture() {
         set(WorldKind::ALL.map(WorldKind::as_str)),
         "every world kind has a fixture"
     );
+}
+
+/// The service reads and writes every fixture in `tests/golden/protocol4` exactly as the
+/// extension's tests do: each request serializes back to its fixture, each receipt decodes into
+/// its primitive's outcome or names its failure, each frame and event round-trips through its
+/// direction, and each world constructor builds its fixture.
+#[test]
+fn every_fixture_reads_and_writes_as_the_extensions_does() {
+    every_request_serializes_back_to_its_fixture();
+    every_receipt_decodes_into_its_primitives_outcome_or_names_its_failure();
+    every_frame_round_trips_through_its_direction();
+    every_event_decodes_and_round_trips();
+    every_world_constructor_builds_its_fixture();
+}
+
+/// `vocabulary.json`, which the extension's protocol module equals, says what the service says:
+/// every closed list equals the service's names, every scalar and limit its constant, the longest
+/// group title fits the extension's limit, and the unknown dialog type is the one the receipts
+/// carry.
+#[test]
+fn the_vocabulary_says_what_the_service_says() {
+    closed_names_equal_the_vocabulary();
+    the_constants_and_limits_equal_the_vocabulary();
+    the_longest_group_title_fits_the_extensions_limit();
+    the_extensions_chunk_limits_equal_the_services();
+    the_unknown_dialog_type_is_the_one_the_receipts_carry();
+}
+
+/// Every closed word a page asset or the extension spells, the tables `world.js`, `content.js` and
+/// `presentation.js` hold and the stop reasons and runtime states the extension reports, is one
+/// the service decodes or sends.
+#[test]
+fn every_closed_word_a_page_asset_or_the_extension_spells_is_one_the_service_knows() {
+    asset_error_codes_agree_across_rust_the_vocabulary_and_world_js();
+    every_problem_word_content_js_names_is_one_the_service_decodes();
+    every_wrong_tool_route_content_js_names_is_one_the_service_decodes();
+    content_js_dispatches_exactly_the_kinds_the_service_builds();
+    every_presentation_name_the_service_sends_is_one_the_page_draws();
+    every_area_and_tier_the_page_names_is_one_the_service_decodes();
+    every_stop_reason_the_extension_sends_is_one_the_service_decodes();
+    the_runtime_states_the_extension_reports_are_the_services_and_disconnected();
 }
