@@ -172,7 +172,9 @@ fn flatpak_line(step: &FlatpakStep) -> Line {
     }
 }
 
-/// What the reconcile changed and what it left for a person.
+/// What the reconcile changed, on standard output, and what it left for a person, on standard
+/// error: get.sh and get.ps1 discard the installer's standard output, so a line that asks the
+/// person to act must not go there.
 fn registration_lines(report: &ReconcileReport, layout: &Layout) -> Vec<Line> {
     let mut lines = Vec::new();
     if !report.browsers.is_empty() {
@@ -182,7 +184,7 @@ fn registration_lines(report: &ReconcileReport, layout: &Layout) -> Vec<Line> {
         lines.push(Line::output(words::client_rewritten(client)));
     }
     for entry in &report.clients_unchanged {
-        lines.push(Line::output(match &entry.found {
+        lines.push(Line::problem(match &entry.found {
             Some(found) => words::client_keeps_entry(&entry.client, found),
             None => words::client_entry_unchangeable(&entry.client),
         }));
@@ -191,13 +193,13 @@ fn registration_lines(report: &ReconcileReport, layout: &Layout) -> Vec<Line> {
         lines.push(Line::output(words::platform_entry_updated(entry)));
     }
     if report.needs_new_terminal {
-        lines.push(Line::output(environment::OPEN_NEW_TERMINAL.to_owned()));
+        lines.push(Line::problem(environment::OPEN_NEW_TERMINAL.to_owned()));
     }
     if let Some(container) = &report.container {
         lines.extend(
             words::kept_private_lines(container, &report.kept_private, layout)
                 .into_iter()
-                .map(Line::output),
+                .map(Line::problem),
         );
     }
     lines.extend(
@@ -265,218 +267,271 @@ mod tests {
         lines.iter().map(|line| line.text.as_str()).collect()
     }
 
+    /// Protects the install report and finding 2 of the tests-1 install lane: a build is said to serve
+    /// only once a service answered; a removed or kept directory, marker or 1.x version directory is
+    /// named by its own path, with the archive of its log; a stray that would not stop is a problem; a
+    /// release says nothing about serving from; a replaced edge is said once with its reason. Every
+    /// line that asks the person to act goes to standard error, which get.sh and get.ps1 show, and
+    /// never to standard output, which they discard.
     #[test]
-    fn a_build_is_said_to_serve_only_once_a_service_answered() {
-        let layout = Layout::new("home");
-        let service = layout.service_executable().display().to_string();
-        for (mode, noun) in [
-            (Mode::Development, "development build"),
-            (Mode::Restore, "release"),
-        ] {
-            let started = report_of(mode, &layout, Vec::new(), Some(true), Vec::new());
-            let sentence = format!("The {noun} now serves from {service}.");
-            assert!(texts(&started).contains(&sentence.as_str()), "{started:?}");
-            let failed = report_of(mode, &layout, Vec::new(), Some(false), Vec::new());
-            assert!(
-                failed.iter().all(|line| !line.text.contains("now serves")),
-                "{failed:?}"
-            );
-            assert!(
-                failed
-                    .iter()
-                    .any(|line| line.stream == Stream::Problem && line.text.contains(&service)),
-                "{failed:?}"
-            );
+    fn an_install_report_says_what_happened_and_shows_what_needs_a_person() {
+        {
+            let layout = Layout::new("home");
+            let service = layout.service_executable().display().to_string();
+            for (mode, noun) in [
+                (Mode::Development, "development build"),
+                (Mode::Restore, "release"),
+            ] {
+                let started = report_of(mode, &layout, Vec::new(), Some(true), Vec::new());
+                let sentence = format!("The {noun} now serves from {service}.");
+                assert!(texts(&started).contains(&sentence.as_str()), "{started:?}");
+                let failed = report_of(mode, &layout, Vec::new(), Some(false), Vec::new());
+                assert!(
+                    failed.iter().all(|line| !line.text.contains("now serves")),
+                    "{failed:?}"
+                );
+                assert!(
+                    failed
+                        .iter()
+                        .any(|line| line.stream == Stream::Problem && line.text.contains(&service)),
+                    "{failed:?}"
+                );
+            }
         }
-    }
+        {
+            let layout = Layout::new("home");
+            let directory = layout.retired_development_directory();
+            let marker = layout.retired_development_marker();
+            let deletions = vec![directory.clone(), marker.clone()];
+            let shown_marker = marker.display().to_string();
 
-    #[test]
-    fn a_removed_or_kept_directory_and_marker_are_each_named_by_their_own_path() {
-        let layout = Layout::new("home");
-        let directory = layout.retired_development_directory();
-        let marker = layout.retired_development_marker();
-        let deletions = vec![directory.clone(), marker.clone()];
-        let shown_marker = marker.display().to_string();
-
-        let removed = report_of(
-            Mode::Development,
-            &layout,
-            deletions.clone(),
-            Some(true),
-            Vec::new(),
-        );
-        let directory_sentence = format!(
-            "Removed {}, where earlier development builds ran.",
-            directory.display()
-        );
-        assert!(
-            texts(&removed).contains(&directory_sentence.as_str()),
-            "{removed:?}"
-        );
-        let marker_line = removed
-            .iter()
-            .find(|line| line.text.contains(&shown_marker))
-            .unwrap();
-        assert!(!marker_line
-            .text
-            .contains("where earlier development builds ran"));
-        assert_eq!(marker_line.stream, Stream::Output);
-
-        let kept = report_of(
-            Mode::Development,
-            &layout,
-            deletions,
-            Some(true),
-            vec![directory.clone(), marker],
-        );
-        let kept_marker = kept
-            .iter()
-            .find(|line| line.text.contains(&shown_marker))
-            .unwrap();
-        assert_eq!(kept_marker.stream, Stream::Problem);
-        assert_eq!(
-            kept_marker.text,
-            format!("Could not remove {shown_marker}. The next install tries again.")
-        );
-        assert!(kept.iter().all(|line| !line.text.contains("still runs")));
-        let shown_directory = directory.display().to_string();
-        // The marker's path starts with the directory's, so match the whole sentence.
-        let kept_directory =
-            format!("Could not remove {shown_directory}. The next install tries again.");
-        assert!(
-            kept.iter()
-                .any(|line| line.stream == Stream::Problem && line.text == kept_directory),
-            "{kept:?}"
-        );
-    }
-
-    #[test]
-    fn a_removed_or_kept_version_directory_is_named_with_the_archive_of_its_log() {
-        use crate::install::migration::Move;
-
-        let layout = Layout::new("home");
-        let first = layout.bin().join("v1.3.5");
-        let second = layout.bin().join("v1.3.6");
-        let archive = layout.state().join("audit-v1.3.5.jsonl");
-        let outcome = |left_behind: Vec<PathBuf>| Outcome {
-            plan: plan(
+            let removed = report_of(
                 Mode::Development,
                 &layout,
-                vec![first.clone(), second.clone()],
-            ),
-            service_started: Some(true),
-            start_failure: None,
-            registrations: None,
-            flatpak: Vec::new(),
-            left_behind,
-            archived_version_audits: vec![Move {
-                from: first.join("audit.jsonl"),
-                to: archive.clone(),
-            }],
-            strays_left: Vec::new(),
-            retired_leftovers: Vec::new(),
-        };
+                deletions.clone(),
+                Some(true),
+                Vec::new(),
+            );
+            let directory_sentence = format!(
+                "Removed {}, where earlier development builds ran.",
+                directory.display()
+            );
+            assert!(
+                texts(&removed).contains(&directory_sentence.as_str()),
+                "{removed:?}"
+            );
+            let marker_line = removed
+                .iter()
+                .find(|line| line.text.contains(&shown_marker))
+                .unwrap();
+            assert!(!marker_line
+                .text
+                .contains("where earlier development builds ran"));
+            assert_eq!(marker_line.stream, Stream::Output);
 
-        let removed = report(&outcome(Vec::new()), &layout);
-        let removed_first = format!(
-            "Removed {}, where an earlier Ghostlight kept one of its versions.",
-            first.display()
-        );
-        let kept_log = format!("Kept its audit log as {}.", archive.display());
-        let start = removed
-            .iter()
-            .position(|line| line.text == removed_first)
-            .unwrap_or_else(|| panic!("{removed:?}"));
-        assert_eq!(removed[start + 1].text, kept_log);
-        assert!(removed.iter().any(|line| line
-            .text
-            .starts_with(&format!("Removed {}", second.display()))));
-        assert_eq!(
-            removed.iter().filter(|line| line.text == kept_log).count(),
-            1
-        );
-        assert!(removed.iter().all(|line| line.stream == Stream::Output));
+            let kept = report_of(
+                Mode::Development,
+                &layout,
+                deletions,
+                Some(true),
+                vec![directory.clone(), marker],
+            );
+            let kept_marker = kept
+                .iter()
+                .find(|line| line.text.contains(&shown_marker))
+                .unwrap();
+            assert_eq!(kept_marker.stream, Stream::Problem);
+            assert_eq!(
+                kept_marker.text,
+                format!("Could not remove {shown_marker}. The next install tries again.")
+            );
+            assert!(kept.iter().all(|line| !line.text.contains("still runs")));
+            let shown_directory = directory.display().to_string();
+            // The marker's path starts with the directory's, so match the whole sentence.
+            let kept_directory =
+                format!("Could not remove {shown_directory}. The next install tries again.");
+            assert!(
+                kept.iter()
+                    .any(|line| line.stream == Stream::Problem && line.text == kept_directory),
+                "{kept:?}"
+            );
+        }
+        {
+            use crate::install::migration::Move;
 
-        let kept = report(&outcome(vec![second.clone()]), &layout);
-        let sentence = format!(
-            "Could not remove {}. The next install tries again.",
-            second.display()
-        );
-        assert!(
-            kept.iter()
-                .any(|line| line.stream == Stream::Problem && line.text == sentence),
-            "{kept:?}"
-        );
-    }
+            let layout = Layout::new("home");
+            let first = layout.bin().join("v1.3.5");
+            let second = layout.bin().join("v1.3.6");
+            let archive = layout.state().join("audit-v1.3.5.jsonl");
+            let outcome = |left_behind: Vec<PathBuf>| Outcome {
+                plan: plan(
+                    Mode::Development,
+                    &layout,
+                    vec![first.clone(), second.clone()],
+                ),
+                service_started: Some(true),
+                start_failure: None,
+                registrations: None,
+                flatpak: Vec::new(),
+                left_behind,
+                archived_version_audits: vec![Move {
+                    from: first.join("audit.jsonl"),
+                    to: archive.clone(),
+                }],
+                strays_left: Vec::new(),
+                retired_leftovers: Vec::new(),
+            };
 
-    #[test]
-    fn a_stray_that_would_not_stop_is_named_as_a_problem() {
-        use crate::install::deployment::{StrayKind, StrayProcess};
+            let removed = report(&outcome(Vec::new()), &layout);
+            let removed_first = format!(
+                "Removed {}, where an earlier Ghostlight kept one of its versions.",
+                first.display()
+            );
+            let kept_log = format!("Kept its audit log as {}.", archive.display());
+            let start = removed
+                .iter()
+                .position(|line| line.text == removed_first)
+                .unwrap_or_else(|| panic!("{removed:?}"));
+            assert_eq!(removed[start + 1].text, kept_log);
+            assert!(removed.iter().any(|line| line
+                .text
+                .starts_with(&format!("Removed {}", second.display()))));
+            assert_eq!(
+                removed.iter().filter(|line| line.text == kept_log).count(),
+                1
+            );
+            assert!(removed.iter().all(|line| line.stream == Stream::Output));
 
-        let layout = Layout::new("home");
-        let image = layout.bin().join("ghostlight-mcp-connector");
-        let outcome = Outcome {
-            plan: plan(Mode::Release, &layout, Vec::new()),
-            service_started: Some(true),
-            start_failure: None,
-            registrations: None,
-            flatpak: Vec::new(),
-            left_behind: Vec::new(),
-            archived_version_audits: Vec::new(),
-            strays_left: vec![StrayProcess {
-                pid: 7,
-                image: image.clone(),
-                kind: StrayKind::RetiredConnector,
-            }],
-            retired_leftovers: Vec::new(),
-        };
-        let lines = report(&outcome, &layout);
-        let sentence = format!("Could not stop {}. Close it yourself.", image.display());
-        let named: Vec<&Line> = lines.iter().filter(|line| line.text == sentence).collect();
-        assert_eq!(named.len(), 1, "{lines:?}");
-        assert_eq!(named[0].stream, Stream::Problem);
-    }
+            let kept = report(&outcome(vec![second.clone()]), &layout);
+            let sentence = format!(
+                "Could not remove {}. The next install tries again.",
+                second.display()
+            );
+            assert!(
+                kept.iter()
+                    .any(|line| line.stream == Stream::Problem && line.text == sentence),
+                "{kept:?}"
+            );
+        }
+        {
+            use crate::install::deployment::{StrayKind, StrayProcess};
 
-    #[test]
-    fn a_release_install_says_nothing_about_serving_from() {
-        let layout = Layout::new("home");
-        let lines = report_of(Mode::Release, &layout, Vec::new(), Some(true), Vec::new());
-        assert!(lines.iter().all(|line| !line.text.contains("serves")));
-    }
+            let layout = Layout::new("home");
+            let image = layout.bin().join("ghostlight-mcp-connector");
+            let outcome = Outcome {
+                plan: plan(Mode::Release, &layout, Vec::new()),
+                service_started: Some(true),
+                start_failure: None,
+                registrations: None,
+                flatpak: Vec::new(),
+                left_behind: Vec::new(),
+                archived_version_audits: Vec::new(),
+                strays_left: vec![StrayProcess {
+                    pid: 7,
+                    image: image.clone(),
+                    kind: StrayKind::RetiredConnector,
+                }],
+                retired_leftovers: Vec::new(),
+            };
+            let lines = report(&outcome, &layout);
+            let sentence = format!("Could not stop {}. Close it yourself.", image.display());
+            let named: Vec<&Line> = lines.iter().filter(|line| line.text == sentence).collect();
+            assert_eq!(named.len(), 1, "{lines:?}");
+            assert_eq!(named[0].stream, Stream::Problem);
+        }
+        {
+            let layout = Layout::new("home");
+            let lines = report_of(Mode::Release, &layout, Vec::new(), Some(true), Vec::new());
+            assert!(lines.iter().all(|line| !line.text.contains("serves")));
+        }
+        {
+            use crate::install::deployment::EdgeReplacement;
 
-    #[test]
-    fn a_replaced_edge_is_said_once_with_its_reason_and_a_kept_one_not_at_all() {
-        use crate::install::deployment::EdgeReplacement;
+            let layout = Layout::new("home");
+            let outcome = |edge_replaced: Option<EdgeReplacement>| Outcome {
+                plan: InstallPlan {
+                    edge_replaced,
+                    ..plan(Mode::Development, &layout, Vec::new())
+                },
+                service_started: Some(true),
+                start_failure: None,
+                registrations: None,
+                flatpak: Vec::new(),
+                left_behind: Vec::new(),
+                archived_version_audits: Vec::new(),
+                strays_left: Vec::new(),
+                retired_leftovers: Vec::new(),
+            };
+            let replaced = report(&outcome(Some(EdgeReplacement::Rebuilt)), &layout);
+            let sentence = "The edge is replaced because this development build changed it.";
+            let said: Vec<&Line> = replaced
+                .iter()
+                .filter(|line| line.text.contains("edge"))
+                .collect();
+            assert_eq!(said.len(), 1, "{replaced:?}");
+            assert_eq!(said[0].text, sentence);
+            assert_eq!(said[0].stream, Stream::Output);
 
-        let layout = Layout::new("home");
-        let outcome = |edge_replaced: Option<EdgeReplacement>| Outcome {
-            plan: InstallPlan {
-                edge_replaced,
-                ..plan(Mode::Development, &layout, Vec::new())
-            },
-            service_started: Some(true),
-            start_failure: None,
-            registrations: None,
-            flatpak: Vec::new(),
-            left_behind: Vec::new(),
-            archived_version_audits: Vec::new(),
-            strays_left: Vec::new(),
-            retired_leftovers: Vec::new(),
-        };
-        let replaced = report(&outcome(Some(EdgeReplacement::Rebuilt)), &layout);
-        let sentence = "The edge is replaced because this development build changed it.";
-        let said: Vec<&Line> = replaced
-            .iter()
-            .filter(|line| line.text.contains("edge"))
-            .collect();
-        assert_eq!(said.len(), 1, "{replaced:?}");
-        assert_eq!(said[0].text, sentence);
-        assert_eq!(said[0].stream, Stream::Output);
+            let kept = report(&outcome(None), &layout);
+            assert!(
+                kept.iter().all(|line| !line.text.contains("edge")),
+                "{kept:?}"
+            );
+        }
+        {
+            use crate::install::container::AppContainer;
+            use crate::install::reconcile::UnchangedEntry;
 
-        let kept = report(&outcome(None), &layout);
-        assert!(
-            kept.iter().all(|line| !line.text.contains("edge")),
-            "{kept:?}"
-        );
+            let layout = Layout::new("home");
+            let report = ReconcileReport {
+                browsers: vec!["Chrome".to_owned()],
+                clients_rewritten: vec!["Claude Desktop".to_owned()],
+                clients_unchanged: vec![
+                    UnchangedEntry {
+                        client: "Cline".to_owned(),
+                        found: Some("npx".to_owned()),
+                    },
+                    UnchangedEntry {
+                        client: "Cursor".to_owned(),
+                        found: None,
+                    },
+                ],
+                needs_new_terminal: true,
+                container: Some(AppContainer {
+                    app: "Claude".to_owned(),
+                }),
+                kept_private: vec!["Claude Desktop MCP client".to_owned()],
+                ..ReconcileReport::default()
+            };
+            let lines = registration_lines(&report, &layout);
+            let on = |stream| {
+                lines
+                    .iter()
+                    .filter(|line| line.stream == stream)
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>()
+            };
+            let output = on(Stream::Output);
+            assert_eq!(output.len(), 2, "only what happened: {output:?}");
+            assert!(
+                output.iter().any(|line| line.contains("Chrome")),
+                "{output:?}"
+            );
+            assert!(
+                output.iter().any(|line| line.contains("Claude Desktop")),
+                "{output:?}"
+            );
+            let problems = on(Stream::Problem);
+            for asks in ["Cline", "Cursor", environment::OPEN_NEW_TERMINAL] {
+                assert!(
+                    problems.iter().any(|line| line.contains(asks)),
+                    "{asks} must reach the person: {problems:?}"
+                );
+            }
+            assert!(
+                problems.len() > 3,
+                "the container's kept-private lines reach the person too: {problems:?}"
+            );
+        }
     }
 }
