@@ -8,8 +8,9 @@
 //! extension sends has an `Unknown` or `Other` arm, so a newer extension never breaks an older
 //! service. Within protocol 4 nothing is removed or renamed. The mirrors of the physical
 //! vocabulary (`DiagnosticEntry`, `RecordingSummary`, `Encoded`, `Delivery`, the presentation
-//! types and the runtime control state) convert to and from the types the rest of the service
-//! uses, so the wire can stay tolerant while the service stays strict.
+//! types and the runtime control state) convert in the one direction each crosses: what the
+//! service sends from the types the rest of the service uses, and what the extension sends into
+//! them, so the wire can stay tolerant while the service stays strict.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1470,27 +1471,6 @@ impl From<physical::RuntimeControlState> for RuntimeControlState {
     }
 }
 
-impl From<RuntimeControlState> for physical::RuntimeControlState {
-    fn from(state: RuntimeControlState) -> Self {
-        match state {
-            RuntimeControlState::Active => Self::Active,
-            RuntimeControlState::Held => Self::Held,
-            RuntimeControlState::Ended => Self::Ended,
-        }
-    }
-}
-
-impl From<physical::BrowserReadiness> for Readiness {
-    fn from(readiness: physical::BrowserReadiness) -> Self {
-        match readiness {
-            physical::BrowserReadiness::Loading => Self::Loading,
-            physical::BrowserReadiness::Interactive => Self::Loading,
-            physical::BrowserReadiness::Complete => Self::Complete,
-            physical::BrowserReadiness::Unknown => Self::Unknown,
-        }
-    }
-}
-
 impl From<Readiness> for physical::BrowserReadiness {
     fn from(readiness: Readiness) -> Self {
         match readiness {
@@ -1523,16 +1503,6 @@ impl From<physical::DiagnosticSource> for DiagnosticSource {
     }
 }
 
-impl From<DiagnosticSource> for physical::DiagnosticSource {
-    fn from(source: DiagnosticSource) -> Self {
-        match source {
-            DiagnosticSource::Both => Self::Both,
-            DiagnosticSource::Console => Self::Console,
-            DiagnosticSource::Network => Self::Network,
-        }
-    }
-}
-
 /// How much a diagnostics read returns.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1548,15 +1518,6 @@ impl From<physical::DiagnosticDetail> for DiagnosticDetail {
         match detail {
             physical::DiagnosticDetail::Problems => Self::Problems,
             physical::DiagnosticDetail::All => Self::All,
-        }
-    }
-}
-
-impl From<DiagnosticDetail> for physical::DiagnosticDetail {
-    fn from(detail: DiagnosticDetail) -> Self {
-        match detail {
-            DiagnosticDetail::Problems => Self::Problems,
-            DiagnosticDetail::All => Self::All,
         }
     }
 }
@@ -1600,43 +1561,6 @@ pub enum DiagnosticEntry {
     /// An entry kind this service does not know.
     #[serde(other)]
     Unknown,
-}
-
-impl From<physical::DiagnosticEntry> for DiagnosticEntry {
-    fn from(entry: physical::DiagnosticEntry) -> Self {
-        match entry {
-            physical::DiagnosticEntry::Console {
-                cursor,
-                timestamp_ms,
-                level,
-                text,
-                url,
-            } => Self::Console {
-                cursor,
-                timestamp_ms,
-                level,
-                text,
-                url,
-            },
-            physical::DiagnosticEntry::Network {
-                cursor,
-                timestamp_ms,
-                method,
-                url,
-                resource_type,
-                status,
-                failure,
-            } => Self::Network {
-                cursor,
-                timestamp_ms,
-                method,
-                url,
-                resource_type,
-                status,
-                failure,
-            },
-        }
-    }
 }
 
 impl TryFrom<DiagnosticEntry> for physical::DiagnosticEntry {
@@ -1817,19 +1741,6 @@ pub struct Encoded {
     pub byte_count: usize,
 }
 
-impl From<physical::EncodedRecording> for Encoded {
-    fn from(encoded: physical::EncodedRecording) -> Self {
-        Self {
-            frame_count: encoded.frame_count,
-            captured_frame_count: encoded.captured_frame_count,
-            duration_ms: encoded.duration_ms,
-            width: encoded.width,
-            height: encoded.height,
-            byte_count: encoded.byte_count,
-        }
-    }
-}
-
 impl From<Encoded> for physical::EncodedRecording {
     fn from(encoded: Encoded) -> Self {
         Self {
@@ -1866,18 +1777,6 @@ pub enum Delivery {
     Unknown,
 }
 
-impl From<physical::RecordingDelivery> for Delivery {
-    fn from(delivery: physical::RecordingDelivery) -> Self {
-        match delivery {
-            physical::RecordingDelivery::Attached { tab_id } => Self::Attached { tab_id },
-            physical::RecordingDelivery::Downloaded => Self::Downloaded,
-            physical::RecordingDelivery::Returned { mime_type, data } => {
-                Self::Returned { mime_type, data }
-            }
-        }
-    }
-}
-
 impl TryFrom<Delivery> for physical::RecordingDelivery {
     type Error = UnknownVariant;
 
@@ -1909,15 +1808,6 @@ impl From<physical::ClickShape> for ClickShape {
     }
 }
 
-impl From<ClickShape> for physical::ClickShape {
-    fn from(shape: ClickShape) -> Self {
-        Self {
-            clicks: shape.clicks,
-            button: shape.button,
-        }
-    }
-}
-
 /// Closed content-free presentation kinds.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1942,18 +1832,6 @@ impl From<physical::PresentationKind> for PresentationKind {
             physical::PresentationKind::Progress => Self::Progress,
             physical::PresentationKind::Completion => Self::Completion,
             physical::PresentationKind::Denial => Self::Denial,
-        }
-    }
-}
-
-impl From<PresentationKind> for physical::PresentationKind {
-    fn from(kind: PresentationKind) -> Self {
-        match kind {
-            PresentationKind::Start => Self::Start,
-            PresentationKind::Target => Self::Target,
-            PresentationKind::Progress => Self::Progress,
-            PresentationKind::Completion => Self::Completion,
-            PresentationKind::Denial => Self::Denial,
         }
     }
 }
@@ -2018,30 +1896,6 @@ impl From<physical::PresentationActivity> for PresentationActivity {
             physical::PresentationActivity::Script => Self::Script,
             physical::PresentationActivity::Wait => Self::Wait,
             physical::PresentationActivity::Dialog => Self::Dialog,
-        }
-    }
-}
-
-impl From<PresentationActivity> for physical::PresentationActivity {
-    fn from(activity: PresentationActivity) -> Self {
-        match activity {
-            PresentationActivity::Quiet => Self::Quiet,
-            PresentationActivity::Navigate => Self::Navigate,
-            PresentationActivity::Click => Self::Click,
-            PresentationActivity::Hover => Self::Hover,
-            PresentationActivity::Drag => Self::Drag,
-            PresentationActivity::Type => Self::Type,
-            PresentationActivity::Key => Self::Key,
-            PresentationActivity::Scroll => Self::Scroll,
-            PresentationActivity::Read => Self::Read,
-            PresentationActivity::Find => Self::Find,
-            PresentationActivity::Screenshot => Self::Screenshot,
-            PresentationActivity::Zoom => Self::Zoom,
-            PresentationActivity::Fill => Self::Fill,
-            PresentationActivity::Upload => Self::Upload,
-            PresentationActivity::Script => Self::Script,
-            PresentationActivity::Wait => Self::Wait,
-            PresentationActivity::Dialog => Self::Dialog,
         }
     }
 }
@@ -2646,7 +2500,7 @@ mod tests {
     }
 
     #[test]
-    fn the_runtime_control_state_round_trips_the_wire() {
+    fn the_runtime_control_state_reaches_the_wire_by_its_name() {
         use physical::RuntimeControlState as Internal;
         for (internal, wire, name) in [
             (Internal::Active, RuntimeControlState::Active, "active"),
@@ -2654,8 +2508,8 @@ mod tests {
             (Internal::Ended, RuntimeControlState::Ended, "ended"),
         ] {
             assert_eq!(RuntimeControlState::from(internal), wire);
-            assert_eq!(Internal::from(wire), internal);
             assert_eq!(encode(&wire), json!(name));
+            assert_eq!(encode(&wire), encode(&internal));
         }
         assert_eq!(
             encode(&Outbound::ControlState {
@@ -2682,7 +2536,7 @@ mod tests {
     }
 
     #[test]
-    fn the_physical_mirrors_convert_both_ways() {
+    fn the_inbound_mirrors_read_what_the_physical_names_write() {
         let console = physical::DiagnosticEntry::Console {
             cursor: "c1".into(),
             timestamp_ms: 5,
@@ -2700,15 +2554,8 @@ mod tests {
             failure: None,
         };
         for entry in [console, network] {
-            let wire = DiagnosticEntry::from(entry.clone());
-            assert_eq!(
-                physical::DiagnosticEntry::try_from(wire.clone()),
-                Ok(entry.clone())
-            );
-            assert_eq!(
-                encode(&wire),
-                serde_json::to_value(&entry).expect("physical encodes")
-            );
+            let wire: DiagnosticEntry = decode(encode(&entry));
+            assert_eq!(physical::DiagnosticEntry::try_from(wire), Ok(entry));
         }
         assert_eq!(
             physical::DiagnosticEntry::try_from(DiagnosticEntry::Unknown),
@@ -2765,10 +2612,8 @@ mod tests {
             height: 480,
             byte_count: 2048,
         };
-        assert_eq!(
-            physical::EncodedRecording::from(Encoded::from(encoded)),
-            encoded
-        );
+        let wire: Encoded = decode(encode(&encoded));
+        assert_eq!(physical::EncodedRecording::from(wire), encoded);
 
         let returned = physical::RecordingDelivery::Returned {
             mime_type: "image/gif".into(),
@@ -2779,29 +2624,31 @@ mod tests {
             physical::RecordingDelivery::Downloaded,
             returned,
         ] {
-            let wire = Delivery::from(delivery.clone());
-            assert_eq!(
-                encode(&wire),
-                serde_json::to_value(&delivery).expect("physical encodes")
-            );
+            let wire: Delivery = decode(encode(&delivery));
             assert_eq!(physical::RecordingDelivery::try_from(wire), Ok(delivery));
         }
         assert_eq!(
             physical::RecordingDelivery::try_from(Delivery::Unknown),
             Err(UnknownVariant)
         );
+
+        for readiness in [
+            physical::BrowserReadiness::Loading,
+            physical::BrowserReadiness::Complete,
+            physical::BrowserReadiness::Unknown,
+        ] {
+            let wire: Readiness = decode(encode(&readiness));
+            assert_eq!(physical::BrowserReadiness::from(wire), readiness);
+        }
     }
 
     #[test]
-    fn the_presentation_mirrors_match_the_physical_names() {
+    fn the_outbound_mirrors_write_the_physical_names() {
         let shape = physical::ClickShape {
             clicks: 2,
             button: "left".into(),
         };
-        assert_eq!(
-            physical::ClickShape::from(ClickShape::from(shape.clone())),
-            shape
-        );
+        assert_eq!(encode(&ClickShape::from(shape.clone())), encode(&shape));
         let kinds = [
             physical::PresentationKind::Start,
             physical::PresentationKind::Target,
@@ -2810,12 +2657,7 @@ mod tests {
             physical::PresentationKind::Denial,
         ];
         for kind in kinds {
-            let wire = PresentationKind::from(kind);
-            assert_eq!(physical::PresentationKind::from(wire), kind);
-            assert_eq!(
-                encode(&wire),
-                serde_json::to_value(kind).expect("physical encodes")
-            );
+            assert_eq!(encode(&PresentationKind::from(kind)), encode(&kind));
         }
         let activities = [
             physical::PresentationActivity::Quiet,
@@ -2837,11 +2679,9 @@ mod tests {
             physical::PresentationActivity::Dialog,
         ];
         for activity in activities {
-            let wire = PresentationActivity::from(activity);
-            assert_eq!(physical::PresentationActivity::from(wire), activity);
             assert_eq!(
-                encode(&wire),
-                serde_json::to_value(activity).expect("physical encodes")
+                encode(&PresentationActivity::from(activity)),
+                encode(&activity)
             );
         }
         for source in [
@@ -2849,29 +2689,13 @@ mod tests {
             physical::DiagnosticSource::Console,
             physical::DiagnosticSource::Network,
         ] {
-            assert_eq!(
-                physical::DiagnosticSource::from(DiagnosticSource::from(source)),
-                source
-            );
+            assert_eq!(encode(&DiagnosticSource::from(source)), encode(&source));
         }
         for detail in [
             physical::DiagnosticDetail::Problems,
             physical::DiagnosticDetail::All,
         ] {
-            assert_eq!(
-                physical::DiagnosticDetail::from(DiagnosticDetail::from(detail)),
-                detail
-            );
-        }
-        for readiness in [
-            physical::BrowserReadiness::Loading,
-            physical::BrowserReadiness::Complete,
-            physical::BrowserReadiness::Unknown,
-        ] {
-            assert_eq!(
-                physical::BrowserReadiness::from(Readiness::from(readiness)),
-                readiness
-            );
+            assert_eq!(encode(&DiagnosticDetail::from(detail)), encode(&detail));
         }
     }
 

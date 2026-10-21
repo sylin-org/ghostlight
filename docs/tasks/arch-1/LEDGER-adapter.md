@@ -9,8 +9,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset waited on (see
 Notes).
 
-The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4 and
-BROW-7 have landed; BROW-6 is next.
+The second sweep (2026-10-20) opens this lane again: see its section below. BROW-10, BROW-4, BROW-7
+and BROW-6 have landed; BROW-14 is next.
 
 ## Slices
 
@@ -139,14 +139,14 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin). A
 slice's specification is its finding in [sweep-2026-10-20/browser.md](sweep-2026-10-20/browser.md), read
-with its skeptic's corrections. BROW-10, BROW-4 and BROW-7 have landed; BROW-6 is next.
+with its skeptic's corrections. BROW-10, BROW-4, BROW-7 and BROW-6 have landed; BROW-14 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | BROW-10 | refactor(assets): one table of the page's error codes, tested against what `content.js` throws, and `visualIdentity` derived from its beats | - | BROW-10 as corrected; `assets.sha256` regenerates | landed (this commit) |
 | BROW-4 | refactor(adapter): one activate variant each, with a modifier list | - | BROW-4 | landed (this commit) |
 | BROW-7 | refactor(adapter): one call request in place of seven arguments | - | BROW-7 | landed (this commit) |
-| BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | todo |
+| BROW-6 | refactor(adapter): the test-only reverse conversions go | - | BROW-6 as corrected; no macro | landed (this commit) |
 | BROW-14 | refactor(adapter): world kinds and primitive names are one enum each | - | BROW-14 | todo |
 | BROW-8a | refactor(adapter): the adapter's literals are named | - | BROW-8's adapter half | todo |
 | BROW-12a | refactor(adapter): the adapter's copies of the hash and failure-name helpers go | SERV-7 | BROW-12's adapter half, with the crate `lock` helper | todo |
@@ -201,3 +201,15 @@ with its skeptic's corrections. BROW-10, BROW-4 and BROW-7 have landed; BROW-6 i
   only the seven-argument gap: `one` carries the first primitive's guard, and `all` the rule that
   no calls is no readable document and the choice of a guard. Removing them would spread those
   rules over their 15 call sites in `read.rs`, `keyboard.rs` and `points.rs`.
+- BROW-6: the ten reverse conversions go, 147 lines: wire to physical for the runtime control
+  state, the diagnostic source and detail, the click shape and the presentation kind and
+  activity, which only the service sends, and physical to wire for the readiness, the diagnostic
+  entry, the encoded recording and the delivery, which only the extension sends. The library
+  compiled with all ten removed before any test changed. The two mirror tests now check what each
+  direction promises against the physical type's own serde names:
+  `the_outbound_mirrors_write_the_physical_names` (a converted value encodes as the physical
+  value does) and `the_inbound_mirrors_read_what_the_physical_names_write` (the physical encoding
+  reads through the mirror back to the same value). `the_runtime_control_state_round_trips_the_wire`
+  becomes `the_runtime_control_state_reaches_the_wire_by_its_name`. The module doc now says each
+  mirror converts in the one direction it crosses; completing its list of mirrors is BROW-11a's.
+  No macro, as the skeptic corrected, and the protocol 4 goldens pass unchanged.
