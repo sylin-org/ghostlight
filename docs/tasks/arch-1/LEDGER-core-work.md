@@ -30,8 +30,8 @@ In order. "After" names what a slice waits for.
 | WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | landed (4237c35e) |
 | WORK-10 | refactor(work): timings and limits are named | - | WORK-10; the next-step cap and the governance backoff stay with their lanes (LANG-6, governance) | landed (1fd8d38c) |
 | WORK-7 | refactor(work): dead code goes | C19c | WORK-7; the two unused lease methods go | lease methods landed (6e38949a); `substitute_references`'s `Option` todo |
-| WORK-9 | refactor(work): one name per contract | - | WORK-9; no persisted word changes; `Decision`'s two constructor names are governance's | landed |
-| WORK-13 | refactor(work): one finish for every wait | W-D3 | WORK-13 | todo |
+| WORK-9 | refactor(work): one name per contract | - | WORK-9; no persisted word changes; `Decision`'s two constructor names are governance's | landed (d3f0660b) |
+| WORK-13 | refactor(work): one finish for every wait | W-D3 | WORK-13 | landed |
 | WORK-6 | refactor(work): `work/mod.rs` splits on its seams | WORK-3 | WORK-6; the moves land alone | todo |
 | WORK-12 | refactor(workspace): its tests and its two books move out, and the lease helpers come in | - | WORK-12; the moves land alone | landed (8108ea82, 66a8842b, c65ec18d, dcb985e0) |
 | WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5 | todo |

@@ -37,6 +37,14 @@ const DURATION_POLL: Duration = Duration::from_millis(20);
 /// How often a selector wait asks the page again.
 const SELECTOR_POLL: Duration = Duration::from_millis(100);
 
+/// What a wait's branch measured before its one finish.
+struct Measured {
+    satisfied: bool,
+    elapsed_ms: u64,
+    /// The page's readiness when the wait ended.
+    readiness: crate::browser::adapter::BrowserReadiness,
+}
+
 impl ApplicationExecutor {
     pub(super) fn perform_fill(
         &self,
@@ -844,58 +852,18 @@ impl ApplicationExecutor {
                     }
                     let elapsed_ms =
                         u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    let should_settle = value.condition.settles(value.visual_settle);
-                    let settlement = if should_settle {
-                        match self.settle_wait(
-                            context,
-                            lease,
-                            selected,
-                            locator.clone(),
-                            value.timeout_ms.saturating_sub(elapsed_ms),
-                        ) {
-                            Ok(observation) => observation,
-                            Err(error) => {
-                                return self.browser_failure(
-                                    context,
-                                    decision,
-                                    error,
-                                    Some(selected.physical_id),
-                                )
-                            }
-                        }
-                    } else {
-                        None
-                    };
-                    let visual_settled = settlement.map(|(satisfied, _)| satisfied);
-                    let final_elapsed_ms =
-                        elapsed_ms.saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
-                    let outcome = Outcome::Waited {
-                        condition: value.condition,
-                        elapsed_ms: final_elapsed_ms,
-                        satisfied: true,
-                        host: observed_host(&selected.url),
-                    };
-                    let facts = json!({
-                        "tab": selected.handle.as_str(),
-                        "condition": value.condition.as_str(),
-                        "satisfied": true,
-                        "elapsed_ms": final_elapsed_ms,
-                        "readiness": readiness(selected.readiness),
-                        "visual_settle": should_settle,
-                        "visual_settled": visual_settled,
-                    });
-                    return Terminal::completed(
-                        context.invocation,
-                        Shape {
-                            status: Status::Succeeded,
-                            effect: Effect::None,
-                            readiness: readiness(selected.readiness),
-                            repeat_safe: true,
-                        },
-                        &outcome,
-                        facts,
+                    return self.finish_wait(
+                        context,
+                        lease,
+                        selected,
+                        locator,
+                        value,
                         decision,
-                        Some(selected.physical_id),
+                        Measured {
+                            satisfied: true,
+                            elapsed_ms,
+                            readiness: selected.readiness,
+                        },
                     );
                 }
                 // Waiting on what the page calls a control: polled executor-side through the same
@@ -957,64 +925,18 @@ impl ApplicationExecutor {
                     }
                     let elapsed_ms =
                         u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    let should_settle = value.condition.settles(value.visual_settle);
-                    let settlement = if satisfied && should_settle {
-                        match self.settle_wait(
-                            context,
-                            lease,
-                            selected,
-                            locator.clone(),
-                            value.timeout_ms.saturating_sub(elapsed_ms),
-                        ) {
-                            Ok(observation) => observation,
-                            Err(error) => {
-                                return self.browser_failure(
-                                    context,
-                                    decision,
-                                    error,
-                                    Some(selected.physical_id),
-                                )
-                            }
-                        }
-                    } else {
-                        None
-                    };
-                    let visual_settled = settlement.map(|(satisfied, _)| satisfied);
-                    let final_satisfied = satisfied;
-                    let final_elapsed_ms =
-                        elapsed_ms.saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
-                    let status = if final_satisfied {
-                        Status::Succeeded
-                    } else {
-                        Status::Failed
-                    };
-                    let outcome = Outcome::Waited {
-                        condition: value.condition,
-                        elapsed_ms: final_elapsed_ms,
-                        satisfied: final_satisfied,
-                        host: observed_host(&selected.url),
-                    };
-                    let facts = json!({
-                        "tab": selected.handle.as_str(),
-                        "condition": value.condition.as_str(),
-                        "satisfied": final_satisfied,
-                        "elapsed_ms": final_elapsed_ms,
-                        "readiness": readiness(selected.readiness),
-                        "visual_settle": should_settle,
-                        "visual_settled": visual_settled,
-                    });
-                    return Terminal::completed(
-                        context.invocation,
-                        Shape {
-                            status,
-                            effect: Effect::None,
-                            readiness: readiness(selected.readiness),
-                            repeat_safe: true,
-                        },
-                        &outcome,
-                        facts,
+                    return self.finish_wait(
+                        context,
+                        lease,
+                        selected,
+                        locator,
+                        value,
                         decision,
-                        Some(selected.physical_id),
+                        Measured {
+                            satisfied,
+                            elapsed_ms,
+                            readiness: selected.readiness,
+                        },
                     );
                 }
                 let Some(condition) = value.condition.page() else {
@@ -1040,66 +962,18 @@ impl ApplicationExecutor {
                         readiness: browser_readiness,
                     }) if tab_id == selected.physical_id => {
                         let _ = lease.update_readiness(&selected.handle, browser_readiness);
-                        let should_settle = value.condition.settles(value.visual_settle);
-                        let settlement = if satisfied && should_settle {
-                            match self.settle_wait(
-                                context,
-                                lease,
-                                selected,
-                                locator.clone(),
-                                value.timeout_ms.saturating_sub(elapsed_ms),
-                            ) {
-                                Ok(observation) => observation,
-                                Err(error) => {
-                                    return self.browser_failure(
-                                        context,
-                                        decision,
-                                        error,
-                                        Some(selected.physical_id),
-                                    )
-                                }
-                            }
-                        } else {
-                            None
-                        };
-                        let visual_settled = settlement.map(|(satisfied, _)| satisfied);
-                        let final_satisfied = satisfied;
-                        let final_elapsed_ms =
-                            elapsed_ms.saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
-                        let status = if final_satisfied {
-                            Status::Succeeded
-                        } else {
-                            Status::Failed
-                        };
-                        // The condition is a closed vocabulary and its value is not: only the name of the
-                        // condition joins the sentence that reaches audit.
-                        let outcome = Outcome::Waited {
-                            condition: value.condition,
-                            elapsed_ms: final_elapsed_ms,
-                            satisfied: final_satisfied,
-                            host: observed_host(&selected.url),
-                        };
-                        let facts = json!({
-                            "tab": selected.handle.as_str(),
-                            "condition": value.condition.as_str(),
-                            "satisfied": final_satisfied,
-                            "elapsed_ms": final_elapsed_ms,
-                            "readiness": readiness(browser_readiness),
-                            "visual_settle": should_settle,
-                        "visual_settled": visual_settled,
-                        });
-                        Terminal::completed(
-                            context.invocation,
-                            Shape {
-                                status,
-                                effect: Effect::None,
-                                readiness: readiness(browser_readiness),
-                                repeat_safe: true,
-                            },
-                            &outcome,
-                            facts,
+                        self.finish_wait(
+                            context,
+                            lease,
+                            selected,
+                            locator,
+                            value,
                             decision,
-                            Some(tab_id),
+                            Measured {
+                                satisfied,
+                                elapsed_ms,
+                                readiness: browser_readiness,
+                            },
                         )
                     }
                     Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -1108,6 +982,82 @@ impl ApplicationExecutor {
                     }
                 }
             },
+        )
+    }
+
+    /// Finish any wait from what its branch measured: settle the view when the wait was met and
+    /// its condition settles, then build the one `Outcome::Waited` result. The condition joins
+    /// the sentence that reaches the audit; its value, which is not a closed vocabulary, does not.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the wait, its frame, its tab and what its branch measured"
+    )]
+    fn finish_wait(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        selected: &SelectedTab,
+        locator: Option<String>,
+        value: &Wait,
+        decision: Decision,
+        measured: Measured,
+    ) -> Terminal {
+        let should_settle = value.condition.settles(value.visual_settle);
+        let settlement = if measured.satisfied && should_settle {
+            match self.settle_wait(
+                context,
+                lease,
+                selected,
+                locator,
+                value.timeout_ms.saturating_sub(measured.elapsed_ms),
+            ) {
+                Ok(observation) => observation,
+                Err(error) => {
+                    return self.browser_failure(
+                        context,
+                        decision,
+                        error,
+                        Some(selected.physical_id),
+                    )
+                }
+            }
+        } else {
+            None
+        };
+        let elapsed_ms = measured
+            .elapsed_ms
+            .saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
+        let outcome = Outcome::Waited {
+            condition: value.condition,
+            elapsed_ms,
+            satisfied: measured.satisfied,
+            host: observed_host(&selected.url),
+        };
+        let facts = json!({
+            "tab": selected.handle.as_str(),
+            "condition": value.condition.as_str(),
+            "satisfied": measured.satisfied,
+            "elapsed_ms": elapsed_ms,
+            "readiness": readiness(measured.readiness),
+            "visual_settle": should_settle,
+            "visual_settled": settlement.map(|(settled, _)| settled),
+        });
+        Terminal::completed(
+            context.invocation,
+            Shape {
+                status: if measured.satisfied {
+                    Status::Succeeded
+                } else {
+                    Status::Failed
+                },
+                effect: Effect::None,
+                readiness: readiness(measured.readiness),
+                repeat_safe: true,
+            },
+            &outcome,
+            facts,
+            decision,
+            Some(selected.physical_id),
         )
     }
 
