@@ -119,8 +119,8 @@ C3c), then the rows below.
 | U-D2 | fix(window): coverage details survive Clear | - | SURF-5's coverage defect | todo |
 | U-D3 | fix(window): the applied-rules toast says its words once | - | SURF-3's note | todo |
 | U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first | todo |
-| U-D5 | fix(workbench): a window with the bearer always finds room among the workbench's connections | - | found by test-01's tests-1 classification, 2026-10-21 (Notes, second sweep); test-01 takes it first in `workbench/` | todo |
-| U-D6 | fix(workbench): a refused HEAD request carries no body | - | the same classification; test-01 | todo |
+| U-D5 | fix(workbench): a window with the bearer always finds room among the workbench's connections | - | found by test-01's tests-1 classification, 2026-10-21 (Notes, second sweep); test-01 took it first in `workbench/` | landed (9db6e896) |
+| U-D6 | fix(workbench): a refused HEAD request carries no body | - | the same classification; test-01 | landed (dc1c4fbf) |
 | SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1 | todo |
 | SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | todo |
 | SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | todo |
@@ -145,3 +145,11 @@ C3c), then the rows below.
   person's own window out; connections without a bearer get their own smaller share. U-D6: a HEAD
   request that is refused (401, 403, 404, 421) is answered with a JSON body, which an HTTP HEAD
   answer never carries (RFC 9110); only page files and agent images stripped it.
+- U-D5 as landed: 32 places in all, of which at most 12 are without the bearer
+  (`MAX_WATCH_STREAMS` 8 plus `SHORT_REQUESTS_WITHOUT_BEARER` 4, so a ninth watcher still gets its
+  503 too_many_screens), and 20 stay for the window. A peer starts in the share without a bearer and
+  leaves it when its request shows the bearer. A peer let in past the share has `BEARER_DEADLINE`,
+  1 s, to send a request that carries the bearer, or it is closed unanswered. A screen that holds
+  the bearer must send it on the request that opens the connection.
+- U-D6 as landed: the connection answers a HEAD the way every route answers a read and sends only
+  the headers, in one place (`workbench/web/mod.rs`), so the per-route copies went.

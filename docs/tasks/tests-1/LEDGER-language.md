@@ -6,7 +6,12 @@ Machine: test-01 (CachyOS). Paths without a crate are under `crates/orchestrator
 
 ## RESUME HERE
 
-In progress since 2026-10-21. Every test in `language/` and `workbench/` was classified read-only first (keep, rewrite or delete, each with what it protects), then cut one file per commit. The decoder defect the gate-2 control found landed first as arch-1 L-D7 (1bbf9e0e). Next: the rest of `language/` against its budget, then `workbench/`.
+`language/` closed on 2026-10-21 at 55 of 349, its budget, in TL1-TL23. Every test in `language/`
+and `workbench/` was first classified read-only (keep, rewrite or delete, each with what it
+protects), and one review fitted all of `language/` into 55 with no promise or named defect left
+without its test. The gate-2 control found a decoder defect, which landed first as arch-1 L-D7.
+Next: `workbench/` (253 now, budget 35). Its plan is ready and fits 35. Arch-1's U-D5 and U-D6,
+found by that classification, landed first. Then cut it file by file.
 
 ## Areas
 
@@ -33,19 +38,39 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | TL9 | test(language): channel_switch.rs keeps the policy sentence | 4 | 1 | 1 promise | landed (00a6928c) |
 | TL10 | test(language): agent_icon.rs keeps the doctor line | 2 | 1 | 1 promise | landed (fc88b901) |
 | TL11 | test(language): intake.rs, migration.rs and adapter.rs drop tests of their literals | 7 | 0 | - | landed (9820d0c8) |
-| TL12 | test(language): the decoder and catalog tests become the model surface contract | 53 | 14 | 5 promise, 6 contract, 3 defect | landed (021297ff) |
-| TL13 | test(language): field_problem.rs and field_echo.rs keep the fill sentences LANGUAGE.md tables | 45 | 9 | 6 promise, 1 contract, 2 defect | landed (642f350d) |
-| TL14 | test(language): capability_map.rs keeps the rawx table LANGUAGE.md documents | 5 | 1 | 1 promise | landed (ce1c2cdc) |
-| TL15 | test(language): handle.rs keeps the prefix contract with the extension | 2 | 1 | 1 contract | landed (234a35e4) |
-| TL16 | test(language): provenance.rs folds its live and record tables into one | 3 | 2 | 2 promise | landed (3666d60e) |
-| TL17 | test(language): outcome.rs and audit.rs keep the 8 tests of what happened | 57 | 8 | 4 promise, 2 contract, 2 defect | landed (6b472ef4) |
-| TL18 | test(language): history.rs keeps the window words and the outcome class | 8 | 2 | 2 promise | landed (41b52bc6) |
-| TL19 | test(language): page_refusal.rs and composition.rs drop tests the executor proves | 7 | 0 | - | landed (40dbbeae) |
-| TL20 | test(language): audit_health.rs keeps L-D2 and L-D3 | 3 | 2 | 2 defect | landed (cda38355) |
-| TL21 | test(language): settlement.rs keeps one table of what settles | 1 | 1 | 1 promise | landed (c09049df) |
-| TL22 | test(language): setup.rs words join the shared words test, and the listing URL is built from the id | 11 | 8 | 4 promise, 3 contract, 1 defect | landed (3d688a07) |
-| TL23 | test(language): readiness.rs folds the sentence into the precedence table | 2 | 1 | 1 promise | landed (this commit) |
+| TL12 | test(language): the decoder and catalog tests become the model surface contract | 53 | 14 | 5 promise, 6 contract, 3 defect | landed (55efa603) |
+| TL13 | test(language): field_problem.rs and field_echo.rs keep the fill sentences LANGUAGE.md tables | 45 | 9 | 6 promise, 1 contract, 2 defect | landed (c22367a2) |
+| TL14 | test(language): capability_map.rs keeps the rawx table LANGUAGE.md documents | 5 | 1 | 1 promise | landed (7b09ce75) |
+| TL15 | test(language): handle.rs keeps the prefix contract with the extension | 2 | 1 | 1 contract | landed (af86d9d7) |
+| TL16 | test(language): provenance.rs folds its live and record tables into one | 3 | 2 | 2 promise | landed (48d07ae0) |
+| TL17 | test(language): outcome.rs and audit.rs keep the 8 tests of what happened | 57 | 8 | 4 promise, 2 contract, 2 defect | landed (90fee6d0) |
+| TL18 | test(language): history.rs keeps the window words and the outcome class | 8 | 2 | 2 promise | landed (6d8d51e2) |
+| TL19 | test(language): page_refusal.rs and composition.rs drop tests the executor proves | 7 | 0 | - | landed (5418db01) |
+| TL20 | test(language): audit_health.rs keeps L-D2 and L-D3 | 3 | 2 | 2 defect | landed (c8f0f788) |
+| TL21 | test(language): settlement.rs keeps one table of what settles | 1 | 1 | 1 promise | landed (e9d4889c) |
+| TL22 | test(language): setup.rs words join the shared words test, and the listing URL is built from the id | 11 | 8 | 4 promise, 3 contract, 1 defect | landed (4d3eae13) |
+| TL23 | test(language): readiness.rs folds the sentence into the precedence table | 2 | 1 | 1 promise | landed (7fea1702) |
 
 ## Notes
 
-None yet.
+- `language/` kept for, by main kind: 32 promise, 11 contract, 12 defect, 0 unsafe. Folded defects
+  are counted once, under the test that keeps them.
+- The method: four read-only plans (one per group of files) proposed 70; one review read them
+  side by side, removed promises proven twice across plans (the decoder and catalog refusals now
+  live once, in the gate-2 tests), and found 55 without merging unrelated behaviors.
+- Product code that only deleted tests used went: `COPIED_COMMAND`, `COPIED_SETUP`,
+  `Environment::ALL`, `CATALOG_TOOL_COUNT`, `EXPECTED_TOOL_NAMES`, `FieldProblemKind::as_str`,
+  two `WaitCondition` conversions and, under the service lane's hold, `RecoveryFailure::as_str`.
+  The store listing URL is now built from the store extension id at compile time, so the two
+  cannot drift.
+- Tests in other lanes that a `language/` promise now rests on, which those lanes must keep:
+  `work/tests/execution.rs` `every_tool_gets_deadline_advice_it_can_follow` and
+  `calls_at_the_longest_timeout_are_not_told_to_raise_it` (Executor 3); `work/tests/protocol4.rs`
+  `a_refused_fill_lists_what_would_succeed_and_names_each_handle` and
+  `a_fill_the_page_partly_undid_is_a_partial_failure_with_no_dialog_advice`;
+  `protocol4/merge/tests.rs` `a_cut_keeps_page_content_over_chrome_over_hidden_in_document_order`
+  (the tier cut order); one end-to-end group-title assertion in `work/tests/tabs.rs`.
+- Gaps found, not closed here: no test plants a claim sentinel and checks that serialized audit and
+  diagnostics exclude it (ACCEPTANCE Connection reporting), and be54ad44 (a stopped recording read
+  as running) lost its only test with the outcome table. Both are reserve candidates for the
+  lanes that own those paths.
