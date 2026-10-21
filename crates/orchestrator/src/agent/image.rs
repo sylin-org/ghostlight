@@ -228,82 +228,6 @@ mod tests {
         (root, cache, bytes)
     }
 
-    #[test]
-    fn an_agent_with_no_cached_icon_is_served_its_monogram() {
-        let served = served("zed", None).unwrap();
-        assert_eq!(served.media_type, "image/svg+xml");
-        assert_eq!(served.bytes, monogram!("zed.svg").bytes());
-        assert_eq!(served.version, version_of(&sha256_hex(&served.bytes)));
-        assert_eq!(served.version.len(), 12);
-        assert!(served.version.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn an_agent_with_a_cached_icon_that_cannot_be_decoded_is_served_that_icon_as_cached() {
-        let (_root, cache, bytes) = zed_cache("served", UNREADABLE_PNG);
-        let before = served("zed", None).unwrap();
-        let after = served("zed", Some(&cache)).unwrap();
-        assert_eq!(after.media_type, "image/png");
-        assert_eq!(
-            after.bytes, bytes,
-            "an icon that cannot be decoded is served as cached"
-        );
-        assert_eq!(after.version, version_of(&sha256_hex(&bytes)));
-        assert_ne!(
-            after.version, before.version,
-            "a new image is a new address"
-        );
-
-        let best = AgentImage::best("zed", monogram!("zed.svg"), Some(&cache));
-        assert_eq!(
-            best.version(),
-            after.version,
-            "the symbol names what is served"
-        );
-        assert_eq!(
-            best.about().as_deref(),
-            Some("Icon from the installed Zed app.")
-        );
-
-        let codex = served("codex", Some(&cache)).unwrap();
-        assert_eq!(
-            codex.bytes,
-            monogram!("codex.svg").bytes(),
-            "an agent with no icon of its own keeps its monogram beside one that has"
-        );
-        assert_eq!(
-            AgentImage::best("codex", monogram!("codex.svg"), Some(&cache)).about(),
-            None
-        );
-    }
-
-    #[test]
-    fn an_app_icon_is_served_as_its_tile_and_the_symbol_names_the_tile() {
-        let source = tile::tests::white_glyph_png();
-        let (_root, cache, _) = zed_cache("tile", &source);
-        let served = served("zed", Some(&cache)).unwrap();
-        assert_eq!(served.media_type, "image/png");
-        assert_ne!(served.bytes, source, "the icon is served on its ground");
-        assert_eq!(
-            tile::tests::ground_of(&served.bytes),
-            Some(tile::Ground::Dark),
-            "a white glyph sits on the dark ground"
-        );
-        assert_eq!(served.version, version_of(&sha256_hex(&served.bytes)));
-        assert_ne!(
-            served.version,
-            version_of(&cache.found("zed").unwrap().sha256),
-            "the version follows the tile, not the cached copy"
-        );
-        let best = AgentImage::best("zed", monogram!("zed.svg"), Some(&cache));
-        assert_eq!(best.version(), served.version, "the symbol names the tile");
-        assert_eq!(
-            super::served("zed", Some(&cache)).unwrap(),
-            served,
-            "the same copy gives the same image"
-        );
-    }
-
     /// The symbol and the window both give `zed`'s monogram from `cache`.
     fn both_give_the_monogram(cache: &IconCache, case: &str) {
         let served = served("zed", Some(cache)).unwrap();
@@ -316,32 +240,6 @@ mod tests {
             served.version,
             "{case}: the symbol and the window agree on the monogram"
         );
-    }
-
-    #[test]
-    fn a_copy_the_cache_no_longer_vouches_for_gives_the_monogram() {
-        let source = tile::tests::png_of(8, &[0xff; 8 * 8 * 4]);
-        let (root, cache, _) = zed_cache("changed", &source);
-        let copy = root.join("icons").join("zed.png");
-        std::fs::write(&copy, b"changed underneath").unwrap();
-        both_give_the_monogram(&cache, "changed before any tile was made");
-    }
-
-    #[test]
-    fn a_tile_already_served_gives_way_to_the_monogram_when_its_copy_goes() {
-        let (root, cache, _) = zed_cache("gone", &tile::tests::white_glyph_png());
-        let copy = root.join("icons").join("zed.png");
-        let tiled = served("zed", Some(&cache)).unwrap();
-        assert_eq!(
-            tile::tests::ground_of(&tiled.bytes),
-            Some(tile::Ground::Dark)
-        );
-
-        std::fs::write(&copy, b"replaced underneath").unwrap();
-        both_give_the_monogram(&cache, "replaced after its tile was served");
-
-        std::fs::remove_file(&copy).unwrap();
-        both_give_the_monogram(&cache, "deleted after its tile was served");
     }
 
     /// The variable that rewrites the preview's app icons from the service's tiles.
@@ -368,63 +266,166 @@ mod tests {
         );
     }
 
+    /// Protects the agent image promise and defect 3e25d145: the window serves each catalog agent its
+    /// best image. An app icon is served as its tile and the symbol names that tile; an agent with no
+    /// cached icon, or a copy the cache no longer vouches for, gets its monogram, and a tile already
+    /// served gives way to it when its copy goes; an icon that cannot be decoded is served as cached;
+    /// an id outside the catalog has no image; and every packaged tile is an agent's and draws no
+    /// script and loads nothing.
+    #[test]
+    fn the_window_serves_each_catalog_agent_its_best_image_and_nothing_else() {
+        {
+            let served = served("zed", None).unwrap();
+            assert_eq!(served.media_type, "image/svg+xml");
+            assert_eq!(served.bytes, monogram!("zed.svg").bytes());
+            assert_eq!(served.version, version_of(&sha256_hex(&served.bytes)));
+            assert_eq!(served.version.len(), 12);
+            assert!(served.version.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+        {
+            let (_root, cache, bytes) = zed_cache("served", UNREADABLE_PNG);
+            let before = served("zed", None).unwrap();
+            let after = served("zed", Some(&cache)).unwrap();
+            assert_eq!(after.media_type, "image/png");
+            assert_eq!(
+                after.bytes, bytes,
+                "an icon that cannot be decoded is served as cached"
+            );
+            assert_eq!(after.version, version_of(&sha256_hex(&bytes)));
+            assert_ne!(
+                after.version, before.version,
+                "a new image is a new address"
+            );
+
+            let best = AgentImage::best("zed", monogram!("zed.svg"), Some(&cache));
+            assert_eq!(
+                best.version(),
+                after.version,
+                "the symbol names what is served"
+            );
+            assert_eq!(
+                best.about().as_deref(),
+                Some("Icon from the installed Zed app.")
+            );
+
+            let codex = served("codex", Some(&cache)).unwrap();
+            assert_eq!(
+                codex.bytes,
+                monogram!("codex.svg").bytes(),
+                "an agent with no icon of its own keeps its monogram beside one that has"
+            );
+            assert_eq!(
+                AgentImage::best("codex", monogram!("codex.svg"), Some(&cache)).about(),
+                None
+            );
+        }
+        {
+            let source = tile::tests::white_glyph_png();
+            let (_root, cache, _) = zed_cache("tile", &source);
+            let served = served("zed", Some(&cache)).unwrap();
+            assert_eq!(served.media_type, "image/png");
+            assert_ne!(served.bytes, source, "the icon is served on its ground");
+            assert_eq!(
+                tile::tests::ground_of(&served.bytes),
+                Some(tile::Ground::Dark),
+                "a white glyph sits on the dark ground"
+            );
+            assert_eq!(served.version, version_of(&sha256_hex(&served.bytes)));
+            assert_ne!(
+                served.version,
+                version_of(&cache.found("zed").unwrap().sha256),
+                "the version follows the tile, not the cached copy"
+            );
+            let best = AgentImage::best("zed", monogram!("zed.svg"), Some(&cache));
+            assert_eq!(best.version(), served.version, "the symbol names the tile");
+            assert_eq!(
+                super::served("zed", Some(&cache)).unwrap(),
+                served,
+                "the same copy gives the same image"
+            );
+        }
+        {
+            let source = tile::tests::png_of(8, &[0xff; 8 * 8 * 4]);
+            let (root, cache, _) = zed_cache("changed", &source);
+            let copy = root.join("icons").join("zed.png");
+            std::fs::write(&copy, b"changed underneath").unwrap();
+            both_give_the_monogram(&cache, "changed before any tile was made");
+        }
+        {
+            let (root, cache, _) = zed_cache("gone", &tile::tests::white_glyph_png());
+            let copy = root.join("icons").join("zed.png");
+            let tiled = served("zed", Some(&cache)).unwrap();
+            assert_eq!(
+                tile::tests::ground_of(&tiled.bytes),
+                Some(tile::Ground::Dark)
+            );
+
+            std::fs::write(&copy, b"replaced underneath").unwrap();
+            both_give_the_monogram(&cache, "replaced after its tile was served");
+
+            std::fs::remove_file(&copy).unwrap();
+            both_give_the_monogram(&cache, "deleted after its tile was served");
+        }
+        {
+            for id in ["not-an-agent", "", "command_line", "unknown", "zed.json"] {
+                assert_eq!(served(id, None), None, "{id}");
+            }
+        }
+        {
+            let folder =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/agent/monograms");
+            for entry in std::fs::read_dir(folder).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().and_then(|extension| extension.to_str()) != Some("svg") {
+                    continue;
+                }
+                let bytes = std::fs::read(&path).unwrap();
+                assert!(
+                    crate::install::monograms()
+                        .iter()
+                        .any(|monogram| monogram.bytes() == bytes.as_slice()),
+                    "no agent wears {}",
+                    path.display()
+                );
+                let text = String::from_utf8(bytes).unwrap().to_ascii_lowercase();
+                for part in ["<script", "href", "url(", "<foreignobject", "<style"] {
+                    assert!(!text.contains(part), "{} holds {part}", path.display());
+                }
+                assert!(
+                    !text
+                        .split(|c: char| c.is_whitespace() || c == '<')
+                        .any(|word| word.starts_with("on") && word.contains('=')),
+                    "{} holds an event handler",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    /// Protects the tile golden in tests/fixtures/workbench: the preview serves the tiles the service
+    /// makes, one on each ground, byte for byte.
     #[test]
     fn the_preview_serves_the_tiles_the_service_makes_one_on_each_ground() {
-        let folder =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/workbench");
-        fixture_holds(&folder.join(WHITE_ICON), &tile::tests::white_glyph_png());
-        let mut grounds = Vec::new();
-        for (source, tiled) in PREVIEW_TILES {
-            let bytes = std::fs::read(folder.join(source)).unwrap();
-            let served = ServedImage::app_icon(CachedIcon {
-                kind: IconKind::Png,
-                sha256: sha256_hex(&bytes),
-                bytes,
-            });
-            assert_eq!(served.media_type, "image/png", "{source}");
-            fixture_holds(&folder.join(tiled), &served.bytes);
-            grounds.push(tile::tests::ground_of(&served.bytes));
-        }
-        assert_eq!(
-            grounds,
-            [Some(tile::Ground::Light), Some(tile::Ground::Dark)],
-            "the colored icon sits on the light ground and the white one on the dark"
-        );
-    }
-
-    #[test]
-    fn an_id_outside_the_catalog_has_no_image() {
-        for id in ["not-an-agent", "", "command_line", "unknown", "zed.json"] {
-            assert_eq!(served(id, None), None, "{id}");
-        }
-    }
-
-    #[test]
-    fn every_packaged_tile_is_an_agents_and_draws_no_script_and_loads_nothing() {
-        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/agent/monograms");
-        for entry in std::fs::read_dir(folder).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().and_then(|extension| extension.to_str()) != Some("svg") {
-                continue;
+        {
+            let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/workbench");
+            fixture_holds(&folder.join(WHITE_ICON), &tile::tests::white_glyph_png());
+            let mut grounds = Vec::new();
+            for (source, tiled) in PREVIEW_TILES {
+                let bytes = std::fs::read(folder.join(source)).unwrap();
+                let served = ServedImage::app_icon(CachedIcon {
+                    kind: IconKind::Png,
+                    sha256: sha256_hex(&bytes),
+                    bytes,
+                });
+                assert_eq!(served.media_type, "image/png", "{source}");
+                fixture_holds(&folder.join(tiled), &served.bytes);
+                grounds.push(tile::tests::ground_of(&served.bytes));
             }
-            let bytes = std::fs::read(&path).unwrap();
-            assert!(
-                crate::install::monograms()
-                    .iter()
-                    .any(|monogram| monogram.bytes() == bytes.as_slice()),
-                "no agent wears {}",
-                path.display()
-            );
-            let text = String::from_utf8(bytes).unwrap().to_ascii_lowercase();
-            for part in ["<script", "href", "url(", "<foreignobject", "<style"] {
-                assert!(!text.contains(part), "{} holds {part}", path.display());
-            }
-            assert!(
-                !text
-                    .split(|c: char| c.is_whitespace() || c == '<')
-                    .any(|word| word.starts_with("on") && word.contains('=')),
-                "{} holds an event handler",
-                path.display()
+            assert_eq!(
+                grounds,
+                [Some(tile::Ground::Light), Some(tile::Ground::Dark)],
+                "the colored icon sits on the light ground and the white one on the dark"
             );
         }
     }

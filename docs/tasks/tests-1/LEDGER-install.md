@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 118 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 112 |
 | `crates/desktop` | 161 | 20 | moved to the adapter lane (2026-10-21) |
 
 ## Slices
@@ -58,6 +58,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I34 | `cli/diagnostics.rs`: its two tests go: one restated the list of log writers, the other a two-word formatter | 127 | 125 | none here | landed (this commit) |
 | T-I35 | `cli/session_end.rs`: two tests fold into one: a command leaves on the final signal and only serve keeps its own listener | 125 | 124 | ADR-0199 D13 and D14 | landed (this commit) |
 | T-I36 | `agent/mod.rs`: seven tests become one: an agent is named by the catalog and shown as its icon or a glyph the page draws (the glyph-words contract and the symbol rows folded in); the roster-alias restatement goes | 124 | 118 | the agent identity, defect b2ede7d3 | landed (this commit) |
+| T-I37 | `agent/image.rs`: eight tests become two: the window serves each catalog agent its best image and nothing else (the packaged-tile safety check kept as a case); the preview tile golden stays | 118 | 112 | the agent image promise, the tile golden, defect 3e25d145 | landed (this commit) |
 
 ## Notes
 
