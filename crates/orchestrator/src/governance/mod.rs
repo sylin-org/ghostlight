@@ -7,7 +7,6 @@
 
 pub mod audit_requirement;
 pub mod documents;
-pub use crate::audit::{AuditSink, JsonlAuditSink};
 pub mod effective;
 pub mod evidence;
 mod file_state;

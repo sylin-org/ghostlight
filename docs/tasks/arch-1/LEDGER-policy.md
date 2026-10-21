@@ -180,14 +180,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-03 (Alpine), after core-work. A
 slice's specification is its finding in [sweep-2026-10-20/work.md](sweep-2026-10-20/work.md), read
-with its skeptic's corrections. WORK-15 has landed. WORK-11 is under way: everything in `governance/` has landed. Left: dropping the `AuditSink`
-re-export, which edits four files in three other lanes.
+with its skeptic's corrections. WORK-15 has landed. WORK-15, WORK-11 and P-lock have landed; this lane's second-sweep rows are done.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | landed (ddd76f9c, 86013a28, cacb1062) |
-| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | landed in governance (ed389024, 5dcd3eaf, b82ff05d); the re-export todo, cross-lane |
-| P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed |
+| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | landed (ed389024, 5dcd3eaf, b82ff05d and the re-export) |
+| P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (d00a7ede) |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
 host), parsed once and lowercased. `PolicyLayer::new` parses its never-touch list and each grant's
@@ -231,3 +230,8 @@ open slice there.
 
 P-lock: governance's private `lock` and its two direct locks of the observer read
 `crate::sync::lock` (SERV-7, 0ba38fa7). It had no `Condvar` wait.
+
+WORK-11, the re-export: `governance` no longer re-exports `crate::audit::{AuditSink,
+JsonlAuditSink}`, so the writer has one path. `service/mod.rs`, `work/mod.rs`'s tests and
+`workbench/tests.rs` and `workbench/history.rs` import it from `crate::audit` (cross-lane: the
+coordinator's leave for `service/mod.rs`, test-04's hold for the two workbench files).

@@ -194,7 +194,8 @@ pub(super) fn operations(items: &[HistoryItem]) -> Vec<&HistoryItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::governance::{AuditSink, Decision};
+    use crate::audit::AuditSink;
+    use crate::governance::Decision;
     use crate::language::composition::{CompositionProgress, StepCounts};
     use crate::language::history::{CompositionKind, StepReceipt};
     use crate::language::outcome::Outcome;
@@ -421,7 +422,7 @@ mod tests {
         assert_eq!(projection.history().len(), 1);
         assert!(projection.lock().notified.is_empty());
         let path = crate::scratch::Scratch::file("history-steps.jsonl");
-        let sink = crate::governance::JsonlAuditSink::open(&path).unwrap();
+        let sink = crate::audit::JsonlAuditSink::open(&path).unwrap();
         sink.record(&receipt).unwrap();
         drop(sink);
         let restored = super::super::WorkbenchProjection::default();

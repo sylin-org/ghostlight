@@ -56,6 +56,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
+use crate::audit::JsonlAuditSink;
 use crate::browser::adapter::chromium::protocol4::assets::page_assets;
 use crate::browser::adapter::{BrowserCommand, BrowserEvent};
 use crate::browser::transport::{SocketReader, SocketWriter};
@@ -63,7 +64,7 @@ use crate::browser::{
     AdapterLifecycleObserver, BrowserError, BrowserEventSink, BrowserPort, RelayBrowserPort,
 };
 use crate::diagnostics::DiagnosticsHub;
-use crate::governance::{AuthoritySnapshot, GovernanceFacade, JsonlAuditSink};
+use crate::governance::{AuthoritySnapshot, GovernanceFacade};
 use crate::install;
 use crate::install::icons::{self, IconCache, IconPlaces};
 use crate::intake::desktop::{DesktopFrame, ShellView, TrayItemId, TrayModel};

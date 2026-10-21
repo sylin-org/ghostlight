@@ -3211,7 +3211,8 @@ mod tests {
     use crate::scratch::Scratch;
 
     use crate::audit::AuditRecord;
-    use crate::governance::{AuditSink, GovernanceFacade};
+    use crate::audit::AuditSink;
+    use crate::governance::GovernanceFacade;
     use crate::install::browser_package::BrowserPackage;
     use crate::install::native_host::NativeHostState;
     use crate::language::outcome::{ExtensionAdvice, Observed};

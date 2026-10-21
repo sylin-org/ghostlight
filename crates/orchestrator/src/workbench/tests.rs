@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::browser::adapter::PresentationActivity;
 
+use crate::audit::AuditSink;
 use crate::events::{DenialPresentation, DomainEvent};
-use crate::governance::{AuditSink, Capability, CapabilitySet, Decision, GovernanceFacade};
+use crate::governance::{Capability, CapabilitySet, Decision, GovernanceFacade};
 use crate::language::outcome::Observed;
 use crate::scratch::Scratch;
 
