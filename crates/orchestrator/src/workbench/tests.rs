@@ -226,10 +226,9 @@ fn facade_over(governance: GovernanceFacade, browser: Arc<ControlledBrowser>) ->
     )
 }
 
-/// The Status check `id` of `snapshot`.
-fn check(snapshot: &super::WorkbenchSnapshot, id: &str) -> super::DiagnosticItem {
-    snapshot
-        .diagnostics
+/// The Status check `id` of `look`.
+fn check(look: &super::Look<'_>, id: &str) -> super::DiagnosticItem {
+    look.diagnostics()
         .iter()
         .find(|item| item.id == id)
         .cloned()
@@ -261,6 +260,17 @@ fn statuses(events: &[WorkbenchEvent]) -> Vec<super::parts::StatusPart> {
         .iter()
         .filter_map(|event| match &event.change {
             WorkbenchChange::StatusChanged { status } => Some(status.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The connections parts among `events`, in order.
+fn connections(events: &[WorkbenchEvent]) -> Vec<super::parts::ConnectionsPart> {
+    events
+        .iter()
+        .filter_map(|event| match &event.change {
+            WorkbenchChange::ConnectionsChanged { connections } => Some(connections.clone()),
             _ => None,
         })
         .collect()
@@ -321,10 +331,11 @@ fn work_in_flight_is_shown_as_it_waits_runs_and_settles() {
         workspace: workspace.into(),
         physical_id: 1,
     });
-    let shown = facade.snapshot();
+    let shown = facade.look();
+    let operations = shown.activity().operations;
+    let sessions = shown.connections().sessions;
     let phase = |invocation: &str| {
-        shown
-            .operations
+        operations
             .iter()
             .find(|operation| operation.invocation == invocation)
             .map(|operation| operation.phase)
@@ -332,15 +343,15 @@ fn work_in_flight_is_shown_as_it_waits_runs_and_settles() {
     assert_eq!(phase("invocation_waiting"), Some(OperationPhase::Waiting));
     assert_eq!(phase("invocation_held"), Some(OperationPhase::Held));
     assert_eq!(
-        shown.sessions[0].running_operations, 0,
+        sessions[0].running_operations, 0,
         "held and waiting work is not running"
     );
-    assert_eq!(shown.readiness.state, Readiness::Ready);
+    assert_eq!(shown.status().readiness.state, Readiness::Ready);
 
     projection.react(&reading(&evidence, "invocation_running", workspace));
-    let shown = facade.snapshot();
-    assert_eq!(shown.sessions[0].running_operations, 1);
-    assert_eq!(shown.readiness.state, Readiness::Working);
+    let shown = facade.look();
+    assert_eq!(shown.connections().sessions[0].running_operations, 1);
+    assert_eq!(shown.status().readiness.state, Readiness::Working);
 
     let durable = Arc::new(MemoryAudit::default());
     let recorder = AuditRecorder::new(durable.clone(), projection.clone());
@@ -460,15 +471,15 @@ fn the_snapshot_and_the_stream_share_one_gapless_sequence() {
     );
     let events = Arc::new(Events::default());
     facade.attach_events(events.clone());
-    let snapshot = facade.snapshot();
+    let snapshot = facade.look();
     let landed = heard(&events)
         .into_iter()
         .find(|event| matches!(event.change, WorkbenchChange::AuditHealthChanged { .. }))
         .expect("the change landed while the snapshot was assembled");
     assert!(
-        snapshot.seq < landed.seq,
+        snapshot.seq() < landed.seq,
         "a snapshot numbered {} claims a change numbered {}, which a page would then skip",
-        snapshot.seq,
+        snapshot.seq(),
         landed.seq
     );
 }
@@ -686,7 +697,7 @@ fn a_runtime_control_is_offered_and_applied_by_the_authority_with_or_without_a_b
         let governance = GovernanceFacade::new(None);
         governance.relay_runtime_state(browser.clone());
         let facade = facade_over(governance.clone(), browser.clone());
-        assert!(facade.snapshot().readiness.invites_control, "{case}");
+        assert!(facade.readiness().invites_control, "{case}");
         for (intent, state) in order {
             let result = facade.apply_runtime_intent(intent);
             assert!(result.accepted, "{case}: {intent:?}");
@@ -709,19 +720,21 @@ fn a_runtime_control_is_offered_and_applied_by_the_authority_with_or_without_a_b
                 state == RuntimeControlState::Active,
                 "{case}: the authority enforces {state:?}"
             );
-            let snapshot = facade.snapshot();
-            assert!(snapshot.readiness.invites_control, "{case}");
-            let readiness = match state {
+            let look = facade.look();
+            let readiness = look.status().readiness;
+            assert!(readiness.invites_control, "{case}");
+            let expected = match state {
                 RuntimeControlState::Held => Readiness::Paused,
                 RuntimeControlState::Ended => Readiness::SessionEnded,
                 RuntimeControlState::Active if connected => Readiness::Ready,
                 RuntimeControlState::Active => Readiness::NotConnected,
             };
-            assert_eq!(snapshot.readiness.state, readiness, "{case}: {state:?}");
+            assert_eq!(readiness.state, expected, "{case}: {state:?}");
             let offered = json!(crate::governance::offers(state));
+            let window = look.controls();
             for (audience, controls) in [
-                ("window", snapshot.controls.clone()),
-                ("watcher", snapshot.controls.seen_by(WebContext::Watch)),
+                ("window", window.clone()),
+                ("watcher", window.seen_by(WebContext::Watch)),
             ] {
                 assert_eq!(
                     json!(controls)["runtime"]["offers"],
@@ -974,12 +987,13 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             std::fs::write(&path, "{half-written").unwrap();
             governance.refresh_tick();
         }
-        let snapshot = facade.snapshot();
-        assert_eq!(snapshot.readiness.state, said.readiness, "{label}");
-        assert_eq!(snapshot.readiness.word, said.readiness.word(), "{label}");
-        assert_eq!(snapshot.readiness.detail, said.detail, "{label}");
-        assert!(snapshot.readiness.invites_control, "{label}");
-        let card = check(&snapshot, said.check);
+        let look = facade.look();
+        let status = look.status();
+        assert_eq!(status.readiness.state, said.readiness, "{label}");
+        assert_eq!(status.readiness.word, said.readiness.word(), "{label}");
+        assert_eq!(status.readiness.detail, said.detail, "{label}");
+        assert!(status.readiness.invites_control, "{label}");
+        let card = check(&look, said.check);
         if let Some(severity) = said.severity {
             assert_eq!(card.severity, severity, "{label}");
         }
@@ -987,11 +1001,11 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             assert_eq!(card.detail, detail, "{label}");
         }
         if let Some(no_browser) = said.no_browser {
-            assert_eq!(snapshot.no_browser, no_browser, "{label}");
+            assert_eq!(look.connections().no_browser, no_browser, "{label}");
         }
         if let Some(situation) = said.situation {
             assert_eq!(
-                snapshot.configuration.policy.situation, situation,
+                status.configuration.policy.situation, situation,
                 "{label}: the Policy situation the band reads"
             );
             assert_eq!(
@@ -1222,15 +1236,16 @@ fn the_window_the_tray_and_status_count_agents_one_way() {
     );
     let shows = |counts: ConnectionCounts| {
         assert_eq!(facade.connection_counts(), counts);
-        let snapshot = facade.snapshot();
-        assert_eq!(snapshot.controls.service.word, service_line(Some(counts)));
-        let grouped: std::collections::BTreeSet<&str> = snapshot
+        let look = facade.look();
+        assert_eq!(look.controls().service.word, service_line(Some(counts)));
+        let connections = look.connections();
+        let grouped: std::collections::BTreeSet<&str> = connections
             .sessions
             .iter()
             .map(|session| session.agent.id.as_str())
             .collect();
         assert_eq!(grouped.len(), counts.agents, "At a glance groups them so");
-        assert_eq!(super::parts::ConnectionsPart::of(&snapshot).counts, counts);
+        assert_eq!(connections.counts, counts);
         assert!(facade
             .tray_model()
             .tooltip
@@ -1291,12 +1306,13 @@ fn one_agent_across_the_window(reported: &str, hosts: &[&str]) -> crate::agent::
         .with_provenance(Some(evidence.attribution()));
     recorder.record_with_provenance(&record, Some(&evidence));
     facade.refresh_harnesses().unwrap();
-    let shown = facade.snapshot();
-    let agent = shown.sessions[0].agent.clone();
-    assert_eq!(shown.operations[0].agent, agent);
-    assert_eq!(shown.history[0].agent, agent);
+    let shown = facade.look();
+    let agent = shown.connections().sessions[0].agent.clone();
+    let activity = shown.activity();
+    assert_eq!(activity.operations[0].agent, agent);
+    assert_eq!(activity.history[0].agent, agent);
     let rows: Vec<&str> = shown
-        .harnesses
+        .harnesses()
         .iter()
         .filter(|harness| harness.agent == agent)
         .map(|harness| harness.id.as_str())
@@ -1339,7 +1355,8 @@ fn a_session_is_named_for_its_agent_and_carries_that_one_agent_everywhere() {
     workspaces.admit("Some\u{202e}Agent\u{200f}".into(), IntakeChannel::Mcp);
     let mut named: Vec<String> = facade_with(&workspaces)
         .0
-        .snapshot()
+        .look()
+        .connections()
         .sessions
         .into_iter()
         .map(|session| {
@@ -1371,10 +1388,11 @@ fn a_session_is_named_for_its_agent_and_carries_that_one_agent_everywhere() {
         "invocation_running",
         workspace.as_str(),
     ));
-    let shown = facade.snapshot();
-    assert_eq!(shown.sessions[0].agent.id, "claude-desktop");
-    assert_eq!(shown.sessions[0].agent.name, "Claude Desktop");
-    assert_eq!(shown.sessions[0].agent, shown.operations[0].agent);
+    let shown = facade.look();
+    let sessions = shown.connections().sessions;
+    assert_eq!(sessions[0].agent.id, "claude-desktop");
+    assert_eq!(sessions[0].agent.name, "Claude Desktop");
+    assert_eq!(sessions[0].agent, shown.activity().operations[0].agent);
 
     let call = Arc::new(ConnectionEvidence::claimed(
         "ghostlight call",
@@ -1391,7 +1409,7 @@ fn a_session_is_named_for_its_agent_and_carries_that_one_agent_everywhere() {
         &workspace,
         call.attribution().connection_id.as_deref().unwrap(),
     );
-    let shown = facade_with(&workspaces).0.snapshot();
+    let shown = facade_with(&workspaces).0.look().connections();
     assert!(shown.sessions[0].connections.is_empty());
     assert_eq!(shown.sessions[0].agent, Agent::command_line());
     assert_eq!(shown.sessions[0].channel, IntakeChannel::Cli);
@@ -1419,18 +1437,26 @@ fn a_session_is_named_for_its_agent_and_carries_that_one_agent_everywhere() {
 /// A browser port whose one browser connects and leaves when a test says so.
 struct ComingAndGoing {
     connected: std::sync::atomic::AtomicBool,
+    /// How many times the browsers were listed: once for each look at the service.
+    looks: std::sync::atomic::AtomicUsize,
 }
 
 impl ComingAndGoing {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             connected: std::sync::atomic::AtomicBool::new(false),
+            looks: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
     fn connect(&self, connected: bool) {
         self.connected
             .store(connected, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// How many times the browsers have been listed.
+    fn looks(&self) -> usize {
+        self.looks.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -1446,6 +1472,7 @@ impl crate::browser::BrowserPort for ComingAndGoing {
     }
 
     fn browsers(&self) -> Vec<crate::browser::BrowserSummary> {
+        self.looks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if !self.connected.load(std::sync::atomic::Ordering::SeqCst) {
             return Vec::new();
         }
@@ -1572,7 +1599,9 @@ fn a_request_that_reached_a_browser(workspace: &str) -> AuditRecord {
 /// a rescan that finds a browser, a browser that connects or leaves, a client connected from the
 /// window and the first request that completes setup each announce the part once, with the tag a
 /// fresh read gives; a look that sees the same inputs announces nothing and reads nothing; and a
-/// client whose name matches no catalog agent rebuilds the part but announces nothing.
+/// client whose name matches no catalog agent rebuilds the part but announces nothing. ADR-0203
+/// S3, `a_setup_read_gathers_once`: a read of every part, setup included, looks at the service
+/// once.
 #[test]
 fn the_setup_part_is_announced_when_what_it_says_changes_and_only_then() {
     use crate::install::HarnessAction;
@@ -1614,6 +1643,16 @@ fn the_setup_part_is_announced_when_what_it_says_changes_and_only_then() {
     assert_eq!(hints.len(), 3);
     assert_eq!(hints[2], bench.setup_etag());
     assert_eq!(bench.facade.setup_view().stage, Stage::Agent);
+    let looks = bench.browser.looks();
+    let look = bench.facade.look();
+    let window = super::parts::Projection::new(super::parts::Audience::Control);
+    let read = window.parts(&super::parts::Part::ALL, &look);
+    assert_eq!(read.len(), super::parts::Part::ALL.len());
+    assert_eq!(
+        read[super::parts::Part::Setup.token()]["stage"],
+        serde_json::json!(Stage::Agent)
+    );
+    assert_eq!(bench.browser.looks(), looks + 1, "one read, one gather");
     bench.browser.connect(false);
     bench.facade.refresh_live_parts();
     assert_eq!(bench.setup_hints().len(), 4);
@@ -1777,14 +1816,14 @@ fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
         "{}",
         operation.detail
     );
-    let snapshot = facade.snapshot();
-    let browser = &snapshot.browsers[0];
+    let look = facade.look();
+    let browser = &look.connections().browsers[0];
     assert_eq!(find(&browser.family, SearchKind::Browser).id, browser.id);
     assert_eq!(
         find(words::STATUS_RULES_LABEL, SearchKind::Diagnostic).id,
         AUTHORITY_CHECK
     );
-    let row = &snapshot.harnesses[0];
+    let row = &look.harnesses()[0];
     let installation = find(&row.label, SearchKind::Installation);
     assert_eq!(
         (installation.id.as_str(), installation.view),
@@ -1881,7 +1920,10 @@ fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
 /// fails reach the band without a pull; the controls are pushed when they differ and not
 /// otherwise; a repeated pause publishes no second status; and a policy hint is tagged with the
 /// id of the authority now in force, so the window's one tag per part means one thing, and the
-/// refresher does not repeat a hint the person's own act already gave.
+/// refresher does not repeat a hint the person's own act already gave. ADR-0203 S3,
+/// `status_connections_and_controls_come_from_one_publication`: a read serves the status,
+/// connections and controls parts the stream last published, built from one gather, and the
+/// status names the one publication of authority in force.
 #[test]
 fn a_change_reaches_the_live_parts_without_a_pull_and_only_once() {
     use super::parts::HintedPart;
@@ -1948,7 +1990,10 @@ fn a_change_reaches_the_live_parts_without_a_pull_and_only_once() {
     let pushed = controls();
     assert_eq!(pushed.len(), 2);
     assert_eq!(pushed[1].runtime.state, RuntimeControlState::Held);
-    assert_eq!(pushed[1], facade.snapshot().controls);
+    let look = facade.look();
+    assert_eq!(pushed[1], look.controls());
+    assert_eq!(statuses(&heard(&events)).pop(), Some(look.status()));
+    assert_eq!(connections(&heard(&events)).pop(), Some(look.connections()));
     let paused = statuses(&heard(&events)).len();
     let runtime_changes = || {
         heard(&events)
@@ -1986,6 +2031,18 @@ fn a_change_reaches_the_live_parts_without_a_pull_and_only_once() {
     let edited = policy_hints();
     assert_eq!(edited.len(), 2);
     assert_eq!(edited[1], governance.snapshot().id());
+    let published = governance.published();
+    let status = statuses(&heard(&events)).pop().unwrap();
+    assert_eq!(status.configuration.policy, *published.chip());
+    assert_eq!(
+        status.configuration.managed_policy,
+        published.diagnostics().managed_policy
+    );
+    assert_eq!(status, facade.look().status());
+    assert_eq!(
+        connections(&heard(&events)).pop(),
+        Some(facade.look().connections())
+    );
     facade.authority_refreshed();
     assert_eq!(policy_hints().len(), 2);
     let tag = super::parts::policy_etag(&facade.policy());

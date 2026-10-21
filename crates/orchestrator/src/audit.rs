@@ -734,7 +734,8 @@ mod tests {
                 )),
                 crate::diagnostics::DiagnosticsHub::for_tests(),
             )
-            .snapshot()
+            .look()
+            .activity()
             .history
         };
 

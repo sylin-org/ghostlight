@@ -177,8 +177,8 @@ fn content_and_effects_come_only_from_admitted_documents() {
         )),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
-    let snapshot = facade.snapshot();
-    let details = snapshot
+    let activity = facade.look().activity();
+    let details = activity
         .document_coverage
         .iter()
         .find(|item| item.invocation == result.invocation)

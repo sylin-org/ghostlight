@@ -17,6 +17,11 @@
 //! The connections part also names the client roster's rows in use, read from the cached roster
 //! beside the sessions, so the Integrations page learns it with the sessions it is decided from.
 //!
+//! A screen's read is one [`Look`]: the sequence it reflects and one gather, from which each part
+//! it asks for is built when asked, so every part of one answer describes one moment. A gather
+//! reads the published authority once, so the status and connections parts it builds describe
+//! one publication.
+//!
 //! While no browser is connected, the connections part says which browser a request would start.
 //! Browser recovery answers that from the installed browsers, which it reads once for each stretch
 //! with no browser connected and each browser startup posture in it, and never under `manual`. The
@@ -28,14 +33,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 
 use super::parts::{
-    self, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, OrganizationView,
+    self, ActivityPart, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, OrganizationView,
     StatusConfiguration, StatusPart, ViewingFacts,
 };
 use super::setup::{self, SetupInputs, SetupMachine, ThisComputer};
 use super::{
-    BrowserInstanceSummary, OperationPhase, OperationSummary, ReadinessSummary, RuntimeSource,
-    ServiceSummary, SessionSummary, WebFacts, WorkbenchChange, WorkbenchError, WorkbenchProjection,
-    WorkbenchTrayPort,
+    BrowserInstanceSummary, DiagnosticItem, OperationPhase, OperationSummary, ReadinessSummary,
+    RuntimeSource, ServiceSummary, SessionSummary, WebFacts, WorkbenchChange, WorkbenchError,
+    WorkbenchProjection, WorkbenchTrayPort,
 };
 use crate::browser::adapter::RuntimeControlState;
 use crate::browser::recovery::BrowserRecovery;
@@ -44,7 +49,7 @@ use crate::diagnostics::DiagnosticsHub;
 use crate::governance::effective::PolicyChip;
 use crate::governance::manifest::BrowserStartup;
 use crate::governance::{AuthoritySnapshot, GovernanceDiagnostics, GovernanceFacade};
-use crate::install::HarnessRegistry;
+use crate::install::{HarnessRegistry, HarnessSummary};
 use crate::intake::desktop::TrayModel;
 use crate::intake::session::IntakeChannel;
 use crate::language::audit_health::AuditHealth;
@@ -67,8 +72,9 @@ pub(super) struct Gathered {
     /// The browser an agent's request would start, while none is connected and Ghostlight would
     /// start one.
     pub starts: Option<String>,
-    /// The ids of the cached client roster's rows these sessions put in use
-    /// ([`parts::harnesses_in_use`]).
+    /// The cached client roster, read once for the Integrations page, the rows in use and setup.
+    pub harnesses: Vec<HarnessSummary>,
+    /// The ids of the roster's rows these sessions put in use ([`parts::harnesses_in_use`]).
     pub harnesses_in_use: Vec<String>,
     /// Content-free authority facts.
     pub authority: GovernanceDiagnostics,
@@ -101,21 +107,154 @@ impl Gathered {
     }
 
     /// What is connected in this look: the agents as At a glance groups them, the connections by
-    /// intake, and the browsers.
+    /// intake, and the browsers, as [`count_connections`] counts them.
     pub fn counts(&self) -> ConnectionCounts {
-        counts_of(&self.sessions, self.browsers.len())
+        count_connections(
+            self.sessions
+                .iter()
+                .map(|session| (session.agent.id.clone(), session.connections.as_slice())),
+            self.browsers.len(),
+        )
+    }
+
+    /// The Status page's checks of this look: the service, the browser, the rules in force and
+    /// the history.
+    pub fn checks(&self) -> Vec<DiagnosticItem> {
+        let mut checks = vec![DiagnosticItem::passing(
+            "service",
+            words::STATUS_SERVICE_LABEL,
+            words::STATUS_SERVICE_RUNNING,
+        )];
+        checks.push(if !self.browsers.is_empty() {
+            let names: Vec<&str> = self
+                .browsers
+                .iter()
+                .map(|browser| browser.family.as_str())
+                .collect();
+            DiagnosticItem::passing(
+                "browser",
+                words::STATUS_BROWSER_LABEL,
+                &words::status_browser_connected(&names),
+            )
+        } else if let Some(browser) = &self.starts {
+            DiagnosticItem::passing(
+                "browser",
+                words::STATUS_BROWSER_LABEL,
+                &readiness::starts_when_asked(browser),
+            )
+        } else {
+            DiagnosticItem::warning(
+                "browser",
+                words::STATUS_BROWSER_LABEL,
+                words::STATUS_BROWSER_WAITING,
+            )
+        });
+        // The same validity governance enforces, so this card, the header, and the Policy tab
+        // agree. A failed reload that keeps the last valid policy in force is not failing closed.
+        let authority = &self.authority;
+        checks.push(if !authority.authority_valid {
+            DiagnosticItem::failing(
+                "authority",
+                words::STATUS_RULES_LABEL,
+                words::STATUS_RULES_INVALID,
+            )
+        } else if !authority.local_policy_valid {
+            DiagnosticItem::warning(
+                "authority",
+                words::STATUS_RULES_LABEL,
+                words::STATUS_RULES_EDIT_INVALID,
+            )
+        } else {
+            DiagnosticItem::passing(
+                "authority",
+                words::STATUS_RULES_LABEL,
+                &words::status_rules_in_force(
+                    authority.local_policy_active,
+                    authority.managed_authority_active,
+                    self.enforced.channels_off(),
+                ),
+            )
+        });
+        let detail = self.audit_health.detail(self.audit_required);
+        checks.push(if self.audit_health.quiet() {
+            DiagnosticItem::passing("audit", words::STATUS_HISTORY_LABEL, &detail)
+        } else {
+            DiagnosticItem::warning("audit", words::STATUS_HISTORY_LABEL, &detail)
+        });
+        checks
     }
 }
 
-/// What is connected, from `sessions` and the number of connected `browsers`, as
-/// [`count_connections`] counts it.
-pub(super) fn counts_of(sessions: &[SessionSummary], browsers: usize) -> ConnectionCounts {
-    count_connections(
-        sessions
-            .iter()
-            .map(|session| (session.agent.id.clone(), session.connections.as_slice())),
-        browsers,
-    )
+/// One read of the workbench a screen asked for: the sequence it reflects and one gather.
+///
+/// Each part is built from that gather only when it is asked for, so the parts of one answer agree
+/// and a part nobody asked for costs nothing. The setup part may read this computer, so it is
+/// built only for a request that names it.
+pub struct Look<'a> {
+    live: &'a Live,
+    seq: u64,
+    gathered: Gathered,
+}
+
+impl Look<'_> {
+    /// The projection sequence this look reflects. A surface applies a later change only when its
+    /// sequence follows this one.
+    #[must_use]
+    pub const fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// The status part.
+    #[must_use]
+    pub fn status(&self) -> StatusPart {
+        self.live.status(&self.gathered)
+    }
+
+    /// The connections part.
+    #[must_use]
+    pub fn connections(&self) -> ConnectionsPart {
+        self.gathered.connections()
+    }
+
+    /// The controls part, as the window sees it.
+    #[must_use]
+    pub fn controls(&self) -> ControlsPart {
+        self.live.controls(&self.gathered)
+    }
+
+    /// The activity part: the work in flight this look saw, and the history and document coverage
+    /// the projection holds now.
+    #[must_use]
+    pub fn activity(&self) -> ActivityPart {
+        ActivityPart {
+            operations: self.gathered.operations.clone(),
+            history: self.live.projection.history(),
+            document_coverage: self.live.projection.coverage(),
+        }
+    }
+
+    /// The cached client roster this look read, which the Integrations page shows.
+    #[must_use]
+    pub fn harnesses(&self) -> &[HarnessSummary] {
+        &self.gathered.harnesses
+    }
+
+    /// The Status page's checks.
+    #[must_use]
+    pub fn diagnostics(&self) -> Vec<DiagnosticItem> {
+        self.gathered.checks()
+    }
+
+    /// The setup part, as the window sees it. An unfinished setup reads this computer.
+    #[must_use]
+    pub fn setup(&self) -> SetupView {
+        self.live.setup(&self.gathered)
+    }
+
+    /// What this look gathered.
+    pub(super) const fn gathered(&self) -> &Gathered {
+        &self.gathered
+    }
 }
 
 /// The parts last published, which a refresh compares with.
@@ -282,17 +421,34 @@ impl Live {
         live
     }
 
-    /// Look at the service: operations, sessions, browsers, authority and runtime.
+    /// One read for a screen: the sequence first, then one gather.
+    pub fn look(&self) -> Look<'_> {
+        // Read the sequence before anything is gathered. A change publishes after it has been
+        // made, so one numbered at or below this is already in what follows, and one above it is
+        // newer: the surface applies it by key, and applying it twice does no harm. Reading the
+        // sequence last would count a change that landed mid-assembly as included when it is not.
+        let seq = self.projection.current_seq();
+        Look {
+            live: self,
+            seq,
+            gathered: self.gather(),
+        }
+    }
+
+    /// Look at the service: operations, sessions, browsers, the client roster, authority and
+    /// runtime. The published authority is read once, so every fact of it here is one
+    /// publication's.
     pub fn gather(&self) -> Gathered {
         let operations = self.projection.operations();
         let browser_list = self.browser.browsers();
+        let published = self.governance.published();
         let mut tabs_in = HashMap::<String, usize>::new();
         let sessions: Vec<SessionSummary> = self
             .workspaces
             .summaries()
             .into_iter()
             .map(|workspace| {
-                let pinned = self.workspaces.browser_of(&workspace.id);
+                let pinned = workspace.browser;
                 if let Some(id) = &pinned {
                     *tabs_in.entry(id.clone()).or_default() += workspace.tab_count;
                 }
@@ -332,7 +488,7 @@ impl Live {
             })
             .collect();
         let starts = if browsers.is_empty() {
-            self.starts_on_request(self.governance.browser_startup())
+            self.starts_on_request(published.authority().browser_startup.value)
         } else {
             lock(&self.starts).end_stretch();
             None
@@ -341,11 +497,12 @@ impl Live {
             .is_empty()
             .then(|| words::no_browser(starts.as_deref()));
         let roster = lock(&self.sources).harnesses.clone();
-        let harnesses_in_use = parts::harnesses_in_use(&roster.summaries(), &sessions);
-        let authority = self.governance.diagnostics();
+        let harnesses = roster.summaries();
+        let harnesses_in_use = parts::harnesses_in_use(&harnesses, &sessions);
+        let authority = published.diagnostics().clone();
         let runtime_state = self.governance.runtime_state();
         let audit_health = self.projection.audit_health();
-        let enforced = self.governance.snapshot();
+        let enforced = Arc::clone(published.snapshot());
         let audit_required = enforced.requires_audit();
         let agents_on = |channel| sessions.iter().any(|session| session.channel == channel);
         let readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
@@ -364,12 +521,13 @@ impl Live {
         });
         Gathered {
             runtime_note: self.runtime_note(runtime_state),
-            policy: self.governance.policy_chip(),
+            policy: published.chip().clone(),
             operations,
             sessions,
             browsers,
             no_browser,
             starts,
+            harnesses,
             harnesses_in_use,
             authority,
             runtime_state,
@@ -428,8 +586,8 @@ impl Live {
     /// resolved once and kept.
     pub fn setup(&self, gathered: &Gathered) -> SetupView {
         let progress = self.projection.setup();
-        let SetupSources { harnesses, machine } = lock(&self.sources).clone();
-        let harnesses = harnesses.summaries();
+        let machine = Arc::clone(&lock(&self.sources).machine);
+        let harnesses = &gathered.harnesses;
         let agent_name = progress
             .as_ref()
             .and_then(|progress| progress.finished())
@@ -437,7 +595,7 @@ impl Live {
                 let mut remembered = lock(&self.remembered);
                 if remembered.agent_name.is_none() {
                     remembered.agent_name =
-                        setup::agent_name(&finished, &gathered.sessions, &harnesses);
+                        setup::agent_name(&finished, &gathered.sessions, harnesses);
                 }
                 remembered.agent_name.clone()
             });
@@ -445,7 +603,7 @@ impl Live {
             progress: progress.as_deref(),
             sessions: &gathered.sessions,
             browsers: &gathered.browsers,
-            harnesses: &harnesses,
+            harnesses,
             machine: machine.as_ref(),
             agent_name: agent_name.as_deref(),
         })

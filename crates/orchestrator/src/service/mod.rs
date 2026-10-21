@@ -2608,8 +2608,8 @@ mod tests {
                 .unwrap();
             assert_eq!(current.url, url);
             assert!(current.generation > selected.generation);
-            assert!(view.snapshot().history.is_empty());
-            assert!(view.snapshot().operations.is_empty());
+            assert!(view.look().activity().history.is_empty());
+            assert!(view.look().activity().operations.is_empty());
             assert!(browser.calls().is_empty());
             assert!(browser.control_states().is_empty());
             assert_eq!(
@@ -2651,9 +2651,9 @@ mod tests {
             .calls()
             .iter()
             .all(|call| matches!(call, BrowserCommand::Present { .. })));
-        let snapshot = view.snapshot();
-        assert_eq!(snapshot.history.len(), 1);
-        assert_eq!(snapshot.history[0].tool, "browser_read");
+        let history = view.look().activity().history;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].tool, "browser_read");
         let bytes = std::fs::read_to_string(&audit_path).unwrap();
         assert!(!bytes.contains("browser_landing"));
         assert!(!bytes.contains("secret"));
@@ -3969,12 +3969,12 @@ mod tests {
         let mut socket = open_mcp(None);
         initialize(&mut socket);
         // The session opens once its source is read, which follows the `initialize` answer.
-        eventually(|| host.workbench.snapshot().sessions.len() == 1);
+        eventually(|| host.workbench.look().connections().sessions.len() == 1);
 
         goodbye(&mut socket);
         drop(socket);
         // The teardown runs on the connection's own thread.
-        eventually(|| host.workbench.snapshot().sessions.is_empty());
+        eventually(|| host.workbench.look().connections().sessions.is_empty());
     }
 
     /// Defect 79cf4cc6: a client that goes away through the error path, with one frame that is not
@@ -5334,7 +5334,7 @@ mod tests {
         );
         assert_eq!(status, 200, "the bearer makes the request the window's");
         assert_eq!(
-            host.workbench.snapshot().configuration.runtime_state,
+            host.workbench.look().status().service.runtime_state,
             RuntimeControlState::Held
         );
         let resume = r#"{"intent":"resume"}"#;

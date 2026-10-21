@@ -347,7 +347,8 @@ fn a_line_an_earlier_build_wrote_still_reads_without_writing_back_what_it_retire
         )),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     )
-    .snapshot()
+    .look()
+    .activity()
     .history;
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].tool, "browser_navigate");

@@ -133,7 +133,7 @@ test("every change the service publishes is folded in, and a kind it never publi
 });
 
 test("each published change moves the cache it names", () => {
-  const { store } = latched({ browsers: [], configuration: {}, overview: {} });
+  const { store } = latched({ browsers: [], configuration: {} });
   const apply = (seq, change) => store.applyChange({ seq, change });
   assert.equal(apply(1, PUBLISHED[2]), "applied");
   assert.equal(store.hero().invocation, "two");
@@ -166,7 +166,7 @@ test("each published change moves the cache it names", () => {
 });
 
 test("the no-browser line follows the connections part, and goes when a browser connects", () => {
-  const { store } = latched({ browsers: [], configuration: {}, overview: {} });
+  const { store } = latched({ browsers: [], configuration: {} });
   const line = "Starts Google Chrome on request";
   store.applyChange({ seq: 1, change: { kind: "connections_changed", connections: { sessions: [], browsers: [], no_browser: line } } });
   assert.equal(store.snapshot().no_browser, line);
@@ -175,7 +175,7 @@ test("the no-browser line follows the connections part, and goes when a browser 
 });
 
 test("the rows in use follow the connections part, as the service publishes them with the sessions", () => {
-  const { store } = latched({ browsers: [], configuration: {}, overview: {}, harnesses_in_use: [] });
+  const { store } = latched({ browsers: [], configuration: {}, harnesses_in_use: [] });
   const session = { id: "w", agent: { id: "codex" } };
   store.applyChange({ seq: 1, change: { kind: "connections_changed",
     connections: { sessions: [session], browsers: [], harnesses_in_use: ["codex"] } } });
@@ -185,7 +185,7 @@ test("the rows in use follow the connections part, as the service publishes them
 });
 
 test("the counts follow the connections part, as the service counted them for the tray", () => {
-  const { store } = latched({ browsers: [], configuration: {}, overview: {}, harnesses_in_use: [] });
+  const { store } = latched({ browsers: [], configuration: {}, harnesses_in_use: [] });
   const counts = { agents: 2, mcp_clients: 3, command_line: 0, browsers: 1 };
   store.applyChange({ seq: 1, change: { kind: "connections_changed",
     connections: { sessions: [{ id: "w" }], browsers: [{ id: "b" }], harnesses_in_use: [], counts } } });

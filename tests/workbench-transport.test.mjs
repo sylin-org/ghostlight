@@ -72,7 +72,7 @@ test("a snapshot is one GET naming the six parts, put back into today's flat sha
   assert.equal(send.calls[0].body, undefined);
   assert.deepEqual(Object.keys(snapshot).sort(), [
     "audit_health", "audit_notice", "browsers", "configuration", "controls", "counts", "diagnostics",
-    "document_coverage", "harnesses", "harnesses_in_use", "history", "instance", "operations", "overview",
+    "document_coverage", "harnesses", "harnesses_in_use", "history", "instance", "operations",
     "readiness", "runtime_note", "seq", "service", "sessions"
   ]);
   assert.deepEqual(snapshot.controls, parts.controls);
@@ -81,9 +81,6 @@ test("a snapshot is one GET naming the six parts, put back into today's flat sha
   assert.equal(snapshot.seq, 9);
   assert.equal(snapshot.service.runtime_state, "active");
   assert.equal(snapshot.runtime_note, "Paused from the tray.");
-  assert.deepEqual(snapshot.overview, {
-    active_sessions: 1, active_operations: 1, connected_browsers: 2, blocked_in_history: 1
-  });
 });
 
 test("a snapshot of a running service has no pause note", () => {

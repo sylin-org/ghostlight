@@ -120,8 +120,7 @@
   /**
    * Put the parts of a snapshot answer back into the one flat shape the store and the view read.
    *
-   * Pure: the answer in, the snapshot out. The counts the overview carries are derived from the
-   * parts, so they cannot disagree with them.
+   * Pure: the answer in, the snapshot out.
    */
   function flatten(answer) {
     const parts = answer.parts ?? {};
@@ -131,10 +130,6 @@
     const integrations = parts.integrations ?? {};
     const diagnostics = parts.diagnostics ?? {};
     const controls = parts.controls;
-    const sessions = connections.sessions ?? [];
-    const browsers = connections.browsers ?? [];
-    const operations = activity.operations ?? [];
-    const history = activity.history ?? [];
     const flat = {
       seq: answer.seq,
       instance: answer.instance,
@@ -143,18 +138,12 @@
       audit_health: status.audit_health,
       audit_notice: status.audit_notice,
       configuration: status.configuration,
-      overview: {
-        active_sessions: sessions.length,
-        active_operations: operations.length,
-        connected_browsers: browsers.length,
-        blocked_in_history: history.filter((item) => item.allowed === false).length
-      },
-      sessions,
-      browsers,
+      sessions: connections.sessions ?? [],
+      browsers: connections.browsers ?? [],
       counts: connections.counts,
       harnesses_in_use: connections.harnesses_in_use ?? [],
-      operations,
-      history,
+      operations: activity.operations ?? [],
+      history: activity.history ?? [],
       document_coverage: activity.document_coverage ?? [],
       harnesses: integrations.harnesses ?? [],
       diagnostics: diagnostics.diagnostics ?? []

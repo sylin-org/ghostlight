@@ -358,9 +358,7 @@ const northwind = {
 
 const snapshot = {
   seq: 0,
-  generated_at_ms: FIXTURE_EPOCH,
   service: { version: "1.0.0", started_at_ms: ago(540000), runtime_state: "active" },
-  overview: { active_sessions: 2, active_operations: 2, connected_browsers: 2, blocked_in_history: 1 },
   sessions: [
     { id: "workspace_codex", agent: agentNamed("Codex"), channel: "mcp", tab_count: 3, browser: "Chrome" },
     // Codex starts a session per request, so its card holds more lines than it shows.
@@ -577,8 +575,8 @@ const serviceLine = (agents, browsers) => {
 };
 
 /**
- * The page with the overview, the connections part's counts and the Status summary counting what
- * it shows connected.
+ * The page with the connections part's counts and the Status summary counting what it shows
+ * connected.
  */
 const summarized = (flat) => {
   const changed = structuredClone(flat);
@@ -591,7 +589,6 @@ const summarized = (flat) => {
     command_line: connections.filter((connection) => connection.channel === "cli").length,
     browsers: changed.browsers.length
   };
-  changed.overview.connected_browsers = changed.browsers.length;
   changed.controls.service.word = serviceLine(agents, changed.browsers.length);
   return changed;
 };
@@ -714,7 +711,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
 
   // Every fixture time moves forward to this page load, so work in flight began seconds ago.
   const shift = Date.now() - ${FIXTURE_EPOCH};
-  const MOMENT = /^(timestamp_ms|started_at_ms|generated_at_ms|last_[a-z]+_ms)$/;
+  const MOMENT = /^(timestamp_ms|started_at_ms|last_[a-z]+_ms)$/;
   const rebase = value => {
     if (Array.isArray(value)) value.forEach(rebase);
     else if (value && typeof value === "object") {

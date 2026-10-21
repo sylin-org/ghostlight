@@ -889,18 +889,12 @@ fn snapshot(shared: &Shared, head: &Head, projection: &Projection) -> Response {
         Ok(parts) => parts,
         Err(response) => return response,
     };
-    let snapshot = shared.facade.snapshot();
-    let body: serde_json::Map<String, Value> = parts
-        .into_iter()
-        .filter(|part| projection.shows(*part))
-        .map(|part| {
-            let value = projection.part(part, &snapshot, || shared.facade.setup_view());
-            (part.token().to_owned(), value)
-        })
-        .collect();
+    // One look serves every part asked for, so the parts of one answer describe one moment.
+    let look = shared.facade.look();
+    let body = projection.parts(&parts, &look);
     json_response(
         Status::Ok,
-        &json!({ "seq": snapshot.seq, "instance": shared.instance, "parts": body }),
+        &json!({ "seq": look.seq(), "instance": shared.instance, "parts": body }),
     )
 }
 

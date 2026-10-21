@@ -17,6 +17,7 @@ pub use history::{HistoryStep, StepHistoryState};
 pub use input::{
     validate_policy_document, validate_search_query, POLICY_DOCUMENT_LIMIT, SEARCH_QUERY_LIMIT,
 };
+pub use live::Look;
 pub use watching::Watching;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -37,8 +38,8 @@ use crate::agent::image::ServedImage;
 use crate::audit::AuditRecord;
 use crate::browser::BrowserPort;
 use crate::events::DomainEvent;
-use crate::governance::effective::{EffectiveAuthority, PolicyChip};
-use crate::governance::{AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport};
+use crate::governance::effective::EffectiveAuthority;
+use crate::governance::{AuthoringError, CapabilitySet, GovernanceFacade};
 use crate::install::icons::IconCache;
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSetupResult,
@@ -417,6 +418,11 @@ impl WorkbenchProjection {
         self.lock().history.iter().rev().cloned().collect()
     }
 
+    /// The document coverage retained for the window, newest first.
+    fn coverage(&self) -> Vec<crate::language::coverage::HumanCoverage> {
+        self.lock().document_coverage.iter().cloned().collect()
+    }
+
     fn lock(&self) -> MutexGuard<'_, ProjectionState> {
         lock(&self.inner)
     }
@@ -679,13 +685,11 @@ impl WorkbenchFacade {
         }
     }
 
-    /// Tell every screen that an agent's icon changed: the roster is looked at again, since each
-    /// row carries its agent's symbol, and the look at the service that follows carries the
-    /// sessions' agents.
+    /// Tell every screen that an agent's icon changed: each cached roster row is given its
+    /// agent's symbol again, without reading any client's configuration, and the look at the
+    /// service that follows carries the sessions' agents.
     fn icons_changed(&self) {
-        if let Ok(summaries) = self.harnesses.refresh() {
-            self.integrations_changed(&summaries);
-        }
+        self.integrations_changed(&self.harnesses.resymbol());
     }
 
     /// Attach the adapter that opens links and folders and asks for files on this computer.
@@ -809,151 +813,24 @@ impl WorkbenchFacade {
         self.live.authority_refreshed();
     }
 
-    /// The one aggregate answer alone, without the rest of a snapshot: no history is read and an
+    /// The one aggregate answer alone, without the rest of a look: no history is read and an
     /// unfinished setup does not read this computer.
     #[must_use]
     pub fn readiness(&self) -> ReadinessSummary {
         self.live.gather().readiness
     }
 
-    /// Build an immutable, content-minimized snapshot for a disposable UI.
+    /// One read of the workbench: the sequence it reflects and one gather, from which each part a
+    /// screen asks for is built when asked ([`Look`]).
     #[must_use]
-    pub fn snapshot(&self) -> WorkbenchSnapshot {
-        // Read the sequence before anything is gathered. A change publishes after it has been
-        // made, so one numbered at or below this is already in what follows, and one above it is
-        // newer: the surface applies it by key, and applying it twice does no harm. Reading the
-        // sequence last would count a change that landed mid-assembly as included when it is not.
-        let seq = self.projection.current_seq();
-        let gathered = self.live.gather();
-        let status = self.live.status(&gathered);
-        let controls = self.live.controls(&gathered);
-        let live::Gathered {
-            operations,
-            sessions,
-            browsers,
-            no_browser,
-            starts,
-            authority,
-            audit_health,
-            audit_required,
-            enforced,
-            ..
-        } = gathered;
-        let mut diagnostics = vec![DiagnosticItem::passing(
-            "service",
-            words::STATUS_SERVICE_LABEL,
-            words::STATUS_SERVICE_RUNNING,
-        )];
-        diagnostics.push(if !browsers.is_empty() {
-            let names: Vec<&str> = browsers
-                .iter()
-                .map(|browser| browser.family.as_str())
-                .collect();
-            DiagnosticItem::passing(
-                "browser",
-                words::STATUS_BROWSER_LABEL,
-                &words::status_browser_connected(&names),
-            )
-        } else if let Some(browser) = &starts {
-            DiagnosticItem::passing(
-                "browser",
-                words::STATUS_BROWSER_LABEL,
-                &readiness::starts_when_asked(browser),
-            )
-        } else {
-            DiagnosticItem::warning(
-                "browser",
-                words::STATUS_BROWSER_LABEL,
-                words::STATUS_BROWSER_WAITING,
-            )
-        });
-        // The same validity governance enforces, so this card, the header, and the Policy tab
-        // agree. A failed reload that keeps the last valid policy in force is not failing closed.
-        diagnostics.push(if !authority.authority_valid {
-            DiagnosticItem::failing(
-                "authority",
-                words::STATUS_RULES_LABEL,
-                words::STATUS_RULES_INVALID,
-            )
-        } else if !authority.local_policy_valid {
-            DiagnosticItem::warning(
-                "authority",
-                words::STATUS_RULES_LABEL,
-                words::STATUS_RULES_EDIT_INVALID,
-            )
-        } else {
-            DiagnosticItem::passing(
-                "authority",
-                words::STATUS_RULES_LABEL,
-                &words::status_rules_in_force(
-                    authority.local_policy_active,
-                    authority.managed_authority_active,
-                    enforced.channels_off(),
-                ),
-            )
-        });
-        diagnostics.push(if audit_health.quiet() {
-            DiagnosticItem::passing(
-                "audit",
-                words::STATUS_HISTORY_LABEL,
-                &audit_health.detail(audit_required),
-            )
-        } else {
-            DiagnosticItem::warning(
-                "audit",
-                words::STATUS_HISTORY_LABEL,
-                &audit_health.detail(audit_required),
-            )
-        });
-        let history = self.projection.history();
-        WorkbenchSnapshot {
-            audit_notice: status.audit_notice,
-            audit_health: status.audit_health,
-            document_coverage: self
-                .projection
-                .lock()
-                .document_coverage
-                .iter()
-                .cloned()
-                .collect(),
-            seq,
-            generated_at_ms: unix_ms(),
-            runtime_note: status.runtime_note,
-            readiness: status.readiness,
-            overview: OverviewSummary {
-                active_sessions: sessions.len(),
-                active_operations: operations.len(),
-                connected_browsers: browsers.len(),
-                blocked_in_history: history.iter().filter(|item| !item.allowed).count(),
-            },
-            sessions,
-            operations,
-            browsers,
-            no_browser,
-            history,
-            diagnostics,
-            harnesses: self.harnesses.summaries(),
-            configuration: ConfigurationSummary {
-                runtime_state: status.service.runtime_state,
-                local_policy_configured: authority.local_policy_configured,
-                local_policy_active: authority.local_policy_active,
-                local_policy_valid: authority.local_policy_valid,
-                managed_authority_configured: authority.managed_authority_configured,
-                managed_authority_active: authority.managed_authority_active,
-                managed_authority_valid: authority.managed_authority_valid,
-                managed_policy: status.configuration.managed_policy,
-                organization: status.configuration.organization,
-                policy: status.configuration.policy,
-            },
-            service: status.service,
-            controls,
-        }
+    pub fn look(&self) -> Look<'_> {
+        self.live.look()
     }
 
     /// The setup part, as the window sees it.
     ///
-    /// It is not part of a snapshot: an unfinished setup reads this computer (the native-host
-    /// report and the browser profiles), so only a request for this part pays for those reads.
+    /// An unfinished setup reads this computer (the native-host report and the browser profiles),
+    /// so only a request for this part pays for those reads.
     #[must_use]
     pub fn setup_view(&self) -> crate::language::setup::SetupView {
         self.live.setup(&self.live.gather())
@@ -988,7 +865,8 @@ impl WorkbenchFacade {
         if query.is_empty() {
             return Vec::new();
         }
-        let snapshot = self.snapshot();
+        let look = self.look();
+        let gathered = look.gathered();
         let mut hits = Hits::new(&query);
         for (page, view) in [
             (&words::SEARCH_GLANCE, SearchDestination::Activity),
@@ -1007,7 +885,7 @@ impl WorkbenchFacade {
                 ));
             }
         }
-        for operation in &snapshot.operations {
+        for operation in &gathered.operations {
             let phase = operation.phase.word();
             if hits.finds_action(&operation.tool, &[&operation.agent.name, phase]) {
                 hits.push(SearchHit::new(
@@ -1019,7 +897,7 @@ impl WorkbenchFacade {
                 ));
             }
         }
-        for session in &snapshot.sessions {
+        for session in &gathered.sessions {
             let line = words::session_line(
                 session.tab_count,
                 session.browser.as_deref(),
@@ -1036,7 +914,7 @@ impl WorkbenchFacade {
                 ));
             }
         }
-        for browser in &snapshot.browsers {
+        for browser in &gathered.browsers {
             let detail = words::search_browser_detail(browser.tab_count);
             if hits.finds(&[&browser.family, &detail]) {
                 hits.push(SearchHit::new(
@@ -1048,11 +926,11 @@ impl WorkbenchFacade {
                 ));
             }
         }
-        for harness in &snapshot.harnesses {
+        for harness in &gathered.harnesses {
             let word = words::harness_state_word(
                 harness.state,
                 harness.copy_only,
-                parts::in_use(harness, &snapshot.sessions),
+                parts::in_use(harness, &gathered.sessions),
             );
             if hits.finds(&[&harness.label, word]) {
                 hits.push(SearchHit::new(
@@ -1064,7 +942,7 @@ impl WorkbenchFacade {
                 ));
             }
         }
-        let runtime = runtime_state_word(snapshot.configuration.runtime_state);
+        let runtime = runtime_state_word(gathered.runtime_state);
         if hits.finds(&[words::CONTROLS_RUNTIME_LABEL, runtime]) {
             hits.push(SearchHit::new(
                 SearchKind::Configuration,
@@ -1074,7 +952,7 @@ impl WorkbenchFacade {
                 SearchDestination::BrowserWork,
             ));
         }
-        for diagnostic in &snapshot.diagnostics {
+        for diagnostic in &gathered.checks() {
             if hits.finds(&[&diagnostic.label, &diagnostic.detail]) {
                 hits.push(SearchHit::new(
                     SearchKind::Diagnostic,
@@ -1085,7 +963,7 @@ impl WorkbenchFacade {
                 ));
             }
         }
-        for item in &snapshot.history {
+        for item in &self.projection.history() {
             let outcome = words::search_outcome(item.outcome);
             let browser = item.browser.as_deref().unwrap_or_default();
             if hits.finds_action(
@@ -1661,51 +1539,6 @@ impl From<WorkbenchPresentationError> for WorkbenchError {
     }
 }
 
-/// Complete immutable workbench read model.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct WorkbenchSnapshot {
-    /// Current storage health and explicit historical gaps.
-    pub audit_health: crate::language::audit_health::AuditHealth,
-    /// Persistent human notice, empty during ordinary healthy operation.
-    pub audit_notice: String,
-    /// Volatile human-only embedded-host explanations, absent from model and audit surfaces.
-    pub document_coverage: Vec<crate::language::coverage::HumanCoverage>,
-    /// Projection sequence this snapshot reflects.
-    ///
-    /// A surface applies a later change only when its sequence follows this one.
-    pub seq: u64,
-    /// Time at which this snapshot was assembled.
-    pub generated_at_ms: u64,
-    /// Service identity and control state.
-    pub service: ServiceSummary,
-    /// The one aggregate answer the front door leads with.
-    pub readiness: ReadinessSummary,
-    /// Where the pause came from, present only while agents are paused.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime_note: Option<String>,
-    /// At-a-glance counts.
-    pub overview: OverviewSummary,
-    /// Admitted MCP sessions.
-    pub sessions: Vec<SessionSummary>,
-    /// Currently tracked operations.
-    pub operations: Vec<OperationSummary>,
-    /// Currently connected browser instances.
-    pub browsers: Vec<BrowserInstanceSummary>,
-    /// What the window says in place of a browser while none is connected
-    /// ([`words::no_browser`]): the browser a request would start, or that none is connected.
-    pub no_browser: Option<String>,
-    /// Newest-first bounded content-minimized history.
-    pub history: Vec<HistoryItem>,
-    /// Current local checkup results.
-    pub diagnostics: Vec<DiagnosticItem>,
-    /// Cached, explicitly supported development-harness registrations.
-    pub harnesses: Vec<HarnessSummary>,
-    /// Content-free authority and runtime configuration facts.
-    pub configuration: ConfigurationSummary,
-    /// The controls part Settings is drawn from, as the window sees it.
-    pub controls: parts::ControlsPart,
-}
-
 /// Current service facts.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ServiceSummary {
@@ -1752,19 +1585,6 @@ impl ReadinessSummary {
             invites_control: state.invites_control(),
         }
     }
-}
-
-/// At-a-glance counts.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct OverviewSummary {
-    /// Admitted sessions.
-    pub active_sessions: usize,
-    /// Current operations.
-    pub active_operations: usize,
-    /// Connected browser adapters.
-    pub connected_browsers: usize,
-    /// Bounded history records whose final boundary was not allowed.
-    pub blocked_in_history: usize,
 }
 
 /// One admitted MCP session.
@@ -2069,31 +1889,6 @@ pub enum DiagnosticSeverity {
     Warning,
     /// Fail-closed or unavailable.
     Failing,
-}
-
-/// Content-free configuration state.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ConfigurationSummary {
-    /// Current runtime state.
-    pub runtime_state: RuntimeControlState,
-    /// Whether local authority is configured.
-    pub local_policy_configured: bool,
-    /// Whether a validated local policy is currently applied.
-    pub local_policy_active: bool,
-    /// Whether local authority is valid.
-    pub local_policy_valid: bool,
-    /// Whether managed authority is configured.
-    pub managed_authority_configured: bool,
-    /// Whether a verified managed policy is currently applied.
-    pub managed_authority_active: bool,
-    /// Whether managed authority is valid.
-    pub managed_authority_valid: bool,
-    /// Signed managed-policy provenance suitable for the Policy Passport.
-    pub managed_policy: ManagedPolicyPassport,
-    /// The organization the policy in force names, as the window names it.
-    pub organization: parts::OrganizationView,
-    /// The band chip, authored by the orchestrator so the surface renders rather than derives it.
-    pub policy: PolicyChip,
 }
 
 /// Every place the workbench is willing to send someone.

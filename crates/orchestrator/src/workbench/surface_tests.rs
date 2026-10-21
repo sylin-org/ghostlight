@@ -92,7 +92,7 @@ fn wire(value: impl serde::Serialize) -> String {
 /// A new value fails to compile here until it is named.
 #[test]
 fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
-    use super::parts::{ConnectionsPart, HintedPart, Part, StatusPart};
+    use super::parts::{HintedPart, Part};
     use super::{
         HistoryItem, OperationPhase, OperationSummary, PageAddress, WorkbenchChange,
         WorkbenchDestination, WorkbenchRuntimeIntent,
@@ -188,7 +188,7 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
         WorkbenchChange::ControlsChanged { .. } => "controls_changed",
         WorkbenchChange::PartChanged { .. } => "part_changed",
     };
-    let snapshot = super::WorkbenchFacade::new(
+    let facade = super::WorkbenchFacade::new(
         super::WorkbenchProjection::default(),
         crate::workspace::WorkspaceStore::default(),
         GovernanceFacade::new(None),
@@ -197,8 +197,8 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
             crate::browser::adapter::chromium::protocol4::assets::page_assets(),
         )),
         crate::diagnostics::DiagnosticsHub::for_tests(),
-    )
-    .snapshot();
+    );
+    let look = facade.look();
     let operation = |phase| OperationSummary {
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
@@ -254,13 +254,13 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
             runtime_state: crate::browser::adapter::RuntimeControlState::Held,
         },
         WorkbenchChange::StatusChanged {
-            status: StatusPart::of(&snapshot),
+            status: look.status(),
         },
         WorkbenchChange::ConnectionsChanged {
-            connections: ConnectionsPart::of(&snapshot),
+            connections: look.connections(),
         },
         WorkbenchChange::ControlsChanged {
-            controls: Box::new(snapshot.controls.clone()),
+            controls: Box::new(look.controls()),
         },
         WorkbenchChange::PartChanged {
             part: HintedPart::Integrations,

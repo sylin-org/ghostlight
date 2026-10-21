@@ -1,7 +1,8 @@
 //! The parts of the workbench state a screen may ask for, and what each audience sees of them.
 //!
-//! A snapshot is cut into closed parts: status, connections, activity, integrations, diagnostics,
-//! controls and setup. Policy has its own route. Each part is projected for an [`Audience`] when
+//! A read is cut into closed parts: status, connections, activity, integrations, diagnostics,
+//! controls and setup, each built from one [`Look`] only when asked for. Policy has its own route.
+//! Each part is projected for an [`Audience`] when
 //! the response is written, so a page never redacts and never holds data its context may not see
 //! (ADR-0199, amendment of 2026-10-15). The projection drops what nobody reads, shows home-relative
 //! paths to everyone, and turns the person's own lists of sensitive sites into counts for a watcher.
@@ -17,8 +18,8 @@ use thiserror::Error;
 
 use super::context::{availability, Availability, WebAct, WebContext};
 use super::{
-    BrowserInstanceSummary, DiagnosticItem, HistoryItem, OperationSummary, ReadinessSummary,
-    ServiceSummary, SessionSummary, WorkbenchChange, WorkbenchEvent, WorkbenchSnapshot,
+    BrowserInstanceSummary, DiagnosticItem, HistoryItem, Look, OperationSummary, ReadinessSummary,
+    ServiceSummary, SessionSummary, WorkbenchChange, WorkbenchEvent,
 };
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 use crate::diagnostics::DiagnosticsReport;
@@ -30,7 +31,6 @@ use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::audit_health::AuditHealth;
 use crate::language::coverage::HumanCoverage;
 use crate::language::policy as policy_words;
-use crate::language::setup::SetupView;
 use crate::language::workbench::{self as words, ConnectionCounts};
 
 /// The environment variable that names the user's home directory.
@@ -208,25 +208,6 @@ impl OrganizationView {
     }
 }
 
-impl StatusPart {
-    /// The status part of `snapshot`.
-    #[must_use]
-    pub fn of(snapshot: &WorkbenchSnapshot) -> Self {
-        Self {
-            service: snapshot.service.clone(),
-            readiness: snapshot.readiness.clone(),
-            audit_health: snapshot.audit_health.clone(),
-            audit_notice: snapshot.audit_notice.clone(),
-            configuration: StatusConfiguration {
-                policy: snapshot.configuration.policy.clone(),
-                managed_policy: snapshot.configuration.managed_policy.clone(),
-                organization: snapshot.configuration.organization.clone(),
-            },
-            runtime_note: snapshot.runtime_note.clone(),
-        }
-    }
-}
-
 /// The connections part: admitted sessions and connected browsers.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ConnectionsPart {
@@ -244,20 +225,6 @@ pub struct ConnectionsPart {
     /// The Integrations page reads it beside the sessions it is decided from, so it changes when
     /// they do.
     pub harnesses_in_use: Vec<String>,
-}
-
-impl ConnectionsPart {
-    /// The connections part of `snapshot`.
-    #[must_use]
-    pub fn of(snapshot: &WorkbenchSnapshot) -> Self {
-        Self {
-            sessions: snapshot.sessions.clone(),
-            browsers: snapshot.browsers.clone(),
-            no_browser: snapshot.no_browser.clone(),
-            counts: super::live::counts_of(&snapshot.sessions, snapshot.browsers.len()),
-            harnesses_in_use: harnesses_in_use(&snapshot.harnesses, &snapshot.sessions),
-        }
-    }
 }
 
 /// Whether the roster row `harness` is in use now: a live session of its agent, with the row's
@@ -647,11 +614,15 @@ impl ControlsPart {
     }
 }
 
-#[derive(Serialize)]
-struct ActivityPart<'a> {
-    operations: &'a [OperationSummary],
-    history: &'a [HistoryItem],
-    document_coverage: &'a [HumanCoverage],
+/// The activity part: live operations, history and document coverage.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ActivityPart {
+    /// Operations tracked now, newest first.
+    pub operations: Vec<OperationSummary>,
+    /// Newest-first bounded content-minimized history.
+    pub history: Vec<HistoryItem>,
+    /// Volatile human-only embedded-host explanations, absent from model and audit surfaces.
+    pub document_coverage: Vec<HumanCoverage>,
 }
 
 #[derive(Serialize)]
@@ -712,27 +683,27 @@ impl Projection {
         !(self.watching() && matches!(part, Part::Setup))
     }
 
-    /// One part of `snapshot`, as this audience sees it. A part the audience is not shown (see
-    /// [`Self::shows`]) comes back null.
-    ///
-    /// The setup part is not in a snapshot: `setup` builds it, and is called only when this
-    /// audience is shown the part, because building it may read this computer.
+    /// The parts of `look` that `parts` names and this audience is shown, in that order, each
+    /// keyed by its token. Only those parts are built.
     #[must_use]
-    pub fn part(
-        &self,
-        part: Part,
-        snapshot: &WorkbenchSnapshot,
-        setup: impl FnOnce() -> SetupView,
-    ) -> Value {
+    pub fn parts(&self, parts: &[Part], look: &Look<'_>) -> serde_json::Map<String, Value> {
+        parts
+            .iter()
+            .filter(|part| self.shows(**part))
+            .map(|part| (part.token().to_owned(), self.part(*part, look)))
+            .collect()
+    }
+
+    /// One part of `look`, as this audience sees it. A part the audience is not shown (see
+    /// [`Self::shows`]) comes back null and is not built, because building the setup part may
+    /// read this computer.
+    #[must_use]
+    pub fn part(&self, part: Part, look: &Look<'_>) -> Value {
         match part {
-            Part::Status => self.status(&StatusPart::of(snapshot)),
-            Part::Connections => self.connections(&ConnectionsPart::of(snapshot)),
+            Part::Status => self.status(&look.status()),
+            Part::Connections => self.connections(&look.connections()),
             Part::Activity => {
-                let mut value = to_value(&ActivityPart {
-                    operations: &snapshot.operations,
-                    history: &snapshot.history,
-                    document_coverage: &snapshot.document_coverage,
-                });
+                let mut value = to_value(&look.activity());
                 each(&mut value, "document_coverage", |coverage| {
                     self.count_excluded_hosts(coverage);
                 });
@@ -740,18 +711,18 @@ impl Projection {
             }
             Part::Integrations => {
                 let mut value = to_value(&IntegrationsPart {
-                    harnesses: &snapshot.harnesses,
+                    harnesses: look.harnesses(),
                 });
                 each(&mut value, "harnesses", |harness| {
                     self.project_harness(harness);
                 });
                 value
             }
-            Part::Controls => self.controls(&snapshot.controls),
+            Part::Controls => self.controls(&look.controls()),
             Part::Setup if !self.shows(part) => Value::Null,
-            Part::Setup => to_value(&setup()),
+            Part::Setup => to_value(&look.setup()),
             Part::Diagnostics => to_value(&DiagnosticsPart {
-                diagnostics: &snapshot.diagnostics,
+                diagnostics: &look.diagnostics(),
             }),
         }
     }

@@ -238,8 +238,7 @@ const snapshot = () => ({
       tone: "applied"
     }
   },
-  controls: controlsPart(),
-  overview: {}
+  controls: controlsPart()
 });
 
 /** The command a request to the window's own service is, by the route it goes to. */

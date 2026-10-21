@@ -405,7 +405,7 @@ fn runtime(intent: &str) -> Call {
 }
 
 fn runtime_state(fixture: &Fixture) -> RuntimeControlState {
-    fixture.facade.snapshot().service.runtime_state
+    fixture.facade.look().status().service.runtime_state
 }
 
 fn set_viewing(fixture: &Fixture, watch: bool) -> Reply {
@@ -666,7 +666,7 @@ fn access_is_decided_per_route_by_the_bearer_and_the_live_watching_switch() {
     assert!(!fixture.user_policy_exists());
     assert_eq!(runtime_state(&fixture), RuntimeControlState::Held);
     assert_eq!(
-        fixture.facade.snapshot().runtime_note.as_deref(),
+        fixture.facade.look().status().runtime_note.as_deref(),
         Some(words::PAUSED_FROM_WATCHER)
     );
 
