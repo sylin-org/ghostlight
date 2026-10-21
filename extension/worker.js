@@ -111,7 +111,7 @@ const controlled = new Map();
 function send(frame) {
   if (!nativePort) return false;
   try {
-    nativePort.postMessage(frame);
+    nativePort.postMessage(shared.wellFormed(frame));
     return true;
   } catch (_error) {
     return false;

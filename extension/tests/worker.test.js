@@ -605,6 +605,19 @@ test("each request is answered exactly once", async () => {
   } finally { worker.dispose(); }
 });
 
+test("a tab title a page made of half an emoji leaves the worker well formed", async () => {
+  // The fake port copies each frame through JSON, as Chrome does, so a lone surrogate would arrive.
+  const emoji = String.fromCodePoint(0x1f600);
+  const lone = String.fromCharCode(0xde00);
+  const worker = await boot({ tabs: [{ ...ACCOUNT, title: `${"a".repeat(499)}${emoji}b` }, { ...OTHER, title: `Other ${lone}` }] });
+  try {
+    await worker.accept();
+    await worker.request("p4_titles", "list_tabs", goldenArgs("list_tabs"));
+    const [receipt] = worker.receipts();
+    assert.deepEqual(receipt.ok.tabs.map((tab) => tab.title), ["a".repeat(499), `Other ${String.fromCharCode(0xfffd)}`]);
+  } finally { worker.dispose(); }
+});
+
 test("a request waits for the hello_accepted work and then runs once", async () => {
   const worker = await boot();
   try {

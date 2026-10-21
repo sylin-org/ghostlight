@@ -164,3 +164,25 @@ test("the refusal code the worker recognizes is the one the service sends", () =
   const golden = JSON.parse(readFileSync(join(__dirname, "..", "..", "tests", "golden", "protocol4", "frames", "error.json"), "utf8"));
   assert.equal(golden.code, shared.ADAPTER_INCOMPATIBLE);
 });
+
+test("bounded text never ends on the first half of an emoji", () => {
+  const emoji = String.fromCodePoint(0x1f600);
+  assert.equal(shared.bounded(`ab${emoji}`, 3), "ab");
+  assert.equal(shared.bounded(`ab${emoji}`, 4), `ab${emoji}`);
+  assert.equal(shared.bounded(`ab${emoji}c`, 4), `ab${emoji}`);
+});
+
+test("every string of a frame leaves well formed, and a frame that needs nothing is the same object", () => {
+  const high = String.fromCharCode(0xd83d);
+  const low = String.fromCharCode(0xde00);
+  const replacement = String.fromCharCode(0xfffd);
+  const emoji = String.fromCodePoint(0x1f600);
+  const frame = { kind: "receipt", ok: { tabs: [{ title: `a${high}` }, { title: `${low}b` }], [`k${high}`]: 1, kept: emoji } };
+  assert.deepEqual(shared.wellFormed(frame), {
+    kind: "receipt",
+    ok: { tabs: [{ title: `a${replacement}` }, { title: `${replacement}b` }], [`k${replacement}`]: 1, kept: emoji }
+  });
+  assert.equal(frame.ok.tabs[0].title, `a${high}`, "the frame itself is left as it was");
+  const clean = { kind: "event", event: { title: emoji, list: [1, "two", null, true] } };
+  assert.equal(shared.wellFormed(clean), clean);
+});

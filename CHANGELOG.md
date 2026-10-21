@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Text cut inside an emoji no longer drops Ghostlight's connection to the browser for every agent.
+  A tab title cut at 500 characters, or a `browser_execute` result cut at its limit, could end on
+  half an emoji, which the service could not read, and it closed the whole connection. The
+  extension now cuts before an emoji or sends U+FFFD in place of the half, and the service skips a
+  message it cannot read instead of closing the connection.
 - The extension no longer refuses text that is within a tool's stated limit but holds emoji or
   other characters outside the Basic Multilingual Plane. It counted each such character twice, as
   JavaScript's string length does, while the service counts it once. An agent with a long emoji

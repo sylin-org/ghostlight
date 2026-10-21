@@ -15,6 +15,7 @@ use std::thread;
 use std::time::Instant;
 
 use ghostlight_relay::endpoint::Connection as RelayConnection;
+use ghostlight_relay::frame::FrameError;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -288,10 +289,17 @@ struct Reading {
 
 impl Reading {
     /// Read frames until the stream ends, then fail every call still waiting and forget the
-    /// connection.
+    /// connection. A frame is read whole before its JSON is decoded, so a frame whose JSON this
+    /// service cannot decode, such as a 2.0.0 extension's frame that carries half an emoji from a
+    /// page, is dropped and the stream stays aligned: one bad frame never ends the connection, and
+    /// with it every session's browser.
     fn run(mut self) {
-        while let Ok(Some(frame)) = self.reader.native::<Value>(None) {
-            self.take(frame);
+        loop {
+            match self.reader.native::<Value>(None) {
+                Ok(Some(frame)) => self.take(frame),
+                Err(FrameError::Json(_)) => {}
+                Ok(None) | Err(_) => break,
+            }
         }
         self.writer.close();
         self.receipts

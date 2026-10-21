@@ -9,8 +9,44 @@
 })(globalThis, function createGhostlightShared() {
   "use strict";
 
+  const HIGH_SURROGATES = Object.freeze({ first: 0xd800, last: 0xdbff });
+
+  // `value` as text of at most `maximum` UTF-16 code units. A cut that would end on the first half
+  // of a surrogate pair, an emoji's, ends before it.
   function bounded(value, maximum) {
-    return String(value ?? "").slice(0, maximum);
+    const text = String(value ?? "");
+    if (text.length <= maximum) return text;
+    const cut = text.slice(0, maximum);
+    const last = cut.charCodeAt(cut.length - 1);
+    return last >= HIGH_SURROGATES.first && last <= HIGH_SURROGATES.last ? cut.slice(0, -1) : cut;
+  }
+
+  // Native messaging carries each frame as UTF-8 JSON, which has no form for a lone UTF-16
+  // surrogate, half an emoji, such as a page can put in its own title or text. V8 writes one as an
+  // escape the service's JSON reader refuses, and the whole frame is lost. This returns `value` with
+  // every string in it, keys included, well formed (a lone surrogate becomes U+FFFD), and returns
+  // `value` itself when nothing needed it, so a large frame is not copied.
+  function wellFormed(value) {
+    if (typeof value === "string") return value.isWellFormed() ? value : value.toWellFormed();
+    if (value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) {
+      let copy = null;
+      for (let index = 0; index < value.length; index += 1) {
+        const formed = wellFormed(value[index]);
+        if (formed !== value[index]) (copy ??= value.slice())[index] = formed;
+      }
+      return copy ?? value;
+    }
+    let copy = null;
+    for (const [key, member] of Object.entries(value)) {
+      const formedKey = wellFormed(key);
+      const formed = wellFormed(member);
+      if (formedKey === key && formed === member) continue;
+      copy ??= { ...value };
+      if (formedKey !== key) delete copy[key];
+      copy[formedKey] = formed;
+    }
+    return copy ?? value;
   }
 
   function readinessForStatus(status) {
@@ -101,6 +137,7 @@
 
   return Object.freeze({
     bounded,
+    wellFormed,
     readinessForStatus,
     activityLabel,
     browserEventFrame,

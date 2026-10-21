@@ -12,7 +12,7 @@ Notes). B1 rides in the same candidate as C21, or neither does.
 The second sweep (2026-10-20) opens this lane again: see its section below. It started while
 adapter waits for C17 (the coordinator's direction). P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15,
 EXT-9, EXT-10, EXT-11, C18, P-D2 and EXT-5 have landed, and so have P-D3, the owner's group title,
-and P-D4 (the coordinator, 2026-10-21). Next: EXT-6 (each module exports its own
+P-D4 and P-D5 (the coordinator, 2026-10-21). Next: EXT-6 (each module exports its own
 handler spec through one `handler()`), then EXT-12, then B-final. B-final regenerates the freeze
 record from the release workflow's candidate zip, not a test-02 package, and stops there: the
 store cancel and resubmission are the owner's call. Parked 2026-10-21 for the night with nothing
@@ -91,7 +91,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-02 (Bluefin), after adapter. A
 slice's specification is its finding in [sweep-2026-10-20/extension.md](sweep-2026-10-20/extension.md), read
-with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18, P-D2, EXT-5, P-D3 and P-D4 have landed; EXT-6 is next.
+with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-9, EXT-10, EXT-11, C18, P-D2, EXT-5, P-D3, P-D4 and P-D5 have landed; EXT-6 is next.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
@@ -111,6 +111,7 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
 | EXT-15 | docs(extension): module docs, and the README lists every file | - | EXT-15; the README is not packaged | landed (this commit) |
 | P-D3 | feat(extension): a group's title is the ghost and the agent's name, and a 2.0.0 group is retitled | - | the owner's request of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `language/provenance.rs` | landed (this commit) |
 | P-D4 | fix(extension): a text limit counts characters, as the service does | - | found while doing P-D3 (Notes); the coordinator | landed (this commit) |
+| P-D5 | fix(browser): half an emoji in page text no longer drops the browser connection | - | the coordinator's live check of P-D4's note (Notes) | landed (this commit) |
 | B-final | chore(extension): the freeze golden for one new 2.0.1 submission | all above | cancelling the staged review and submitting are the owner's go | todo |
 
 ### Notes (second sweep)
@@ -333,3 +334,21 @@ with its skeptic's corrections. P-D1, EXT-7, EXT-8, EXT-13, EXT-14, EXT-15, EXT-
   `chunk_limits`), and `golden.rs` pins that the longest title the service composes fits it.
   `shared.bounded` still cuts by code units and can leave half an emoji at the end of a cut tab
   title, which drops the browser connection; P-D5 takes that.
+- P-D5, found live on the owner's machine on 2026-10-21 while checking P-D4's note: a script set
+  a tab's title to 499 letters, an emoji and a letter, and the next call failed with "Connection
+  lost before the browser confirmed completion." The session lost the tab. The cut to 500 code
+  units left half the emoji. V8 writes a lone surrogate as a JSON escape, serde_json refuses it,
+  and the service's read loop ended the whole connection on that one frame, so every session's
+  browser went with it. Any cut the extension makes in text can leave such a half: `evaluate.js`
+  cuts a script's result at `max_result_chars` and its exception text, and `diagnostics.js` cuts
+  console messages, so a script that returns text with emoji could drop the connection too. The
+  fix has two halves. In the extension, `shared.bounded` cuts before the first half of a pair, and the
+  worker's `send` passes every frame through `shared.wellFormed`, which replaces a lone surrogate
+  with U+FFFD and returns the frame itself when nothing needs it, which covers every cut, whichever
+  made the half (a cut other than `shared.bounded` may end in U+FFFD). In the service,
+  `connection::Reading::run` drops a frame whose JSON it cannot decode and reads on, since the frame
+  was read whole and the stream is still aligned. That half covers the 2.0.0 extension the store
+  still serves: its frame is lost, so that call waits out its deadline instead of every session
+  losing its browser. The packaged `lib/shared.js` and `worker.js` change, and the freeze record is
+  regenerated. Owed: the tab the check opened is left open with the long title in the owner's
+  Chrome, outside any session.

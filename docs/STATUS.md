@@ -239,7 +239,10 @@ Now:
   2026-10-21). P-D3 changes three packaged extension files, so the next candidate carries it.
   Owed: the tab strip on the four test machines, the Alpine one first, for the emoji font. Found
   while doing P-D3, P-D4: the extension counts a text limit in characters, as the service does, so
-  text with emoji within a tool's limit is no longer refused.
+  text with emoji within a tool's limit is no longer refused. P-D5, found checking P-D4 live: text
+  cut inside an emoji (a long tab title, a script's result) dropped the browser connection for
+  every session; the extension now sends text well formed, and the service skips a frame it cannot
+  decode.
 - Second sweep state after that night. core-language and adapter are done, and so is the policy
   lane. package: EXT-6, EXT-12 and B-final are next. core-work: W-D4 is next: after a Quit, closing
   a handle the Quit released says "That tab was already closed." while the tab stays open.

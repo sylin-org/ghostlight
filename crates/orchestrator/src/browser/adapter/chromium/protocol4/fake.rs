@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use ghostlight_relay::endpoint::Connection;
-use ghostlight_relay::frame::{read_frame, write_frame};
+use ghostlight_relay::frame::{read_frame, write_frame, write_frame_raw};
 use serde_json::{json, Value};
 
 use super::wire;
@@ -132,6 +132,11 @@ impl FakeExtension {
     /// Send one frame to the service.
     pub(crate) fn send(&self, frame: &impl serde::Serialize) {
         write_frame(&mut *lock(&self.writer), frame).expect("the fake sends a frame");
+    }
+
+    /// Send one frame of exactly these bytes, which need not be JSON this service can decode.
+    pub(crate) fn send_raw(&self, payload: &[u8]) {
+        write_frame_raw(&mut *lock(&self.writer), payload).expect("the fake sends a frame");
     }
 
     /// Answer heartbeats from now on, or stop answering them.

@@ -121,6 +121,11 @@ All frames use today's framing: 4-byte little-endian length, then UTF-8 JSON, ca
 the relay. A service-to-extension frame must stay under 768 KiB (Chromium caps host-to-extension messages at
 1 MiB). Larger requests use `command_chunk`; protocol 4 has one chunk shape. Every frame is an object with a `kind`.
 
+UTF-8 has no form for a lone UTF-16 surrogate, half an emoji, and page text can hold one. V8 writes it
+as a JSON escape that the service's JSON reader refuses. The extension therefore sends every string
+well formed, with a lone surrogate replaced by U+FFFD, and the service drops a frame it cannot decode
+instead of ending the connection (P-D5, 2026-10-21).
+
 ### 1.1 Frame kinds
 
 | Direction | `kind` | Fields | Notes |

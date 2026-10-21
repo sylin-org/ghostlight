@@ -410,6 +410,27 @@ fn unknown_and_unreadable_receipts_end_nothing() {
 }
 
 #[test]
+fn a_frame_whose_json_cannot_be_decoded_ends_nothing() {
+    let port = port();
+    let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
+    attached.unwrap();
+    let (_, receipts) = channel(&port, FOUR);
+
+    // Half an emoji, as V8 writes a lone surrogate, which serde_json refuses.
+    fake.send_raw(br#"{"kind":"receipt","correlation":"p4_half","ok":{"title":"a\ud83d"}}"#);
+    let after = receipts.register("p4_after");
+    fake.send(&wire::Inbound::Receipt(FakeExtension::ok(
+        "p4_after",
+        json!({}),
+    )));
+    assert!(after.recv_timeout(PATIENCE).unwrap().is_ok());
+    assert!(
+        port.is_registered(FOUR),
+        "a frame the service cannot decode ends nothing"
+    );
+}
+
+#[test]
 fn cancel_and_notice_frames_reach_the_extension() {
     let port = port();
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
