@@ -8,7 +8,8 @@ entry in [ADR-0203](../../adr/0203-one-owner-for-each-fact.md)'s Rebuild plan. S
 
 ## RESUME HERE
 
-W-D2 and W-D3 have landed. W-D1 moved to core-language (L-D5). Next: C19c. A slice's hash is
+W-D2, W-D3 and C19c have landed, and WORK-12's three moves (its helpers are still to come).
+W-D1 moved to core-language (L-D5). Next: C10c (P1 and P5 have landed). A slice's hash is
 filled in by the next slice's commit, since a rebase before the push changes it.
 
 ## Slices
@@ -19,8 +20,8 @@ In order. "After" names what a slice waits for.
 | --- | --- | --- | --- | --- |
 | W-D1 | fix(work): an inline upload of exactly 5,000,000 bytes is accepted | - | WORK-1's note | moved to LEDGER-core-language.md (L-D5) |
 | W-D2 | fix(work): a flow step whose tab close the policy refuses shows the kept-tab notice | - | WORK-8's notice half | landed (ecf30a64) |
-| W-D3 | fix(work): a selector wait gives the readiness fact the other waits give | - | WORK-13; a deliberate model-visible change | landed |
-| C19c | refactor(work): the completion path's leftovers go | - | ADR-0203 C19c, moved from core; WORK-7's `CompletionGate`; the service half is core-service's | todo |
+| W-D3 | fix(work): a selector wait gives the readiness fact the other waits give | - | WORK-13; a deliberate model-visible change | landed (f6d9fdc3) |
+| C19c | refactor(work): the completion path's leftovers go | - | ADR-0203 C19c, moved from core; WORK-7's `CompletionGate`; the service half is core-service's | landed |
 | C10c | refactor(work): the executor reads one publication | P1, P5 | ADR-0203 C10c, moved from core | todo |
 | C16 | refactor(work): which recording a workspace holds is a workspace fact | - | ADR-0203 C16, moved from core; removes SERV-9's "reaped" | todo |
 | C12b-2 | refactor(work): the typed refusal builds its result (the work half) | C12b-1 | ADR-0203 C12b; WORK-4, WORK-2 and WORK-3's refusal sites | todo |
@@ -31,7 +32,7 @@ In order. "After" names what a slice waits for.
 | WORK-9 | refactor(work): one name per contract | - | WORK-9; no persisted word changes | todo |
 | WORK-13 | refactor(work): one finish for every wait | W-D3 | WORK-13 | todo |
 | WORK-6 | refactor(work): `work/mod.rs` splits on its seams | WORK-3 | WORK-6; the moves land alone | todo |
-| WORK-12 | refactor(workspace): its tests and its two books move out, and the lease helpers come in | - | WORK-12; the moves land alone | todo |
+| WORK-12 | refactor(workspace): its tests and its two books move out, and the lease helpers come in | - | WORK-12; the moves land alone | moves landed (8108ea82, 66a8842b, c65ec18d); helpers todo |
 | WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5 | todo |
 | WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | todo |
 
@@ -57,3 +58,16 @@ W-D3 adds `readiness` to the selector wait's facts, the value its envelope alrea
 the duration wait already reports. Regenerating the result goldens changed nothing, because no
 result golden holds a wait, so the extended `waiting_on_a_semantic_selector_polls_the_live_page`
 pins the new fact. The edit stays out of the condition matches C17 retypes.
+
+C19c's work half deletes `CompletionGate`, its `CompletionError` and its test: the executor hands
+its one `Terminal` to `complete_terminal` by value, so a second completion cannot be written
+(Decision 4.4). Decision 4.7's comments on `Decision.allowed` and `ReasonCode::InvalidRequest`
+say what is true: a policy refusal and two refusals no policy made (a call that did not match the
+catalog, the person's hold or stop) set `allowed` false, while a cancellation or a call refused
+during a quit keep it true. `governance/mod.rs` is the policy lane's, which is this machine's
+next lane. The `DomainEvent` fields, `AuditRecorder::record` and the service lines are
+core-service's C19c-s.
+
+WORK-12's moves landed alone: the tests to `workspace/tests.rs`, `TargetBook` and its two bounds
+to `workspace/targets.rs`, and the released-tab pool (with `reusable_site`, which only the claim
+reads) to `workspace/released.rs`. `workspace/mod.rs` went from 4,820 lines to 2,353.

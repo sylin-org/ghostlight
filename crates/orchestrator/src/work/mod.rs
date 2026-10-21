@@ -71,7 +71,7 @@ use crate::workspace::{
 };
 use findings::{Findings, Frame, FrameFindings, StaleOffer};
 use item::candidate_item;
-use result::{CompletionGate, Effect, InvocationResult, Readiness, Status};
+use result::{Effect, InvocationResult, Readiness, Status};
 
 /// How many controls a stale-target refusal offers.
 const STALE_CANDIDATES_MAX: usize = 3;
@@ -343,7 +343,6 @@ impl ApplicationExecutor {
         let started = prepared.received;
         let capacity_refused = admission == Admission::OverCapacity;
         let refused_at_admission = admission != Admission::Queued;
-        let gate = CompletionGate::default();
         let operation = match &prepared.decoded {
             Ok(operation) => operation,
             Err(error) => {
@@ -369,7 +368,6 @@ impl ApplicationExecutor {
                     audit: refusal.audit(),
                 };
                 return self.finish(
-                    &gate,
                     terminal,
                     // A request that never decoded asked for nothing and learned nothing.
                     Completion {
@@ -479,7 +477,7 @@ impl ApplicationExecutor {
         if let Some(lease) = lease.as_ref() {
             pending::report_forgotten(lease, &mut terminal);
         }
-        self.finish(&gate, terminal, Completion::of(&context, tool, started))
+        self.finish(terminal, Completion::of(&context, tool, started))
     }
 
     fn run(

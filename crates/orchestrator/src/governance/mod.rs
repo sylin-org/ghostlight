@@ -226,7 +226,9 @@ pub enum ReasonCode {
     OwnWorkbench,
     /// Configured policy could not be validated.
     InvalidAuthority,
-    /// Model-facing input did not match the catalog contract.
+    /// The call did not match the catalog contract, so it reached no boundary and no policy was
+    /// consulted. Its decision is refused all the same, so the call is never counted as work that
+    /// ran.
     InvalidRequest,
     /// Runtime control entered hold. Also reads the code `runtime_attention`; only
     /// `runtime_hold` is written.
@@ -310,7 +312,11 @@ struct PolicyAttribution {
 /// A final-boundary permission decision.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Decision {
-    /// Whether the boundary is admitted.
+    /// Whether the work may go on past this boundary. A policy refusal sets it false and names
+    /// the deciding layer. So do two refusals no policy made, which name no layer: a call that did
+    /// not match the catalog (`InvalidRequest`), and the person's runtime hold or stop. Other
+    /// lifecycle outcomes, such as a cancellation or a call refused while Ghostlight quits, keep it
+    /// true. Separating the two kinds is ADR-0202 Decision 12's open question.
     pub allowed: bool,
     /// Stable reason.
     pub reason: ReasonCode,

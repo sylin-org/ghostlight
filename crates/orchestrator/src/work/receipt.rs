@@ -8,17 +8,14 @@ impl ApplicationExecutor {
     /// Complete a direct operation or the composition parent through the shared receipt seam.
     pub(super) fn finish(
         &self,
-        gate: &CompletionGate,
         terminal: Terminal,
         completion: Completion<'_>,
     ) -> InvocationResult {
-        self.complete_terminal(gate, terminal, completion, None)
-            .result
+        self.complete_terminal(terminal, completion, None).result
     }
 
     fn complete_terminal(
         &self,
-        gate: &CompletionGate,
         mut terminal: Terminal,
         completion: Completion<'_>,
         step: Option<StepReceipt>,
@@ -126,9 +123,6 @@ impl ApplicationExecutor {
             storage.qualify(&terminal.result.summary)
         };
         terminal.result.history_storage = storage;
-        gate.complete(terminal.result)
-            .expect("single executor completion path");
-        terminal.result = gate.take().expect("completion committed");
         terminal
     }
 
@@ -157,7 +151,6 @@ impl ApplicationExecutor {
             flow.findings.reach(browser);
         }
         self.complete_terminal(
-            &CompletionGate::default(),
             terminal,
             Completion::of(&context, operation.name(), started),
             Some(step),
