@@ -11,8 +11,8 @@ locally (workspace clippy, ghostlight-service 2398 passed). Landed, all pushed t
 c51204ca, I-D2 278a9c4c, I-D3 b9e76161, I-lock 6664028e, INST-1 959d0d00, INST-4 09ee4bff.
 SERV-6c moved to test-01 (15b38451). Nothing is parked as a patch; the working tree is clean.
 
-Next: INST-5 (one `config_root`; `HarnessContext.config` and `.roaming` always hold the same
-directory, and `harness_roots` still takes both), then the table's order below. SERV-13 and
+INST-5 landed on 2026-10-21 (`HarnessContext` and `HarnessRoots` hold one `config_root`). Next: the
+table's order below. SERV-13 and
 SERV-11c touch `cli/setup.rs`, `cli/mod.rs` and `cli/parse.rs`: other lanes held them today
 (LANG-12b, SERV-6, S-D4, all landed), so ask before starting there.
 
@@ -435,7 +435,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | I-D4 | fix(cli): an agent's `ghostlight call` joins one session named for that agent | - | the owner's question of 2026-10-21; the ADR-0106 amendment of 2026-10-21; this lane's first slice when leo-desktop-02 is on, before its tests-1 cut | landed (this commit); live check waits for a browser, see Notes |
 | INST-1 | refactor(install): the home's file names live in `layout.rs` | - | INST-1 as corrected; the 1.x names stay the migration's | landed (this commit); see Notes, second sweep |
 | INST-4 | refactor(install): one `user_dirs.rs` resolves the user's directories | I-D1 | INST-4 as corrected | landed (this commit); see Notes, second sweep |
-| INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | todo |
+| INST-5 | refactor(install): one `config_root` | INST-4 | INST-5 | landed (this commit) |
 | INST-9 | refactor(install): the install's sentences move to `language/deployment.rs` | - | INST-9; some reach the agent, so model-visible text stays byte-equal | todo |
 | INST-8 | refactor(install): `inspect` reads its state once | - | INST-8 | todo |
 | INST-6 | refactor(install): one `edit` for every dialect | INST-8 | INST-6 | todo |

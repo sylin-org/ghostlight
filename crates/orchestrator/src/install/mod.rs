@@ -376,8 +376,7 @@ impl HarnessRegistry {
 fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessContext {
     HarnessContext {
         home: directory.join("home"),
-        config: directory.join("config"),
-        roaming: directory.join("config"),
+        config_root: directory.join("config"),
         codex_config: directory.join("codex").join("config.toml"),
         claude_config_dir: None,
         crush_config: None,
@@ -666,8 +665,9 @@ pub struct HarnessSetupFailure {
 #[derive(Clone)]
 struct HarnessContext {
     home: PathBuf,
-    config: PathBuf,
-    roaming: PathBuf,
+    /// The directory agents keep their per-user settings in: `%APPDATA%` on Windows and
+    /// `$XDG_CONFIG_HOME`, or `~/.config`, elsewhere.
+    config_root: PathBuf,
     codex_config: PathBuf,
     /// The directory [`CLAUDE_CONFIG_VARIABLE`] names, when this process or the person's stored
     /// environment sets it ([`claude_config_dir`]): Claude Code reads its [`CLAUDE_CODE_FILE`]
@@ -744,13 +744,12 @@ impl HarnessContext {
                 .container()
                 .map(|container| PrivateView {
                     container: container.clone(),
-                    roots: vec![roots.roaming.clone(), local.clone()],
+                    roots: vec![roots.config_root.clone(), local.clone()],
                 })
         });
         Self {
             home,
-            config: roots.config,
-            roaming: roots.roaming,
+            config_root: roots.config_root,
             codex_config: roots.codex_config,
             claude_config_dir: claude_config_dir(
                 env::var_os(CLAUDE_CONFIG_VARIABLE),
@@ -773,7 +772,7 @@ impl HarnessContext {
     fn packages(&self) -> Packages {
         match &self.local_app_data {
             Some(local) if self.windows => Packages::listed(DataRoots {
-                roaming: self.roaming.clone(),
+                roaming: self.config_root.clone(),
                 local: local.clone(),
             }),
             _ => Packages::none(),
@@ -838,8 +837,9 @@ fn environment_roots(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HarnessRoots {
-    config: PathBuf,
-    roaming: PathBuf,
+    /// The directory agents keep their per-user settings in: `%APPDATA%` on Windows and
+    /// `$XDG_CONFIG_HOME`, or `~/.config`, elsewhere.
+    config_root: PathBuf,
     codex_config: PathBuf,
 }
 
@@ -850,24 +850,16 @@ fn harness_roots(
     codex_home: Option<PathBuf>,
     windows: bool,
 ) -> HarnessRoots {
-    let config = if windows {
-        app_data
-            .clone()
-            .unwrap_or_else(|| home.join("AppData/Roaming"))
-    } else {
-        xdg_config_home.unwrap_or_else(|| home.join(".config"))
-    };
-    let roaming = if windows {
+    let config_root = if windows {
         app_data.unwrap_or_else(|| home.join("AppData/Roaming"))
     } else {
-        config.clone()
+        xdg_config_home.unwrap_or_else(|| home.join(".config"))
     };
     let codex_config = codex_home
         .unwrap_or_else(|| home.join(".codex"))
         .join("config.toml");
     HarnessRoots {
-        config,
-        roaming,
+        config_root,
         codex_config,
     }
 }
@@ -1157,7 +1149,11 @@ const ROSTER: &[AgentRow] = &[
         target: "User",
         monogram: monogram!("claude-desktop.svg"),
         download_url: None,
-        path: |context| context.roaming.join("Claude/claude_desktop_config.json"),
+        path: |context| {
+            context
+                .config_root
+                .join("Claude/claude_desktop_config.json")
+        },
         candidates: &[],
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
@@ -1193,7 +1189,7 @@ const ROSTER: &[AgentRow] = &[
         target: "User",
         monogram: monogram!("vscode.svg"),
         download_url: Some("https://code.visualstudio.com/download"),
-        path: |context| context.roaming.join("Code/User/mcp.json"),
+        path: |context| context.config_root.join("Code/User/mcp.json"),
         candidates: &[],
         executables: &["code"],
         dialect: ConfigDialect::Json(JsonDialect::Servers),
@@ -1232,7 +1228,7 @@ const ROSTER: &[AgentRow] = &[
         target: "Devin user",
         monogram: monogram!("windsurf.svg"),
         download_url: Some("https://windsurf.com/editor/download"),
-        path: |context| context.config.join("devin/mcp_config.json"),
+        path: |context| context.config_root.join("devin/mcp_config.json"),
         candidates: &[],
         executables: &["devin", "devin-desktop", "surf"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
@@ -1252,9 +1248,9 @@ const ROSTER: &[AgentRow] = &[
         download_url: Some("https://zed.dev/download"),
         path: |context| {
             if context.windows {
-                context.roaming.join("Zed/settings.json")
+                context.config_root.join("Zed/settings.json")
             } else {
-                context.config.join("zed/settings.json")
+                context.config_root.join("zed/settings.json")
             }
         },
         candidates: &[],
@@ -1375,7 +1371,7 @@ const ROSTER: &[AgentRow] = &[
         ),
         path: |context| {
             context
-                .roaming
+                .config_root
                 .join("Code/User/globalStorage/saoudrizwan.claude-dev")
                 .join(CLINE_SETTINGS)
         },
@@ -1398,7 +1394,7 @@ const ROSTER: &[AgentRow] = &[
         download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
         path: |context| {
             context
-                .roaming
+                .config_root
                 .join("Cursor/User/globalStorage/saoudrizwan.claude-dev")
                 .join(CLINE_SETTINGS)
         },
@@ -1421,7 +1417,7 @@ const ROSTER: &[AgentRow] = &[
         download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
         path: |context| {
             context
-                .roaming
+                .config_root
                 .join("Windsurf/User/globalStorage/saoudrizwan.claude-dev")
                 .join(CLINE_SETTINGS)
         },
@@ -1496,7 +1492,7 @@ const ROSTER: &[AgentRow] = &[
         target: "CLI",
         monogram: monogram!("kilo-code.svg"),
         download_url: Some("https://kilo.ai/"),
-        path: |context| context.config.join("kilo").join("kilo.json"),
+        path: |context| context.config_root.join("kilo").join("kilo.json"),
         candidates: KILO_FILES,
         executables: &["kilo"],
         dialect: ConfigDialect::Json(JsonDialect::OpenCodeV1),
@@ -1514,7 +1510,7 @@ const ROSTER: &[AgentRow] = &[
         target: "CLI and desktop",
         monogram: monogram!("goose.svg"),
         download_url: Some("https://block.github.io/goose/docs/getting-started/installation/"),
-        path: |context| context.config.join("goose/config.yaml"),
+        path: |context| context.config_root.join("goose/config.yaml"),
         candidates: &[],
         executables: &["goose"],
         dialect: ConfigDialect::Manual(ManualDialect::Goose),
@@ -1895,7 +1891,7 @@ fn product_config_parent_exists(context: &HarnessContext, path: &Path) -> bool {
     // A product-specific settings directory is useful installation evidence. A generic home or
     // configuration root is not: treating `$HOME` as Claude Code detection made that harness
     // appear installed on every ordinary machine and would make aggregate setup overreach.
-    ![&context.home, &context.config, &context.roaming]
+    ![&context.home, &context.config_root]
         .into_iter()
         .any(|root| entry::spelled_alike(parent, root, context.windows))
 }
@@ -3284,8 +3280,7 @@ mod tests {
     fn context(directory: &Path) -> HarnessContext {
         HarnessContext {
             home: directory.join("home"),
-            config: directory.join("config"),
-            roaming: directory.join("config"),
+            config_root: directory.join("config"),
             codex_config: directory.join("codex/config.toml"),
             claude_config_dir: None,
             crush_config: None,
@@ -3392,7 +3387,9 @@ mod tests {
             },
             roots: vec![directory.join("config")],
         });
-        let desktop = context.roaming.join("Claude/claude_desktop_config.json");
+        let desktop = context
+            .config_root
+            .join("Claude/claude_desktop_config.json");
         fs::create_dir_all(desktop.parent().unwrap()).unwrap();
         fs::write(&desktop, r#"{"mcpServers":{}}"#).unwrap();
         (context, desktop)
@@ -3416,7 +3413,9 @@ mod tests {
 
     /// Claude Desktop's plain settings file on the computer `context` describes.
     fn plain_desktop(context: &HarnessContext) -> PathBuf {
-        context.roaming.join("Claude/claude_desktop_config.json")
+        context
+            .config_root
+            .join("Claude/claude_desktop_config.json")
     }
 
     /// The Store edition's own Claude folder on the computer `context` describes, made.
@@ -4463,8 +4462,7 @@ mod tests {
                 assert_eq!(
                     environment_roots(&dirs, &lookup, windows),
                     HarnessRoots {
-                        config: config.clone(),
-                        roaming: config,
+                        config_root: config,
                         codex_config: home.join(".codex").join("config.toml"),
                     }
                 );
@@ -4481,8 +4479,7 @@ mod tests {
             assert_eq!(
                 linux,
                 HarnessRoots {
-                    config: PathBuf::from("/mnt/config"),
-                    roaming: PathBuf::from("/mnt/config"),
+                    config_root: PathBuf::from("/mnt/config"),
                     codex_config: PathBuf::from("/workbench/codex/config.toml"),
                 }
             );
@@ -4497,8 +4494,7 @@ mod tests {
             assert_eq!(
                 windows,
                 HarnessRoots {
-                    config: PathBuf::from("D:/Profiles/Roaming"),
-                    roaming: PathBuf::from("D:/Profiles/Roaming"),
+                    config_root: PathBuf::from("D:/Profiles/Roaming"),
                     codex_config: PathBuf::from("C:/Users/test/.codex/config.toml"),
                 }
             );
@@ -4522,7 +4518,7 @@ mod tests {
         {
             let directory = temporary("kilo-current-config");
             let context = context(&directory);
-            let current = context.config.join("kilo").join("kilo.jsonc");
+            let current = context.config_root.join("kilo").join("kilo.jsonc");
             fs::create_dir_all(current.parent().unwrap()).unwrap();
             fs::write(&current, "{}\n").unwrap();
             let registry = HarnessRegistry::with_context(context.clone());
@@ -4765,7 +4761,7 @@ mod tests {
             // the Codex app's private copy of that folder, which Visual Studio Code never reads.
             let directory = temporary("store-other-only");
             let context = windows_context(&directory);
-            let plain = context.roaming.join("Code/User/mcp.json");
+            let plain = context.config_root.join("Code/User/mcp.json");
             // Spelled as the look spells it: the settings folder as the row names it, then the file.
             let leftover = packaged::private_root(
                 context.local_app_data.as_deref().unwrap(),
@@ -4820,7 +4816,7 @@ mod tests {
                 container: AppContainer {
                     app: "Claude".into(),
                 },
-                roots: vec![context.roaming.clone(), local.clone()],
+                roots: vec![context.config_root.clone(), local.clone()],
             });
             let private = store_folder(&context).join("claude_desktop_config.json");
             fs::write(&private, PERSON_SETTINGS).unwrap();
@@ -4839,7 +4835,7 @@ mod tests {
             // `%APPDATA%`, the same mapping the container probe confirms for `%LOCALAPPDATA%`: the
             // plain path the view shows and the copy found here are one file.
             let rest = plain_desktop(&context)
-                .strip_prefix(&context.roaming)
+                .strip_prefix(&context.config_root)
                 .unwrap()
                 .to_path_buf();
             let redirected =
@@ -4863,7 +4859,7 @@ mod tests {
                 container: AppContainer {
                     app: "OpenAI.Codex".into(),
                 },
-                roots: vec![context.roaming.clone(), local],
+                roots: vec![context.config_root.clone(), local],
             });
             let other = HarnessRegistry::with_context(context);
             let summary = desktop_summary(&other);

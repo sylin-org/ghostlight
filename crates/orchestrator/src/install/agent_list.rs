@@ -116,8 +116,7 @@ impl Platform {
         let roots = harness_roots(&home, xdg_config_home, app_data, codex_home, windows);
         HarnessContext {
             home,
-            config: roots.config,
-            roaming: roots.roaming,
+            config_root: roots.config_root,
             codex_config: roots.codex_config,
             claude_config_dir: overrides
                 .then(|| PathBuf::from(self.variable(CLAUDE_CONFIG_VARIABLE))),
@@ -149,7 +148,7 @@ impl Platform {
     /// Where the configuration root is when its variable is not set.
     fn unset_config(self) -> String {
         let roots = harness_roots(&self.home(), None, None, None, self.windows());
-        self.shown(&roots.config)
+        self.shown(&roots.config_root)
     }
 }
 

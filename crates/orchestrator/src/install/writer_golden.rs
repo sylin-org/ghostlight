@@ -409,7 +409,7 @@ impl Run {
                 app: CONTAINER_APP.into(),
             },
             roots: vec![
-                roots.roaming.clone(),
+                roots.config_root.clone(),
                 local_app_data
                     .clone()
                     .expect("the container runs on Windows"),
@@ -417,8 +417,7 @@ impl Run {
         });
         let context = HarnessContext {
             home,
-            config: roots.config,
-            roaming: roots.roaming,
+            config_root: roots.config_root,
             codex_config: roots.codex_config,
             claude_config_dir: None,
             crush_config: None,
