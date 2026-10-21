@@ -6,19 +6,18 @@ Machine: test-03 (Alpine). Paths without a crate are under `crates/orchestrator/
 
 ## RESUME HERE
 
-arch-1's W-D4 (eac543ea) and W-D5 (39b7fe8f) landed first. Every test of `work/` and `workspace/`
-is classified (the plan below, read-only, 2026-10-21): 373 tests to 55, plus the P3 reserve test.
-Cut order: the inline modules, then `work/tests/` file by file (golden, channels, provenance,
-audit_health, credentials, controls, control, configured_authority, catalog_authority, documents,
-presentation, composition, findings, replacement, restarts, availability, protocol4, rebound,
-tabs), then `workspace/tests.rs`, then `execution.rs`. A test that folds into another file's test is
-added there in the commit that deletes it. `governance/` moved to the language lane on 2026-10-21.
+Closed 2026-10-21. `work/` and `workspace/` went from 373 tests to 57: the budget of 55 plus the
+two reserve tests (presentation P3, and be54ad44's stopped-recording row, now in execution.rs's
+recording test). Every kept test says what it protects. Three fixed sleeps went (restarts'
+`reconnect_soon`, availability's `attach_later` and its own-profile thread, `acquire_until`'s
+20 ms); the waits are now driven by the call. The gaps listed under the plan stay open for the
+reserve or other lanes. `governance/` moved to the language lane on 2026-10-21.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 373 | 55 | 146 |
+| `work/` and `workspace/` | 373 | 55 | 57 (55 and 2 reserve) |
 | `governance/` | 136 | 40 | moved to the language lane (2026-10-21) |
 
 ## Slices
@@ -45,7 +44,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | W14 | `tests/protocol4.rs`: 28 tests are four (a failure's true effect; dialogs; a fill's answer, holding the language lane's two K13 rows; what the service asks the page), each old test a scoped block with its assertions unchanged | 251 | 227 | contract 1, promise 3 (ADR-0158 5; c2df20e2, 925d573c, 3e80fb91, 8256f32d) | landed (0cf15f1e) |
 | W15 | `tests/rebound.rs`: nine tests are one, each a scoped block | 227 | 219 | promise 1 (ADR-0198 D17; 3466718c, 259241ad) | landed (3a7cccf8) |
 | W16 | `tests/tabs.rs`: 33 tests and configured_authority's b9c2da60 landing test are six (reuse, group title, same-document route, which tab a call means, a held tab's landing decision, a close on its own), each old test a scoped block; the ownership refusal sits in the which-tab test rather than K13 | 219 | 191 | promise 6 (BJ 2, 25; Ext 8; Exec 6; Gov 9, 14; ADR-0196 D9; ADR-0203 D2.4, D5.5) | landed (c4b22f1d) |
-| W17 | `workspace/tests.rs`: 50 tests are five (a busy workspace waits; a session outlives its connections; one handle per control per document; a binding across a gap is pending and inert, the store half of restarts.rs, kept here because its helpers are the store's; a tab let go of is reused only as kept and a closed one leaves nothing), each a scoped block; `acquire_until`'s 20 ms sleep goes, either order must acquire | 191 | 146 | promise 5 (ADR-0106; Contract 19; ADR-0203 D1; c78d4bd3, 10fc554a, d80b64c3, 7bd0bf20) | landed |
+| W17 | `workspace/tests.rs`: 50 tests are five (a busy workspace waits; a session outlives its connections; one handle per control per document; a binding across a gap is pending and inert, the store half of restarts.rs, kept here because its helpers are the store's; a tab let go of is reused only as kept and a closed one leaves nothing), each a scoped block; `acquire_until`'s 20 ms sleep goes, either order must acquire | 191 | 146 | promise 5 (ADR-0106; Contract 19; ADR-0203 D1; c78d4bd3, 10fc554a, d80b64c3, 7bd0bf20) | landed (30c58fa3) |
+| W18 | `tests/execution.rs`: 96 tests and documents.rs's preparation test are fourteen, each old test a scoped block (typed refusal and true effect; deadline advice; unconfirmed expectations; one executor and receipt; a flow under on_error; stale handles; open, read and close; view handles; waits with Bounded preparation; recording with the be54ad44 row; session isolation; a clean audit; refusals that change nothing; dialogs, K15, kept here because its helpers are here); `composition.rs`'s five and `reading.rs`'s one inline test go into the flow test | 146 | 57 | 14 (Exec 1, 3-6, 8; BJ 1, 5, 17-18, 24; Gov 9, 10, 15-17; ADR-0195; ADR-0203) | landed |
 
 ## Notes
 

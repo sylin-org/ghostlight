@@ -1,5 +1,5 @@
 //! Documents at the application boundary: content and effects come only from admitted documents
-//! (ADR-0158), and optional preparation stays within its budget (ADR-0195).
+//! (ADR-0158).
 
 use super::*;
 use crate::browser::adapter::documents::{DocumentInventory, PhysicalDocument};
@@ -64,7 +64,7 @@ pub(super) fn open(executor: &ApplicationExecutor, browser: &FakeBrowser, worksp
     );
 }
 
-fn captured_image() -> BrowserOutcome {
+pub(super) fn captured_image() -> BrowserOutcome {
     BrowserOutcome::Screenshot {
         tab_id: 7,
         mime_type: "image/jpeg".into(),
@@ -85,77 +85,6 @@ fn captured_image() -> BrowserOutcome {
             zoom: 1.0,
             output_scale: 1.0,
         },
-    }
-}
-
-/// ACCEPTANCE Bounded preparation (ADR-0195; 2513f862): a call spends at most 1000 ms on
-/// optional preparation, and opting out spends none. A targeted click's lookup and action share
-/// one budget, and a screenshot under a short deadline keeps half of it for the capture. Folds
-/// into `tests/execution.rs`'s waits test when that file is cut.
-#[test]
-fn optional_preparation_stays_within_its_budget_and_opting_out_spends_none() {
-    for enabled in [true, false] {
-        let (executor, browser, _, workspace, _) = fixture();
-        open(&executor, &browser, &workspace);
-        browser.push(Ok(BrowserOutcome::targets(
-            7,
-            vec![ObservedTarget {
-                locator: "0:doc_top:locator_button".into(),
-                role: "button".into(),
-                name: "Save".into(),
-                state: vec![],
-                credential_class: false,
-                ..Default::default()
-            }],
-        )));
-        browser.push(Ok(BrowserOutcome::Activated {
-            tab: tab(7, "https://example.com/"),
-            subject: None,
-            committed_urls: vec![],
-        }));
-        let result = executor.execute(
-            &workspace,
-            "browser_click",
-            json!({"selector":{"name":"Save","exact":true},"visual_settle":enabled}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-        let scopes = browser.scopes();
-        assert_eq!(scopes.len(), 2);
-        assert!(scopes[0].settle_ms <= 1000);
-        assert_eq!(scopes[0].settle_ms > 0, enabled);
-        assert_eq!(
-            scopes[1].settle_ms, 0,
-            "the action shares the lookup's budget"
-        );
-        assert!(scopes.iter().all(|scope| scope.settle_requested == enabled));
-    }
-    for (arguments, settles) in [
-        (json!({"timeout_ms":600}), true),
-        (json!({"timeout_ms":600,"visual_settle":false}), false),
-        (json!({}), true),
-    ] {
-        let (executor, browser, _, workspace, _) = fixture();
-        open(&executor, &browser, &workspace);
-        browser.push(Ok(captured_image()));
-        let result = executor.execute(
-            &workspace,
-            "browser_screenshot",
-            arguments.clone(),
-            &CancellationToken::default(),
-        );
-        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
-        let sent = browser
-            .calls()
-            .into_iter()
-            .find_map(|call| match call {
-                BrowserCommand::Screenshot { settle_ms, .. } => Some(settle_ms),
-                _ => None,
-            })
-            .expect("a capture was sent");
-        let ceiling = arguments["timeout_ms"].as_u64().map_or(1_000, |ms| ms / 2);
-        assert!(sent <= ceiling, "{arguments}: {sent} ms of settle");
-        assert_eq!(sent > 0, settles, "{arguments}");
     }
 }
 
