@@ -19,6 +19,7 @@ use crate::browser::adapter::{
 };
 use crate::browser::{lock, BrowserDispatch, BrowserError, BrowserPort, RelayBrowserPort};
 use crate::governance::ReasonCode;
+use crate::language::outcome::PrimitiveCause;
 use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
@@ -392,7 +393,7 @@ fn a_history_direction_other_than_back_or_forward_sends_nothing() {
             direction: "sideways".into(),
         },
     );
-    assert!(matches!(result, Err(BrowserError::Primitive(_))));
+    assert!(matches!(result, Err(BrowserError::Primitive { .. })));
     assert_eq!(
         call(&port, BrowserCommand::ListTabs),
         Ok(BrowserOutcome::Tabs { tabs: vec![] })
@@ -413,7 +414,7 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
         (
             wire::Failure::TabMissing,
             Some("No tab with id: 99."),
-            BrowserError::Primitive("browser tab is missing".into()),
+            BrowserError::primitive("browser tab is missing"),
         ),
         (
             wire::Failure::DocumentChanged,
@@ -433,13 +434,32 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
         (
             wire::Failure::DebuggerUnavailable,
             Some("Cannot attach to this page."),
-            BrowserError::Primitive("Cannot attach to this page.".into()),
+            BrowserError::Primitive {
+                detail: "Cannot attach to this page.".into(),
+                cause: PrimitiveCause::DebuggerUnavailable,
+            },
         ),
         (
-            wire::Failure::Other,
-            None,
-            BrowserError::Primitive("other".into()),
+            wire::Failure::SessionLost,
+            Some("Debugger is not attached to the tab with id: 99."),
+            BrowserError::Primitive {
+                detail: "Debugger is not attached to the tab with id: 99.".into(),
+                cause: PrimitiveCause::SessionLost,
+            },
         ),
+        (
+            wire::Failure::CaptureTooLarge,
+            Some("No quality in the budget fits the size limit."),
+            BrowserError::CaptureTooLarge {
+                detail: "No quality in the budget fits the size limit.".into(),
+            },
+        ),
+        (
+            wire::Failure::BrowserRefused,
+            Some("Zoom level is out of range."),
+            BrowserError::primitive("Zoom level is out of range."),
+        ),
+        (wire::Failure::Other, None, BrowserError::primitive("other")),
         (
             wire::Failure::Unsupported,
             None,

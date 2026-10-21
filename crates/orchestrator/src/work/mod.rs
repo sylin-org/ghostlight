@@ -2647,13 +2647,15 @@ fn routing_refusal(
             Refusal::BrowserPinned,
             json!({"reason":BROWSER_PINNED_FACT}),
         )),
-        BrowserError::Primitive(detail) => Some((
-            Refusal::BrowserPrimitive {
-                detail: detail.clone(),
-                cause: PrimitiveCause::Refused,
-            },
-            json!({"reason":"browser_primitive_failed","detail":detail}),
-        )),
+        BrowserError::Primitive { detail, .. } | BrowserError::CaptureTooLarge { detail } => {
+            Some((
+                Refusal::BrowserPrimitive {
+                    detail: detail.clone(),
+                    cause: PrimitiveCause::Refused,
+                },
+                json!({"reason":"browser_primitive_failed","detail":detail}),
+            ))
+        }
         BrowserError::RecoveryManual { browsers } => Some((
             Refusal::BrowserStartupManual {
                 browsers: browsers.clone(),
@@ -2915,7 +2917,8 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         | BrowserError::AmbiguousBrowser(_)
         | BrowserError::RecoveryManual { .. }
         | BrowserError::RecoveryFailed { .. } => (CheckFailure::BrowserUnavailable, admitted),
-        BrowserError::Primitive(_)
+        BrowserError::Primitive { .. }
+        | BrowserError::CaptureTooLarge { .. }
         | BrowserError::PageRefused(_)
         | BrowserError::StaleLocator { .. }
         | BrowserError::FieldsRejected { .. }
@@ -3229,7 +3232,9 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::WrongProfile => "browser_wrong_profile",
         BrowserError::CancelledBeforeDispatch => "cancelled",
         BrowserError::DeadlineBeforeDispatch => "deadline",
-        BrowserError::Primitive(_) => "browser_primitive_failed",
+        BrowserError::Primitive { .. } | BrowserError::CaptureTooLarge { .. } => {
+            "browser_primitive_failed"
+        }
         BrowserError::PageRefused(refusal) => refusal.as_str(),
         BrowserError::FieldsRejected { .. } => "field_value_rejected",
         BrowserError::DialogOpen => "dialog_open",

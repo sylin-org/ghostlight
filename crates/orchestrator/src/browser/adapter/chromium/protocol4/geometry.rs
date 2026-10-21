@@ -54,7 +54,7 @@ pub enum GeometryError {
 
 impl From<GeometryError> for BrowserError {
     fn from(error: GeometryError) -> Self {
-        Self::Primitive(error.to_string())
+        Self::primitive(error.to_string())
     }
 }
 

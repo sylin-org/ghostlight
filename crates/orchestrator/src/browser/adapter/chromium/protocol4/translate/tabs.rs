@@ -140,7 +140,7 @@ pub fn traverse_history(
     let to = match direction {
         direction::BACK => wire::NavigationTarget::Back,
         direction::FORWARD => wire::NavigationTarget::Forward,
-        _ => return Err(BrowserError::Primitive(UNKNOWN_DIRECTION.into())),
+        _ => return Err(BrowserError::primitive(UNKNOWN_DIRECTION)),
     };
     navigate(l, tab_id, to, false)
 }

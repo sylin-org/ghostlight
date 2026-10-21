@@ -525,7 +525,7 @@ fn a_point_that_zero_or_several_owners_claim_is_unresolved_and_sends_nothing() {
         let (port, fake) = rig(owners, view());
         assert_eq!(
             call(&port, scoped(without_c(), click_at(OVER_E))),
-            Err(BrowserError::Primitive(UNRESOLVED.into())),
+            Err(BrowserError::primitive(UNRESOLVED)),
             "an embed no single owner claims is never guessed"
         );
         assert!(inputs_seen(&fake).is_empty());
@@ -716,7 +716,7 @@ fn a_drag_point_outside_the_viewport_is_a_plain_failure() {
         scoped(all_open(), drag_points((150.0, 50.0), OVER_E)),
     )
     .unwrap_err();
-    assert_eq!(error, BrowserError::Primitive("outside_viewport".into()));
+    assert_eq!(error, BrowserError::primitive("outside_viewport"));
     assert!(inputs_seen(&fake).is_empty());
 }
 

@@ -68,7 +68,7 @@ pub fn group_by_document(fields: &[PhysicalField]) -> Result<Vec<Group>, Browser
     let mut groups: Vec<Group> = Vec::new();
     for (position, field) in fields.iter().enumerate() {
         let target = Locator::decode(&field.locator)
-            .map_err(|_| BrowserError::Primitive(NOT_FRAME_SCOPED.into()))?;
+            .map_err(|_| BrowserError::primitive(NOT_FRAME_SCOPED))?;
         let local = PhysicalField {
             locator: target.local,
             value: field.value.clone(),
@@ -108,14 +108,14 @@ pub fn field_kinds(
                     .ok()
                     .map(|plan| plan.field_kinds)
                     .filter(|kinds| kinds.len() == group.fields.len())
-                    .ok_or_else(|| BrowserError::Primitive(INVALID_PLAN.into()))?,
+                    .ok_or_else(|| BrowserError::primitive(INVALID_PLAN))?,
             ),
             Err(BrowserError::FieldsRejected { problems }) => {
                 for mut problem in problems {
                     let position = group.positions.get(problem.field).copied();
                     match position {
                         Some(position) => problem.field = position,
-                        None => return Err(BrowserError::Primitive(INVALID_PLAN.into())),
+                        None => return Err(BrowserError::primitive(INVALID_PLAN)),
                     }
                     rejected.push(problem);
                 }
@@ -154,7 +154,7 @@ pub fn fill(
         .as_ref()
         .is_some_and(|target| !groups.iter().any(|group| group.doc == target.doc))
     {
-        return Err(BrowserError::Primitive(ORPHAN_SUBMIT.into()));
+        return Err(BrowserError::primitive(ORPHAN_SUBMIT));
     }
     let tab_id = request.tab_id;
 
@@ -200,7 +200,7 @@ pub fn fill(
                     let text = field
                         .value
                         .text()
-                        .ok_or_else(|| BrowserError::Primitive(INVALID_PLAN.into()))?;
+                        .ok_or_else(|| BrowserError::primitive(INVALID_PLAN))?;
                     let input = input_for(
                         l,
                         tab_id,
@@ -285,7 +285,7 @@ fn verified(
                 .positions
                 .get(local)
                 .copied()
-                .ok_or_else(|| BrowserError::Primitive(INVALID_VERIFICATION.into()))
+                .ok_or_else(|| BrowserError::primitive(INVALID_VERIFICATION))
         };
         match value::<FillVerified>(answer) {
             Ok(verified) => {
@@ -349,7 +349,7 @@ fn flush(
 /// after one.
 fn require_budget(l: &Link<'_>, budget: Instant) -> Result<(), BrowserError> {
     if Instant::now() >= budget {
-        return Err(l.settle(BrowserError::Primitive(BUDGET_EXHAUSTED.into())));
+        return Err(l.settle(BrowserError::primitive(BUDGET_EXHAUSTED)));
     }
     Ok(())
 }

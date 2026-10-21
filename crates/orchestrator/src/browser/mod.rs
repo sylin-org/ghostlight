@@ -1385,9 +1385,17 @@ pub enum BrowserError {
     /// Deadline expired after dispatch.
     #[error("deadline expired after dispatch")]
     DeadlineAfterDispatch,
-    /// Adapter decisively rejected a primitive without an effect.
-    #[error("browser primitive failed: {0}")]
-    Primitive(String),
+    /// Adapter decisively rejected a primitive without an effect. `cause` is the closed kind of
+    /// the refusal the receipt named; `detail` keeps the browser's or the adapter's own words.
+    #[error("browser primitive failed: {detail}")]
+    Primitive {
+        detail: String,
+        cause: crate::language::outcome::PrimitiveCause,
+    },
+    /// No capture in the budget fitted its size limit. Raised before any effect; `detail` keeps
+    /// the browser's words.
+    #[error("no capture fitted its size limit: {detail}")]
+    CaptureTooLarge { detail: String },
     /// The page refused the call's control before acting on it: it is hidden, disabled,
     /// read-only or takes no text. Raised before any effect.
     #[error("the page refused the target: {}", .0.as_str())]
@@ -1485,6 +1493,15 @@ pub enum BrowserError {
 }
 
 impl BrowserError {
+    /// A primitive the adapter or the browser refused in words of its own.
+    #[must_use]
+    pub fn primitive(detail: impl Into<String>) -> Self {
+        Self::Primitive {
+            detail: detail.into(),
+            cause: crate::language::outcome::PrimitiveCause::Refused,
+        }
+    }
+
     /// A stale locator for a reason, with nothing found by looking again.
     #[must_use]
     pub const fn stale(reason: crate::workspace::StaleReason) -> Self {
@@ -1744,7 +1761,7 @@ pub(crate) mod testing {
                 outcome: result,
                 written,
             } = lock(&self.outcomes).pop_front().unwrap_or_else(|| Queued {
-                outcome: Err(BrowserError::Primitive("no fake outcome".into())),
+                outcome: Err(BrowserError::primitive("no fake outcome")),
                 written: true,
             });
             if let Ok(

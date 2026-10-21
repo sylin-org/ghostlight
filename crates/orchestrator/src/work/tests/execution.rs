@@ -10,11 +10,10 @@ use crate::browser::adapter::{
 /// detail, instead of falling through to the browser-stopped rendering.
 #[test]
 fn primitive_adapter_errors_route_to_an_honest_refusal_with_detail() {
-    let (refusal, facts) =
-        routing_refusal(&BrowserError::Primitive("no such frame".into()), || {
-            ExtensionAdvice::Plain
-        })
-        .expect("primitive errors route to a refusal");
+    let (refusal, facts) = routing_refusal(&BrowserError::primitive("no such frame"), || {
+        ExtensionAdvice::Plain
+    })
+    .expect("primitive errors route to a refusal");
     let crate::language::outcome::Refusal::BrowserPrimitive { detail, .. } = refusal else {
         panic!("primitive errors must route to BrowserPrimitive");
     };
@@ -39,7 +38,7 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
         ("cancelled_after", BrowserError::CancelledAfterDispatch),
         ("deadline_before", BrowserError::DeadlineBeforeDispatch),
         ("deadline_after", BrowserError::DeadlineAfterDispatch),
-        ("primitive", BrowserError::Primitive("x".into())),
+        ("primitive", BrowserError::primitive("x")),
         ("stale_view", BrowserError::StaleView),
         ("stale_locator", BrowserError::stale(StaleReason::Removed)),
         ("interlock", BrowserError::LocalInterlock("x".into())),
@@ -659,9 +658,7 @@ fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
 #[test]
 fn audit_excludes_primitive_exception_text_and_unknown_tool_names() {
     let (executor, browser, _, workspace, audit) = fixture();
-    browser.push(Err(BrowserError::Primitive(
-        "PRIVATE_EXCEPTION_SENTINEL".into(),
-    )));
+    browser.push(Err(BrowserError::primitive("PRIVATE_EXCEPTION_SENTINEL")));
     let result = executor.execute(
         &workspace,
         "browser_navigate",
@@ -894,8 +891,8 @@ fn audit_records_carry_refusal_facts_for_failures_and_omit_them_for_successes() 
     let (executor, browser, _workspaces, workspace, audit) = fixture();
     browser.connect(vec![summary("browser_chrome", true)]);
 
-    browser.push(Err(BrowserError::Primitive(
-        "target is not visible for focus".into(),
+    browser.push(Err(BrowserError::primitive(
+        "target is not visible for focus",
     )));
     let _ = executor.execute(
         &workspace,
@@ -1302,7 +1299,7 @@ fn read_only_compositions_are_repeat_safe_only_when_fully_successful() {
     for fail_last in [false, true] {
         for index in 0..2 {
             browser.push(if fail_last && index == 1 {
-                Err(BrowserError::Primitive("PRIVATE_ERROR".into()))
+                Err(BrowserError::primitive("PRIVATE_ERROR"))
             } else {
                 Ok(BrowserOutcome::Text {
                     tab_id: 7,
@@ -2826,7 +2823,7 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
             browser.push(Err(if unknown {
                 BrowserError::DisconnectedAfterDispatch
             } else {
-                BrowserError::Primitive("PRIVATE_WAIT_FAILURE".into())
+                BrowserError::primitive("PRIVATE_WAIT_FAILURE")
             }));
             let before = browser.calls().len();
             let mut arguments = json!({"steps":[

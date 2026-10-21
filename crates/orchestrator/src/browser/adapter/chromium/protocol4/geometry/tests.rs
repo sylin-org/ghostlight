@@ -133,7 +133,7 @@ fn region_geometry_rejects_negative_and_empty_rectangles() {
 fn a_geometry_error_is_a_plain_primitive_failure() {
     let error = BrowserError::from(GeometryError::NotPositive("width"));
     assert!(
-        matches!(&error, BrowserError::Primitive(message) if message == "width must be positive")
+        matches!(&error, BrowserError::Primitive { detail: message, .. } if message == "width must be positive")
     );
 }
 

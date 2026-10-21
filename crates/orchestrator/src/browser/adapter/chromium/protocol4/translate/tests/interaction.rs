@@ -586,7 +586,7 @@ fn a_lost_focus_refuses_the_key_press_with_nothing_sent() {
     let mut bound = all_open();
     bound.subjects = vec!["C.c1".into()];
     let error = call(&port, scoped(bound, press(None, "Tab", &[]))).unwrap_err();
-    assert_eq!(error, BrowserError::Primitive("focus_lost".into()));
+    assert_eq!(error, BrowserError::primitive("focus_lost"));
 }
 
 #[test]
@@ -612,7 +612,7 @@ fn a_focus_that_moved_refuses_the_text_with_nothing_sent() {
         precondition_refused("no_focused_control"),
     );
     let error = call(&port, scoped(all_open(), type_focused(false))).unwrap_err();
-    assert_eq!(error, BrowserError::Primitive("no_focused_control".into()));
+    assert_eq!(error, BrowserError::primitive("no_focused_control"));
 }
 
 /// Typing into the focused control with the focus held by `holders`, each answering its
@@ -694,7 +694,7 @@ fn typing_into_the_focused_control_without_clearing_sends_only_the_text() {
 fn typing_with_no_focused_text_control_fails_before_anything_is_sent() {
     let (port, fake) = rig(focus_held_by(&[]), finished);
     let error = call(&port, scoped(all_open(), type_focused(true))).unwrap_err();
-    assert_eq!(error, BrowserError::Primitive("no_focused_control".into()));
+    assert_eq!(error, BrowserError::primitive("no_focused_control"));
     assert!(inputs_seen(&fake).is_empty());
     assert_eq!(calls_seen(&fake).len(), 1, "nothing was cleared");
 }

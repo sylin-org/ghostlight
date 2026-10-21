@@ -26,6 +26,7 @@ use super::wire::{self, PrimitiveName};
 use super::world::{self, EffectClass};
 use crate::browser::transport::{SocketWriter, DELIVERY_TIMEOUT};
 use crate::browser::{lock, BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
+use crate::language::outcome::PrimitiveCause;
 use crate::workspace::StaleReason;
 
 /// How long a cancelled primitive may take to report what it did.
@@ -547,7 +548,7 @@ impl<'a> Link<'a> {
         })
         .map_err(|error| self.settle(BrowserError::Protocol(error.to_string())))?;
         if payload.len() > wire::TRANSFER_MAX_BYTES {
-            return Err(self.settle(BrowserError::Primitive(format!(
+            return Err(self.settle(BrowserError::primitive(format!(
                 "browser request exceeds the {}-byte transfer bound",
                 wire::TRANSFER_MAX_BYTES
             ))));
@@ -666,7 +667,7 @@ impl<'a> Link<'a> {
             .tabs
             .into_iter()
             .find(|tab| tab.tab_id == tab_id)
-            .ok_or_else(|| self.settle(BrowserError::Primitive(TAB_MISSING.into())))
+            .ok_or_else(|| self.settle(BrowserError::primitive(TAB_MISSING)))
     }
 
     /// Write one presentation notice. Nothing answers it.
@@ -811,18 +812,25 @@ impl<'a> Link<'a> {
             wire::Failure::DocumentChanged => BrowserError::DocumentUnavailable,
             wire::Failure::Cancelled => BrowserError::CancelledBeforeDispatch,
             wire::Failure::Timeout => BrowserError::DeadlineBeforeDispatch,
-            wire::Failure::TabMissing => BrowserError::Primitive(TAB_MISSING.into()),
+            wire::Failure::TabMissing => BrowserError::primitive(TAB_MISSING),
             wire::Failure::DialogOpen => BrowserError::DialogOpen,
             wire::Failure::NoHistoryEntry => BrowserError::NoHistoryEntry,
             wire::Failure::Unsupported => BrowserError::Unsupported {
                 primitive: P::NAME.as_str().into(),
             },
             wire::Failure::InvalidRequest => BrowserError::Protocol(message),
-            wire::Failure::DebuggerUnavailable
-            | wire::Failure::BrowserRefused
-            | wire::Failure::CaptureTooLarge
-            | wire::Failure::SessionLost
-            | wire::Failure::Other => BrowserError::Primitive(message),
+            wire::Failure::DebuggerUnavailable => BrowserError::Primitive {
+                detail: message,
+                cause: PrimitiveCause::DebuggerUnavailable,
+            },
+            wire::Failure::SessionLost => BrowserError::Primitive {
+                detail: message,
+                cause: PrimitiveCause::SessionLost,
+            },
+            wire::Failure::CaptureTooLarge => BrowserError::CaptureTooLarge { detail: message },
+            wire::Failure::BrowserRefused | wire::Failure::Other => {
+                BrowserError::primitive(message)
+            }
         }
     }
 
@@ -838,7 +846,9 @@ impl<'a> Link<'a> {
             BrowserError::DeadlineBeforeDispatch => BrowserError::DeadlineAfterDispatch,
             BrowserError::DisconnectedBeforeDispatch => BrowserError::DisconnectedAfterDispatch,
             BrowserError::RuntimeControl(_) => BrowserError::EffectUnknown(HELD_MID_ACTION.into()),
-            BrowserError::Primitive(message)
+            BrowserError::Primitive {
+                detail: message, ..
+            }
             | BrowserError::LocalInterlock(message)
             | BrowserError::Protocol(message) => BrowserError::EffectUnknown(message),
             BrowserError::PageRefused(refusal) => {

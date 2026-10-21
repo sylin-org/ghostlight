@@ -93,7 +93,7 @@ pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError
                 },
                 None => match error.code.page_refusal() {
                     Some(refusal) => BrowserError::PageRefused(refusal),
-                    None => BrowserError::Primitive(if error.message.is_empty() {
+                    None => BrowserError::primitive(if error.message.is_empty() {
                         wire_name(&error.code)
                     } else {
                         error.message
@@ -111,13 +111,13 @@ pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError
             ..
         } => Err(BrowserError::DialogOpen),
         CallAnswer::Failed { code, message, .. } => {
-            Err(BrowserError::Primitive(if message.is_empty() {
+            Err(BrowserError::primitive(if message.is_empty() {
                 wire_name(code)
             } else {
                 message.clone()
             }))
         }
-        CallAnswer::Skipped => Err(BrowserError::Primitive(CALL_SKIPPED.into())),
+        CallAnswer::Skipped => Err(BrowserError::primitive(CALL_SKIPPED)),
         CallAnswer::Unknown => Err(BrowserError::Protocol(CALL_UNKNOWN.into())),
     }
 }
@@ -350,7 +350,7 @@ pub fn route_and_admit(
     point: Point,
 ) -> Result<Routed, BrowserError> {
     let routed = route(l, scope.tree(), tab_id, point, false)?
-        .ok_or_else(|| BrowserError::Primitive(UNRESOLVED_POINT.into()))?;
+        .ok_or_else(|| BrowserError::primitive(UNRESOLVED_POINT))?;
     scope.admit_input_subject(&routed.doc)?;
     Ok(routed)
 }

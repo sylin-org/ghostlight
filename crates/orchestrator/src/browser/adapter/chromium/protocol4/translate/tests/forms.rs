@@ -616,7 +616,7 @@ fn a_submit_outside_the_fields_documents_is_refused_before_anything_is_sent() {
     );
     assert_eq!(
         call(&port, scoped(all_open(), command)).unwrap_err(),
-        BrowserError::Primitive("submit control is not contained in the resolved form".into())
+        BrowserError::primitive("submit control is not contained in the resolved form")
     );
     assert!(fake.wait(|_| true).requests.is_empty());
 }
@@ -633,7 +633,7 @@ fn malformed_locators_are_plain_failures_before_anything_is_sent() {
             )
         )
         .unwrap_err(),
-        BrowserError::Primitive("field target is not frame-scoped".into())
+        BrowserError::primitive("field target is not frame-scoped")
     );
     assert_eq!(
         call(
@@ -676,7 +676,7 @@ fn a_plan_without_one_kind_per_field_is_refused_before_any_edit() {
     .unwrap_err();
     assert_eq!(
         error,
-        BrowserError::Primitive("content primitive returned an invalid fill plan".into())
+        BrowserError::primitive("content primitive returned an invalid fill plan")
     );
     assert_eq!(primitives_order(&fake), ["call"]);
 }
@@ -753,7 +753,7 @@ fn a_problem_for_a_place_the_document_does_not_have_is_an_invalid_plan() {
     .unwrap_err();
     assert_eq!(
         error,
-        BrowserError::Primitive("content primitive returned an invalid fill plan".into())
+        BrowserError::primitive("content primitive returned an invalid fill plan")
     );
 }
 
