@@ -297,33 +297,13 @@ mod tests {
         fs::write(path, b"").unwrap();
     }
 
+    /// How a connection's source is named (ADR-0161, amendment of 2026-10-18): an agent's app is
+    /// where the catalog says it is installed, never a file name. A program below a known folder
+    /// makes that whole folder the app's; a command names its one file, not the folder it shares; a
+    /// Store app is where Windows installed its package, in any case or verbatim spelling; and a
+    /// Linux desktop entry names the program it starts, never a shared launcher such as `flatpak`.
     #[test]
-    fn wrappers_are_named_by_their_stem_whatever_the_suffix_case_or_version() {
-        for wrapper in [
-            "/usr/bin/bash",
-            "/usr/bin/python3.12",
-            r"C:\Windows\System32\cmd.exe",
-            r"C:\Program Files\PowerShell\7\pwsh.EXE",
-            r"C:\Windows\System32\conhost.exe",
-            r"C:\Windows\System32\timeout.exe",
-            r"C:\Program Files\nodejs\node.exe",
-            "/home/ann/.ghostlight/bin/ghostlight",
-            r"C:\Users\ann\.ghostlight\bin\ghostlight-service.exe",
-        ] {
-            assert!(is_wrapper(Path::new(wrapper)), "{wrapper}");
-        }
-        for app in [
-            r"C:\Program Files\WindowsApps\Claude_1.0.0.0_x64__pzs8sxrjxfjjc\app\claude.exe",
-            "/usr/share/code/code",
-            r"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe",
-            "/usr/bin/gnome-terminal-server",
-        ] {
-            assert!(!is_wrapper(Path::new(app)), "{app}");
-        }
-    }
-
-    #[test]
-    fn a_program_below_a_known_folder_names_its_whole_folder_and_a_command_names_one_file() {
+    fn an_agents_app_is_where_the_catalog_says_it_is_installed() {
         let scratch = Scratch::named("app-locations");
         let local = scratch.path().join("local");
         let bin = scratch.path().join("bin");
@@ -362,10 +342,7 @@ mod tests {
             "a command names its file, not the folder it shares"
         );
         assert_eq!(apps.agent_of(&local.join("Programs/zed/Zed.exe")), None);
-    }
 
-    #[test]
-    fn a_store_app_is_recognized_by_where_its_package_is_installed_not_by_its_file_name() {
         let scratch = Scratch::named("app-locations-store");
         let local = scratch.path().join("local");
         fs::create_dir_all(local.join("Packages/Claude_pzs8sxrjxfjjc")).unwrap();
@@ -401,10 +378,7 @@ mod tests {
             None,
             "the same file name elsewhere is not the app"
         );
-    }
 
-    #[test]
-    fn a_linux_desktop_entry_names_the_program_it_starts_and_never_a_shared_launcher() {
         let scratch = Scratch::named("app-locations-linux");
         let share = scratch.path().join("share");
         let code = scratch.path().join("opt/code/code");
