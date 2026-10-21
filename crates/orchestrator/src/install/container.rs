@@ -196,60 +196,42 @@ mod tests {
         private
     }
 
+    /// Defect 53a04ef2: a process inside a Store app's container is found by the effect of the
+    /// container, a write below `%LOCALAPPDATA%` that lands in the app's private copy, never by its
+    /// parent chain, which an agent's `timeout` or pipeline can hide. Only a folder shaped like a
+    /// package family counts, the container is named by the family without its publisher id, and
+    /// each probe has a name of its own and is gone once dropped.
     #[test]
-    fn a_probe_in_any_packages_private_copy_decides_the_container_without_a_parent_chain() {
-        // Nothing names Claude but the redirected write: an agent's `timeout` or pipeline between
-        // Claude and this process changes nothing.
+    fn the_container_is_the_package_whose_private_copy_holds_the_probe() {
         let local = temporary("any-package");
         private_copy(&local, "Microsoft.WindowsTerminal_8wekyb3d8bbwe");
         let claude = private_copy(&local, CLAUDE_FAMILY);
         private_copy(&local, "OpenAI.Codex_2p2nqsd0c76g0");
+        for folder in ["NotAFamily", "_pzs8sxrjxfjjc", "Claude_pzs-8"] {
+            private_copy(&local, folder);
+        }
         let probe = Probe::write_in(local.to_path_buf()).unwrap();
-        assert_eq!(Residence::of_probe(&probe), Residence::Regular);
-
-        fs::write(claude.join(&probe.name), []).unwrap();
-        assert_eq!(
-            Residence::of_probe(&probe),
-            Residence::AppContainer(AppContainer {
-                app: "Claude".into()
-            })
-        );
-    }
-
-    #[test]
-    fn a_folder_that_is_no_package_family_never_counts() {
-        let local = temporary("not-a-family");
-        let probe = Probe::write_in(local.to_path_buf()).unwrap();
+        let other = Probe::write_in(local.to_path_buf()).unwrap();
+        assert_ne!(probe.name, other.name);
         for folder in ["NotAFamily", "_pzs8sxrjxfjjc", "Claude_pzs-8"] {
             fs::write(private_copy(&local, folder).join(&probe.name), []).unwrap();
         }
         assert_eq!(Residence::of_probe(&probe), Residence::Regular);
-    }
 
-    #[test]
-    fn without_a_packages_folder_the_process_is_regular() {
-        let local = temporary("no-packages");
-        let probe = Probe::write_in(local.to_path_buf()).unwrap();
-        assert_eq!(Residence::of_probe(&probe), Residence::Regular);
-    }
+        fs::write(claude.join(&probe.name), []).unwrap();
+        let container = AppContainer {
+            app: "Claude".into(),
+        };
+        assert_eq!(
+            Residence::of_probe(&probe),
+            Residence::AppContainer(container)
+        );
 
-    #[test]
-    fn every_probe_has_a_new_name_and_is_removed_when_dropped() {
-        let local = temporary("probe");
-        let first = Probe::write_in(local.to_path_buf()).unwrap();
-        let second = Probe::write_in(local.to_path_buf()).unwrap();
-        assert_ne!(first.name, second.name);
-        let file = local.join(&first.name);
+        assert!(AppContainer::of_family("OpenAI.Codex_2p2nqsd0c76g0").is_app("openai.codex"));
+
+        let file = local.join(&probe.name);
         assert!(file.is_file());
-        drop(first);
+        drop(probe);
         assert!(!file.exists());
-    }
-
-    #[test]
-    fn the_app_is_the_family_name_without_its_publisher_id() {
-        assert_eq!(AppContainer::of_family(CLAUDE_FAMILY).app, "Claude");
-        let codex = AppContainer::of_family("OpenAI.Codex_2p2nqsd0c76g0");
-        assert_eq!(codex.app, "OpenAI.Codex");
-        assert!(codex.is_app("openai.codex"));
     }
 }

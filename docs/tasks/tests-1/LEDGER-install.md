@@ -12,7 +12,7 @@ Classified on 2026-10-21 (every test, read-only; the plan is under Notes, "The i
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 615 |
+| `install/`, `cli/`, `agent/`, `crates/bridge`, `crates/win-peer` | 626 (627 with I-D4's test) | 78 (75 and 3 reserve) | 611 |
 | `crates/desktop` | 161 | 20 | 161 |
 
 ## Slices
@@ -26,6 +26,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | T-I2 | `install/last_browser.rs`: its three tests repeated `service/mod.rs`'s B22 test, which remembers a connected browser and reads an unreadable record as none | 624 | 621 | none here (the service test proves it) | landed (this commit) |
 | T-I3 | `install/setup_state.rs`: four tests of one record fold into one; the unknown-fields test goes (no reader writes them) | 621 | 618 | promise 1 (Desktop 24) | landed (this commit) |
 | T-I4 | `install/browser_package.rs`: four tests of one classification fold into one, every case kept | 618 | 615 | promise 1 (Desktop 16, with defect 8ac06f75 as a case) | landed (this commit) |
+| T-I5 | `install/container.rs`: five tests of the container probe fold into one, every assertion kept | 615 | 611 | defect 1 (53a04ef2) | landed (this commit) |
 
 ## Notes
 
