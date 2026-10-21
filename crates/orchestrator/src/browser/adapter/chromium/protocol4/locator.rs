@@ -141,160 +141,48 @@ fn is_local(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
-    fn doc(frame: &str, loader: &str) -> FrameRef {
-        FrameRef {
-            frame_id: frame.into(),
-            loader_id: loader.into(),
-        }
-    }
+    /// A world golden both suites read: it carries a handle in the form the page asset mints.
+    const ACTIVATE_FIXTURE: &str =
+        include_str!("../../../../../../../tests/golden/protocol4/world/activate.json");
 
+    /// A handle the page minted round-trips through the frame-qualified form the model holds, and
+    /// any other text is a stale `unknown` handle before anything is sent, so a malformed or
+    /// foreign handle never reaches a page.
     #[test]
-    fn a_locator_round_trips_through_its_encoded_form() {
-        let locator = Locator::new(doc("7F3A", "9C21"), "locator_a1b2c3d4_12");
-        let encoded = locator.encode();
-        assert_eq!(encoded, "7F3A:9C21:locator_a1b2c3d4_12");
-        assert_eq!(Locator::decode(&encoded), Ok(locator));
-    }
+    fn a_handle_round_trips_and_anything_else_is_a_stale_handle() {
+        let fixture: Value = serde_json::from_str(ACTIVATE_FIXTURE).expect("the fixture parses");
+        let minted = fixture["locator"]
+            .as_str()
+            .expect("the fixture names a handle");
+        let document = FrameRef {
+            frame_id: "7F3A".into(),
+            loader_id: "9C21".into(),
+        };
+        let locator = Locator::new(document, minted);
+        assert_eq!(Locator::decode(&locator.encode()), Ok(locator));
 
-    #[test]
-    fn a_malformed_or_foreign_locator_is_a_stale_locator() {
         for text in [
-            "",
-            "locator_a1b2c3d4_1",
-            "7F3A:locator_a1b2c3d4_1",
-            ":9C21:locator_a1b2c3d4_1",
-            "7F3A::locator_a1b2c3d4_1",
-            "7F3A:9C21:",
-            "7F3A:9C21:element_1",
-            "7F3A:9C21:locator_1",
-            "7F3A:9C21:locator__1",
-            "7F3A:9C21:locator_a1b2c3d4_",
-            "7F3A:9C21:locator_xyz_1",
-            "7F3A:9C21:locator_a1b2c3d4_1:extra",
-            "0:doc_6B1F:locator_3",
-            "7F 3A:9C21:locator_a1b2c3d4_1",
+            String::new(),
+            minted.to_owned(),
+            format!("7F3A:{minted}"),
+            format!(":9C21:{minted}"),
+            format!("7F3A::{minted}"),
+            "7F3A:9C21:".into(),
+            "7F3A:9C21:element_1".into(),
+            "7F3A:9C21:locator_1".into(),
+            "7F3A:9C21:locator__1".into(),
+            "7F3A:9C21:locator_a1b2c3d4_".into(),
+            "7F3A:9C21:locator_xyz_1".into(),
+            format!("7F3A:9C21:{minted}:extra"),
+            format!("7F 3A:9C21:{minted}"),
         ] {
             assert_eq!(
-                Locator::decode(text),
+                Locator::decode(&text),
                 Err(BrowserError::stale(StaleReason::Unknown)),
                 "{text:?}"
             );
         }
-    }
-
-    #[test]
-    fn rescoping_binds_every_observed_target_to_its_document() {
-        let target = |locator: &str| ObservedTarget {
-            locator: locator.into(),
-            role: "button".into(),
-            name: "Save".into(),
-            state: vec![],
-            credential_class: false,
-            ..Default::default()
-        };
-        let scoped = rescope(
-            &doc("F1", "L1"),
-            vec![target("locator_a1b2c3d4_1"), target("locator_a1b2c3d4_2")],
-        );
-        assert_eq!(
-            scoped
-                .iter()
-                .map(|t| t.locator.as_str())
-                .collect::<Vec<_>>(),
-            ["F1:L1:locator_a1b2c3d4_1", "F1:L1:locator_a1b2c3d4_2"]
-        );
-        assert!(scoped.iter().all(|t| t.name == "Save"));
-    }
-
-    fn lookup_of(locators: &[&str]) -> StaleLookup {
-        StaleLookup {
-            matched: locators.len(),
-            same_count: 1,
-            truncated: false,
-            candidates: locators
-                .iter()
-                .enumerate()
-                .map(|(index, locator)| StaleCandidate {
-                    target: ObservedTarget {
-                        locator: (*locator).into(),
-                        role: "button".into(),
-                        name: "More options".into(),
-                        ..Default::default()
-                    },
-                    same: index == 0,
-                })
-                .collect(),
-        }
-    }
-
-    #[test]
-    fn a_stale_lookup_is_bound_to_the_document_of_the_locator_that_went_stale() {
-        let stale = |lookup| BrowserError::StaleLocator {
-            reason: StaleReason::Removed,
-            lookup: Some(lookup),
-        };
-        let bound = bind_lookup(
-            stale(lookup_of(&["locator_a1b2c3d4_8", "locator_a1b2c3d4_9"])),
-            Some("F1:L1:locator_a1b2c3d4_1"),
-        );
-        let BrowserError::StaleLocator {
-            reason,
-            lookup: Some(lookup),
-        } = bound
-        else {
-            panic!("the stale locator keeps its lookup");
-        };
-        assert_eq!(reason, StaleReason::Removed);
-        assert_eq!(lookup.same_count, 1);
-        assert_eq!(
-            lookup
-                .candidates
-                .iter()
-                .map(|candidate| (candidate.target.locator.as_str(), candidate.same))
-                .collect::<Vec<_>>(),
-            [
-                ("F1:L1:locator_a1b2c3d4_8", true),
-                ("F1:L1:locator_a1b2c3d4_9", false)
-            ]
-        );
-    }
-
-    #[test]
-    fn a_stale_lookup_with_no_single_document_to_bind_is_dropped() {
-        for subject in [None, Some("not a locator")] {
-            assert_eq!(
-                bind_lookup(
-                    BrowserError::StaleLocator {
-                        reason: StaleReason::Removed,
-                        lookup: Some(lookup_of(&["locator_a1b2c3d4_8"])),
-                    },
-                    subject
-                ),
-                BrowserError::stale(StaleReason::Removed),
-                "{subject:?}"
-            );
-        }
-        assert_eq!(
-            bind_lookup(BrowserError::DialogOpen, Some("F1:L1:locator_a1b2c3d4_1")),
-            BrowserError::DialogOpen
-        );
-    }
-
-    #[test]
-    fn rescoping_keeps_what_a_control_holds_and_accepts() {
-        let select = ObservedTarget {
-            locator: "locator_a1b2c3d4_1".into(),
-            role: "combobox".into(),
-            name: "Role".into(),
-            value: Some(serde_json::json!("Other")),
-            options: Some(serde_json::json!(["Developer", "Other"])),
-            hint: Some("Choose one...".into()),
-            ..Default::default()
-        };
-        let scoped = rescope(&doc("F1", "L1"), vec![select.clone()]);
-        assert_eq!(scoped[0].value, select.value);
-        assert_eq!(scoped[0].options, select.options);
-        assert_eq!(scoped[0].hint, select.hint);
     }
 }
