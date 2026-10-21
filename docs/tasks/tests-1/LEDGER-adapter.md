@@ -7,17 +7,19 @@ Machine: test-02 (Bluefin). Paths without a crate are under `crates/orchestrator
 ## RESUME HERE
 
 The `browser/adapter/` area is cut: 337 Rust tests at opening, 55 now (24 promise, 16 contract, 15
-defect), in slices A1 to A19, all on dev. Every test was classified first, read-only, against
-ADR-0204's four reasons (see Notes). Next for this lane: the page assets' node tests, once the owner
-sets the JavaScript ceiling. The protocol 4 goldens and the pins in `protocol4/golden.rs` are
-contracts both sides read; keep them.
+defect), in slices A1 to A19. `crates/desktop` is cut on every system: 24 in the source, of which 5
+compile only on Windows, in slices D1 to D11; the coordinator cuts those 5 to 1 on Windows (D8 and
+the Notes hold the verdicts), which ends the area at 20. Then P-D6 (an oversized receipt becomes
+`answer_too_large`, in the package ledger), then the page assets' node tests once the owner sets
+the JavaScript ceiling. The protocol 4 goldens, their pins in `protocol4/golden.rs` and the desktop
+goldens are contracts both sides read; keep them.
 
 ## Areas
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
 | `browser/adapter/` | 337 | 55 | 55 |
-| `crates/desktop` | 161 | 20 | 25 |
+| `crates/desktop` | 161 | 20 | 24 (20 once the coordinator cuts its 5 Windows-only tests to 1) |
 
 ## Slices
 
@@ -54,7 +56,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 | D7 | `crates/desktop/src/window.rs` and `webview.rs`: the window's life and the webview's one origin | 27 + 6 | 3 | promise 2, defect 1 | landed (f9b8a4a2) |
 | D8 | `crates/desktop/src/tray.rs`: each tray state's icon (its two `cfg(windows)` tests wait for the coordinator) | 22 | 1 + 2 Windows | promise 1 | landed (b0796dd0) |
 | D9 | `crates/desktop/src/app.rs`: what the shell says, its alarm, its window slot and what is missing | 13 | 4 | promise 1, defect 3 | landed (4b15a853) |
-| D10 | `crates/desktop/src/native.rs`: sections, what the shell may open, and the file pick | 11 | 3 | promise 1, defect 2 | landed (this commit) |
+| D10 | `crates/desktop/src/native.rs`: sections, what the shell may open, and the file pick | 11 | 3 | promise 1, defect 2 | landed (a55d58f3) |
+| D11 | `crates/desktop/src/machine.rs`: the recover rule joins the stream-end table | 5 | 4 | promise 3, defect 1 | landed (this commit) |
 
 ## Notes
 
@@ -131,6 +134,21 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   loop never blocks (ebbbcf49). Cut: the app id test, which restates a literal. Open item: no test
   proves `SHELL_APP_ID` equals the installer's AUMID (`install/windows_entry.rs`); the root fix is
   one shared constant, not a test.
+- D11: the recover test becomes a case of the goodbye table, renamed for what it now says: each
+  way the stream ends decides what the shell does, a loss included.
+- The desktop close on every system: 161 at opening, 19 run on Linux (promise 10, contract 2,
+  defect 7). The Windows-only verdicts, for the coordinator to apply: in `tray.rs`, fold
+  `the_small_icon_size_follows_the_scale` and
+  `the_16_pixel_art_is_drawn_at_16_and_the_32_pixel_art_at_24_and_32` into
+  `each_tray_state_has_its_own_icon_at_the_hosts_size` as `cfg(windows)` cases, the way its
+  `cfg(not(windows))` case runs (j-11); in `tests/loads.rs`, keep
+  `the_window_image_loads_and_reaches_main` (a537043b, the manifest Windows needs before `main`)
+  and delete `an_argument_pair_the_window_does_not_take_is_refused` (the usage exit the kept test
+  already reaches) and `a_tray_start_with_no_service_ends_at_once_and_starts_nothing` (the
+  machine's launch table proves the rule on every system), with the helpers only they use. Three
+  contract gaps the cut found, each a shared constant rather than a test: the shell's `--tray`
+  (service/presence.rs and the shell's `TRAY_ARGUMENT`), `SHELL_APP_ID` and the installer's
+  AUMID, and the Linux `APPLICATION_ID` and `install/desktop_entry.rs`'s copy.
 - The classification (2026-10-21) read every test with its file, the ACCEPTANCE items and
   `docs/1.0/` contracts it carries and the defects recorded against its file, and gave each a
   verdict and what it protects. Kept tests that restate literals are rewritten to compare against

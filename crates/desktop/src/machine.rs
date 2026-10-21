@@ -717,12 +717,14 @@ mod tests {
 
     // Goodbyes.
 
-    /// Each goodbye reason decides what the shell does: quit, uninstall and session end end it and
-    /// start nothing; a replace relaunches the new image once when it changed and the window is open,
-    /// and otherwise only ends or shows Updating; an image that cannot be read counts as the same; and
-    /// an unknown reason is a loss (ACCEPTANCE, 13: each edge acts on the reason).
+    /// Each way the stream ends decides what the shell does: quit, uninstall and session end end it
+    /// and start nothing; a replace relaunches the new image once when it changed and the window is
+    /// open, and otherwise only ends or shows Updating; an image that cannot be read counts as the
+    /// same; and an unknown reason or a loss without a goodbye shows Restarting and recovers, starting
+    /// the service for `recover` at most `RECOVER_TRIES` times before Stopped (ACCEPTANCE, 13: each
+    /// edge acts on the reason; ARCHITECTURE, the `recover` start).
     #[test]
-    fn each_goodbye_reason_decides_what_the_shell_does() {
+    fn each_way_the_stream_ends_decides_what_the_shell_does() {
         for reason in [
             GoodbyeReason::Quit,
             GoodbyeReason::Uninstall,
@@ -743,6 +745,8 @@ mod tests {
         the_same_image_shows_updating_and_never_relaunches();
         an_image_that_cannot_be_read_counts_as_the_same();
         an_unknown_goodbye_is_a_loss();
+
+        three_recover_tries_and_then_the_stopped_screen();
     }
 
     fn a_replaced_image_with_the_window_open_relaunches_once_and_ends() {
@@ -828,7 +832,6 @@ mod tests {
 
     /// A loss without a goodbye shows Restarting and starts the service for `recover`, at most
     /// `RECOVER_TRIES` times, and then shows Stopped (ARCHITECTURE, the `recover` start).
-    #[test]
     fn three_recover_tries_and_then_the_stopped_screen() {
         let mut rig = Rig::new(Launch::Person);
         rig.attached_then(LinkEnd::Lost, true);
