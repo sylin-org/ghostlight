@@ -36,10 +36,6 @@ use crate::language::readiness::Readiness;
 use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::workbench::PageAddress;
 
-/// The longest tooltip the shell draws, in characters: the Windows limit. The tooltip is the
-/// band's word for the state and the service line that counts connections, which stay inside it.
-pub const MAX_TOOLTIP_LENGTH: usize = 127;
-
 /// One frame on a `desktop` stream, in either direction.
 ///
 /// A frame is one JSON object whose `kind` names it. A reader skips a kind it does not know.
@@ -417,11 +413,12 @@ mod tests {
     /// What the goldens describe.
     const SUBJECT: &str = "the desktop contract";
 
-    /// The address the goldens carry.
-    const GOLDEN_URL: &str = "http://127.0.0.1:41234/";
+    /// The port of the workbench address the goldens carry, written the way the service writes it.
+    const GOLDEN_PORT: u16 = 41234;
 
-    /// The secret the goldens carry.
-    const GOLDEN_BEARER: &str = "BEARER";
+    /// The secret the goldens carry, in the shape the service mints: 43 URL-safe base64
+    /// characters, which the shell's own check reads in its golden test.
+    const GOLDEN_BEARER: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO-_";
 
     /// The link the goldens carry.
     const GOLDEN_LINK: &str = "https://example.com/docs";
@@ -451,6 +448,27 @@ mod tests {
         }
     }
 
+    /// The longest tray the service can draw, which the shell's golden test checks against its own
+    /// limits: the longest tooltip any readiness gives at the service's session capacity, with as
+    /// many browsers or none, and the labels of an ended session, which offer Start a new session.
+    fn longest_tray() -> TrayModel {
+        [999, 0]
+            .into_iter()
+            .flat_map(|browsers| {
+                Readiness::ALL.iter().map(move |readiness| {
+                    let counts = ConnectionCounts {
+                        agents: 1998,
+                        mcp_clients: 999,
+                        command_line: 999,
+                        browsers,
+                    };
+                    TrayModel::of(*readiness, RuntimeControlState::Ended, counts)
+                })
+            })
+            .max_by_key(|tray| tray.tooltip.chars().count())
+            .expect("a readiness")
+    }
+
     /// The tray the goldens carry: ready, with two MCP clients and two browsers.
     fn golden_tray() -> TrayModel {
         TrayModel::of(
@@ -461,16 +479,24 @@ mod tests {
     }
 
     /// Contract: every frame of the desktop stream matches its golden in tests/golden/desktop/,
-    /// the bytes the shell decodes in its own tests (crates/desktop/src/link.rs): what the
-    /// service sends (the workbench with its tray, a new tray, already open, goodbye, show with
-    /// and without a section, a notice, each act) and what the shell sends (a tray click,
-    /// unavailable, closed, each act result).
+    /// the bytes the shell decodes and checks in its own tests (crates/desktop/src/link.rs): what
+    /// the service sends (the workbench at the address it serves, with its bearer and tray, a new
+    /// tray, the longest tray it can draw, already open, goodbye, show with and without a
+    /// section, a notice, each act) and what the shell sends (a tray click, unavailable, closed,
+    /// each act result).
     #[test]
     fn every_desktop_frame_matches_the_golden_the_shell_reads() {
+        let address = crate::workbench::web::WorkbenchAddress::new(GOLDEN_PORT, true);
         let frames = [
             (
                 "workbench.json",
-                DesktopFrame::workbench(GOLDEN_URL, GOLDEN_BEARER, golden_tray()),
+                DesktopFrame::workbench(address.url(), GOLDEN_BEARER, golden_tray()),
+            ),
+            (
+                "tray-model-longest.json",
+                DesktopFrame::TrayModel {
+                    model: longest_tray(),
+                },
             ),
             (
                 "tray-model.json",
@@ -630,29 +656,6 @@ mod tests {
                         .iter()
                         .any(|item| item.id == always && item.enabled),
                     "{always:?} while {runtime:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn the_longest_tooltip_fits_the_windows_limit() {
-        // The most the service admits at once: its session capacity of command-line or MCP
-        // sessions, and as many browsers or none, in every state.
-        for browsers in [999, 0] {
-            let counts = ConnectionCounts {
-                agents: 1998,
-                mcp_clients: 999,
-                command_line: 999,
-                browsers,
-            };
-            for readiness in Readiness::ALL {
-                let tray = TrayModel::of(*readiness, RuntimeControlState::Active, counts);
-                assert!(
-                    tray.tooltip.chars().count() <= MAX_TOOLTIP_LENGTH,
-                    "{} characters: {}",
-                    tray.tooltip.chars().count(),
-                    tray.tooltip
                 );
             }
         }

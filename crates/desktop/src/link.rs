@@ -554,7 +554,12 @@ mod tests {
         let DesktopFrame::Workbench { url, bearer, tray } = golden("workbench.json") else {
             panic!("workbench.json is a workbench frame");
         };
-        assert_eq!((url.as_str(), bearer.as_str()), (URL, "BEARER"));
+        // The address and the bearer the service writes pass the shell's own checks.
+        assert_eq!(validate_workbench_url(&url).ok(), Some(41234));
+        assert!(
+            well_formed_bearer(&bearer),
+            "the service's bearer has the shape the shell takes"
+        );
         assert_eq!(tray.validate(), Ok(()));
         assert_eq!(tray.state, TrayState::Ready);
         assert_eq!(
@@ -587,6 +592,14 @@ mod tests {
             .map(|item| item.id.as_str())
             .collect();
         assert_eq!(enabled, ["open", "resume", "quit"]);
+        let DesktopFrame::TrayModel { model: longest } = golden("tray-model-longest.json") else {
+            panic!("tray-model-longest.json is a tray model frame");
+        };
+        assert_eq!(
+            longest.validate(),
+            Ok(()),
+            "the longest tray the service draws fits the shell's limits"
+        );
         assert_eq!(golden("already-open.json"), DesktopFrame::AlreadyOpen);
         assert_eq!(
             golden("goodbye.json"),

@@ -1,7 +1,7 @@
 {
   "kind": "workbench",
   "url": "http://127.0.0.1:41234/",
-  "bearer": "BEARER",
+  "bearer": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO-_",
   "tray": {
     "tooltip": "Ready. Ghostlight is running; 2 agents and 2 browsers connected.",
     "items": [

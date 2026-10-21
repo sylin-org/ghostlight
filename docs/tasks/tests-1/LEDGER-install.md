@@ -29,3 +29,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   repeats the service's deleted `show_reveals_the_existing_workbench` through a real host, with
   a 2 s sleep and a deadline under 1 s. Take it in this lane's `cli/` slice: keep it only as a
   condition-waiting test if no kept test proves the reveal.
+- From the coordinator (2026-10-21): `crates/desktop/src/link.rs`'s golden test now checks the
+  service's longest tray, its bearer and its address with the shell's own `validate()`,
+  `well_formed_bearer` and `validate_workbench_url`, against the desktop goldens the service writes.
+  Keep that test in this lane's `crates/desktop` cut; `tray.rs`'s `assert_eq!(MAX_TOOLTIP_LEN, 127)`
+  only restates the number and can go.

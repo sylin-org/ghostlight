@@ -67,7 +67,13 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
     by `crates/desktop/src/tray.rs`), the window bearer's shape (the workbench and the shell each test
     their own), and the workbench address (the shell's golden test compares the URL for equality
     instead of parsing it). Each wants a golden both sides read; the desktop half is the install
-    lane's file. The clear-diagnostics limit (256 on both sides, in no shared vocabulary) is now
+    lane's file. Done by the coordinator on 2026-10-21: the service writes its longest tray (the
+    longest tooltip at full capacity, with an ended session's labels) to
+    `tests/golden/desktop/tray-model-longest.json`, and the workbench golden carries a real-shaped
+    bearer at the address the service formats; the shell's golden test runs `validate()`,
+    `validate_workbench_url` and `well_formed_bearer` on them, and the workbench's bearer test
+    checks a minted bearer against the golden's shape. The service's own copy of the 127 limit and
+    its one-sided tooltip test go. The clear-diagnostics limit (256 on both sides, in no shared vocabulary) is now
     the vocabulary's `clear_diagnostics_tabs`, which `golden.rs` and the extension's protocol test
     pin, and the extension test that restated 256 goes.
   - A client before MCP revision 2025-06-18 gets a cut-off or expired answer without the lean JSON

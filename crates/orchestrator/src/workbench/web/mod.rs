@@ -87,7 +87,8 @@ pub struct WorkbenchAddress {
 }
 
 impl WorkbenchAddress {
-    fn new(port: u16, usual: bool) -> Self {
+    /// The workbench address at `port`, `usual` when it is the port the home's default names.
+    pub(crate) fn new(port: u16, usual: bool) -> Self {
         Self {
             url: format!("http://{}:{port}/", Ipv4Addr::LOCALHOST),
             port,

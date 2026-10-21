@@ -402,17 +402,32 @@ fn secrets_compare_by_value_and_length() {
     assert!(same_secret(b"", b""));
 }
 
+/// Contract with the shell: every start mints its own bearer, in the shape of the one the desktop
+/// golden carries (tests/golden/desktop/workbench.json), which the shell's own check reads in its
+/// golden test, so a bearer the service mints is one the shell takes.
 #[test]
-fn every_start_makes_its_own_bearer_of_forty_three_characters() {
+fn every_start_makes_its_own_bearer_in_the_shape_the_shell_takes() {
     let one = Fixture::start();
     let two = Fixture::start();
-    assert_eq!(one.bearer().len(), 43);
-    assert_eq!(two.bearer().len(), 43);
+    let golden: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/desktop/workbench.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let shape = |bearer: &str| {
+        (
+            bearer.len(),
+            bearer
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'),
+        )
+    };
+    let pinned = shape(golden["bearer"].as_str().expect("the golden's bearer"));
+    assert_eq!(shape(&one.bearer()), pinned);
+    assert_eq!(shape(&two.bearer()), pinned);
     assert_ne!(one.bearer(), two.bearer());
-    assert!(one
-        .bearer()
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
 }
 
 #[test]
