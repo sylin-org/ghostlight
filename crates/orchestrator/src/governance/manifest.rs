@@ -186,7 +186,7 @@ pub enum PolicySetting {
     /// audit.
     PreserveTargetNames,
     /// `content.security.sacred_domains`: the destinations a layer marks never-touch.
-    SacredDomains,
+    NeverTouch,
 }
 
 impl PolicySetting {
@@ -199,7 +199,7 @@ impl PolicySetting {
         Self::McpChannelEnabled,
         Self::CliChannelEnabled,
         Self::PreserveTargetNames,
-        Self::SacredDomains,
+        Self::NeverTouch,
     ];
 
     /// The key a schema-4 document authors for this setting.
@@ -213,7 +213,7 @@ impl PolicySetting {
             Self::McpChannelEnabled => "channels.mcp.enabled",
             Self::CliChannelEnabled => "channels.cli.enabled",
             Self::PreserveTargetNames => "privacy.preserve_target_names",
-            Self::SacredDomains => "content.security.sacred_domains",
+            Self::NeverTouch => "content.security.sacred_domains",
         }
     }
 
@@ -253,7 +253,7 @@ impl PolicySetting {
                     return field(source, path, "must be a boolean");
                 }
             }
-            Self::SacredDomains => {
+            Self::NeverTouch => {
                 let Some(items) = value.as_array() else {
                     return field(source, path, "must be an array of host patterns");
                 };
@@ -898,7 +898,7 @@ mod tests {
             | PolicySetting::CliChannelEnabled
             | PolicySetting::PreserveTargetNames => json!(false),
             PolicySetting::BrowserStartup => json!("manual"),
-            PolicySetting::SacredDomains => json!(["vault.example", "*.bank.example"]),
+            PolicySetting::NeverTouch => json!(["vault.example", "*.bank.example"]),
         }
     }
 
@@ -942,7 +942,7 @@ mod tests {
         );
         assert_eq!(policy.browser_startup(), Some(BrowserStartup::Manual));
         assert_eq!(
-            policy.string_array_setting(PolicySetting::SacredDomains),
+            policy.string_array_setting(PolicySetting::NeverTouch),
             Some(vec![
                 "vault.example".to_owned(),
                 "*.bank.example".to_owned()

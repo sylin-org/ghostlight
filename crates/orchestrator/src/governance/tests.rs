@@ -840,12 +840,12 @@ fn an_empty_policy_refuses_ordinary_hosts_and_protected_resources_stay_protected
     assert!(!protected.allowed);
     assert_eq!(protected.reason, ReasonCode::ProtectedHost);
 
-    let sacred = snapshot_for(
-        "sacred",
+    let never_touch = snapshot_for(
+        "never-touch",
         r#"{"schema":4,"name":"sacred","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["localhost"],"level":"mandatory"}]}"#,
     );
     assert!(
-        !sacred
+        !never_touch
             .authorize_landing(Capability::Read, "http://localhost:3000")
             .allowed
     );

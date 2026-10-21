@@ -180,13 +180,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 Rules: [BOOTSTRAP.md](BOOTSTRAP.md), "The second sweep (2026-10-20)". Machine: test-03 (Alpine), after core-work. A
 slice's specification is its finding in [sweep-2026-10-20/work.md](sweep-2026-10-20/work.md), read
-with its skeptic's corrections. WORK-15 has landed. WORK-11 is under way: the tier fold has landed; the never-touch word, the
+with its skeptic's corrections. WORK-15 has landed. WORK-11 is under way: the tier fold and the never-touch word have landed; the
 `audit_requirement` rename and the module doc are next, then the re-export, which is cross-lane.
 
 | Slice | Subject | After | Source | Status |
 | --- | --- | --- | --- | --- |
 | WORK-15 | refactor(governance): one `HostPattern` parsed at load, one `url_host` and one `layer_denial` | - | WORK-15 as corrected; `denial_id` bytes stay | landed (ddd76f9c, 86013a28, cacb1062) |
-| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | tier fold landed; the rest todo |
+| WORK-11 | refactor(governance): one internal word for the never-touch rule, `AuthorityTier` folded into `PolicyAuthor`, and `governance::audit` renamed | - | WORK-11 as corrected; persisted words stay | tier fold (ed389024) and never-touch word landed; the rest todo |
 | P-lock | refactor(governance): the crate `lock` helper here | SERV-7 | SERV-7's adoption | todo |
 
 WORK-15, `HostPattern`: `governance/host_pattern.rs` holds the grammar (`*`, `*.suffix`, an exact
@@ -214,3 +214,9 @@ as the skeptic corrected (`LayerKind` has a third, `Ghostlight`, that no layer c
 persisted words come from one `tier_word`, beside `MANAGED_TIER` and the new `USER_TIER`, and stay
 `managed` and `user` in audit records and the authority id. `channel_refusal`'s hand-written match
 goes.
+
+WORK-11, the never-touch word: `PolicySetting::NeverTouch`, `PolicyRule::NeverTouch` and
+`never_touch_hosts` (the snapshot's list and the effective view's input) join the `never_touch`
+names the code already used. The persisted words are unchanged: the key
+`content.security.sacred_domains`, the rule word `sacred_host` and the reason `protected_host`.
+`ReasonCode::ProtectedHost` keeps its name, because it also refuses every non-HTTP(S) address.

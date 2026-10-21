@@ -341,7 +341,7 @@ pub(super) struct Inputs<'a> {
     pub(super) valid: bool,
     /// The channel switches the same publication's snapshot enforces.
     pub(super) channels_off: ChannelsOff<'a>,
-    pub(super) sacred_hosts: Vec<String>,
+    pub(super) never_touch_hosts: Vec<String>,
     pub(super) organization_source: Option<String>,
     pub(super) organization_document: Option<String>,
     pub(super) user_source: Option<String>,
@@ -396,7 +396,7 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
         organization,
         capabilities,
         layers,
-        ceilings: policy::ceilings(&inputs.sacred_hosts),
+        ceilings: policy::ceilings(&inputs.never_touch_hosts),
         user_layer: user_layer(inputs),
         browser_startup: browser_startup(inputs),
         passport: inputs.passport.clone(),
@@ -731,7 +731,7 @@ mod tests {
     ) -> Inputs<'a> {
         let snapshot = snapshot(organization, user);
         Inputs {
-            sacred_hosts: snapshot.sacred_hosts(),
+            never_touch_hosts: snapshot.never_touch_hosts(),
             snapshot,
             organization,
             user,
@@ -776,7 +776,7 @@ mod tests {
         assert!(view.user_layer.editable);
 
         let mut restricted = inputs(None, None);
-        restricted.sacred_hosts.push("localhost".into());
+        restricted.never_touch_hosts.push("localhost".into());
         assert_eq!(
             compile(&restricted).ceilings,
             [

@@ -285,7 +285,7 @@ pub enum PolicyRule {
     /// A channel switch refuses the request's channel.
     Channel,
     /// A layer marks the host never-touch.
-    SacredHost,
+    NeverTouch,
 }
 
 impl PolicyRule {
@@ -299,7 +299,7 @@ impl PolicyRule {
             Self::TabClose => "tab_close",
             Self::Screenshot => "screenshot",
             Self::Channel => "channel",
-            Self::SacredHost => "sacred_host",
+            Self::NeverTouch => "sacred_host",
             Self::AuditAvailability => "audit_availability",
         }
     }
@@ -472,7 +472,7 @@ impl PolicyLayer {
     /// every host pattern parsed once.
     fn new(tier: PolicyAuthor, manifest: manifest::Manifest) -> Self {
         let never_touch = manifest
-            .string_array_setting(PolicySetting::SacredDomains)
+            .string_array_setting(PolicySetting::NeverTouch)
             .unwrap_or_default();
         let never_touch_patterns = host_pattern::parse_all(&never_touch);
         let grant_hosts = manifest
@@ -580,7 +580,7 @@ impl AuthoritySnapshot {
     /// Destinations policy marked never-touch, for the boundaries a person is shown, in
     /// authority order.
     #[must_use]
-    pub fn sacred_hosts(&self) -> Vec<String> {
+    pub fn never_touch_hosts(&self) -> Vec<String> {
         self.layers
             .iter()
             .flat_map(|layer| layer.never_touch.iter().cloned())
@@ -606,7 +606,7 @@ impl AuthoritySnapshot {
             ReasonCode::ProtectedHost,
             author,
             None,
-            PolicyRule::SacredHost,
+            PolicyRule::NeverTouch,
         )
     }
 
@@ -937,7 +937,7 @@ impl AuthoritySnapshot {
         } else if outcomes.is_empty() {
             let author = decision
                 .attribution
-                .filter(|attribution| attribution.rule == PolicyRule::SacredHost)
+                .filter(|attribution| attribution.rule == PolicyRule::NeverTouch)
                 .map(|attribution| usize::from(attribution.layer));
             author.map_or(ProbeAnswer::Beyond, |author| {
                 ProbeAnswer::NeverTouch(Untouched {
@@ -1415,7 +1415,7 @@ impl Publication {
             user,
             valid,
             channels_off,
-            sacred_hosts: snapshot.sacred_hosts(),
+            never_touch_hosts: snapshot.never_touch_hosts(),
             organization_source: organization
                 .map(|_| policy::signed_source(passport.source_class).to_owned()),
             organization_document: organization.map(document),
