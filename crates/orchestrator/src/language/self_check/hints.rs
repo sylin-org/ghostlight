@@ -710,7 +710,7 @@ fn outcome_samples() -> Vec<Outcome> {
         },
         Outcome::PageScrolled {
             host: host(),
-            direction: "down".into(),
+            direction: crate::language::ScrollDirection::Down,
         },
         Outcome::TargetRevealed {
             host: host(),

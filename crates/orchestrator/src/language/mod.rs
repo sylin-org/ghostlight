@@ -8,6 +8,7 @@ pub mod audit_health;
 mod bounds;
 pub mod capability_map;
 pub mod channel_switch;
+pub mod choices;
 pub mod composition;
 pub mod control;
 pub mod coverage;
@@ -35,6 +36,10 @@ mod tool_catalog;
 pub mod wait;
 pub mod workbench;
 
+pub use choices::{
+    DiagnosticDetail, DiagnosticSource, DialogAction, FindScope, HistoryDirection, InspectScope,
+    OnError, PointerButton, RecordAction, ScrollAmount, ScrollDirection,
+};
 pub use handle::HandleKind;
 pub use tool_catalog::{catalog, catalog_for, CATALOG_TOOL_COUNT, EXPECTED_TOOL_NAMES};
 pub use wait::{PageCondition, WaitCondition};
@@ -394,7 +399,7 @@ pub struct NavigatePage {
 /// Input for browser history traversal.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct NavigateHistory {
-    pub direction: String,
+    pub direction: HistoryDirection,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
@@ -469,7 +474,7 @@ pub struct InspectPage {
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_inspect_kind")]
-    pub scope: String,
+    pub scope: InspectScope,
     /// Optional subtree root for document scope.
     #[serde(default)]
     pub root: Option<String>,
@@ -492,7 +497,7 @@ pub struct Find {
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_find_kind")]
-    pub scope: String,
+    pub scope: FindScope,
     #[serde(default = "default_max_results")]
     pub max_results: usize,
     #[serde(default = "default_timeout")]
@@ -568,7 +573,7 @@ pub struct Click {
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_button")]
-    pub button: String,
+    pub button: PointerButton,
     #[serde(default = "default_click_count")]
     pub click_count: u8,
     #[serde(default)]
@@ -591,9 +596,9 @@ pub struct ScrollPage {
     #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
-    pub direction: Option<String>,
+    pub direction: Option<ScrollDirection>,
     #[serde(default)]
-    pub amount: Option<String>,
+    pub amount: Option<ScrollAmount>,
     #[serde(default)]
     pub view: Option<String>,
     #[serde(default)]
@@ -887,7 +892,7 @@ pub struct FlowStep {
 pub struct RunFlow {
     pub steps: Vec<FlowStep>,
     #[serde(default = "default_on_error")]
-    pub on_error: String,
+    pub on_error: OnError,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_timeout")]
@@ -898,14 +903,14 @@ fn empty_arguments() -> Value {
     serde_json::json!({})
 }
 
-fn default_on_error() -> String {
-    DEFAULT_ON_ERROR.into()
+fn default_on_error() -> OnError {
+    DEFAULT_ON_ERROR
 }
 
 /// Input for dialog handling.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct HandleDialog {
-    pub action: String,
+    pub action: DialogAction,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
@@ -917,7 +922,7 @@ pub struct HandleDialog {
 /// Input for the memory-only recording lifecycle.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Record {
-    pub action: String,
+    pub action: RecordAction,
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default)]
@@ -935,9 +940,9 @@ pub struct Diagnose {
     #[serde(default)]
     pub tab: Option<String>,
     #[serde(default = "default_diagnostic_source")]
-    pub source: String,
+    pub source: DiagnosticSource,
     #[serde(default = "default_diagnostic_detail")]
-    pub detail: String,
+    pub detail: DiagnosticDetail,
     #[serde(default)]
     pub r#match: Option<String>,
     #[serde(default)]
@@ -1042,12 +1047,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             |value: &InspectPage| {
                 validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
                 validate_timeout(value.timeout_ms)?;
-                validate_choice(
-                    &value.scope,
-                    &["controls", "structure", "all", "document"],
-                    "scope",
-                )?;
-                if value.scope == "document" {
+                if value.scope == InspectScope::Document {
                     validate_optional_handle(value.root.as_deref(), HandleKind::Target)?;
                     if let Some(depth) = value.max_depth {
                         validate_within(depth, DOCUMENT_DEPTH, "max_depth")?;
@@ -1077,7 +1077,6 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_text(&value.text, SEARCH_TEXT_CHARS, "text")?;
                 validate_timeout(value.timeout_ms)?;
                 validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
-                validate_choice(&value.scope, &["any", "control", "text"], "scope")?;
                 validate_within(value.max_results, FIND_RESULTS, "max_results")?;
                 Ok(())
             },
@@ -1134,9 +1133,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_scroll,
             )?;
             if scroll.wheel() {
-                scroll
-                    .direction
-                    .get_or_insert_with(|| SCROLL_DIRECTION_DEFAULT.into());
+                scroll.direction.get_or_insert(SCROLL_DIRECTION_DEFAULT);
             }
             Ok(Operation::ScrollPage(scroll))
         }
@@ -1385,8 +1382,8 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
     })
 }
 
-/// The history action that goes forward, as the catalog and the decoder name it.
-pub(crate) const HISTORY_FORWARD: &str = "forward";
+/// The history action that reloads the page instead of moving through its history.
+pub(super) const HISTORY_RELOAD: &str = "reload";
 
 fn decode_history(input: Value) -> Result<Operation, LanguageError> {
     let value: HistoryRequest = parse(
@@ -1395,12 +1392,16 @@ fn decode_history(input: Value) -> Result<Operation, LanguageError> {
         |value: &HistoryRequest| {
             validate_choice(
                 &value.action,
-                &["back", HISTORY_FORWARD, "reload"],
+                &[
+                    HistoryDirection::Back.as_str(),
+                    HistoryDirection::Forward.as_str(),
+                    HISTORY_RELOAD,
+                ],
                 "action",
             )?;
             validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
             // false is the advertised default, which a client may send with any action.
-            if value.action != "reload" && value.bypass_cache {
+            if value.action != HISTORY_RELOAD && value.bypass_cache {
                 return Err(LanguageError::Invalid(
                     "bypass_cache is only valid when action is reload".into(),
                 ));
@@ -1409,7 +1410,7 @@ fn decode_history(input: Value) -> Result<Operation, LanguageError> {
             Ok(())
         },
     )?;
-    Ok(if value.action == "reload" {
+    Ok(if value.action == HISTORY_RELOAD {
         Operation::ReloadPage(ReloadPage {
             tab: value.tab,
             bypass_cache: value.bypass_cache,
@@ -1417,7 +1418,7 @@ fn decode_history(input: Value) -> Result<Operation, LanguageError> {
         })
     } else {
         Operation::NavigateHistory(NavigateHistory {
-            direction: value.action,
+            direction: HistoryDirection::named(&value.action).map_err(LanguageError::Invalid)?,
             tab: value.tab,
             timeout_ms: value.timeout_ms,
         })
@@ -1489,15 +1490,10 @@ fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
         input,
         &["action", "tab", "text", "timeout_ms"],
         |value: &HandleDialog| {
-            validate_choice(
-                &value.action,
-                &["status", "accept", "dismiss", "respond"],
-                "action",
-            )?;
             validate_timeout(value.timeout_ms)?;
             validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
-            match value.action.as_str() {
-                "respond" => validate_text_allow_empty(
+            match value.action {
+                DialogAction::Respond => validate_text_allow_empty(
                     value.text.as_deref().ok_or_else(|| {
                         LanguageError::Invalid(
                             "action respond needs text: the prompt response, which may be empty"
@@ -1525,41 +1521,38 @@ fn decode_record(input: Value) -> Result<Operation, LanguageError> {
         input,
         &["action", "tab", "target", "download", "timeout_ms"],
         |value: &Record| {
-            validate_choice(
-                &value.action,
-                &["start", "status", "stop", "save", "discard"],
-                "action",
-            )?;
             validate_timeout(value.timeout_ms)?;
             validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
             validate_optional_handle(value.target.as_deref(), HandleKind::Target)?;
-            match value.action.as_str() {
-                "start" if value.target.is_some() => {
+            match value.action {
+                RecordAction::Start if value.target.is_some() => {
                     return Err(LanguageError::Invalid(
                         "start accepts tab but not target".into(),
                     ))
                 }
-                "start" => {}
-                "save" if value.tab.is_some() => {
+                RecordAction::Start => {}
+                RecordAction::Save if value.tab.is_some() => {
                     return Err(LanguageError::Invalid(
                         "tab is only valid when action is start".into(),
                     ))
                 }
                 // One replay goes to one place. Asking for two is a mistake worth naming rather
                 // than a preference to resolve silently.
-                "save" if value.target.is_some() && value.download => {
+                RecordAction::Save if value.target.is_some() && value.download => {
                     return Err(LanguageError::Invalid(
                         "save accepts target or download, not both".into(),
                     ))
                 }
-                "save" => {}
-                _ if value.tab.is_some() || value.target.is_some() || value.download => {
+                RecordAction::Save => {}
+                RecordAction::Status | RecordAction::Stop | RecordAction::Discard
+                    if value.tab.is_some() || value.target.is_some() || value.download =>
+                {
                     return Err(LanguageError::Invalid(
                         "tab is only valid for start; target and download are only valid for save"
                             .into(),
                     ))
                 }
-                _ => {}
+                RecordAction::Status | RecordAction::Stop | RecordAction::Discard => {}
             }
             Ok(())
         },
@@ -1582,8 +1575,6 @@ fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
         |value: &Diagnose| {
             validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
             validate_timeout(value.timeout_ms)?;
-            validate_choice(&value.source, &["both", "console", "network"], "source")?;
-            validate_choice(&value.detail, &["problems", "all"], "detail")?;
             if let Some(pattern) = &value.r#match {
                 validate_text(pattern, SEARCH_TEXT_CHARS, "match")?;
             }
@@ -1751,7 +1742,6 @@ fn validate_flow(value: &RunFlow) -> Result<(), LanguageError> {
         history::COMPOSITION_STEP_LIMIT,
         "steps",
     )?;
-    validate_choice(&value.on_error, &["stop", "continue"], "on_error")?;
     validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
     validate_timeout(value.timeout_ms)?;
     let mut seen: Vec<&str> = Vec::with_capacity(value.steps.len());
@@ -1883,7 +1873,6 @@ fn validate_click(value: &Click) -> Result<(), LanguageError> {
         )?;
     }
     validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
-    validate_choice(&value.button, &["primary", "middle", "secondary"], "button")?;
     validate_within(usize::from(value.click_count), CLICK_COUNT, "click_count")?;
     validate_modifiers(&value.modifiers)?;
     validate_expect(&value.expect)?;
@@ -1973,11 +1962,15 @@ fn validate_location(
 
 /// The direction a scroll takes when the call gives none: the catalog advertises it, the decoder
 /// applies it to a wheel scroll and the executor to a page scroll.
-pub(crate) const SCROLL_DIRECTION_DEFAULT: &str = "down";
+pub(crate) const SCROLL_DIRECTION_DEFAULT: ScrollDirection = ScrollDirection::Down;
 
 /// The amount a page scroll takes when the call gives none: the catalog advertises it and the
 /// executor applies it.
-pub(crate) const SCROLL_AMOUNT_DEFAULT: &str = "medium";
+pub(crate) const SCROLL_AMOUNT_DEFAULT: ScrollAmount = ScrollAmount::Medium;
+
+/// The directions a wheel scroll at a view point takes.
+pub(super) const WHEEL_DIRECTIONS: &[&str] =
+    &[ScrollDirection::Up.as_str(), ScrollDirection::Down.as_str()];
 
 impl ScrollPage {
     /// Whether the call scrolls the wheel at a view point rather than the page or a target.
@@ -2000,11 +1993,9 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
         // direction or amount asks for the page scroll a target excludes.
         let page_scroll = value
             .direction
-            .as_deref()
             .is_some_and(|direction| direction != SCROLL_DIRECTION_DEFAULT)
             || value
                 .amount
-                .as_deref()
                 .is_some_and(|amount| amount != SCROLL_AMOUNT_DEFAULT);
         if page_scroll {
             return Err(LanguageError::Invalid(
@@ -2012,13 +2003,12 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
             ));
         }
     } else if wheel {
-        if let Some(direction) = &value.direction {
-            validate_choice(direction, &["up", "down"], "direction")?;
+        if let Some(direction) = value.direction {
+            validate_choice(direction.as_str(), WHEEL_DIRECTIONS, "direction")?;
         }
         // Ticks set how far a wheel scrolls. The advertised amount default is what a
         // defaults-filling client sends beside them; any other amount asks for a page scroll.
-        if let Some(amount) = &value.amount {
-            validate_choice(amount, &["small", "medium", "large", "page"], "amount")?;
+        if let Some(amount) = value.amount {
             if amount != SCROLL_AMOUNT_DEFAULT {
                 return Err(LanguageError::Invalid(
                     "amount cannot be combined with a view point: ticks set how far a wheel scrolls"
@@ -2049,13 +2039,6 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
             WHEEL_TICKS,
             "ticks",
         )?;
-    } else {
-        if let Some(direction) = &value.direction {
-            validate_choice(direction, &["up", "down", "left", "right"], "direction")?;
-        }
-        if let Some(amount) = &value.amount {
-            validate_choice(amount, &["small", "medium", "large", "page"], "amount")?;
-        }
     }
     validate_timeout(value.timeout_ms)?;
     Ok(())
@@ -2584,11 +2567,11 @@ fn default_max_chars() -> usize {
 fn default_script_result_chars() -> usize {
     DEFAULT_SCRIPT_RESULT_CHARS
 }
-fn default_inspect_kind() -> String {
-    DEFAULT_INSPECT_SCOPE.into()
+fn default_inspect_kind() -> InspectScope {
+    DEFAULT_INSPECT_SCOPE
 }
-fn default_find_kind() -> String {
-    DEFAULT_FIND_SCOPE.into()
+fn default_find_kind() -> FindScope {
+    DEFAULT_FIND_SCOPE
 }
 fn default_max_items() -> usize {
     DEFAULT_INSPECT_ITEMS
@@ -2596,8 +2579,8 @@ fn default_max_items() -> usize {
 fn default_max_results() -> usize {
     DEFAULT_FIND_RESULTS
 }
-fn default_button() -> String {
-    DEFAULT_BUTTON.into()
+fn default_button() -> PointerButton {
+    DEFAULT_BUTTON
 }
 fn default_click_count() -> u8 {
     DEFAULT_CLICK_COUNT
@@ -2606,11 +2589,11 @@ fn default_click_count() -> u8 {
 fn default_repeat() -> u16 {
     DEFAULT_KEY_REPEAT
 }
-fn default_diagnostic_source() -> String {
-    DEFAULT_DIAGNOSTIC_SOURCE.into()
+fn default_diagnostic_source() -> DiagnosticSource {
+    DEFAULT_DIAGNOSTIC_SOURCE
 }
-fn default_diagnostic_detail() -> String {
-    DEFAULT_DIAGNOSTIC_DETAIL.into()
+fn default_diagnostic_detail() -> DiagnosticDetail {
+    DEFAULT_DIAGNOSTIC_DETAIL
 }
 fn default_diagnostic_limit() -> usize {
     DEFAULT_DIAGNOSTIC_LIMIT
@@ -2972,7 +2955,7 @@ mod tests {
         let Operation::InspectPage(inspect) = decode("browser_inspect", json!({})).unwrap() else {
             panic!("wrong operation")
         };
-        assert_eq!(inspect.scope, "controls");
+        assert_eq!(inspect.scope, crate::language::InspectScope::Controls);
         assert_eq!(inspect.max_items, 80);
     }
 
@@ -3185,7 +3168,7 @@ mod tests {
         let Operation::ScrollPage(scroll) = decode("browser_scroll", wheel.clone()).unwrap() else {
             panic!("wrong operation")
         };
-        assert_eq!(scroll.direction.as_deref(), Some(SCROLL_DIRECTION_DEFAULT));
+        assert_eq!(scroll.direction, Some(SCROLL_DIRECTION_DEFAULT));
         let with = |field: &str, value: &str| {
             let mut call = wheel.clone();
             call[field] = json!(value);
@@ -3194,10 +3177,10 @@ mod tests {
         let Operation::ScrollPage(scroll) = with("direction", "up").unwrap() else {
             panic!("wrong operation")
         };
-        assert_eq!(scroll.direction.as_deref(), Some("up"));
+        assert_eq!(scroll.direction, Some(crate::language::ScrollDirection::Up));
         assert!(with("direction", "left").is_err());
         // The advertised amount default is what a defaults-filling client sends beside ticks.
-        assert!(with("amount", SCROLL_AMOUNT_DEFAULT).is_ok());
+        assert!(with("amount", SCROLL_AMOUNT_DEFAULT.as_str()).is_ok());
         for amount in ["page", "small", "huge", ""] {
             assert!(with("amount", amount).is_err(), "{amount}");
         }
@@ -3206,7 +3189,7 @@ mod tests {
         else {
             panic!("wrong operation")
         };
-        assert_eq!(step.direction.as_deref(), Some(SCROLL_DIRECTION_DEFAULT));
+        assert_eq!(step.direction, Some(SCROLL_DIRECTION_DEFAULT));
     }
 
     #[test]

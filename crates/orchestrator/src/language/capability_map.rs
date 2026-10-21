@@ -2,7 +2,7 @@
 
 use crate::governance::CapabilitySet;
 
-use super::Operation;
+use super::{DialogAction, Operation, RecordAction};
 
 const READ_WRITE: CapabilitySet = CapabilitySet::READ.union(CapabilitySet::WRITE);
 const READ_ACTION: CapabilitySet = CapabilitySet::READ.union(CapabilitySet::ACTION);
@@ -380,13 +380,15 @@ fn entry(operation: &Operation) -> &'static CapabilityVariant {
         Operation::Wait(_) => &WAIT,
         // A flow classifies nothing itself; every child step authorizes normally.
         Operation::RunFlow(_) => &FLOW,
-        Operation::HandleDialog(value) if value.action == "status" => &DIALOG_STATUS,
+        Operation::HandleDialog(value) if value.action == DialogAction::Status => &DIALOG_STATUS,
         Operation::HandleDialog(_) => &DIALOG_RESOLVE,
-        Operation::Record(value) if value.action == "start" => &RECORD_START,
-        Operation::Record(value) if value.action == "save" && value.target.is_some() => {
+        Operation::Record(value) if value.action == RecordAction::Start => &RECORD_START,
+        Operation::Record(value)
+            if value.action == RecordAction::Save && value.target.is_some() =>
+        {
             &RECORD_SAVE_TARGET
         }
-        Operation::Record(value) if value.action == "save" => &RECORD_SAVE_CLIENT,
+        Operation::Record(value) if value.action == RecordAction::Save => &RECORD_SAVE_CLIENT,
         Operation::Record(_) => &RECORD_INSPECT,
         Operation::Diagnose(_) => &DIAGNOSE,
         Operation::ExplainPolicy(_) => &POLICY_EXPLAIN,

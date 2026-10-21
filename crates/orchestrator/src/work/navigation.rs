@@ -8,7 +8,7 @@ use crate::events::DomainEvent;
 use crate::governance::{Capability, Decision};
 use crate::language::outcome::{Outcome, Refusal};
 use crate::language::provenance::group_title;
-use crate::language::{ReusePolicy, HISTORY_FORWARD};
+use crate::language::{HistoryDirection, ReusePolicy};
 use crate::workspace::{Opener, SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
@@ -544,14 +544,14 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
-        direction: &str,
+        direction: HistoryDirection,
     ) -> Terminal {
         self.with_authorized_tab(context, lease, requested_tab, |selected, decision| {
             let outcome = self.dispatch(
                 context,
                 BrowserCommand::TraverseHistory {
                     tab_id: selected.physical_id,
-                    direction: direction.into(),
+                    direction: direction.as_str().into(),
                 },
             );
             // The browser looked and sent nothing, so the refusal can say which way was empty.
@@ -561,7 +561,7 @@ impl ApplicationExecutor {
                     decision,
                     Some(selected.physical_id),
                     Refusal::NoHistoryEntry {
-                        forward: direction == HISTORY_FORWARD,
+                        forward: direction == HistoryDirection::Forward,
                     },
                     json!({"reason": browser_reason(error)}),
                 );
@@ -573,10 +573,10 @@ impl ApplicationExecutor {
                 decision,
                 outcome,
                 |host| Outcome::HistoryTraversed {
-                    direction: direction.into(),
+                    direction: direction.as_str().into(),
                     host,
                 },
-                json!({"action":direction}),
+                json!({"action":direction.as_str()}),
             )
         })
     }

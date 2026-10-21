@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::governance::Capability;
 use crate::language::outcome::{CaptureKind, Outcome, Refusal, TargetNoun};
-use crate::language::{InspectPage, ReadMode, DEFAULT_DOCUMENT_DEPTH};
+use crate::language::{FindScope, InspectPage, InspectScope, ReadMode, DEFAULT_DOCUMENT_DEPTH};
 use crate::workspace::{SnapshotScope, WorkspaceLease};
 
 use super::item::control_item;
@@ -88,8 +88,8 @@ impl ApplicationExecutor {
         request: &InspectPage,
     ) -> Terminal {
         let requested_tab = request.tab.as_deref();
-        let kind = request.scope.as_str();
-        if kind == "document" {
+        let kind = request.scope;
+        if kind == InspectScope::Document {
             return self.inspect_document(
                 context,
                 lease,
@@ -104,10 +104,10 @@ impl ApplicationExecutor {
             requested_tab,
             BrowserCommand::Inspect {
                 tab_id: 0,
-                kind: kind.into(),
+                kind: kind.as_str().into(),
                 max_items: request.max_items,
             },
-            if kind == "controls" {
+            if kind == InspectScope::Controls {
                 TargetNoun::Control
             } else {
                 TargetNoun::Item
@@ -197,7 +197,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested_tab: Option<&str>,
         text: &str,
-        kind: &str,
+        kind: FindScope,
         max_results: usize,
     ) -> Terminal {
         self.targets_operation(
@@ -207,7 +207,7 @@ impl ApplicationExecutor {
             BrowserCommand::Find {
                 tab_id: 0,
                 text: text.into(),
-                kind: kind.into(),
+                kind: kind.as_str().into(),
                 max_results,
             },
             TargetNoun::Match,

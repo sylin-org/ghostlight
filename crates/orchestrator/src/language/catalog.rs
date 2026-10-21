@@ -18,6 +18,10 @@ use super::bounds::{
     READ_CHARS, SCRIPT_RESULT_CHARS, SEARCH_TEXT_CHARS, UPLOAD_PATHS, UPLOAD_PATH_CHARS, URL_MAX,
     WHEEL_TICKS, WINDOW_HEIGHT, WINDOW_WIDTH, ZOOM_PERCENT,
 };
+use super::choices::{
+    DiagnosticDetail, DiagnosticSource, DialogAction, FindScope, HistoryDirection, InspectScope,
+    OnError, PointerButton, RecordAction, ScrollAmount, ScrollDirection,
+};
 use super::handle::HandleKind;
 use super::wait::{PageCondition, WaitCondition};
 use super::{
@@ -25,6 +29,7 @@ use super::{
     MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS, SCRIPT_MAX_CHARS,
     SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT, SEMANTIC_ROLES,
 };
+use super::{HISTORY_RELOAD, WHEEL_DIRECTIONS};
 
 /// Canonical tool names in the complete catalog.
 pub const EXPECTED_TOOL_NAMES: [&str; 23] = [
@@ -402,11 +407,11 @@ fn new_tab() -> Value {
 fn history_schema() -> Value {
     union(
         vec![
-            history_branch("back", "Go back one page."),
-            history_branch("forward", "Go forward one page."),
+            history_branch(HistoryDirection::Back.as_str(), "Go back one page."),
+            history_branch(HistoryDirection::Forward.as_str(), "Go forward one page."),
             object(
                 vec![
-                    ("action", constant("reload", "Reload the page.")),
+                    ("action", constant(HISTORY_RELOAD, "Reload the page.")),
                     ("tab", tab()),
                     ("bypass_cache", boolean(false, "")),
                 ],
@@ -494,8 +499,8 @@ fn inspect_schema() -> Value {
                 (
                     "scope",
                     enumeration(
-                        &["controls", "structure", "all", "document"],
-                        Some(DEFAULT_INSPECT_SCOPE),
+                        InspectScope::WORDS,
+                        Some(DEFAULT_INSPECT_SCOPE.as_str()),
                         "document: a {kind, label, children} tree, a snapshot handle, and a diff against the previous snapshot when root and max_depth match.",
                     ),
                 ),
@@ -534,7 +539,7 @@ fn find_schema() -> Value {
                 ("tab", tab()),
                 (
                     "scope",
-                    enumeration(&["any", "control", "text"], Some(DEFAULT_FIND_SCOPE), ""),
+                    enumeration(FindScope::WORDS, Some(DEFAULT_FIND_SCOPE.as_str()), ""),
                 ),
                 (
                     "max_results",
@@ -599,11 +604,7 @@ fn click_schema() -> Value {
         ("tab", tab()),
         (
             "button",
-            enumeration(
-                &["primary", "middle", "secondary"],
-                Some(DEFAULT_BUTTON),
-                "",
-            ),
+            enumeration(PointerButton::WORDS, Some(DEFAULT_BUTTON.as_str()), ""),
         ),
         (
             "click_count",
@@ -664,16 +665,16 @@ fn scroll_schema() -> Value {
                     (
                         "direction",
                         enumeration(
-                            &["up", "down", "left", "right"],
-                            Some(SCROLL_DIRECTION_DEFAULT),
+                            ScrollDirection::WORDS,
+                            Some(SCROLL_DIRECTION_DEFAULT.as_str()),
                             SCROLL_DIRECTION,
                         ),
                     ),
                     (
                         "amount",
                         enumeration(
-                            &["small", "medium", "large", "page"],
-                            Some(SCROLL_AMOUNT_DEFAULT),
+                            ScrollAmount::WORDS,
+                            Some(SCROLL_AMOUNT_DEFAULT.as_str()),
                             "",
                         ),
                     ),
@@ -686,8 +687,8 @@ fn scroll_schema() -> Value {
                     (
                         "direction",
                         enumeration(
-                            &["up", "down"],
-                            Some(SCROLL_DIRECTION_DEFAULT),
+                            WHEEL_DIRECTIONS,
+                            Some(SCROLL_DIRECTION_DEFAULT.as_str()),
                             SCROLL_DIRECTION,
                         ),
                     ),
@@ -997,17 +998,17 @@ fn dialog_schema() -> Value {
     union(
         vec![
             dialog_branch(
-                "status",
+                DialogAction::Status.as_str(),
                 "Its kind and message, and a prompt's field text, if open.",
                 false,
             ),
             dialog_branch(
-                "accept",
+                DialogAction::Accept.as_str(),
                 "As OK does; a prompt answers with its field text.",
                 false,
             ),
-            dialog_branch("dismiss", "Dismiss it.", false),
-            dialog_branch("respond", "Answer a prompt.", true),
+            dialog_branch(DialogAction::Dismiss.as_str(), "Dismiss it.", false),
+            dialog_branch(DialogAction::Respond.as_str(), "Answer a prompt.", true),
         ],
         vec![
             json!({"action":"status"}),
@@ -1106,7 +1107,7 @@ fn flow_schema() -> Value {
                 ),
                 (
                     "on_error",
-                    enumeration(&["stop", "continue"], Some(DEFAULT_ON_ERROR), ""),
+                    enumeration(OnError::WORDS, Some(DEFAULT_ON_ERROR.as_str()), ""),
                 ),
                 ("tab", tab()),
             ],
@@ -1125,20 +1126,23 @@ fn record_schema() -> Value {
                 vec![
                     (
                         "action",
-                        constant("start", "Start recording."),
+                        constant(RecordAction::Start.as_str(), "Start recording."),
                     ),
                     ("tab", tab()),
                 ],
                 vec!["action"],
             ),
-            record_branch("status", "Report state and bounds."),
-            record_branch("stop", "Stop and keep the frames in memory."),
+            record_branch(RecordAction::Status.as_str(), "Report state and bounds."),
+            record_branch(
+                RecordAction::Stop.as_str(),
+                "Stop and keep the frames in memory.",
+            ),
             object(
                 vec![
                     (
                         "action",
                         constant(
-                            "save",
+                            RecordAction::Save.as_str(),
                             "Save the GIF. Needs read for captured sources, plus write when attaching to a target; an active capture stops after admission.",
                         ),
                     ),
@@ -1159,7 +1163,10 @@ fn record_schema() -> Value {
                 ],
                 vec!["action"],
             ),
-            record_branch("discard", "Erase captured bytes. This cannot be undone."),
+            record_branch(
+                RecordAction::Discard.as_str(),
+                "Erase captured bytes. This cannot be undone.",
+            ),
         ],
         vec![
             json!({"action":"start"}),
@@ -1188,16 +1195,16 @@ fn diagnose_schema() -> Value {
                 (
                     "source",
                     enumeration(
-                        &["both", "console", "network"],
-                        Some(DEFAULT_DIAGNOSTIC_SOURCE),
+                        DiagnosticSource::WORDS,
+                        Some(DEFAULT_DIAGNOSTIC_SOURCE.as_str()),
                         "",
                     ),
                 ),
                 (
                     "detail",
                     enumeration(
-                        &["problems", "all"],
-                        Some(DEFAULT_DIAGNOSTIC_DETAIL),
+                        DiagnosticDetail::WORDS,
+                        Some(DEFAULT_DIAGNOSTIC_DETAIL.as_str()),
                         "problems: warnings, errors, failed requests, and HTTP failures.",
                     ),
                 ),

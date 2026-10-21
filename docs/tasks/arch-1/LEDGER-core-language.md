@@ -10,10 +10,11 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D5, C17, LANG-4, C12b-1, LANG-1, LANG-2, LANG-11, LANG-7, LANG-9 and LANG-12 have
-landed. LANG-3 waits for test-02's BROW-15 (agreed: it lands first and reports its commit); then
-LANG-10, LANG-5 and LANG-8 follow in order, and C20 after I9b. A slice's hash is filled in by
-the next slice's commit, since a rebase before the push changes it.
+Every slice up to LANG-3 has landed, LANG-8 included. Next are LANG-10 (the pure move of
+`mod.rs`), then LANG-5; C20 waits for I9b. The coordinator also gave this lane LANG-12b (the
+environment probe into `cli/`, test-04 holds `cli/doctor.rs` and `cli/setup.rs`) and the docs
+lane's owed lines under D3. A slice's hash is filled in by the next slice's commit, since a
+rebase before the push changes it.
 
 ## Slices
 
@@ -31,12 +32,12 @@ In order. "After" names what a slice waits for.
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
 | LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | landed (test f54e2469, block 512ad4d1) |
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | landed (01cc55e6) |
-| LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | todo |
+| LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | landed |
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
 | LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
 | LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed (ec0166d5) |
 | LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | landed (6b5f619e) |
-| LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | landed |
+| LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | landed (0b6c3817) |
 | LANG-11 | docs(language): the item docs match the code | - | LANG-11 | landed (df9e4cac) |
 | LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | landed (fb359bf5) |
 | C20 | test(language): the plugin skill names only catalog tools and fields | I9b | ADR-0203 C20, moved from core | todo |
@@ -172,3 +173,17 @@ In order. "After" names what a slice waits for.
   so `Outcome::CompositionProgress` (which shared its name with the struct) and
   `Outcome::CompositionUnrecorded` are gone. `StepNotStarted` stays, the typed author of the
   persisted not-started line. Cross-lane: `workbench/history.rs`, two lines. No word changes.
+- LANG-3: `language/choices.rs` defines the closed choices with one `closed_choice!` macro
+  (enum, `WORDS` in catalog order, `as_str`, and a `Deserialize` that refuses with the curated
+  "`field` must be one of ...: got `value`" words, pinned through `decode`): `InspectScope`,
+  `FindScope`, `PointerButton`, `ScrollDirection`, `ScrollAmount`, `HistoryDirection`,
+  `DiagnosticSource`, `DiagnosticDetail`, `OnError`, `DialogAction` and `RecordAction`. The
+  decoder's `validate_choice` calls for them go; the catalog advertises `WORDS` (golden
+  byte-identical); the defaults are typed; `HISTORY_FORWARD` became `HistoryDirection` and
+  `HISTORY_RELOAD`. Work matches the types: the diagnose fallback `_ => Both` and the
+  recording `unreachable!` are gone, and `Outcome::PageScrolled` carries a `ScrollDirection`, so
+  pointer's literal "down" is gone. `BrowserCommand`'s fields stay strings, filled with
+  `as_str()`; test-02's BROW-3a retypes them. Cross-lane, under test-03's hold: `work/flow.rs`,
+  `interaction.rs`, `mod.rs`, `navigation.rs`, `pointer.rs`, `reading.rs`, `recording.rs`. Left:
+  `Outcome::HistoryTraversed` still carries its direction as a String, and the modifiers stay
+  strings (BROW-3).

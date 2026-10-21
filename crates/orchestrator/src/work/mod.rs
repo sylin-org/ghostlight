@@ -62,7 +62,7 @@ use crate::language::{
         STALE_FACT,
     },
     page_refusal::{PageGesture, PageRefusal},
-    Operation, Record, TakeScreenshot,
+    Operation, Record, RecordAction, TakeScreenshot,
 };
 use crate::presentation::PresentationReactor;
 use crate::provenance::ConnectionEvidence;
@@ -509,7 +509,7 @@ impl ApplicationExecutor {
                 value.reuse,
             ),
             Operation::NavigateHistory(value) => {
-                self.navigate_history(context, lease, value.tab.as_deref(), &value.direction)
+                self.navigate_history(context, lease, value.tab.as_deref(), value.direction)
             }
             Operation::ReloadPage(value) => {
                 self.reload_page(context, lease, value.tab.as_deref(), value.bypass_cache)
@@ -529,7 +529,7 @@ impl ApplicationExecutor {
                 lease,
                 value.tab.as_deref(),
                 &value.text,
-                &value.scope,
+                value.scope,
                 value.max_results,
             ),
             Operation::TakeScreenshot(value) => self.screenshot(context, lease, value),
@@ -2621,7 +2621,9 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
         Operation::HandleDialog(_) => PresentationActivity::Dialog,
         Operation::Diagnose(_) => PresentationActivity::Quiet,
         Operation::ExplainPolicy(_) => PresentationActivity::Quiet,
-        Operation::Record(value) if value.action == "start" => PresentationActivity::Screenshot,
+        Operation::Record(value) if value.action == RecordAction::Start => {
+            PresentationActivity::Screenshot
+        }
         Operation::Record(_) => PresentationActivity::Quiet,
     }
 }

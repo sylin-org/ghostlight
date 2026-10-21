@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::area::{LeftOut, LeftOutKey};
+use super::choices::ScrollDirection;
 use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
 use super::page_refusal::{self, PageGesture, PageRefusal};
@@ -546,7 +547,7 @@ pub enum Outcome {
     /// A page was scrolled.
     PageScrolled {
         host: Option<String>,
-        direction: String,
+        direction: ScrollDirection,
     },
     /// A semantic target was revealed.
     TargetRevealed {
@@ -817,7 +818,7 @@ impl Outcome {
                 format!("Clicked at {x},{y} on {}.", on_page(host))
             }
             Self::PageScrolled { host, direction } => {
-                format!("Scrolled {direction} on {}.", on_page(host))
+                format!("Scrolled {} on {}.", direction.as_str(), on_page(host))
             }
             Self::TargetRevealed { host, subject } => format!(
                 "Scrolled {} into view on {}.",
@@ -3047,7 +3048,7 @@ mod tests {
             (
                 Outcome::PageScrolled {
                     host: Some("example.com".into()),
-                    direction: "down".into(),
+                    direction: crate::language::ScrollDirection::Down,
                 },
                 "Scrolled down on example.com.",
             ),
@@ -3535,7 +3536,7 @@ Changes are \"unsaved\".".into()),
             },
             Outcome::PageScrolled {
                 host: Some("example.com".into()),
-                direction: "down".into(),
+                direction: crate::language::ScrollDirection::Down,
             },
             Outcome::TargetRevealed {
                 host: Some("example.com".into()),
@@ -4452,7 +4453,7 @@ Changes are \"unsaved\".".into()),
         );
         let opened = Outcome::PageScrolled {
             host: None,
-            direction: "down".into(),
+            direction: crate::language::ScrollDirection::Down,
         }
         .with_open_dialog(DialogKind::Prompt);
         assert_eq!(

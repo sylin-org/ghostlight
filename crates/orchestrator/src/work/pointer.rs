@@ -66,13 +66,13 @@ impl ApplicationExecutor {
                     &target.locator,
                     Some(ClickShape {
                         clicks: value.click_count,
-                        button: value.button.clone(),
+                        button: value.button.as_str().into(),
                     }),
                 );
                 let command = BrowserCommand::Activate(PhysicalClick {
                     tab_id: tab.physical_id,
                     locator: target.locator,
-                    button: value.button.clone(),
+                    button: value.button.as_str().into(),
                     click_count: value.click_count,
                     modifiers: value.modifiers.clone(),
                 });
@@ -89,7 +89,7 @@ impl ApplicationExecutor {
                         point,
                         expected_viewport: view.viewport,
                     },
-                    button: value.button.clone(),
+                    button: value.button.as_str().into(),
                     click_count: value.click_count,
                     modifiers: value.modifiers.clone(),
                 });
@@ -173,8 +173,9 @@ impl ApplicationExecutor {
                             .then(|| {
                                 value
                                     .direction
-                                    .clone()
-                                    .unwrap_or_else(|| SCROLL_DIRECTION_DEFAULT.into())
+                                    .unwrap_or(SCROLL_DIRECTION_DEFAULT)
+                                    .as_str()
+                                    .into()
                             }),
                         amount: value
                             .target
@@ -182,8 +183,9 @@ impl ApplicationExecutor {
                             .then(|| {
                                 value
                                     .amount
-                                    .clone()
-                                    .unwrap_or_else(|| SCROLL_AMOUNT_DEFAULT.into())
+                                    .unwrap_or(SCROLL_AMOUNT_DEFAULT)
+                                    .as_str()
+                                    .into()
                             }),
                     }),
                 ) {
@@ -219,10 +221,7 @@ impl ApplicationExecutor {
                             } else {
                                 Outcome::PageScrolled {
                                     host: observed_host(&selected.url),
-                                    direction: value
-                                        .direction
-                                        .clone()
-                                        .unwrap_or_else(|| "down".into()),
+                                    direction: value.direction.unwrap_or(SCROLL_DIRECTION_DEFAULT),
                                 }
                             },
                             json!({"tab":selected.handle.as_str(),"target":value.target,"scrolled":true,"x":x,"y":y}),
@@ -285,8 +284,9 @@ impl ApplicationExecutor {
                 },
                 direction: value
                     .direction
-                    .clone()
-                    .expect("language validated direction"),
+                    .expect("language fills a wheel scroll's direction")
+                    .as_str()
+                    .into(),
                 ticks: value.ticks.expect("language validated ticks"),
             }),
         ) {
@@ -308,7 +308,9 @@ impl ApplicationExecutor {
                     false,
                     Outcome::PageScrolled {
                         host: observed_host(&selected.url),
-                        direction: value.direction.clone().expect("language validated direction"),
+                        direction: value
+                            .direction
+                            .expect("language fills a wheel scroll's direction"),
                     },
                     json!({"tab":selected.handle.as_str(),"view":view.handle.as_str(),"wheel":true,"ticks":value.ticks,"scrolled":true,"x":x,"y":y}),
                 )

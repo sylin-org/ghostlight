@@ -730,10 +730,10 @@ fn every_advertised_default_is_the_decoded_default() {
     let scroll = advertised("browser_scroll");
     assert_eq!(
         scroll["properties"]["direction"]["default"],
-        crate::language::SCROLL_DIRECTION_DEFAULT
+        crate::language::SCROLL_DIRECTION_DEFAULT.as_str()
     );
     assert_eq!(
         scroll["properties"]["amount"]["default"],
-        crate::language::SCROLL_AMOUNT_DEFAULT
+        crate::language::SCROLL_AMOUNT_DEFAULT.as_str()
     );
 }

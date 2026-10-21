@@ -6,7 +6,7 @@ use serde_json::{json, Map, Value};
 
 use crate::language::composition::StepCause;
 use crate::language::history::{CompositionKind, StepReceipt};
-use crate::language::{Operation, RunFlow};
+use crate::language::{OnError, Operation, RunFlow};
 use crate::workspace::{TabHandle, WorkspaceLease};
 
 use super::result::{Readiness, UnexecutedStatus};
@@ -77,7 +77,7 @@ impl ApplicationExecutor {
                     row["cause"] = json!(cause);
                     row["error"] = json!(error);
                     rows.push(row);
-                    if value.on_error == "stop" {
+                    if value.on_error == OnError::Stop {
                         progress.progress.stopped = true;
                         break;
                     }
@@ -118,7 +118,7 @@ impl ApplicationExecutor {
             rows.push(row);
             envelopes.insert(step.id.clone(), envelope);
             if cause.is_some_and(StepCause::stops_execution)
-                || (terminal.result.status != Status::Succeeded && value.on_error == "stop")
+                || (terminal.result.status != Status::Succeeded && value.on_error == OnError::Stop)
             {
                 progress.progress.stopped = true;
                 break;

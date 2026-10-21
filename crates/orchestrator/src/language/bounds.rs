@@ -2,6 +2,10 @@
 //! decoder checks them, the catalog advertises them, and the sentences that name a bound read it
 //! from here, so the three can never disagree.
 
+use super::choices::{
+    DiagnosticDetail, DiagnosticSource, FindScope, InspectScope, OnError, PointerButton,
+};
+
 /// An inclusive range a whole-number field accepts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Range {
@@ -133,14 +137,14 @@ pub(crate) const DIAGNOSTIC_LIMIT: Range = Range { min: 1, max: 200 };
 pub(crate) const DEFAULT_DIAGNOSTIC_LIMIT: usize = 50;
 
 /// The scope an inspection reads when the call names none.
-pub(crate) const DEFAULT_INSPECT_SCOPE: &str = "controls";
+pub(crate) const DEFAULT_INSPECT_SCOPE: InspectScope = InspectScope::Controls;
 /// The scope a find searches when the call names none.
-pub(crate) const DEFAULT_FIND_SCOPE: &str = "any";
+pub(crate) const DEFAULT_FIND_SCOPE: FindScope = FindScope::Any;
 /// The button a click presses when the call names none.
-pub(crate) const DEFAULT_BUTTON: &str = "primary";
+pub(crate) const DEFAULT_BUTTON: PointerButton = PointerButton::Primary;
 /// The diagnostics a read returns when the call names no `source`.
-pub(crate) const DEFAULT_DIAGNOSTIC_SOURCE: &str = "both";
+pub(crate) const DEFAULT_DIAGNOSTIC_SOURCE: DiagnosticSource = DiagnosticSource::Both;
 /// The detail a diagnostics read returns when the call names none.
-pub(crate) const DEFAULT_DIAGNOSTIC_DETAIL: &str = "problems";
+pub(crate) const DEFAULT_DIAGNOSTIC_DETAIL: DiagnosticDetail = DiagnosticDetail::Problems;
 /// What a flow does at a failed step when the call names no `on_error`.
-pub(crate) const DEFAULT_ON_ERROR: &str = "stop";
+pub(crate) const DEFAULT_ON_ERROR: OnError = OnError::Stop;

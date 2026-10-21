@@ -8,7 +8,7 @@ use crate::browser::adapter::{
 
 use crate::governance::Capability;
 use crate::language::outcome::{DialogKind, Outcome, PromptField, Refusal};
-use crate::language::{Diagnose, HandleDialog};
+use crate::language::{self, Diagnose, DialogAction, HandleDialog};
 use crate::workspace::WorkspaceLease;
 
 use super::result::Effect;
@@ -46,7 +46,7 @@ impl ApplicationExecutor {
             lease,
             value.tab.as_deref(),
             |selected, decision| {
-                if value.action == "status" {
+                if value.action == DialogAction::Status {
                     return match self.dispatch(
                         context,
                         BrowserCommand::InspectDialog {
@@ -92,8 +92,8 @@ impl ApplicationExecutor {
                         ),
                     };
                 }
-                let accept = value.action != "dismiss";
-                let text = (value.action == "respond")
+                let accept = value.action != DialogAction::Dismiss;
+                let text = (value.action == DialogAction::Respond)
                     .then(|| value.text.clone())
                     .flatten();
                 match self.dispatch(
@@ -154,15 +154,14 @@ impl ApplicationExecutor {
             lease,
             value.tab.as_deref(),
             |selected, decision| {
-                let source = match value.source.as_str() {
-                    "console" => DiagnosticSource::Console,
-                    "network" => DiagnosticSource::Network,
-                    _ => DiagnosticSource::Both,
+                let source = match value.source {
+                    language::DiagnosticSource::Console => DiagnosticSource::Console,
+                    language::DiagnosticSource::Network => DiagnosticSource::Network,
+                    language::DiagnosticSource::Both => DiagnosticSource::Both,
                 };
-                let detail = if value.detail == "all" {
-                    DiagnosticDetail::All
-                } else {
-                    DiagnosticDetail::Problems
+                let detail = match value.detail {
+                    language::DiagnosticDetail::All => DiagnosticDetail::All,
+                    language::DiagnosticDetail::Problems => DiagnosticDetail::Problems,
                 };
                 match self.dispatch(
                     context,
@@ -213,13 +212,13 @@ impl ApplicationExecutor {
                             Outcome::DiagnosticsRead {
                                 count,
                                 capture_started,
-                                problems_only: value.detail == "problems",
+                                problems_only: value.detail == language::DiagnosticDetail::Problems,
                                 host: observed_host(&selected.url),
                             },
                             json!({
                                 "tab":selected.handle.as_str(),
-                                "source":value.source,
-                                "detail":value.detail,
+                                "source":value.source.as_str(),
+                                "detail":value.detail.as_str(),
                                 "entries":entries,
                                 "cursor":cursor,
                                 "truncated":truncated,

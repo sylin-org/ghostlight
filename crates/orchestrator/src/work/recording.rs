@@ -11,7 +11,7 @@ use serde_json::json;
 use crate::governance::{Capability, CapabilitySet, Decision};
 use crate::language::{
     outcome::{Outcome, Refusal, SavedTo},
-    Record,
+    Record, RecordAction,
 };
 use crate::workspace::WorkspaceLease;
 
@@ -43,13 +43,13 @@ impl ApplicationExecutor {
         lease: Option<&WorkspaceLease>,
         value: &Record,
     ) -> Terminal {
-        match value.action.as_str() {
-            "start" => self.start_recording(
+        match value.action {
+            RecordAction::Start => self.start_recording(
                 context,
                 lease.expect("recording start holds the workspace lease"),
                 value,
             ),
-            "status" => {
+            RecordAction::Status => {
                 // Needs no capability, but crosses the runtime gate like every path to the
                 // browser, so a pause also holds status, stop and discard. See stop_recording
                 // and discard_recording for the same gate.
@@ -72,10 +72,9 @@ impl ApplicationExecutor {
                     Err(error) => self.browser_failure(context, decision, error, None),
                 }
             }
-            "stop" => self.stop_recording(context),
-            "save" => self.save_recording(context, lease, value),
-            "discard" => self.discard_recording(context),
-            _ => unreachable!("recording action was validated"),
+            RecordAction::Stop => self.stop_recording(context),
+            RecordAction::Save => self.save_recording(context, lease, value),
+            RecordAction::Discard => self.discard_recording(context),
         }
     }
 
