@@ -296,27 +296,7 @@ fn source_name(source: &Source) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_live_claim_is_named_in_the_sentence_that_says_it_is_not_verified() {
-        assert_eq!(
-            claimed_name_explanation("codex-mcp-client"),
-            "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it."
-        );
-    }
-
-    #[test]
-    fn a_client_that_reported_no_name_claims_none() {
-        for unnamed in ["", "   ", " \t "] {
-            assert_eq!(claimed_name(unnamed), None, "{unnamed:?}");
-        }
-        assert_eq!(
-            claimed_name(" MCP client "),
-            Some("MCP client"),
-            "no name a client sends is Ghostlight's own"
-        );
-        assert_eq!(claimed_name("  Some Agent  "), Some("Some Agent"));
-    }
+    use crate::agent::{UNKNOWN_ID, UNKNOWN_NAME_SEPARATOR};
 
     /// Durable evidence of a connection on `channel` that `source` started.
     fn started(channel: IntakeChannel, source: Option<Source>) -> Attribution {
@@ -334,237 +314,6 @@ mod tests {
         })
     }
 
-    #[test]
-    fn a_claim_its_own_app_started_drops_the_caveat_and_says_where_it_was_seen() {
-        let attribution = started(
-            IntakeChannel::Mcp,
-            source(Some("claude-desktop"), "claude.exe"),
-        );
-        assert_eq!(
-            details(&attribution, Claimed::Live(Some("claude-ai"))).explanation,
-            "Started by Claude Desktop."
-        );
-    }
-
-    #[test]
-    fn a_claimed_agent_inside_another_agent_s_app_says_both() {
-        let attribution = started(
-            IntakeChannel::Mcp,
-            source(Some("claude-desktop"), "claude.exe"),
-        );
-        let said = details(&attribution, Claimed::Live(Some("claude-code")));
-        assert_eq!(said.explanation, "Claude Code, in Claude Desktop.");
-        assert_eq!(said.reported_application.as_deref(), Some("claude-code"));
-    }
-
-    #[test]
-    fn a_claim_and_a_source_that_do_not_line_up_are_both_said_without_judging_either() {
-        let by_program = started(IntakeChannel::Mcp, source(None, "WindowsTerminal.exe"));
-        assert_eq!(
-            details(&by_program, Claimed::Live(Some("codex-mcp-client"))).explanation,
-            "\"codex-mcp-client\" is what the agent calls itself. Started by WindowsTerminal.exe."
-        );
-        let unknown_name = started(IntakeChannel::Mcp, source(Some("cursor"), "Cursor.exe"));
-        assert_eq!(
-            details(&unknown_name, Claimed::Live(Some("my agent"))).explanation,
-            format!("{CLAIM_CAVEAT} Started by Cursor."),
-            "a name the card already shows is not quoted again, and stays a claim"
-        );
-    }
-
-    #[test]
-    fn an_unknown_source_keeps_the_caveat() {
-        let attribution = started(IntakeChannel::Mcp, None);
-        assert_eq!(
-            details(&attribution, Claimed::Live(Some("codex-mcp-client"))).explanation,
-            claimed_name_explanation("codex-mcp-client")
-        );
-        assert_eq!(
-            details(&attribution, Claimed::Live(Some("my agent"))).explanation,
-            CLAIM_CAVEAT
-        );
-    }
-
-    #[test]
-    fn a_claim_that_reads_as_its_agent_s_name_is_not_said_again() {
-        let unseen = started(IntakeChannel::Mcp, None);
-        let said = details(&unseen, Claimed::Live(Some("claude-code")));
-        assert_eq!(said.agent.name, "Claude Code");
-        assert_eq!(said.explanation, CLAIM_CAVEAT);
-        let by_program = started(IntakeChannel::Mcp, source(None, "WindowsTerminal.exe"));
-        assert_eq!(
-            details(&by_program, Claimed::Live(Some("Claude Code"))).explanation,
-            format!("{CLAIM_CAVEAT} Started by WindowsTerminal.exe.")
-        );
-        assert_eq!(
-            details(&unseen, Claimed::Live(Some("Unknown agent"))).explanation,
-            claimed_name_explanation("Unknown agent"),
-            "a reserved name names no agent, so it is still said"
-        );
-    }
-
-    #[test]
-    fn earlier_work_that_kept_no_agent_says_only_what_its_record_shows() {
-        let unlisted = crate::provenance::ConnectionEvidence::new(
-            Attribution::accepted(IntakeChannel::Mcp),
-            Some("my agent"),
-        );
-        assert_eq!(unlisted.details().agent.name, "my agent");
-        let restored = unlisted.attribution().details();
-        assert_eq!(
-            restored.agent,
-            Agent::earlier(),
-            "a new record whose name the catalog does not know, with no source, keeps no agent"
-        );
-        assert_eq!(
-            restored.agent,
-            Attribution::legacy(IntakeChannel::Mcp).details().agent
-        );
-        let note = restored.agent.note.unwrap_or_default();
-        assert_eq!(note, EARLIER_SESSION_NOTE);
-        assert!(
-            !note.contains("before"),
-            "the record does not show when it was written: {note}"
-        );
-    }
-
-    #[test]
-    fn work_nothing_named_says_nothing_to_vouch_for() {
-        let live = details(&started(IntakeChannel::Mcp, None), Claimed::Live(None));
-        assert_eq!(live.agent, Agent::unknown());
-        assert_eq!(live.explanation, "");
-        let recorded = details(&started(IntakeChannel::Mcp, None), Claimed::Unkept);
-        assert_eq!(recorded.agent, Agent::earlier());
-        assert_eq!(recorded.explanation, "");
-        let legacy = details(&Attribution::legacy(IntakeChannel::Mcp), Claimed::Unkept);
-        assert_eq!(legacy.agent, Agent::earlier());
-        assert_eq!(legacy.explanation, "");
-        assert_eq!(
-            details(&Attribution::legacy(IntakeChannel::Cli), Claimed::Unkept).explanation,
-            LEGACY_EXPLANATION
-        );
-        let by_program = details(
-            &started(IntakeChannel::Mcp, source(None, "node.exe")),
-            Claimed::Unkept,
-        );
-        assert_eq!(
-            by_program.agent,
-            Agent::unknown(),
-            "a record with a source was not before names were kept"
-        );
-        assert_eq!(by_program.explanation, "Started by node.exe.");
-    }
-
-    #[test]
-    fn history_and_the_command_line_say_what_started_the_connection() {
-        let mcp = started(
-            IntakeChannel::Mcp,
-            source(Some("claude-desktop"), "claude.exe"),
-        );
-        let recorded = details(&mcp, Claimed::Unkept);
-        assert_eq!(recorded.explanation, "Started by Claude Desktop.");
-        assert_eq!(
-            recorded.reported_application, None,
-            "history keeps no claim"
-        );
-        let cli = started(IntakeChannel::Cli, source(None, "WindowsTerminal.exe"));
-        assert_eq!(
-            details(&cli, Claimed::Live(Some("ghostlight call"))).explanation,
-            "A ghostlight call from WindowsTerminal.exe. Ghostlight does not verify the scripts \
-             and instructions it runs."
-        );
-        assert_eq!(
-            details(&started(IntakeChannel::Cli, None), Claimed::Unkept).explanation,
-            "A ghostlight call session is a local program. Ghostlight does not verify the scripts \
-             and instructions it runs."
-        );
-    }
-
-    #[test]
-    fn a_claim_inside_its_known_host_says_both() {
-        let desktop = started(
-            IntakeChannel::Mcp,
-            source(Some("claude-desktop"), "claude.exe"),
-        );
-        let code = details(&desktop, Claimed::Live(Some("claude-code")));
-        assert_eq!(code.explanation, "Claude Code, in Claude Desktop.");
-        assert_eq!(code.agent.id, "claude-code");
-        let editor = started(IntakeChannel::Mcp, source(Some("vscode"), "Code.exe"));
-        let cline = details(&editor, Claimed::Live(Some("cline-vscode")));
-        assert_eq!(cline.explanation, "Cline, in Visual Studio Code.");
-        assert_eq!(cline.agent.id, "cline");
-    }
-
-    #[test]
-    fn a_known_claim_beside_another_agents_app_does_not_say_in() {
-        let desktop = started(
-            IntakeChannel::Mcp,
-            source(Some("claude-desktop"), "claude.exe"),
-        );
-        let cline = details(&desktop, Claimed::Live(Some("cline")));
-        assert_eq!(
-            cline.explanation,
-            format!("{CLAIM_CAVEAT} Started by Claude Desktop.")
-        );
-        assert_eq!(cline.agent.id, "cline");
-        let editor = started(IntakeChannel::Mcp, source(Some("cursor"), "Cursor.exe"));
-        assert_eq!(
-            details(&editor, Claimed::Live(Some("claude-code"))).explanation,
-            format!("{CLAIM_CAVEAT} Started by Cursor."),
-            "the catalog does not know Claude Code inside Cursor"
-        );
-    }
-
-    #[test]
-    fn a_live_claim_names_the_agent_before_its_source() {
-        let desktop = started(
-            IntakeChannel::Mcp,
-            source(Some("claude-desktop"), "claude.exe"),
-        );
-        assert_eq!(
-            details(&desktop, Claimed::Live(Some("codex-mcp-client")))
-                .agent
-                .id,
-            "codex"
-        );
-        assert_eq!(
-            details(&desktop, Claimed::Live(Some("my agent"))).agent.id,
-            "unknown:my agent",
-            "a name the catalog does not know still names the agent"
-        );
-        assert_eq!(
-            details(&desktop, Claimed::Live(Some("Command line"))).agent,
-            Agent::unknown(),
-            "a reserved name names the unknown agent, not the source's"
-        );
-        for unnamed in [
-            Claimed::Live(None),
-            Claimed::Live(Some("")),
-            Claimed::Unkept,
-        ] {
-            assert_eq!(
-                details(&desktop, unnamed).agent.id,
-                "claude-desktop",
-                "{unnamed:?}"
-            );
-        }
-        // I-D4 (ADR-0106, amendment of 2026-10-21): a command-line session is named for the agent
-        // whose app runs it, whatever its client claims, and is "Command line" for a terminal.
-        let cli = started(
-            IntakeChannel::Cli,
-            source(Some("claude-desktop"), "claude.exe"),
-        );
-        assert_eq!(
-            details(&cli, Claimed::Live(Some("codex"))).agent.id,
-            "claude-desktop"
-        );
-        let terminal = started(IntakeChannel::Cli, source(None, "pwsh.exe"));
-        assert_eq!(
-            details(&terminal, Claimed::Live(None)).agent,
-            Agent::command_line()
-        );
-    }
-
     /// Durable evidence of an MCP connection whose client claimed the catalog agent `claimed`,
     /// beside the `source` that started it.
     fn restored(claimed: &str, source: Option<Source>) -> Attribution {
@@ -574,103 +323,301 @@ mod tests {
         }
     }
 
+    /// One live row: the channel, the source that started the connection, the claims that read
+    /// alike, the agent id they name and the sentence, when the row asserts one.
+    type LiveRow<'a> = (
+        IntakeChannel,
+        Option<Source>,
+        &'a [Option<&'a str>],
+        String,
+        Option<String>,
+    );
+
+    /// ACCEPTANCE Connection reporting: a live connection's details name its agent once (its
+    /// claim, else the app that started it, else Unknown agent) and say in one sentence what the
+    /// connection establishes. "in" only when the catalog knows the agent runs inside the source's
+    /// app (118d5070), the caveat while the name is only a claim, and the client's own words quoted
+    /// only where they say more than the agent's name. A name that is empty or blank names nobody
+    /// (233e7569). I-D4 (ADR-0106, amendment of 2026-10-21): a command-line session is named for
+    /// the agent whose app runs it, whatever its client claims, and is the command line for a
+    /// terminal.
     #[test]
-    fn a_restored_claim_names_its_agent_and_quotes_no_words_the_client_never_sent() {
-        let apart = details(
-            &restored("claude-code", source(Some("cursor"), "Cursor.exe")),
-            Claimed::Unkept,
-        );
-        assert_eq!(apart.agent.id, "claude-code");
-        assert_eq!(
-            apart.explanation,
-            format!("{CLAIM_CAVEAT} Started by Cursor.")
-        );
-        assert_eq!(apart.reported_application, None);
-        let by_program = details(
-            &restored("claude-code", source(None, "WindowsTerminal.exe")),
-            Claimed::Unkept,
-        );
-        assert_eq!(
-            by_program.explanation,
-            format!("{CLAIM_CAVEAT} Started by WindowsTerminal.exe.")
-        );
-        let unseen = details(&restored("claude-code", None), Claimed::Unkept);
-        assert_eq!(unseen.agent.id, "claude-code");
-        assert_eq!(unseen.explanation, CLAIM_CAVEAT);
-        for said in [&apart, &by_program, &unseen] {
+    fn a_live_connection_names_its_agent_once_and_says_what_its_source_establishes() {
+        let desktop = || source(Some("claude-desktop"), "claude.exe");
+        let terminal = || source(None, "WindowsTerminal.exe");
+        let cursor = || source(Some("cursor"), "Cursor.exe");
+        let unknown_named = |name: &str| format!("{UNKNOWN_ID}{UNKNOWN_NAME_SEPARATOR}{name}");
+        let unnamed: &[Option<&str>] = &[None, Some(""), Some("   ")];
+        let rows: Vec<LiveRow<'_>> = vec![
+            (
+                IntakeChannel::Mcp,
+                desktop(),
+                &[Some("claude-ai")],
+                "claude-desktop".into(),
+                Some("Started by Claude Desktop.".into()),
+            ),
+            (
+                IntakeChannel::Mcp,
+                desktop(),
+                &[Some("claude-code")],
+                "claude-code".into(),
+                Some("Claude Code, in Claude Desktop.".into()),
+            ),
+            (
+                IntakeChannel::Mcp,
+                source(Some("vscode"), "Code.exe"),
+                &[Some("cline-vscode")],
+                "cline".into(),
+                Some("Cline, in Visual Studio Code.".into()),
+            ),
+            (
+                IntakeChannel::Mcp,
+                desktop(),
+                &[Some("cline")],
+                "cline".into(),
+                Some(format!("{CLAIM_CAVEAT} Started by Claude Desktop.")),
+            ),
+            (
+                IntakeChannel::Mcp,
+                cursor(),
+                &[Some("claude-code")],
+                "claude-code".into(),
+                Some(format!("{CLAIM_CAVEAT} Started by Cursor.")),
+            ),
+            (
+                IntakeChannel::Mcp,
+                cursor(),
+                &[Some("my agent")],
+                unknown_named("my agent"),
+                Some(format!("{CLAIM_CAVEAT} Started by Cursor.")),
+            ),
+            (
+                IntakeChannel::Mcp,
+                terminal(),
+                &[Some("codex-mcp-client")],
+                "codex".into(),
+                Some(
+                    "\"codex-mcp-client\" is what the agent calls itself. Started by \
+                     WindowsTerminal.exe."
+                        .into(),
+                ),
+            ),
+            (
+                IntakeChannel::Mcp,
+                terminal(),
+                &[Some("Claude Code")],
+                "claude-code".into(),
+                Some(format!("{CLAIM_CAVEAT} Started by WindowsTerminal.exe.")),
+            ),
+            (
+                IntakeChannel::Mcp,
+                None,
+                &[Some("codex-mcp-client")],
+                "codex".into(),
+                Some(
+                    "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not \
+                     verify it."
+                        .into(),
+                ),
+            ),
+            (
+                IntakeChannel::Mcp,
+                None,
+                &[Some("my agent")],
+                unknown_named("my agent"),
+                Some(CLAIM_CAVEAT.into()),
+            ),
+            (
+                IntakeChannel::Mcp,
+                None,
+                &[Some("claude-code")],
+                "claude-code".into(),
+                Some(CLAIM_CAVEAT.into()),
+            ),
+            (
+                IntakeChannel::Mcp,
+                None,
+                &[Some("Unknown agent")],
+                Agent::unknown().id,
+                Some(
+                    "\"Unknown agent\" is what the agent calls itself; Ghostlight does not \
+                     verify it."
+                        .into(),
+                ),
+            ),
+            (
+                IntakeChannel::Mcp,
+                desktop(),
+                &[Some("codex-mcp-client")],
+                "codex".into(),
+                None,
+            ),
+            (
+                IntakeChannel::Mcp,
+                desktop(),
+                &[Some("Command line")],
+                Agent::unknown().id,
+                None,
+            ),
+            (
+                IntakeChannel::Mcp,
+                desktop(),
+                unnamed,
+                "claude-desktop".into(),
+                Some("Started by Claude Desktop.".into()),
+            ),
+            (
+                IntakeChannel::Mcp,
+                None,
+                unnamed,
+                Agent::unknown().id,
+                Some(String::new()),
+            ),
+            (
+                IntakeChannel::Cli,
+                terminal(),
+                &[Some("ghostlight call")],
+                Agent::command_line().id,
+                Some(format!(
+                    "A ghostlight call from WindowsTerminal.exe. {CLI_SCRIPTS_UNVERIFIED}"
+                )),
+            ),
+            (
+                IntakeChannel::Cli,
+                desktop(),
+                &[Some("codex")],
+                "claude-desktop".into(),
+                Some(format!(
+                    "A ghostlight call from Claude Desktop. {CLI_SCRIPTS_UNVERIFIED}"
+                )),
+            ),
+            (
+                IntakeChannel::Cli,
+                source(None, "pwsh.exe"),
+                &[None],
+                Agent::command_line().id,
+                Some(format!(
+                    "A ghostlight call from pwsh.exe. {CLI_SCRIPTS_UNVERIFIED}"
+                )),
+            ),
+        ];
+        for (channel, from, claims, agent, explanation) in rows {
+            let attribution = started(channel, from);
+            for &claim in claims {
+                let said = details(&attribution, Claimed::Live(claim));
+                let row = format!("{channel:?} {:?} {claim:?}", attribution.source);
+                assert_eq!(said.agent.id, agent, "{row}");
+                if let Some(explanation) = &explanation {
+                    assert_eq!(&said.explanation, explanation, "{row}");
+                }
+                let kept = claim.filter(|claim| !claim.trim().is_empty());
+                assert_eq!(said.reported_application.as_deref(), kept, "{row}");
+            }
+        }
+    }
+
+    /// A record read back from history keeps no client words, so its details quote none
+    /// (80868c31): a kept claimed agent still names it and its sentence says only what the source
+    /// and the caveat say, the same as its live row where that row quotes nothing. A record that
+    /// kept neither a claim nor a source is the Earlier session, with the hover that says no agent
+    /// name was kept and no claim about when it was written (window-7, 2dfbe8d8), and command-line
+    /// history from before connection identities says so (ACCEPTANCE Connection reporting).
+    #[test]
+    fn a_record_read_back_says_only_what_it_kept() {
+        let desktop = || source(Some("claude-desktop"), "claude.exe");
+        let rows: [(Attribution, String, String); 11] = [
+            (
+                restored("claude-code", source(Some("cursor"), "Cursor.exe")),
+                "claude-code".into(),
+                format!("{CLAIM_CAVEAT} Started by Cursor."),
+            ),
+            (
+                restored("claude-code", source(None, "WindowsTerminal.exe")),
+                "claude-code".into(),
+                format!("{CLAIM_CAVEAT} Started by WindowsTerminal.exe."),
+            ),
+            (
+                restored("claude-code", None),
+                "claude-code".into(),
+                CLAIM_CAVEAT.into(),
+            ),
+            (
+                restored("claude-code", desktop()),
+                "claude-code".into(),
+                "Claude Code, in Claude Desktop.".into(),
+            ),
+            (
+                restored("claude-desktop", desktop()),
+                "claude-desktop".into(),
+                "Started by Claude Desktop.".into(),
+            ),
+            (
+                started(IntakeChannel::Mcp, desktop()),
+                "claude-desktop".into(),
+                "Started by Claude Desktop.".into(),
+            ),
+            (
+                started(IntakeChannel::Mcp, source(None, "node.exe")),
+                Agent::unknown().id,
+                "Started by node.exe.".into(),
+            ),
+            (
+                started(IntakeChannel::Mcp, None),
+                Agent::earlier().id,
+                String::new(),
+            ),
+            (
+                Attribution::legacy(IntakeChannel::Mcp),
+                Agent::earlier().id,
+                String::new(),
+            ),
+            (
+                Attribution::legacy(IntakeChannel::Cli),
+                Agent::command_line().id,
+                LEGACY_EXPLANATION.into(),
+            ),
+            (
+                started(IntakeChannel::Cli, None),
+                Agent::command_line().id,
+                format!("{CLI_SESSION} {CLI_SCRIPTS_UNVERIFIED}"),
+            ),
+        ];
+        for (attribution, agent, explanation) in &rows {
+            let said = details(attribution, Claimed::Unkept);
+            assert_eq!(&said.agent.id, agent, "{attribution:?}");
+            assert_eq!(&said.explanation, explanation, "{attribution:?}");
+            assert_eq!(said.reported_application, None, "history keeps no claim");
             assert!(!said.explanation.contains('"'), "{}", said.explanation);
         }
-    }
-
-    #[test]
-    fn a_restored_claim_reads_as_its_live_row_where_no_words_are_quoted() {
-        let desktop = source(Some("claude-desktop"), "claude.exe");
-        let inside = restored("claude-code", desktop.clone());
+        let inside = restored("claude-code", desktop());
         assert_eq!(
             details(&inside, Claimed::Unkept).explanation,
-            details(&inside, Claimed::Live(Some("claude-code"))).explanation
+            details(&inside, Claimed::Live(Some("claude-code"))).explanation,
+            "a record reads as its live row where that row quotes nothing"
         );
-        assert_eq!(
-            details(&inside, Claimed::Unkept).explanation,
-            "Claude Code, in Claude Desktop."
+
+        let unlisted = crate::provenance::ConnectionEvidence::new(
+            Attribution::accepted(IntakeChannel::Mcp),
+            Some("my agent"),
         );
-        let own = restored("claude-desktop", desktop);
+        assert_eq!(unlisted.details().agent.name, "my agent");
+        let earlier = unlisted.attribution().details().agent;
         assert_eq!(
-            details(&own, Claimed::Unkept).explanation,
-            "Started by Claude Desktop."
+            earlier,
+            Agent::earlier(),
+            "a new record whose name the catalog does not know, with no source, keeps no agent"
+        );
+        let note = earlier.note.unwrap_or_default();
+        assert_eq!(note, EARLIER_SESSION_NOTE);
+        assert!(
+            !note.contains("before"),
+            "the record does not show when it was written: {note}"
         );
     }
 
-    #[test]
-    fn connection_details_carry_the_sources_catalog_agent_unserialized() {
-        let editor = started(IntakeChannel::Mcp, source(Some("vscode"), "Code.exe"));
-        let cline = details(&editor, Claimed::Live(Some("cline-vscode")));
-        assert_eq!(cline.agent.id, "cline");
-        assert_eq!(
-            cline.source_agent.as_ref().map(|agent| agent.id.as_str()),
-            Some("vscode"),
-            "the session's agent is Cline, and the app it runs inside is Visual Studio Code"
-        );
-        assert_eq!(
-            details(&editor, Claimed::Unkept).source_agent,
-            cline.source_agent,
-            "a record names the same source agent"
-        );
-        let encoded = serde_json::to_value(&cline).unwrap();
-        assert!(encoded.get("source_agent").is_none(), "{encoded}");
-        assert!(encoded.get("agent").is_none(), "{encoded}");
-        for nothing in [
-            started(IntakeChannel::Mcp, source(None, "WindowsTerminal.exe")),
-            started(IntakeChannel::Mcp, None),
-        ] {
-            assert_eq!(
-                details(&nothing, Claimed::Live(Some("cline"))).source_agent,
-                None
-            );
-        }
-    }
-
-    #[test]
-    fn a_group_title_is_the_agents_name_after_the_ghost() {
-        assert_eq!(
-            group_title(&Agent::of(Some("claude-code"), IntakeChannel::Mcp)),
-            "\u{1F47B} Claude Code"
-        );
-        assert_eq!(
-            group_title(&Agent::command_line()),
-            "\u{1F47B} Command line"
-        );
-        assert_eq!(group_title(&Agent::unknown()), "\u{1F47B} Unknown agent");
-        let long = Agent::of(Some(&"n".repeat(100)), IntakeChannel::Mcp);
-        assert_eq!(
-            group_title(&long),
-            format!(
-                "{GROUP_TITLE_PREFIX}{}",
-                "n".repeat(GROUP_TITLE_AGENT_CHARS)
-            )
-        );
-    }
-
+    /// ACCEPTANCE Connection reporting: only a catalog agent id a client's name names becomes the
+    /// durable claimed agent; free text, a reserved name, no name and any claim on the command
+    /// line are never kept (118d5070).
     #[test]
     fn only_a_catalog_claim_on_an_mcp_connection_is_kept_as_claimed() {
         assert_eq!(

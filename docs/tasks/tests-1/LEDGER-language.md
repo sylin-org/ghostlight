@@ -12,7 +12,7 @@ In progress since 2026-10-21. Every test in `language/` and `workbench/` was cla
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `language/` | 349 | 55 | 335 |
+| `language/` | 349 | 55 | 320 |
 | `workbench/` | 252 | 35 | 252 |
 
 ## Slices
@@ -22,7 +22,8 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 
 | Slice | Subject | Before | After | Kept for | Status |
 | --- | --- | --- | --- | --- | --- |
-| TL1 | test(language): `self_check/` keeps the 7 tests of the model surface contract | 21 | 7 | 3 promise, 3 contract, 1 defect | landed (this commit) |
+| TL1 | test(language): `self_check/` keeps the 7 tests of the model surface contract | 21 | 7 | 3 promise, 3 contract, 1 defect | landed (b91a3bab) |
+| TL2 | test(language): provenance.rs keeps the 3 tests of connection reporting | 18 | 3 | 2 promise, 1 defect | landed (this commit) |
 
 ## Notes
 
