@@ -157,6 +157,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
   delivery). The constants test's two derived checks, that a base64 chunk fits Chromium's 1 MiB
   native message and that a full transfer fits its chunks, are now `const` assertions beside the
   constants, so every build checks them.
-- From the language lane's close (2026-10-21; `LEDGER-language.md` Notes): keep
-  `protocol4/merge/tests.rs`'s `a_cut_keeps_page_content_over_chrome_over_hidden_in_document_order`,
-  now the only proof of the tier cut order.
+- From the language lane's close (2026-10-21; `LEDGER-language.md` Notes): the tier cut order's only
+  proof stays in this area. A10 folded it into `protocol4/merge/tests.rs`'s
+  `a_capped_list_keeps_page_content_first_and_counts_what_it_left_out`, as an unchanged row of its
+  table; keep that test.
