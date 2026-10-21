@@ -27,6 +27,8 @@ In order. "After" names what a slice waits for.
 | SERV-7 | refactor: one poison-tolerant `lock` for the crate | - | SERV-7 and BROW-12's lock part; other lanes adopt it | landed (0ba38fa7) |
 | S-D3 | fix(relay): a ready service wakes the edges that wait for it | - | BROW-9's open half, the owner's design (ADR-0199 amendment of 2026-10-20); relay revision 5 | landed (e4a9fade, b0290246) |
 | S-D4 | fix(cli): a start relaunches itself, so a tree kill of its starter cannot reach the service | - | leo-desktop-02's finding while proving S-D3 (ADR-0199 amendment of 2026-10-21); cross-lane `cli/parse.rs`, `cli/mod.rs`, `cli/desktop.rs`, `cli/start.rs` under test-04's hold | landed (this commit) |
+| S-D5 | fix(intake): a batch is answered as one array, its tool results in it | - | tests-1's service plan; the owner's question of 2026-10-21, sent back to the coordinator (Notes) | todo |
+| S-D6 | fix(intake): a client before MCP 2025-06-18 gets the lean JSON in a cut-off or expired answer too | - | tests-1's service plan (Notes) | todo |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | todo |
 | BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | todo |
@@ -109,3 +111,12 @@ init. The starters and the relay are unchanged. Tests: `cli::desktop` (the relau
 refusal before it), `cli::parse` (the relaunched form is the only extra one), and the race and
 waiver journeys, which now find the service by its image (`processesOf` in `tests/lib/home.mjs`).
 A kill-on-close job would need the relay to break away; none has been seen.
+- S-D5 and S-D6, decided on 2026-10-21. The owner sent both questions back with "for Users (human
+  and agentic) what's more delightful?". S-D5: an older client that batches expects JSON-RPC's
+  answer, every response in the batch's one array, and a tool result sent outside it can be dropped
+  by a strict client, whose agent then waits for an answer it was sent. The intake already holds a
+  batch's array until its catalog requests are answered; it now holds it until its tool calls are
+  too, and batches stay accepted at every revision (the leniency rule). S-D6: `intake/mcp.rs` builds
+  the cut-off and expired templates at the latest revision, so a client before 2025-06-18 gets
+  them without the lean JSON copy in the text block that C21 promises it for every other answer.
+  Each lands with one test that reproduces it.
