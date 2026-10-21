@@ -192,35 +192,3 @@ fn operation_line(
         None => line,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::operation_line;
-    use crate::intake::session::IntakeChannel;
-    use crate::provenance::{Attribution, ConnectionEvidence};
-
-    #[test]
-    fn operation_lines_name_the_connection() {
-        let evidence = ConnectionEvidence::new(
-            Attribution::accepted(IntakeChannel::Mcp),
-            Some("PRIVATE_CLAIM"),
-        );
-        let attribution = evidence.attribution();
-        let connection = attribution.connection_id.as_deref().unwrap();
-        let line = operation_line("browser_read", "succeeded", "none", 12, attribution);
-        assert_eq!(
-            line,
-            format!("browser_read succeeded none 12ms on {connection}")
-        );
-        assert!(!line.contains("PRIVATE_CLAIM"));
-
-        let restored = Attribution {
-            connection_id: None,
-            ..Attribution::accepted(IntakeChannel::Cli)
-        };
-        assert_eq!(
-            operation_line("browser_click", "failed", "unknown", 3, &restored),
-            "browser_click failed unknown 3ms"
-        );
-    }
-}

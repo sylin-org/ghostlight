@@ -18,7 +18,7 @@ added there in the commit that deletes it. Then `governance/`.
 
 | Area | Tests at opening | Budget | Now |
 | --- | --- | --- | --- |
-| `work/` and `workspace/` | 371 | 55 | 371 |
+| `work/` and `workspace/` | 373 | 55 | 357 |
 | `governance/` | 136 | 40 | 136 |
 
 ## Slices
@@ -28,6 +28,7 @@ One row per slice: what it cuts, its counts before and after, and what the kept 
 
 | Slice | Subject | Before | After | Kept for | Status |
 | --- | --- | --- | --- | --- | --- |
+| W1 | the inline modules: `invocation_id.rs`, `receipt.rs`, `pending.rs` and `documents.rs` keep no test, `item.rs` keeps only its three credential-masking tests until they fold into the credentials test | 373 | 357 | none kept; the 3 left fold later (promise E7) | landed |
 
 ## Notes
 

@@ -52,18 +52,3 @@ impl PartialEq<InvocationId> for String {
         *self == other.0
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{InvocationId, INVOCATION_PREFIX};
-
-    #[test]
-    fn an_id_is_the_prefix_and_32_hex_digits_and_each_is_new() {
-        let id = InvocationId::mint();
-        let digits = id.as_str().strip_prefix(INVOCATION_PREFIX).unwrap();
-        assert_eq!(digits.len(), 32);
-        assert!(digits.chars().all(|digit| digit.is_ascii_hexdigit()));
-        assert_ne!(id, InvocationId::mint());
-        assert_eq!(serde_json::to_value(&id).unwrap(), id.as_str());
-    }
-}

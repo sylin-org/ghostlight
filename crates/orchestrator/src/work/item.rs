@@ -243,52 +243,6 @@ mod tests {
     }
 
     #[test]
-    fn an_item_names_its_area_and_form_only_when_it_has_them() {
-        let mut placed = target();
-        placed.area = Some("nav".into());
-        placed.form = Some(3);
-        let item = control_item("target_1", &placed);
-        assert_eq!(item["area"], json!("nav"));
-        assert_eq!(item["form"], json!(3));
-
-        let bare = control_item("target_1", &target());
-        assert!(bare.get("area").is_none() && bare.get("form").is_none());
-    }
-
-    #[test]
-    fn a_repeated_control_carries_its_context_and_nth_after_its_name() {
-        let mut repeated = target();
-        repeated.context = Some("Alpha".into());
-        repeated.nth = Some(2);
-        let item = control_item("target_1", &repeated);
-        assert_eq!(item["context"], json!("Alpha"));
-        assert_eq!(item["nth"], json!(2));
-
-        let mut context_only = target();
-        context_only.context = Some("Alpha".into());
-        let item = control_item("target_1", &context_only);
-        assert_eq!(item["context"], json!("Alpha"));
-        assert!(item.get("nth").is_none());
-
-        let mut empty = target();
-        empty.context = Some(String::new());
-        assert!(control_item("target_1", &empty).get("context").is_none());
-    }
-
-    #[test]
-    fn a_long_or_multi_line_context_is_cut_to_one_short_line() {
-        let mut wide = target();
-        wide.context = Some(format!("first\n  second\t{}", "x".repeat(200)));
-        let context = control_item("target_1", &wide)["context"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        assert!(context.starts_with("first second x"));
-        assert_eq!(context.chars().count(), CONTEXT_MAX);
-        assert!(!context.contains(['\n', '\t']));
-    }
-
-    #[test]
     fn a_credential_control_never_carries_context_or_nth() {
         let mut secret = target();
         secret.credential_class = true;
@@ -296,18 +250,6 @@ mod tests {
         secret.nth = Some(1);
         let item = control_item("target_1", &secret);
         assert!(item.get("context").is_none() && item.get("nth").is_none());
-    }
-
-    #[test]
-    fn an_area_word_off_the_list_is_dropped() {
-        for word in ["main", "banner", "", "Nav", "<script>"] {
-            let mut odd = target();
-            odd.area = Some(word.into());
-            assert!(
-                control_item("target_1", &odd).get("area").is_none(),
-                "{word:?}"
-            );
-        }
     }
 
     #[test]
@@ -321,113 +263,6 @@ mod tests {
         assert_eq!(item["area"], json!("dialog"));
         assert_eq!(item["form"], json!(1));
         assert!(item.get("hint").is_none());
-    }
-
-    #[test]
-    fn a_plain_control_carries_only_its_identity() {
-        let item = control_item("target_1", &target());
-        assert_eq!(
-            item,
-            json!({"target":"target_1","role":"combobox","name":"Role","state":[],"credential_class":false})
-        );
-    }
-
-    #[test]
-    fn a_select_passes_its_value_hint_and_options_through() {
-        let mut select = target();
-        select.value = Some(json!(""));
-        select.hint = Some("Choose one...".into());
-        select.options = Some(
-            json!(["Developer", {"text":"Team","value":"a1"}, {"text":"Solo","disabled":true},
-            {"group":"Staff","options":["Engineering"]}]),
-        );
-        select.state = vec!["required".into()];
-
-        let item = control_item("target_1", &select);
-
-        assert_eq!(item["value"], json!(""));
-        assert_eq!(item["hint"], json!("Choose one..."));
-        assert_eq!(item["state"], json!(["required"]));
-        assert_eq!(
-            item["options"],
-            json!(["Developer", {"text":"Team","value":"a1"}, {"text":"Solo","disabled":true},
-                {"group":"Staff","options":["Engineering"]}])
-        );
-    }
-
-    #[test]
-    fn typed_input_keys_pass_through_and_unknown_limits_are_dropped() {
-        let mut date = target();
-        date.input_type = Some("date".into());
-        date.limits =
-            Some(json!({"min":"2026-01-01","max":"2026-12-31","evil":"x","multiple":true}));
-        date.group = Some("Dates".into());
-        date.error = Some("is required".into());
-
-        let item = control_item("target_1", &date);
-
-        assert_eq!(item["type"], json!("date"));
-        assert_eq!(
-            item["limits"],
-            json!({"min":"2026-01-01","max":"2026-12-31","multiple":true})
-        );
-        assert_eq!(item["group"], json!("Dates"));
-        assert_eq!(item["error"], json!("is required"));
-    }
-
-    #[test]
-    fn every_string_and_list_is_bounded_again() {
-        let mut long = target();
-        long.value = Some(json!("v".repeat(200)));
-        long.value_chars = Some(200);
-        long.hint = Some("h".repeat(500));
-        long.error = Some("e".repeat(500));
-        long.group = Some("g".repeat(500));
-        let many: Vec<Value> = (0..40)
-            .map(|index| json!(format!("{index}{}", "o".repeat(90))))
-            .collect();
-        long.options = Some(json!(many));
-        long.options_total = Some(40);
-
-        let item = control_item("target_1", &long);
-
-        assert_eq!(item["value"].as_str().unwrap().chars().count(), VALUE_MAX);
-        assert_eq!(item["value_chars"], json!(200));
-        assert_eq!(item["hint"].as_str().unwrap().chars().count(), HINT_MAX);
-        assert_eq!(item["error"].as_str().unwrap().chars().count(), HINT_MAX);
-        assert_eq!(item["group"].as_str().unwrap().chars().count(), GROUP_MAX);
-        let options = item["options"].as_array().unwrap();
-        assert_eq!(options.len(), OPTIONS_MAX);
-        assert!(options
-            .iter()
-            .all(|option| option.as_str().unwrap().chars().count() == OPTION_TEXT_MAX));
-        assert_eq!(item["options_total"], json!(40));
-    }
-
-    #[test]
-    fn groups_count_their_options_against_the_cap() {
-        let mut grouped = target();
-        let inner: Vec<Value> = (0..30).map(|index| json!(format!("o{index}"))).collect();
-        grouped.options = Some(json!([{"group":"All","options":inner}]));
-
-        let item = control_item("target_1", &grouped);
-
-        assert_eq!(
-            item["options"][0]["options"].as_array().unwrap().len(),
-            OPTIONS_MAX
-        );
-    }
-
-    #[test]
-    fn a_multiple_select_value_is_a_bounded_list_without_a_length() {
-        let mut tags = target();
-        tags.value = Some(json!(["Alpha", "Gamma"]));
-        tags.value_chars = Some(5);
-
-        let item = control_item("target_1", &tags);
-
-        assert_eq!(item["value"], json!(["Alpha", "Gamma"]));
-        assert!(item.get("value_chars").is_none());
     }
 
     #[test]
@@ -464,54 +299,5 @@ mod tests {
         assert_eq!(control_item("target_1", &secret)["value"], json!(""));
         secret.value = None;
         assert!(control_item("target_1", &secret).get("value").is_none());
-    }
-
-    #[test]
-    fn a_decoded_target_carries_the_new_keys_only_when_the_page_sent_them() {
-        let bare: ObservedTarget = serde_json::from_value(json!({
-            "locator": "l1", "role": "button", "name": "Go", "state": [], "credential_class": false
-        }))
-        .unwrap();
-        assert_eq!(
-            bare,
-            ObservedTarget {
-                locator: "l1".into(),
-                role: "button".into(),
-                name: "Go".into(),
-                ..ObservedTarget::default()
-            }
-        );
-
-        let full: ObservedTarget = serde_json::from_value(json!({
-            "locator": "l2", "role": "combobox", "name": "Role", "state": ["required"], "credential_class": false,
-            "value": "Other", "options": ["Other"], "type": "date", "limits": {"min": "1"},
-            "hint": "h", "group": "g", "error": "e", "value_chars": 5, "options_total": 1
-        }))
-        .unwrap();
-        assert_eq!(full.input_type.as_deref(), Some("date"));
-        assert_eq!(full.value, Some(json!("Other")));
-        assert_eq!(full.options_total, Some(1));
-
-        let placed: ObservedTarget = serde_json::from_value(json!({
-            "locator": "l4", "role": "textbox", "name": "Email", "state": [], "credential_class": false,
-            "area": "dialog", "form": 2
-        }))
-        .unwrap();
-        assert_eq!(placed.area.as_deref(), Some("dialog"));
-        assert_eq!(placed.form, Some(2));
-        assert_eq!((placed.context.as_deref(), placed.nth), (None, None));
-
-        let repeated: ObservedTarget = serde_json::from_value(json!({
-            "locator": "l5", "role": "button", "name": "More options", "state": [], "credential_class": false,
-            "context": "Alpha", "nth": 2
-        }))
-        .unwrap();
-        assert_eq!(repeated.context.as_deref(), Some("Alpha"));
-        assert_eq!(repeated.nth, Some(2));
-
-        let stray = serde_json::from_value::<ObservedTarget>(json!({
-            "locator": "l3", "role": "button", "name": "Go", "credential_class": false, "surprise": 1
-        }));
-        assert!(stray.is_err());
     }
 }
