@@ -36,7 +36,9 @@ const {
 /** How long an act waits for the change it caused to reach this page, before it asks again. */
 const SEQ_WAIT_MS = 2000;
 
-const { ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
+const { ACT, CONTEXT, SETUP_PART, GET_CHROME, CONNECT_ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
+const { RESULT } = globalThis.GhostlightStore;
+const { STAGE } = globalThis.GhostlightSetupView;
 
 const transport = globalThis.GhostlightTransport.overHttp({
   fetch: window.fetch.bind(window),
@@ -187,7 +189,7 @@ function paintControls(part) {
 /* What the service said this page may do. Nothing is offered until it has said. */
 let context = null;
 const allowed = (act) => context?.acts?.[act]?.available ?? true;
-const showsData = () => context !== null && context.context !== CONTEXT_CLOSED;
+const showsData = () => context !== null && context.context !== CONTEXT.closed;
 
 /**
  * The one place a change becomes a picture.
@@ -283,9 +285,9 @@ function receiveChange(event) {
   }
   // A gap means this cache can no longer be trusted. Rebuild rather than guess.
   const change = store.applyChange(event);
-  if (change === "gap") resync({ rebuildFeed: true });
-  else if (change === "refresh") resync();
-  else if (change === "hinted") hinted(event.change);
+  if (change === RESULT.gap) resync({ rebuildFeed: true });
+  else if (change === RESULT.refresh) resync();
+  else if (change === RESULT.hinted) hinted(event.change);
   reached();
 }
 
@@ -694,15 +696,6 @@ async function openDestination(destination) {
 
 /* ------------------------------ the setup view -------------------------- */
 
-/** The part the service announces when what the setup view says may have changed. */
-const SETUP_PART = "setup";
-
-/** The destination the service opens for the Google Chrome download. */
-const GET_CHROME = "get_chrome";
-
-/** The act a connect button asks of the integrations roster. */
-const CONNECT_ACT = "install";
-
 /*
  * The setup part last given: undefined before the first read, null when the service leaves it out
  * (a watcher is shown the ordinary workbench), otherwise the part. `setupShown` is whether the view
@@ -720,7 +713,7 @@ let setupTurn = 0;
 /** Whether the person has turned motion off, in the system or in Settings. */
 function motionIsReduced() {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true
-    || document.body?.classList?.contains?.("motion-reduced") === true;
+    || document.body?.classList?.contains?.(globalThis.GhostlightSettings.PERSONAL.motion.classes.reduced) === true;
 }
 
 /** Read the setup part, and take what the service says. Nothing is asked once setup is complete. */
@@ -745,7 +738,7 @@ async function takeSetup(read) {
 function receiveSetup(part) {
   const first = setupPart === undefined;
   setupPart = part ?? null;
-  setupComplete = setupComplete || part?.stage === "retired" || part?.stage === "done";
+  setupComplete = setupComplete || part?.stage === STAGE.retired || part?.stage === STAGE.done;
   if (first && setupRequested) {
     setupRequested = false;
     showSetup();
@@ -1031,7 +1024,7 @@ async function becomeClosed(sentence) {
   } catch (error) {
     told = null;
   }
-  const base = told?.context === CONTEXT_CLOSED ? told : { ...context, context: CONTEXT_CLOSED };
+  const base = told?.context === CONTEXT.closed ? told : { ...context, context: CONTEXT.closed };
   context = { ...base, sentence: sentence ?? base.sentence };
   view.closed(context);
   attempt("closing Settings", () => settings.closed(context.sentence));
@@ -1076,7 +1069,7 @@ async function start() {
     sayFailure(error);
     return;
   }
-  if (context.context === CONTEXT_CLOSED) {
+  if (context.context === CONTEXT.closed) {
     view.closed(context);
     attempt("closing Settings", () => settings.closed(context.sentence));
     attempt("opening the address", () => openAddress(window.location.hash, true));

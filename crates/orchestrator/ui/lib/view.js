@@ -21,7 +21,7 @@
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
     escapeHtml, words, duration, ago, agoSaid,
-    OUTCOME, OUTCOME_WORD, PHASE_WORD, workCounts, bandFacts, rowBy, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
+    OUTCOME, OUTCOME_WORD, PHASE_WORD, RUNTIME, workCounts, bandFacts, rowBy, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
     CONTINUE_LABEL, POLICY_IN_WINDOW, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     CARD, browserChipTitle,
@@ -881,7 +881,7 @@
         const told = bandFacts({
           agents: facts.snapshot.counts.agents,
           browsers: facts.snapshot.counts.browsers,
-          work: workCounts({ ...facts, paused: facts.runtime !== "active" }),
+          work: workCounts({ ...facts, paused: facts.runtime !== RUNTIME.active }),
           recorded: facts.snapshot.history.length
         });
         recorded = facts.snapshot.history.length;
@@ -992,14 +992,14 @@
     /** Say that the live stream is being opened again, or that it is back. */
     function reconnecting(on) {
       lost = on || farewell !== null;
-      if (!closedMode) band(lastFacts ?? { connected: false, snapshot: null, runtime: "active", running: 0 });
+      if (!closedMode) band(lastFacts ?? { connected: false, snapshot: null, runtime: RUNTIME.active, running: 0 });
     }
 
     /** Say that Ghostlight is quitting: the band stops vouching for anything and says so, for good. */
     function leaving(sentence) {
       farewell = sentence;
       lost = true;
-      if (!closedMode) band(lastFacts ?? { connected: false, snapshot: null, runtime: "active", running: 0 });
+      if (!closedMode) band(lastFacts ?? { connected: false, snapshot: null, runtime: RUNTIME.active, running: 0 });
     }
 
     /* ----------------------------- collections ---------------------------- */

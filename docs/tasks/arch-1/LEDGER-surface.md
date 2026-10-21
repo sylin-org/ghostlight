@@ -128,7 +128,7 @@ C3c), then the rows below.
 | U-D6 | fix(workbench): a refused HEAD request carries no body | - | the same classification; test-01 | landed (dc1c4fbf) |
 | SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1 | todo |
 | SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | todo |
-| SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | todo |
+| SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | landed (this commit) |
 | SURF-8 | refactor(workbench): what a watcher may do is said once | - | SURF-8 | todo |
 | SURF-10 | refactor(workbench): the small repeats go | - | SURF-10 | todo |
 | SURF-12 | refactor(workbench): watching, everywhere | - | SURF-12; the route path changes with the preview server | todo |
@@ -195,3 +195,17 @@ C3c), then the rows below.
   the re-encoded value. Checked by hand on test-02: a probe golden with a tray field the shell's
   copy lacks fails it ("zz-probe.json is the bytes the shell writes"), and the probe was removed.
   S8's two new goldens are read the same way.
+- SURF-6 as landed: `words.js` `PHASE` holds all five `OperationPhase` words (`entries.js`'s
+  "blocked" and "completed" literals use it) and a new `RUNTIME` holds the three runtime states
+  (the "active" literals in `store.js` and `view.js` use it). `transport.js` owns the window
+  contexts as `CONTEXT` (control, watch, closed; `CONTEXT_CLOSED` and `kit/settings.js`'s
+  `CONTEXT_CONTROL` go) and the wire tokens `app.js` kept, plus the two the skeptic added:
+  `SETUP_PART`, `GET_CHROME`, `CONNECT_ACT`. The store exports `RESULT`, which `app.js` compares
+  against, `app.js` reads `STAGE` from the setup view and the motion class from
+  `GhostlightSettings.PERSONAL`. Pins, as rows in the kept
+  `every_closed_name_the_page_and_the_service_exchange_is_one_both_know`: `PHASE`, `RUNTIME` and
+  `CONTEXT` hold exactly the service's sets (an exhaustive match each), and the three constants
+  equal `Part::Setup`, `WorkbenchDestination::GetChrome` and `HarnessAction::Install`. The web
+  test's read of `CONTEXT_CLOSED` went, because the next line already checks the service's token.
+  The page journey (`node tests/workbench-surface.mjs`) passes with the page's real module
+  order. The page's "completed" fallback word in `view.js` is visible text, left for SURF-3.

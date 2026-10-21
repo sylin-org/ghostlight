@@ -677,7 +677,6 @@ fn access_is_decided_per_route_by_the_bearer_and_the_live_watching_switch() {
     let closed = fixture.watch(get("/api/context"));
     assert_eq!(closed.status, 200);
     let closed = closed.json();
-    assert_eq!(closed["context"], page_constant("CONTEXT_CLOSED"));
     assert_eq!(closed["context"], WebContext::Closed.token());
     let mut keys: Vec<&String> = closed.as_object().unwrap().keys().collect();
     keys.sort();

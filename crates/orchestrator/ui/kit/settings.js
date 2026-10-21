@@ -39,7 +39,6 @@
   });
 
   /** The token the service gives the Ghostlight window's own context. */
-  const CONTEXT_CONTROL = "control";
 
   /** The page that holds Settings. A press outside it is not this module's. */
   const SETTINGS_VIEW_ID = "view-settings";
@@ -226,7 +225,7 @@
         notifications: part.notifications,
         diagnostics: part.diagnostics
       };
-      const control = part.you.context === CONTEXT_CONTROL;
+      const control = part.you.context === globalThis.GhostlightTransport.CONTEXT.control;
       for (const [section, group] of Object.entries(sections)) {
         const withheld = control ? undefined : Object.values(group.acts).find((act) => act && act.available === false);
         say(`settings-${section}-why`, withheld?.why_not);
@@ -236,7 +235,7 @@
 
     /** The Quit row: in the window alone, a button that asks first, inline, and then a question with two answers. */
     function drawQuit() {
-      const offered = Boolean(current) && current.you.context === CONTEXT_CONTROL && mayQuit();
+      const offered = Boolean(current) && current.you.context === globalThis.GhostlightTransport.CONTEXT.control && mayQuit();
       if (!offered) asking = false;
       show("settings-quit", offered);
       show("settings-quit-ask", !asking);

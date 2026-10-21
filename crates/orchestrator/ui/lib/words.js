@@ -98,8 +98,24 @@
     [OUTCOME.unknown]: "Unknown"
   });
 
-  /** The phases of work that has not settled, in the service's wire words (workbench `OperationPhase`). */
-  const PHASE = Object.freeze({ waiting: "waiting", running: "running", held: "held" });
+  /**
+   * The phases of an operation, in the service's wire words (workbench `OperationPhase`): three for
+   * work that has not settled, and two for work that settled before its audit record arrived.
+   */
+  const PHASE = Object.freeze({
+    waiting: "waiting",
+    running: "running",
+    held: "held",
+    blocked: "blocked",
+    completed: "completed"
+  });
+
+  /** The runtime states the service publishes (`RuntimeControlState`). */
+  const RUNTIME = Object.freeze({
+    active: "active",
+    held: "held",
+    ended: "ended"
+  });
 
   /**
    * The word unsettled work carries on the running card, and pending work in its row's duration
@@ -1205,7 +1221,7 @@
 
   return Object.freeze({ FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, VIEWS, SEARCH_ADDRESSES, HIT_KIND, SEARCH_FOUND_NOTHING, searchAll,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
-    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
+    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME, OUTCOME_WORD, PHASE, PHASE_WORD, RUNTIME, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, POLICY_IN_WINDOW, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES, CARD, browserChipTitle,

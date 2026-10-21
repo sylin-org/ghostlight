@@ -39,7 +39,7 @@
       startedAt: existing?.startedAt,
       endedAt: record.timestamp_ms,
       phase: record.complete === false && existing && !existing.settled ? existing.phase
-        : record.outcome === OUTCOME.refused ? "blocked" : "completed",
+        : record.outcome === OUTCOME.refused ? PHASE.blocked : PHASE.completed,
       reason: record.reason,
       // Kept so a refusal can name the rule that caused it rather than only that it happened.
       policyTier: record.policy_tier ?? null,
@@ -84,7 +84,7 @@
   const isUnsettled = entry => isRunning(entry) || isPending(entry);
 
   /** Whether policy or a person refused the action: the one outcome drawn in the full red treatment. */
-  const isBlocked = entry => entry.phase === "blocked" || entry.outcome === OUTCOME.refused;
+  const isBlocked = entry => entry.phase === PHASE.blocked || entry.outcome === OUTCOME.refused;
 
   return Object.freeze({
     entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isPending, isUnsettled,

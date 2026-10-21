@@ -11,7 +11,7 @@
 })(globalThis, function createGhostlightStoreApi() {
   "use strict";
 
-  const { FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, PHASE } = globalThis.GhostlightWords;
+  const { FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, PHASE, RUNTIME } = globalThis.GhostlightWords;
   const { entryFromOperation, entryFromRecord, entryTime, isRunning, isPending, isUnsettled } = globalThis.GhostlightEntries;
 
   /**
@@ -30,6 +30,9 @@
     Collections: "collections" // connections, about, integrations, status
   });
 
+  /** What `applyChange` says the caller must do: nothing, rebuild, refresh, read a hinted part, or draw. */
+  const RESULT = Object.freeze({ ignored: "ignored", gap: "gap", refresh: "refresh", hinted: "hinted", applied: "applied" });
+
   function create({
     announce = () => {},
     now = Date.now,
@@ -39,7 +42,7 @@
     const state = {
       seq: 0,
       connected: false,
-      runtime: "active",
+      runtime: RUNTIME.active,
       snapshot: null,
       feed: [],
       hidden: new Set(),
@@ -268,13 +271,13 @@
        * already in it.
        */
       applyChange(event) {
-        if (!event || typeof event.seq !== "number") return "ignored";
-        if (event.seq <= state.seq) return "ignored";
-        if (event.seq !== state.seq + 1) return "gap";
+        if (!event || typeof event.seq !== "number") return RESULT.ignored;
+        if (event.seq <= state.seq) return RESULT.ignored;
+        if (event.seq !== state.seq + 1) return RESULT.gap;
         state.seq = event.seq;
         const change = event.change;
         switch (change.kind) {
-          case "audit_health_changed": return "refresh";
+          case "audit_health_changed": return RESULT.refresh;
           case "document_coverage_changed": {
             // Coverage is drawn for feed rows, so it is kept for the rows the feed holds, whatever
             // their age: after Clear the feed holds older rows than the newest coverage.
@@ -297,11 +300,11 @@
           case "connections_changed": applyConnections(change.connections); break;
           case "controls_changed": applyControls(change.controls); break;
           // The part is read on demand; the caller decides whether this window shows it.
-          case "part_changed": return "hinted";
-          default: return "ignored";
+          case "part_changed": return RESULT.hinted;
+          default: return RESULT.ignored;
         }
         emit(CHANGE.Band);
-        return "applied";
+        return RESULT.applied;
       },
 
       /**
@@ -332,5 +335,5 @@
     });
   }
 
-  return Object.freeze({ CHANGE, create });
+  return Object.freeze({ CHANGE, RESULT, create });
 });

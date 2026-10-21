@@ -70,6 +70,14 @@ fn page_list<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
         .collect()
 }
 
+/// The value of the page's string constant `name` in `source`, with the quotes taken off.
+fn page_constant<'a>(source: &'a str, name: &str) -> &'a str {
+    let opening = format!("const {name} = \"");
+    let start = source.find(&opening).expect("the page has the constant") + opening.len();
+    let value = &source[start..];
+    &value[..value.find('"').expect("the constant ends")]
+}
+
 /// The text a closed value has on the wire.
 fn wire(value: impl serde::Serialize) -> String {
     serde_json::to_value(value)
@@ -89,7 +97,10 @@ fn wire(value: impl serde::Serialize) -> String {
 /// `ADDRESSES`, in order, and reads back as itself. Page to service: each runtime intent and
 /// destination key the page sends decodes (tests/workbench-settings.test.mjs pins the page's
 /// copy); every `SNAPSHOT_PARTS` token is a part the server knows, and an unknown token is not.
-/// A new value fails to compile here until it is named.
+/// Both ways, the page's `PHASE`, `RUNTIME` and `CONTEXT` hold exactly the service's operation
+/// phases, runtime states and window contexts, and its setup part, Chrome destination and connect
+/// act are the service's tokens (arch-1 SURF-6). A new value fails to compile here until it is
+/// named.
 #[test]
 fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
     use super::parts::{HintedPart, Part};
@@ -97,10 +108,12 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
         HistoryItem, OperationPhase, OperationSummary, PageAddress, WorkbenchChange,
         WorkbenchDestination, WorkbenchRuntimeIntent,
     };
+    use crate::browser::adapter::RuntimeControlState;
     use crate::governance::{Capability, Decision, GovernanceFacade};
-    use crate::install::HarnessState;
+    use crate::install::{HarnessAction, HarnessState};
     use crate::language::history::OutcomeClass;
     use crate::language::workbench::search_outcome;
+    use crate::workbench::context::WebContext;
 
     // The roster's client states, and the one standing the page adds: a copy-only agent found
     // here whose file it never reads.
@@ -348,6 +361,83 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
             destination.key()
         );
     }
+
+    // The page's copies of the operation phases, the runtime states and the window contexts.
+    let table = |source: &str, name: &str| -> BTreeSet<String> {
+        page_table(source, name)
+            .into_iter()
+            .map(|(key, value)| {
+                assert_eq!(key, value, "{name}.{key} is its own wire word");
+                value.to_owned()
+            })
+            .collect()
+    };
+    let phases = [
+        OperationPhase::Waiting,
+        OperationPhase::Running,
+        OperationPhase::Held,
+        OperationPhase::Blocked,
+        OperationPhase::Completed,
+    ];
+    for phase in phases {
+        match phase {
+            OperationPhase::Waiting
+            | OperationPhase::Running
+            | OperationPhase::Held
+            | OperationPhase::Blocked
+            | OperationPhase::Completed => {}
+        }
+    }
+    assert_eq!(
+        table(PAGE_WORDS, "PHASE"),
+        phases.into_iter().map(wire).collect::<BTreeSet<_>>()
+    );
+    let runtime = [
+        RuntimeControlState::Active,
+        RuntimeControlState::Held,
+        RuntimeControlState::Ended,
+    ];
+    for state in runtime {
+        match state {
+            RuntimeControlState::Active
+            | RuntimeControlState::Held
+            | RuntimeControlState::Ended => {}
+        }
+    }
+    assert_eq!(
+        table(PAGE_WORDS, "RUNTIME"),
+        runtime.into_iter().map(wire).collect::<BTreeSet<_>>()
+    );
+    let contexts = [WebContext::Control, WebContext::Watch, WebContext::Closed];
+    for context in contexts {
+        match context {
+            WebContext::Control | WebContext::Watch | WebContext::Closed => {}
+        }
+    }
+    assert_eq!(
+        table(PAGE_TRANSPORT, "CONTEXT"),
+        contexts
+            .into_iter()
+            .map(|context| context.token().to_owned())
+            .collect::<BTreeSet<_>>()
+    );
+    // The setup part the page listens for, the destination its Chrome button opens and the act
+    // its connect buttons ask for.
+    assert_eq!(
+        page_constant(PAGE_TRANSPORT, "SETUP_PART"),
+        Part::Setup.token()
+    );
+    assert_eq!(
+        page_constant(PAGE_TRANSPORT, "GET_CHROME"),
+        WorkbenchDestination::GetChrome.key()
+    );
+    assert_eq!(
+        serde_json::from_value::<HarnessAction>(
+            page_constant(PAGE_TRANSPORT, "CONNECT_ACT").into()
+        )
+        .ok(),
+        Some(HarnessAction::Install)
+    );
 
     // The parts the page asks a snapshot for.
     for token in page_list(PAGE_TRANSPORT, "SNAPSHOT_PARTS") {

@@ -51,8 +51,21 @@
     setupAct: "setup_act",
     quit: "quit"
   });
-  /** The context in which the service shows nothing of this computer. */
-  const CONTEXT_CLOSED = "closed";
+  /**
+   * The contexts a window is in, as the service names them (`WebContext`): the window with this
+   * start's key controls, a tab watches, and `closed` is shown nothing of this computer.
+   */
+  const CONTEXT = Object.freeze({
+    control: "control",
+    watch: "watch",
+    closed: "closed"
+  });
+  /** The part the service announces when what the setup view says may have changed. */
+  const SETUP_PART = "setup";
+  /** The destination the service opens for the Google Chrome download. */
+  const GET_CHROME = "get_chrome";
+  /** The act a connect button asks of the integrations roster. */
+  const CONNECT_ACT = "install";
   /** The opener of the window: the service opens a link for it. A tab opens its own links. */
   const OPENER_SERVICE = "service";
   /** What a client's setup can be copied as. */
@@ -514,6 +527,7 @@
   }
 
   return Object.freeze({
-    overHttp, flatten, seqOf, isRefusal, STALE, SNAPSHOT_PARTS, ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND
+    overHttp, flatten, seqOf, isRefusal, STALE, SNAPSHOT_PARTS, ACT, CONTEXT, SETUP_PART, GET_CHROME, CONNECT_ACT, OPENER_SERVICE,
+    COPY_KIND
   });
 });
