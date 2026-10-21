@@ -12,8 +12,8 @@ read with its skeptic's corrections, or its entry in
 
 Parked on 2026-10-21. Every slice in this ledger has landed: core-language's own, and the
 core-service slices moved here (SERV-6, SERV-12, BROW-2), with the `workspace_refusal` cleanup
-test-03 asked for after C12b-2, and L-D6, which the coordinator fixed on 2026-10-21 while the
-lane was parked. Nothing is open and nothing is held. A fresh session takes what the
+test-03 asked for after C12b-2, L-D6, which the coordinator fixed on 2026-10-21 while the
+lane was parked, and L-D7, which tests-1 found the same day. Nothing is open and nothing is held. A fresh session takes what the
 coordinator hands it next.
 
 How this lane works: build in `.target-lane-arch-core-language`; before each commit run fmt,
@@ -37,7 +37,8 @@ In order. "After" names what a slice waits for.
 | L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed (09d78bd9) |
 | L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed (eff79366) |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | landed (b5135a14) |
-| L-D6 | fix(language): a script that threw tells the agent what it threw | - | the owner's live test of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `browser/`, `protocol4/translate/script.rs` and `work/mod.rs` | landed (this commit) |
+| L-D6 | fix(language): a script that threw tells the agent what it threw | - | the owner's live test of 2026-10-21 (Notes); done by the coordinator while the lanes were parked, cross-lane into `browser/`, `protocol4/translate/script.rs` and `work/mod.rs` | landed (28ea74b3) |
+| L-D7 | fix(language): a field a nested object does not advertise is refused, not dropped | - | found by tests-1 (the rewritten gate-2 control in `self_check/catalog.rs`), 2026-10-21 (Notes); approved by the coordinator | landed (this commit) |
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b 1b693758) |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed (5c65614a) |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
@@ -281,3 +282,14 @@ translate tests. No result or catalog golden moved.
 - The `workspace_refusal` cleanup: `language::outcome::workspace_refusal` returns the `Refusal`
   alone. Since C12b-2 the result writes `refusal.reason()`, so its second element, the reason
   word, had no reader; the test now checks `reason()` for every workspace error instead.
+
+L-D7, found by tests-1 on 2026-10-21. The rewritten gate-2 control runs real catalog calls through
+the strict schema checker and the decoder. The schema closes every nested object, but the decoder
+accepted an unknown field inside a selector, an `expect` and an inline file and dropped it:
+`browser_click {"selector":{"name":"Save","rol":"button"}}` decoded with no role, so a typo widened
+what the click could land on, and a misspelled postcondition value skipped the check the agent
+asked for. docs/MEMORY.md's leniency rule draws the line: be strict where continuing would
+misinterpret an action. `SemanticSelector`, `Postcondition` and `InlineFile` now deny unknown
+fields, as `FormField` and `FlowStep` did, and the decoder words serde's refusal as it words an
+unknown top-level field ("unknown field `rol`: check this tool's advertised fields"), so the model
+never reads serde's list of expected fields. The catalog does not change.

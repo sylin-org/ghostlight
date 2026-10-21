@@ -567,6 +567,38 @@ mod tests {
     fn unknown_fields_and_ambiguous_waits_fail() {
         let error = decode("browser_read", json!({"max_chars":8000,"max_char":1})).unwrap_err();
         assert!(matches!(error, LanguageError::Invalid(message) if message.contains("max_char")));
+        // L-D7: a field a nested object's schema does not name is refused, in the words of the
+        // top level, rather than dropped (a dropped role widened what a click could land on).
+        for (tool, input, field) in [
+            (
+                "browser_click",
+                json!({"selector":{"name":"Save","rol":"button"}}),
+                "rol",
+            ),
+            (
+                "browser_click",
+                json!({"target":"target_1","expect":{"condition":"load_ready","valu":"x"}}),
+                "valu",
+            ),
+            (
+                "browser_upload",
+                json!({"target":"target_1","files":[{"name":"a.txt","data_base64":"SGk=","mime":"x"}]}),
+                "mime",
+            ),
+            (
+                "browser_fill_form",
+                json!({"fields":[{"selector":{"name":"Email","exactly":true},"value":"a"}]}),
+                "exactly",
+            ),
+        ] {
+            assert_eq!(
+                decode(tool, input).unwrap_err().to_string(),
+                format!(
+                    "invalid input: unknown field `{field}`: check this tool's advertised fields"
+                ),
+                "{tool}"
+            );
+        }
         assert!(decode("browser_wait", json!({"condition":"text_present"})).is_err());
         assert!(decode(
             "browser_wait",

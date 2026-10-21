@@ -412,6 +412,7 @@ pub struct TakeScreenshot {
 
 /// One typed semantic selector resolved against the live document.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SemanticSelector {
     /// Required accessible-name text.
     pub name: String,
@@ -425,6 +426,7 @@ pub struct SemanticSelector {
 
 /// One optional typed expectation checked after an applied effect.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Postcondition {
     /// Closed observable condition from the shared wait vocabulary.
     #[serde(deserialize_with = "wait::decode_expected")]
@@ -694,6 +696,7 @@ pub struct UploadFiles {
 
 /// One bounded inline file supplied directly by the caller.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InlineFile {
     /// Bounded file name.
     pub name: String,

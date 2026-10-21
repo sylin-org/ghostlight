@@ -630,8 +630,7 @@ fn parse<T: DeserializeOwned>(
     validate: impl FnOnce(&T) -> Result<(), LanguageError>,
 ) -> Result<T, LanguageError> {
     ensure_fields(&input, fields)?;
-    let value: T =
-        serde_json::from_value(input).map_err(|error| LanguageError::Invalid(error.to_string()))?;
+    let value: T = serde_json::from_value(input).map_err(|error| invalid_input(&error))?;
     validate(&value)?;
     Ok(value)
 }
@@ -643,12 +642,34 @@ fn ensure_fields(input: &Value, fields: &[&str]) -> Result<(), LanguageError> {
     reject_retired_arguments(input)?;
     for key in object.keys() {
         if !fields.contains(&key.as_str()) {
-            return Err(LanguageError::Invalid(format!(
-                "unknown field `{key}`: check this tool's advertised fields"
-            )));
+            return Err(unknown_field(key));
         }
     }
     Ok(())
+}
+
+/// The refusal of a field the tool's schema does not advertise, at the top level or inside a
+/// nested object the schema closes.
+fn unknown_field(key: &str) -> LanguageError {
+    LanguageError::Invalid(format!(
+        "unknown field `{key}`: check this tool's advertised fields"
+    ))
+}
+
+/// How serde's derive opens its refusal of a field a `deny_unknown_fields` struct does not name.
+const SERDE_UNKNOWN_FIELD: &str = "unknown field `";
+
+/// A typed decoding failure in the decoder's words. A field a closed nested object does not name
+/// reads as an unknown top-level field does, not as serde's list of expected fields (L-D7).
+fn invalid_input(error: &serde_json::Error) -> LanguageError {
+    let message = error.to_string();
+    match message
+        .strip_prefix(SERDE_UNKNOWN_FIELD)
+        .and_then(|rest| rest.split_once('`'))
+    {
+        Some((key, _)) => unknown_field(key),
+        None => LanguageError::Invalid(message),
+    }
 }
 
 fn validate_selector(selector: &SemanticSelector) -> Result<(), LanguageError> {
