@@ -70,6 +70,8 @@ pub enum Event {
     ServiceReady,
     /// The edge could not register its wake endpoint, so only its scheduled looks find a service.
     WakeFailed,
+    /// A browser frame over the relay bound was dropped; the detail is its declared byte count.
+    FrameSkipped,
 }
 
 impl Event {
@@ -89,6 +91,7 @@ impl Event {
             Self::ServiceDisconnected => "service_disconnected",
             Self::ServiceReady => "service_ready",
             Self::WakeFailed => "wake_failed",
+            Self::FrameSkipped => "frame_skipped",
         }
     }
 }

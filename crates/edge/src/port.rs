@@ -45,7 +45,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ghostlight_relay::endpoint::{ConnectError, Connection};
-use ghostlight_relay::frame;
+use ghostlight_relay::frame::{self, RawFrame};
 use ghostlight_relay::log::Event as LogEvent;
 use ghostlight_relay::protocol::{
     goodbye_in, Control, Edge, GoodbyeReason, Opening, Program, Reply, Role, StartReason,
@@ -172,7 +172,7 @@ pub fn run(
 ) -> io::Result<Ended> {
     let started = Instant::now();
     let shared = Arc::new(Shared::default());
-    read_browser(input, Arc::clone(&shared), events.clone());
+    read_browser(input, Arc::clone(&shared), events.clone(), environment.log);
     let result = Port {
         environment,
         shared: Arc::clone(&shared),
@@ -244,17 +244,28 @@ impl Shared {
     }
 }
 
-/// Read browser frames on their own thread: hand over the first, forward the rest.
-fn read_browser(mut input: impl Read + Send + 'static, shared: Arc<Shared>, events: Sender<Event>) {
+/// Read browser frames on their own thread: hand over the first, forward the rest. A frame over the
+/// relay bound is dropped by its length and logged with its size alone, and the port carries on
+/// (S-D8): its call waits out its deadline, and every other session keeps its browser.
+fn read_browser(
+    mut input: impl Read + Send + 'static,
+    shared: Arc<Shared>,
+    events: Sender<Event>,
+    log: Log,
+) {
     thread::spawn(move || {
         let mut first = true;
         loop {
-            let event = match frame::read_frame_raw(&mut input) {
-                Ok(Some(payload)) if first => {
+            let event = match frame::read_frame_or_skip(&mut input) {
+                Ok(Some(RawFrame::Skipped(length))) => {
+                    log(LogEvent::FrameSkipped, &length.to_string());
+                    continue;
+                }
+                Ok(Some(RawFrame::Payload(payload))) if first => {
                     first = false;
                     Event::Hello(payload)
                 }
-                Ok(Some(payload)) => {
+                Ok(Some(RawFrame::Payload(payload))) => {
                     shared.forward(&payload);
                     continue;
                 }

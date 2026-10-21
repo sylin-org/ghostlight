@@ -407,11 +407,11 @@ fn the_first_connection_carries_the_held_hello_after_one_browser_start() {
 }
 
 /// ACCEPTANCE C4 and C8: the browser edge carries every frame both ways byte for byte, whatever
-/// its bytes, without reading them: not JSON, empty, or larger than a pipe's buffer. A frame from
-/// Chrome that declares more than the relay's largest frame ends the port as an error before
-/// anything is misread.
+/// its bytes, without reading them: not JSON, empty, or larger than a pipe's buffer. Defect S-D8:
+/// a frame from Chrome over the relay's largest frame is dropped by its length, and the next frame
+/// still crosses, so one oversized answer never ends the port every session's browser uses.
 #[test]
-fn frames_cross_both_ways_byte_for_byte_up_to_the_relays_largest_frame() {
+fn frames_cross_both_ways_byte_for_byte_and_an_oversized_one_is_dropped() {
     let mut harness = Harness::connected(b"hello");
     let not_json = vec![0_u8, 255, 1, 254, b'{', b'"'];
     let large = vec![b'x'; 300 * 1024];
@@ -441,14 +441,17 @@ fn frames_cross_both_ways_byte_for_byte_up_to_the_relays_largest_frame() {
     harness.wait(|| harness.chrome_receives().len() == to_chrome.len());
     assert_eq!(harness.chrome_receives(), to_chrome);
 
+    // Chrome frames up to 64 MiB, so this one is written past the relay's own bound check.
     let declared = u32::try_from(MAX_FRAME_BYTES + 1).unwrap();
-    harness
-        .input
-        .as_ref()
-        .unwrap()
-        .send(declared.to_le_bytes().to_vec())
-        .unwrap();
-    assert!(harness.finish().is_err());
+    let mut oversized = declared.to_le_bytes().to_vec();
+    oversized.resize(oversized.len() + MAX_FRAME_BYTES + 1, b'z');
+    harness.input.as_ref().unwrap().send(oversized).unwrap();
+    let after = br#"{"id":"8","kind":"receipt"}"#.to_vec();
+    harness.chrome_sends(&after);
+    harness.wait(|| harness.fake.received(0).len() == 2 + to_service.len());
+    assert_eq!(harness.fake.received(0).last(), Some(&after));
+    harness.chrome_closes();
+    assert_eq!(harness.finish().unwrap(), Ended::BrowserGone);
 }
 
 /// ACCEPTANCE C10 and relay-protocol-4 section 6: a lost service, whether its stream just ends

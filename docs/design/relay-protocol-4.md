@@ -63,7 +63,9 @@ Each side checks the other before any payload byte moves.
 ## 3. Framing
 
 A frame is a `u32` little-endian byte count followed by that many bytes of UTF-8. The largest frame
-in either direction is 8 MiB. A declared length above that is a framing error. Every frame except
+in either direction is 8 MiB. A declared length above that is a framing error, except on the browser
+edge's Chrome side: Chrome sends native messages of up to 64 MiB, so the edge reads a frame over the
+bound through, drops it, logs its size and carries on (S-D8). Every frame except
 the adapter protocol on a `browser` stream and the browser goodbye (section 6) is one JSON object.
 
 ## 4. Opening and reply
