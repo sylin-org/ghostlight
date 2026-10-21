@@ -10,9 +10,8 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1 to L-D5, C17, LANG-4 and C12b-1 have landed. LANG-1 is under way: its default test is in,
-and the bounds block is next, then LANG-2. A slice's hash is filled in by the next slice's
-commit, since a rebase before the push changes it.
+L-D1 to L-D5, C17, LANG-4, C12b-1 and LANG-1 have landed. Next is LANG-2 (one `HandleKind`). A
+slice's hash is filled in by the next slice's commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -28,7 +27,7 @@ In order. "After" names what a slice waits for.
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | landed (C17a df5b5923, C17b 1b693758) |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | landed (5c65614a) |
 | LANG-4 | refactor(language): RAWX requirements are read from the directory, failing closed | - | LANG-4 | landed (5016587b) |
-| LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | test landed; bounds block todo |
+| LANG-1 | refactor(language): every bound and default has one home, read by the catalog and the decoder | C12b-1 | LANG-1; a test of every advertised default comes first | landed (test f54e2469, block) |
 | LANG-2 | refactor(language): one `HandleKind` names every handle prefix | L-D4 | LANG-2; core-work adopts it at the mint sites | todo |
 | LANG-3 | refactor(language): the closed fields are enums decoded once | C17 | LANG-3, reopened by Decision 14; its uses in `work/` and `browser/` edit in the same commit | todo |
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
@@ -129,3 +128,12 @@ In order. "After" names what a slice waits for.
   changing `find`'s scope default). `visual_settle` and the scroll direction and amount stay
   unset at decode; the test checks settlement reads the same and the scroll defaults are the
   shared constants. No default had drifted.
+- LANG-1, second commit: `language/bounds.rs` holds every bound and default the decoder checks
+  and the catalog advertises (a `Range` for each integer field, the character limits, the
+  timeouts, the string defaults until LANG-3 makes those fields enums). The decoder validates
+  with `validate_within`, the catalog builds integer fields with `within`, and the sentences
+  that name a bound (fill fields, flow steps, duration, zoom, ticks, url) format it. The catalog
+  golden is byte-identical. The skeptic's traps: the url bound counts bytes in the decoder and
+  characters in the schema, documented on `URL_MAX`; the coordinate bound is an integer so the
+  schema still prints `1000000`. The 5,000,000-byte inline ceiling stays where C12b left it,
+  and `COMPOSITION_STEP_LIMIT` stays in `history.rs` for LANG-10 to move.

@@ -5,6 +5,7 @@ pub mod agent_icon;
 pub mod area;
 pub mod audit;
 pub mod audit_health;
+mod bounds;
 pub mod capability_map;
 pub mod channel_switch;
 pub mod composition;
@@ -43,22 +44,20 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
-/// The call time a tool gets when the caller names none.
-pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 8_000;
-/// The shortest `timeout_ms` any tool accepts.
-pub(crate) const MIN_TIMEOUT_MS: u64 = 100;
-/// The longest `timeout_ms` any tool accepts.
-pub(crate) const MAX_TIMEOUT_MS: u64 = 30_000;
-pub(super) const DEFAULT_FILL_TIMEOUT_MS: u64 = MAX_TIMEOUT_MS;
-pub(super) const DEFAULT_RECORD_TIMEOUT_MS: u64 = MAX_TIMEOUT_MS;
-pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
-/// How many levels a document-scope inspection reaches when the call names no `max_depth`.
-pub const DEFAULT_DOCUMENT_DEPTH: usize = 6;
-/// The most items one `browser_inspect` call may ask for.
-pub const MAX_INSPECT_ITEMS: usize = 200;
-/// The most characters a `browser_execute` script may have, as the model sends it. The adapter
-/// sends nothing longer, so it also bounds a script it wraps.
-pub const SCRIPT_MAX_CHARS: usize = 20_000;
+use bounds::{
+    Range, CLICK_COUNT, COORDINATE_MAX, DEFAULT_BUTTON, DEFAULT_CLICK_COUNT,
+    DEFAULT_DIAGNOSTIC_DETAIL, DEFAULT_DIAGNOSTIC_LIMIT, DEFAULT_DIAGNOSTIC_SOURCE,
+    DEFAULT_FILL_TIMEOUT_MS, DEFAULT_FIND_RESULTS, DEFAULT_FIND_SCOPE, DEFAULT_INSPECT_ITEMS,
+    DEFAULT_INSPECT_SCOPE, DEFAULT_KEY_REPEAT, DEFAULT_ON_ERROR, DEFAULT_READ_CHARS,
+    DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_SCRIPT_RESULT_CHARS, DIAGNOSTIC_LIMIT, DIALOG_TEXT_CHARS,
+    DOCUMENT_DEPTH, DURATION_MS, FIELD_CHOICES, FIELD_VALUE_CHARS, FILE_NAME_CHARS, FILL_FIELDS,
+    FIND_RESULTS, FLOW_STEP_ID_CHARS, HANDLE_CHARS, INLINE_FILE_LIMIT, INSPECT_ITEMS, KEY_REPEAT,
+    KEY_STROKES, MAX_POSTCONDITION_VALUE_CHARS, MEDIA_TYPE_CHARS, READ_CHARS, SCRIPT_RESULT_CHARS,
+    SEARCH_TEXT_CHARS, UPLOAD_PATHS, UPLOAD_PATH_CHARS, URL_MAX, WHEEL_TICKS, WINDOW_HEIGHT,
+    WINDOW_WIDTH, ZOOM_PERCENT,
+};
+pub use bounds::{DEFAULT_DOCUMENT_DEPTH, MAX_INSPECT_ITEMS, SCRIPT_MAX_CHARS};
+pub(crate) use bounds::{DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS};
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 
 /// Model-facing instructions supplied to every protocol edge by the orchestrator.
@@ -824,7 +823,7 @@ pub struct RunScript {
     pub script: String,
     #[serde(default)]
     pub tab: Option<String>,
-    #[serde(default = "default_max_chars")]
+    #[serde(default = "default_script_result_chars")]
     pub max_result_chars: usize,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
@@ -891,7 +890,7 @@ fn empty_arguments() -> Value {
 }
 
 fn default_on_error() -> String {
-    "stop".into()
+    DEFAULT_ON_ERROR.into()
 }
 
 /// Input for dialog handling.
@@ -1016,7 +1015,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                         "mode cannot be combined with target".into(),
                     ));
                 }
-                validate_range(value.max_chars, 500, 50_000, "max_chars")?;
+                validate_within(value.max_chars, READ_CHARS, "max_chars")?;
                 Ok(())
             },
         )?)),
@@ -1042,7 +1041,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 if value.scope == "document" {
                     validate_optional_handle(value.root.as_deref(), "target_")?;
                     if let Some(depth) = value.max_depth {
-                        validate_range(depth, 1, 12, "max_depth")?;
+                        validate_within(depth, DOCUMENT_DEPTH, "max_depth")?;
                     }
                 } else {
                     if value.root.is_some() || value.max_depth.is_some() {
@@ -1051,7 +1050,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                         ));
                     }
                 }
-                validate_range(value.max_items, 1, MAX_INSPECT_ITEMS, "max_items")?;
+                validate_within(value.max_items, INSPECT_ITEMS, "max_items")?;
                 Ok(())
             },
         )?)),
@@ -1066,11 +1065,11 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             |value: &Find| {
-                validate_text(&value.text, 500, "text")?;
+                validate_text(&value.text, SEARCH_TEXT_CHARS, "text")?;
                 validate_timeout(value.timeout_ms)?;
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_choice(&value.scope, &["any", "control", "text"], "scope")?;
-                validate_range(value.max_results, 1, 50, "max_results")?;
+                validate_within(value.max_results, FIND_RESULTS, "max_results")?;
                 Ok(())
             },
         )?)),
@@ -1234,7 +1233,11 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             |value: &RunScript| {
                 validate_text(&value.script, SCRIPT_MAX_CHARS, "script")?;
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
-                validate_range(value.max_result_chars, 100, 20_000, "max_result_chars")?;
+                validate_within(
+                    value.max_result_chars,
+                    SCRIPT_RESULT_CHARS,
+                    "max_result_chars",
+                )?;
                 validate_timeout(value.timeout_ms)?;
                 Ok(())
             },
@@ -1422,10 +1425,13 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
             validate_optional_handle(value.tab.as_deref(), "tab_")?;
             match value.action.as_str() {
                 "zoom" => {
-                    let percent = value
-                        .percent
-                        .ok_or_else(|| LanguageError::Invalid("action zoom needs percent: the zoom level as a whole number, 25 to 500".into()))?;
-                    validate_range(usize::from(percent), 25, 500, "percent")?;
+                    let percent = value.percent.ok_or_else(|| {
+                        LanguageError::Invalid(format!(
+                            "action zoom needs percent: the zoom level as a whole number, {} to {}",
+                            ZOOM_PERCENT.min, ZOOM_PERCENT.max
+                        ))
+                    })?;
+                    validate_within(usize::from(percent), ZOOM_PERCENT, "percent")?;
                     if value.width.is_some() || value.height.is_some() {
                         return Err(LanguageError::Invalid(
                             "width and height are only valid when action is resize".into(),
@@ -1445,8 +1451,8 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
                                 .into(),
                         )
                     })?;
-                    validate_range(width as usize, 320, 7_680, "width")?;
-                    validate_range(height as usize, 240, 4_320, "height")?;
+                    validate_within(width as usize, WINDOW_WIDTH, "width")?;
+                    validate_within(height as usize, WINDOW_HEIGHT, "height")?;
                     if value.percent.is_some() {
                         return Err(LanguageError::Invalid(
                             "percent is only valid when action is zoom".into(),
@@ -1495,7 +1501,7 @@ fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
                                 .into(),
                         )
                     })?,
-                    2_000,
+                    DIALOG_TEXT_CHARS,
                     "text",
                 )?,
                 _ if text_present => {
@@ -1576,10 +1582,10 @@ fn decode_diagnose(input: Value) -> Result<Operation, LanguageError> {
             validate_choice(&value.source, &["both", "console", "network"], "source")?;
             validate_choice(&value.detail, &["problems", "all"], "detail")?;
             if let Some(pattern) = &value.r#match {
-                validate_text(pattern, 500, "match")?;
+                validate_text(pattern, SEARCH_TEXT_CHARS, "match")?;
             }
             validate_optional_handle(value.after.as_deref(), "diag_")?;
-            validate_range(value.limit, 1, 200, "limit")?;
+            validate_within(value.limit, DIAGNOSTIC_LIMIT, "limit")?;
             Ok(())
         },
     )?;
@@ -1626,7 +1632,7 @@ fn ensure_fields(input: &Value, fields: &[&str]) -> Result<(), LanguageError> {
 }
 
 fn validate_selector(selector: &SemanticSelector) -> Result<(), LanguageError> {
-    validate_text(&selector.name, 500, "name")?;
+    validate_text(&selector.name, SEARCH_TEXT_CHARS, "name")?;
     if let Some(role) = &selector.role {
         validate_choice(role, SEMANTIC_ROLES, "role")?;
     }
@@ -1747,7 +1753,7 @@ fn validate_flow(value: &RunFlow) -> Result<(), LanguageError> {
     validate_timeout(value.timeout_ms)?;
     let mut seen: Vec<&str> = Vec::with_capacity(value.steps.len());
     for (index, step) in value.steps.iter().enumerate() {
-        validate_text(&step.id, 64, "id")?;
+        validate_text(&step.id, FLOW_STEP_ID_CHARS, "id")?;
         if seen.contains(&step.id.as_str()) {
             return Err(LanguageError::Invalid(format!(
                 "step id `{}` is not unique",
@@ -1875,7 +1881,7 @@ fn validate_click(value: &Click) -> Result<(), LanguageError> {
     }
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_choice(&value.button, &["primary", "middle", "secondary"], "button")?;
-    validate_range(usize::from(value.click_count), 1, 3, "click_count")?;
+    validate_within(usize::from(value.click_count), CLICK_COUNT, "click_count")?;
     validate_modifiers(&value.modifiers)?;
     validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
@@ -2030,14 +2036,14 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
                 name,
             )?;
         }
-        validate_range(
+        validate_within(
             usize::from(value.ticks.ok_or_else(|| {
-                LanguageError::Invalid(
-                    "coordinate wheel scrolling needs ticks: how far to scroll, 1 to 10".into(),
-                )
+                LanguageError::Invalid(format!(
+                    "coordinate wheel scrolling needs ticks: how far to scroll, {} to {}",
+                    WHEEL_TICKS.min, WHEEL_TICKS.max
+                ))
             })?),
-            1,
-            10,
+            WHEEL_TICKS,
             "ticks",
         )?;
     } else {
@@ -2053,7 +2059,7 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
 }
 
 fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
-    validate_range(value.fields.len(), 1, 30, "fields")?;
+    validate_within(value.fields.len(), FILL_FIELDS, "fields")?;
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_optional_handle(value.submit_target.as_deref(), "target_")?;
     validate_expect(&value.expect)?;
@@ -2072,11 +2078,13 @@ fn validate_fill(value: &FillForm) -> Result<(), LanguageError> {
             validate_selector(selector)?;
         }
         match &field.value {
-            FormFieldValue::Text(text) => validate_text_allow_empty(text, 8_000, "field value")?,
+            FormFieldValue::Text(text) => {
+                validate_text_allow_empty(text, FIELD_VALUE_CHARS, "field value")?
+            }
             FormFieldValue::Choices(choices) => {
-                validate_range(choices.len(), 0, 100, "field values")?;
+                validate_range(choices.len(), 0, FIELD_CHOICES, "field values")?;
                 for choice in choices {
-                    validate_text_allow_empty(choice, 8_000, "field value")?;
+                    validate_text_allow_empty(choice, FIELD_VALUE_CHARS, "field value")?;
                 }
             }
             FormFieldValue::Flag(_) | FormFieldValue::Number(_) => {}
@@ -2105,7 +2113,7 @@ fn validate_type_text(value: &TypeText) -> Result<(), LanguageError> {
             "text cannot be empty unless clear_first is true".into(),
         ));
     }
-    validate_text_allow_empty(&value.text, 8_000, "text")?;
+    validate_text_allow_empty(&value.text, FIELD_VALUE_CHARS, "text")?;
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_expect(&value.expect)?;
     validate_timeout(value.timeout_ms)?;
@@ -2164,7 +2172,6 @@ fn validate_drag(value: &Drag) -> Result<(), LanguageError> {
     Ok(())
 }
 
-const INLINE_FILE_LIMIT: usize = 5;
 const UPLOAD_AGGREGATE_BYTES: u64 = 5_000_000;
 
 /// How many bytes standard base64 decodes to, counted exactly: the digits without their `=`
@@ -2243,12 +2250,12 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
         }
     }
     if !value.paths.is_empty() {
-        validate_range(value.paths.len(), 1, 5, "paths")?;
+        validate_within(value.paths.len(), UPLOAD_PATHS, "paths")?;
         if has_duplicates(&value.paths) {
             return Err(LanguageError::Invalid("paths must be unique".into()));
         }
         for path in &value.paths {
-            validate_text(path, 4_096, "path")?;
+            validate_text(path, UPLOAD_PATH_CHARS, "path")?;
             if !Path::new(path).is_absolute() {
                 return Err(LanguageError::Invalid("paths must be absolute".into()));
             }
@@ -2257,8 +2264,8 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
         validate_range(value.files.len(), 0, INLINE_FILE_LIMIT, "files")?;
         let mut aggregate = 0u64;
         for file in &value.files {
-            validate_text(&file.name, 255, "name")?;
-            validate_text(&file.media_type, 100, "media_type")?;
+            validate_text(&file.name, FILE_NAME_CHARS, "name")?;
+            validate_text(&file.media_type, MEDIA_TYPE_CHARS, "media_type")?;
             let data = file.data_base64.as_bytes();
             if data.is_empty() || data.len() % 4 != 0 {
                 return Err(LanguageError::Invalid(
@@ -2286,7 +2293,7 @@ fn validate_upload(value: &UploadFiles) -> Result<(), LanguageError> {
 }
 
 fn validate_coordinate(value: f64, field: &str) -> Result<(), LanguageError> {
-    if value.is_finite() && (0.0..=1_000_000.0).contains(&value) {
+    if value.is_finite() && (0.0..=f64::from(COORDINATE_MAX)).contains(&value) {
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
@@ -2296,7 +2303,7 @@ fn validate_coordinate(value: f64, field: &str) -> Result<(), LanguageError> {
 }
 
 fn validate_extent(value: f64, field: &str) -> Result<(), LanguageError> {
-    if value.is_finite() && (0.0..=1_000_000.0).contains(&value) && value > 0.0 {
+    if value.is_finite() && (0.0..=f64::from(COORDINATE_MAX)).contains(&value) && value > 0.0 {
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
@@ -2319,11 +2326,11 @@ fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
                 "provide exactly key or strokes".into(),
             ));
         }
-        validate_range(value.strokes.len(), 1, 20, "strokes")?;
+        validate_within(value.strokes.len(), KEY_STROKES, "strokes")?;
         for stroke in &value.strokes {
             validate_key(stroke)?;
         }
-        validate_range(usize::from(value.repeat), 1, 100, "repeat")?;
+        validate_within(usize::from(value.repeat), KEY_REPEAT, "repeat")?;
     }
     validate_optional_handle(value.tab.as_deref(), "tab_")?;
     validate_optional_handle(value.target.as_deref(), "target_")?;
@@ -2383,10 +2390,9 @@ fn validate_condition(
             let milliseconds = raw.parse::<u64>().map_err(|_| {
                 LanguageError::Invalid("duration requires whole milliseconds".into())
             })?;
-            validate_range(
+            validate_within(
                 usize::try_from(milliseconds).unwrap_or(usize::MAX),
-                0,
-                10_000,
+                DURATION_MS,
                 "duration",
             )
         }
@@ -2408,7 +2414,7 @@ fn validate_condition(
         WaitCondition::UrlContains | WaitCondition::TextPresent | WaitCondition::TextAbsent => {
             let value =
                 value.ok_or_else(|| LanguageError::Invalid(format!("{name} requires value")))?;
-            validate_text(value, 2_000, "value")?;
+            validate_text(value, MAX_POSTCONDITION_VALUE_CHARS, "value")?;
             if target.is_some() {
                 Err(LanguageError::Invalid(format!(
                     "{name} does not accept target"
@@ -2433,9 +2439,9 @@ fn validate_condition(
 }
 
 fn validate_url(value: &str) -> Result<(), LanguageError> {
-    if value.len() > 4_096 {
+    if value.len() > URL_MAX {
         return Err(LanguageError::Invalid(format!(
-            "url is limited to 4096 bytes; got {}",
+            "url is limited to {URL_MAX} bytes; got {}",
             value.len()
         )));
     }
@@ -2460,6 +2466,10 @@ fn validate_timeout(value: u64) -> Result<(), LanguageError> {
             "timeout_ms must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS}; got {value}"
         )))
     }
+}
+
+fn validate_within(value: usize, range: Range, field: &str) -> Result<(), LanguageError> {
+    validate_range(value, range.min, range.max, field)
 }
 
 fn validate_range(
@@ -2489,7 +2499,7 @@ fn validate_choice(value: &str, choices: &[&str], field: &str) -> Result<(), Lan
 }
 
 fn validate_handle(value: &str, prefix: &str) -> Result<(), LanguageError> {
-    if value.starts_with(prefix) && value.len() > prefix.len() && value.len() <= 160 {
+    if value.starts_with(prefix) && value.len() > prefix.len() && value.len() <= HANDLE_CHARS {
         Ok(())
     } else {
         Err(LanguageError::Invalid(format!(
@@ -2564,38 +2574,41 @@ fn default_record_timeout() -> u64 {
     DEFAULT_RECORD_TIMEOUT_MS
 }
 fn default_max_chars() -> usize {
-    8_000
+    DEFAULT_READ_CHARS
+}
+fn default_script_result_chars() -> usize {
+    DEFAULT_SCRIPT_RESULT_CHARS
 }
 fn default_inspect_kind() -> String {
-    "controls".into()
+    DEFAULT_INSPECT_SCOPE.into()
 }
 fn default_find_kind() -> String {
-    "any".into()
+    DEFAULT_FIND_SCOPE.into()
 }
 fn default_max_items() -> usize {
-    80
+    DEFAULT_INSPECT_ITEMS
 }
 fn default_max_results() -> usize {
-    20
+    DEFAULT_FIND_RESULTS
 }
 fn default_button() -> String {
-    "primary".into()
+    DEFAULT_BUTTON.into()
 }
 fn default_click_count() -> u8 {
-    1
+    DEFAULT_CLICK_COUNT
 }
 
 fn default_repeat() -> u16 {
-    1
+    DEFAULT_KEY_REPEAT
 }
 fn default_diagnostic_source() -> String {
-    "both".into()
+    DEFAULT_DIAGNOSTIC_SOURCE.into()
 }
 fn default_diagnostic_detail() -> String {
-    "problems".into()
+    DEFAULT_DIAGNOSTIC_DETAIL.into()
 }
 fn default_diagnostic_limit() -> usize {
-    50
+    DEFAULT_DIAGNOSTIC_LIMIT
 }
 
 #[cfg(test)]

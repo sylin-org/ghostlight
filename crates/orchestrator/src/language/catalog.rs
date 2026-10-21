@@ -7,11 +7,22 @@ use serde_json::{json, Map, Value};
 
 use crate::governance::AuthoritySnapshot;
 
+use super::bounds::{
+    Range, CLICK_COUNT, COORDINATE_MAX, DEFAULT_BUTTON, DEFAULT_CLICK_COUNT,
+    DEFAULT_DIAGNOSTIC_DETAIL, DEFAULT_DIAGNOSTIC_LIMIT, DEFAULT_DIAGNOSTIC_SOURCE,
+    DEFAULT_FIND_RESULTS, DEFAULT_FIND_SCOPE, DEFAULT_INSPECT_ITEMS, DEFAULT_INSPECT_SCOPE,
+    DEFAULT_KEY_REPEAT, DEFAULT_ON_ERROR, DEFAULT_READ_CHARS, DEFAULT_SCRIPT_RESULT_CHARS,
+    DIAGNOSTIC_LIMIT, DIALOG_TEXT_CHARS, DOCUMENT_DEPTH, DURATION_MS, FIELD_CHOICES,
+    FIELD_VALUE_CHARS, FILE_NAME_CHARS, FILL_FIELDS, FIND_RESULTS, FLOW_STEP_ID_CHARS,
+    HANDLE_CHARS, INLINE_FILE_LIMIT, INSPECT_ITEMS, KEY_REPEAT, KEY_STROKES, MEDIA_TYPE_CHARS,
+    READ_CHARS, SCRIPT_RESULT_CHARS, SEARCH_TEXT_CHARS, UPLOAD_PATHS, UPLOAD_PATH_CHARS, URL_MAX,
+    WHEEL_TICKS, WINDOW_HEIGHT, WINDOW_WIDTH, ZOOM_PERCENT,
+};
 use super::wait::{PageCondition, WaitCondition};
 use super::{
     DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
-    MAX_INSPECT_ITEMS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
-    SCRIPT_MAX_CHARS, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT, SEMANTIC_ROLES,
+    MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS, SCRIPT_MAX_CHARS,
+    SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT, SEMANTIC_ROLES,
 };
 
 /// Canonical tool names in the complete catalog.
@@ -128,7 +139,10 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_fill_form",
             "Fill form",
-            "Fill 1 to 30 fields in one call; needs write even for unsent drafts. Nothing submits unless submit_target names the control. A value a control cannot take is refused before any field changes, with what it accepts. For credentials, set user_authorized_credentials only on the user's explicit instruction.",
+            &format!(
+                "Fill {} to {} fields in one call; needs write even for unsent drafts. Nothing submits unless submit_target names the control. A value a control cannot take is refused before any field changes, with what it accepts. For credentials, set user_authorized_credentials only on the user's explicit instruction.",
+                FILL_FIELDS.min, FILL_FIELDS.max
+            ),
             with_expect(fill_schema()),
             Hints::browser_action(true),
         ),
@@ -184,7 +198,10 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_flow",
             "Run flow",
-            "Run 1 to 20 tool calls. tab defaults tab-scoped steps; a step's own tab wins. Later arguments may reference earlier results. Stops at the first failed step by default.",
+            &format!(
+                "Run 1 to {} tool calls. tab defaults tab-scoped steps; a step's own tab wins. Later arguments may reference earlier results. Stops at the first failed step by default.",
+                super::history::COMPOSITION_STEP_LIMIT
+            ),
             flow_schema(),
             Hints::browser_action(true),
         ),
@@ -415,7 +432,7 @@ fn window_schema() -> Value {
             object(
                 vec![
                     ("action", constant("zoom", "Set tab zoom.")),
-                    ("percent", integer(25, 500, None, "")),
+                    ("percent", within(ZOOM_PERCENT, None, "")),
                     ("tab", tab()),
                 ],
                 vec!["action", "percent"],
@@ -426,8 +443,8 @@ fn window_schema() -> Value {
                         "action",
                         constant("resize", "Set the window size in pixels."),
                     ),
-                    ("width", integer(320, 7_680, None, "")),
-                    ("height", integer(240, 4_320, None, "")),
+                    ("width", within(WINDOW_WIDTH, None, "")),
+                    ("height", within(WINDOW_HEIGHT, None, "")),
                     ("tab", tab()),
                 ],
                 vec!["action", "width", "height"],
@@ -459,7 +476,7 @@ fn read_schema() -> Value {
                 ),
                 (
                     "max_chars",
-                    integer(500, 50_000, Some(8_000), ""),
+                    within(READ_CHARS, Some(DEFAULT_READ_CHARS), ""),
                 ),
             ],
             vec![],
@@ -477,7 +494,7 @@ fn inspect_schema() -> Value {
                     "scope",
                     enumeration(
                         &["controls", "structure", "all", "document"],
-                        Some("controls"),
+                        Some(DEFAULT_INSPECT_SCOPE),
                         "document: a {kind, label, children} tree, a snapshot handle, and a diff against the previous snapshot when root and max_depth match.",
                     ),
                 ),
@@ -488,16 +505,15 @@ fn inspect_schema() -> Value {
                 (
                     "max_depth",
                     // No schema default: the decoder refuses max_depth outside document scope.
-                    integer(
-                        1,
-                        12,
+                    within(
+                        DOCUMENT_DEPTH,
                         None,
                         &format!("Tree levels; {DEFAULT_DOCUMENT_DEPTH} when omitted."),
                     ),
                 ),
                 (
                     "max_items",
-                    integer(1, MAX_INSPECT_ITEMS, Some(80), ""),
+                    within(INSPECT_ITEMS, Some(DEFAULT_INSPECT_ITEMS), ""),
                 ),
             ],
             vec![],
@@ -510,13 +526,19 @@ fn find_schema() -> Value {
     examples(
         object(
             vec![
-                ("text", text(1, 500, "Visible or accessible text.")),
+                (
+                    "text",
+                    text(1, SEARCH_TEXT_CHARS, "Visible or accessible text."),
+                ),
                 ("tab", tab()),
                 (
                     "scope",
-                    enumeration(&["any", "control", "text"], Some("any"), ""),
+                    enumeration(&["any", "control", "text"], Some(DEFAULT_FIND_SCOPE), ""),
                 ),
-                ("max_results", integer(1, 50, Some(20), "")),
+                (
+                    "max_results",
+                    within(FIND_RESULTS, Some(DEFAULT_FIND_RESULTS), ""),
+                ),
             ],
             vec!["text"],
         ),
@@ -576,9 +598,16 @@ fn click_schema() -> Value {
         ("tab", tab()),
         (
             "button",
-            enumeration(&["primary", "middle", "secondary"], Some("primary"), ""),
+            enumeration(
+                &["primary", "middle", "secondary"],
+                Some(DEFAULT_BUTTON),
+                "",
+            ),
         ),
-        ("click_count", integer(1, 3, Some(1), "")),
+        (
+            "click_count",
+            within(CLICK_COUNT, Some(usize::from(DEFAULT_CLICK_COUNT)), ""),
+        ),
         ("modifiers", modifier_keys()),
         ("selector", semantic_selector()),
     ];
@@ -613,7 +642,7 @@ fn semantic_selector() -> Value {
         "additionalProperties": false,
         "description": "Lookup needs read.",
         "properties": {
-            "name": {"type": "string", "minLength": 1, "maxLength": 500, "description": "Accessible name, case-insensitive substring unless exact."},
+            "name": {"type": "string", "minLength": 1, "maxLength": SEARCH_TEXT_CHARS, "description": "Accessible name, case-insensitive substring unless exact."},
             "role": {"type": "string", "enum": SEMANTIC_ROLES},
             "exact": {"type": "boolean", "default": false}
         },
@@ -664,7 +693,7 @@ fn scroll_schema() -> Value {
                     ("view", handle("view_", VIEW_POINT)),
                     ("x", coordinate()),
                     ("y", coordinate()),
-                    ("ticks", integer(1, 10, None, "")),
+                    ("ticks", within(WHEEL_TICKS, None, "")),
                 ],
                 vec!["view", "x", "y", "ticks"],
             ),
@@ -714,7 +743,7 @@ fn fill_schema() -> Value {
             vec![
                 (
                     "fields",
-                    json!({"type":"array","minItems":1,"maxItems":30,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_",""),"selector":semantic_selector(),"value":{"description":"Text replaces the current value; empty clears it. Select: an option's text or value as browser_inspect lists it; multi-select: an array. Checkbox: true or false (sets, never toggles). Radio: true selects it, or a sibling's label selects that one. Date and time: ISO, like 2026-10-14, 14:30, 2026-10-14T14:30. Number and range: within the control's limits.","anyOf":[{"type":"string","maxLength":8000},{"type":"boolean"},{"type":"number"},{"type":"array","items":{"type":"string","maxLength":8000},"maxItems":100}]}},"required":["value"]}}),
+                    json!({"type":"array","minItems":FILL_FIELDS.min,"maxItems":FILL_FIELDS.max,"description":"Each field gives exactly one of target or selector.","items":{"type":"object","additionalProperties":false,"properties":{"target":handle("target_",""),"selector":semantic_selector(),"value":{"description":"Text replaces the current value; empty clears it. Select: an option's text or value as browser_inspect lists it; multi-select: an array. Checkbox: true or false (sets, never toggles). Radio: true selects it, or a sibling's label selects that one. Date and time: ISO, like 2026-10-14, 14:30, 2026-10-14T14:30. Number and range: within the control's limits.","anyOf":[{"type":"string","maxLength":FIELD_VALUE_CHARS},{"type":"boolean"},{"type":"number"},{"type":"array","items":{"type":"string","maxLength":FIELD_VALUE_CHARS},"maxItems":FIELD_CHOICES}]}},"required":["value"]}}),
                 ),
                 ("tab", tab()),
                 (
@@ -741,7 +770,7 @@ fn type_schema() -> Value {
             "text",
             text(
                 0,
-                8_000,
+                FIELD_VALUE_CHARS,
                 "Empty text only clears, and needs clear_first true.",
             ),
         ),
@@ -797,11 +826,15 @@ fn key_schema() -> Value {
                     vec![
                         (
                             "strokes",
-                            json!({"type":"array","minItems":1,"maxItems":20,"description":"Replaces key.","items":stroke_item}),
+                            json!({"type":"array","minItems":KEY_STROKES.min,"maxItems":KEY_STROKES.max,"description":"Replaces key.","items":stroke_item}),
                         ),
                         (
                             "repeat",
-                            integer(1, 100, Some(1), "Repeats the whole sequence."),
+                            within(
+                                KEY_REPEAT,
+                                Some(usize::from(DEFAULT_KEY_REPEAT)),
+                                "Repeats the whole sequence.",
+                            ),
                         ),
                     ],
                 ),
@@ -922,7 +955,17 @@ fn wait_branch(condition: WaitCondition) -> Value {
     match input {
         None => {}
         Some(WaitInput::Text) => {
-            fields.push(("value", text(1, 2_000, "Text or URL fragment; page text, not field values. For duration, milliseconds from 0 to 10000 as a string.")));
+            fields.push((
+                "value",
+                text(
+                    1,
+                    MAX_POSTCONDITION_VALUE_CHARS,
+                    &format!(
+                        "Text or URL fragment; page text, not field values. For duration, milliseconds from {} to {} as a string.",
+                        DURATION_MS.min, DURATION_MS.max
+                    ),
+                ),
+            ));
             required.push("value");
         }
         Some(kind @ (WaitInput::Target | WaitInput::OptionalTarget)) => {
@@ -975,7 +1018,10 @@ fn dialog_branch(action: &str, action_description: &str, text_required: bool) ->
     ];
     let mut required = vec!["action"];
     if text_required {
-        fields.push(("text", text(0, 2_000, "Prompt answer; may be empty.")));
+        fields.push((
+            "text",
+            text(0, DIALOG_TEXT_CHARS, "Prompt answer; may be empty."),
+        ));
         required.push("text");
     }
     object(fields, required)
@@ -989,11 +1035,11 @@ fn upload_schema() -> Value {
                 ("selector", semantic_selector()),
                 (
                     "paths",
-                    json!({"type":"array","minItems":1,"maxItems":5,"uniqueItems":true,"description":"Absolute paths.","items":{"type":"string","minLength":1,"maxLength":4096}}),
+                    json!({"type":"array","minItems":UPLOAD_PATHS.min,"maxItems":UPLOAD_PATHS.max,"uniqueItems":true,"description":"Absolute paths.","items":{"type":"string","minLength":1,"maxLength":UPLOAD_PATH_CHARS}}),
                 ),
                 (
                     "files",
-                    json!({"type":"array","minItems":1,"maxItems":5,"items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":255},"media_type":{"type":"string","maxLength":100},"data_base64":{"type":"string"}},"required":["name","data_base64"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":INLINE_FILE_LIMIT,"items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":FILE_NAME_CHARS},"media_type":{"type":"string","maxLength":MEDIA_TYPE_CHARS},"data_base64":{"type":"string"}},"required":["name","data_base64"]}}),
                 ),
                 (
                     "source_image",
@@ -1034,7 +1080,10 @@ fn evaluate_schema() -> Value {
             vec![
                 ("script", text(1, SCRIPT_MAX_CHARS, "")),
                 ("tab", tab()),
-                ("max_result_chars", integer(100, 20_000, Some(8_000), "")),
+                (
+                    "max_result_chars",
+                    within(SCRIPT_RESULT_CHARS, Some(DEFAULT_SCRIPT_RESULT_CHARS), ""),
+                ),
             ],
             vec!["script"],
         ),
@@ -1048,11 +1097,11 @@ fn flow_schema() -> Value {
             vec![
                 (
                     "steps",
-                    json!({"type":"array","minItems":1,"maxItems":super::history::COMPOSITION_STEP_LIMIT,"description":"Omitted ids become step_1, step_2, ...","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":64},"tool":{"type":"string","description":"An advertised non-composite tool."},"arguments":{"type":"object","description":"That tool's arguments. Any value may be a reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["tool"]}}),
+                    json!({"type":"array","minItems":1,"maxItems":super::history::COMPOSITION_STEP_LIMIT,"description":"Omitted ids become step_1, step_2, ...","items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string","minLength":1,"maxLength":FLOW_STEP_ID_CHARS},"tool":{"type":"string","description":"An advertised non-composite tool."},"arguments":{"type":"object","description":"That tool's arguments. Any value may be a reference object: {\"flow_ref\":{\"step\":\"earlier_id\",\"pointer\":\"/facts/...\"}}."}},"required":["tool"]}}),
                 ),
                 (
                     "on_error",
-                    enumeration(&["stop", "continue"], Some("stop"), ""),
+                    enumeration(&["stop", "continue"], Some(DEFAULT_ON_ERROR), ""),
                 ),
                 ("tab", tab()),
             ],
@@ -1133,13 +1182,17 @@ fn diagnose_schema() -> Value {
                 ("tab", tab()),
                 (
                     "source",
-                    enumeration(&["both", "console", "network"], Some("both"), ""),
+                    enumeration(
+                        &["both", "console", "network"],
+                        Some(DEFAULT_DIAGNOSTIC_SOURCE),
+                        "",
+                    ),
                 ),
                 (
                     "detail",
                     enumeration(
                         &["problems", "all"],
-                        Some("problems"),
+                        Some(DEFAULT_DIAGNOSTIC_DETAIL),
                         "problems: warnings, errors, failed requests, and HTTP failures.",
                     ),
                 ),
@@ -1147,12 +1200,15 @@ fn diagnose_schema() -> Value {
                     "match",
                     text(
                         1,
-                        500,
+                        SEARCH_TEXT_CHARS,
                         "Case-insensitive literal filter, not a regular expression.",
                     ),
                 ),
                 ("after", handle("diag_", "Cursor from a prior result.")),
-                ("limit", integer(1, 200, Some(50), "")),
+                (
+                    "limit",
+                    within(DIAGNOSTIC_LIMIT, Some(DEFAULT_DIAGNOSTIC_LIMIT), ""),
+                ),
             ],
             vec![],
         ),
@@ -1547,6 +1603,11 @@ fn text(minimum: usize, maximum: usize, description: &str) -> Value {
     )
 }
 
+/// An integer field that accepts `range`.
+fn within(range: Range, default: Option<usize>, description: &str) -> Value {
+    integer(range.min, range.max, default, description)
+}
+
 fn integer(minimum: usize, maximum: usize, default: Option<usize>, description: &str) -> Value {
     let mut schema = json!({"type":"integer","minimum":minimum,"maximum":maximum});
     if let Some(default) = default {
@@ -1565,7 +1626,7 @@ fn enumeration(values: &[&str], default: Option<&str>, description: &str) -> Val
 
 fn handle(prefix: &str, description: &str) -> Value {
     described(
-        json!({"type":"string","maxLength":160,"pattern":format!("^{prefix}.+$")}),
+        json!({"type":"string","maxLength":HANDLE_CHARS,"pattern":format!("^{prefix}.+$")}),
         description,
     )
 }
@@ -1580,7 +1641,7 @@ fn tab() -> Value {
 }
 
 fn url() -> Value {
-    json!({"type":"string","format":"uri","pattern":"^https?://","maxLength":4096})
+    json!({"type":"string","format":"uri","pattern":"^https?://","maxLength":URL_MAX})
 }
 
 /// The `timeout_ms` field every tool accepts, defaulting to what that tool has always been given.
@@ -1602,12 +1663,12 @@ const VIEW_POINT: &str = "x and y are pixels in this view's screenshot image; ta
 
 /// A pointer coordinate in the pixels of the call's view image.
 fn coordinate() -> Value {
-    json!({"type":"number","minimum":0,"maximum":1_000_000})
+    json!({"type":"number","minimum":0,"maximum":COORDINATE_MAX})
 }
 
 /// A region size in the pixels of the call's view image.
 fn extent() -> Value {
-    json!({"type":"number","exclusiveMinimum":0,"maximum":1_000_000})
+    json!({"type":"number","exclusiveMinimum":0,"maximum":COORDINATE_MAX})
 }
 
 #[cfg(test)]
