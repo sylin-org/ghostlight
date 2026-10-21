@@ -254,6 +254,13 @@ Now:
   slices wait for it; core-work's W-D4 and W-D5 and install's I-D4 go first. The coordinator's
   service lane has cut 396 tests to 113 so far; the four test-machine lanes started on 2026-10-21,
   when the owner powered the machines on.
+- Release order for 2.0.1, from test-01's reading of the 2.0.0 package (2026-10-21): publish the
+  2.0.1 extension before the service, or with it. A 2.0.0 extension beside a 2.0.1 service matches
+  groups by exact title, so it opens a ghost-titled group beside the agent's old "Ghostlight - ..."
+  group, and its popup names the agent with the ghost in front, until the store update arrives and
+  the next open merges them (ADR-0098 amendment of 2026-10-21). The 2.0.1 extension beside a 2.0.0
+  service keeps the old title and names the agent right, so the extension first costs nothing.
+  Publishing is the owner's go.
 - Owed before the new 2.0.1 candidate: the changelog and `release/notes-v2.0.1.md` take the
   second sweep's user-visible fixes. About twenty landed after the changelog's last entry
   (7cecdda7), and of those only P-D3, P-D4 and P-D5 wrote theirs.
