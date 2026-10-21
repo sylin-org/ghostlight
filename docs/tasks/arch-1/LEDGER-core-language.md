@@ -10,8 +10,8 @@ read with its skeptic's corrections, or its entry in
 
 ## RESUME HERE
 
-L-D1, L-D2 and L-D3 have landed. Next is L-D4. A slice's hash is filled in by the next slice's commit,
-since a rebase before the push changes it.
+L-D1 to L-D4 have landed. Next is L-D5. A slice's hash is filled in by the next slice's
+commit, since a rebase before the push changes it.
 
 ## Slices
 
@@ -21,8 +21,8 @@ In order. "After" names what a slice waits for.
 | --- | --- | --- | --- | --- |
 | L-D1 | fix(language): a wheel scroll may leave out its direction, and its amount is checked | - | LANG-3's skeptic note | landed (59c67621) |
 | L-D2 | fix(language): a summary with its coverage note stays within its bound, to the character | - | LANG-6 and its note | landed (69e58321) |
-| L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed |
-| L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | todo |
+| L-D3 | fix(language): one skipped history entry is counted in the singular | - | LANG-9's note | landed (09d78bd9) |
+| L-D4 | fix(language): the handle-like text check matches real `diag_` and `invocation_` ids | - | LANG-2's note | landed |
 | L-D5 | fix(language): an inline upload of exactly 5,000,000 bytes is accepted | L-D4 | WORK-1's note; one pub exact counter in `language/`, which core-work's WORK-1 then reads | todo |
 | C17 | refactor(language): one wait vocabulary and one coverage predicate | - | ADR-0203 C17, moved from core; LANG-3, WORK-5 and BROW-3's wait parts | todo |
 | C12b-1 | refactor(language): each refusal is typed where it is learned, and its code is written once (the language half) | C17 | ADR-0203 C12b, moved from core | todo |
@@ -57,3 +57,8 @@ In order. "After" names what a slice waits for.
 - L-D3: one skipped entry reads "1 unreadable history entry was skipped." in the history and
   status detail, as the unconfirmed-receipts sentence already did. Person-facing, on purpose.
   LANG-9 later folds both hand-written plurals into the shared phrase helpers.
+- L-D4: each handle prefix in `field_problem.rs` carries its own shape: eight lowercase base32
+  characters after `target_`, `tab_`, `view_` and `image_`, 32 lowercase hex digits after
+  `invocation_`, and `<counter>_<8 hex>` after `diag_` (`extension/lib/diagnostics.js`). The set
+  of prefixes is unchanged; `snapshot_` and `browser_` stay out of page-text replacement until
+  LANG-2's `HandleKind` decides each kind's shape.
