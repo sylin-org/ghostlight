@@ -88,7 +88,6 @@ impl DiagnosticsHub {
             env!("CARGO_PKG_VERSION"),
             Path::new("/ghostlight-test"),
             None,
-            &ghostlight_bridge::diagnostics::OsMarkerWatcher,
             None,
         );
         Arc::new(Self {

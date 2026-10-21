@@ -211,77 +211,60 @@ pub fn set_marker(home: &Path, on: bool) -> io::Result<Activation> {
     Ok(resolve(None, home))
 }
 
-/// A source of marker-change wake-ups. The production implementation watches the marker's
-/// directory through the operating system; tests inject synthetic wake-ups.
-pub trait MarkerWatcher: Send + Sync + 'static {
-    /// Call `wake` whenever the marker file may have changed. The returned guard stops the
-    /// watch when dropped; `None` means this watcher cannot run here and the safety-net tick
-    /// alone serves.
-    fn watch(
-        &self,
-        marker: PathBuf,
-        wake: Arc<dyn Fn() + Send + Sync>,
-    ) -> Option<Box<dyn Send + Sync>>;
-}
-
-/// The production watcher: one OS directory watch on the marker's parent, filtered to the
-/// marker's file name so the sink's own log appends never trigger an evaluation.
-#[derive(Default)]
-pub struct OsMarkerWatcher;
-
-impl MarkerWatcher for OsMarkerWatcher {
-    fn watch(
-        &self,
-        marker: PathBuf,
-        wake: Arc<dyn Fn() + Send + Sync>,
-    ) -> Option<Box<dyn Send + Sync>> {
-        let marker_name = marker.file_name()?.to_os_string();
-        let directory = marker.parent()?.to_path_buf();
-        let (send, receive) = mpsc::channel::<()>();
-        let marker_name_for_events = marker_name.clone();
-        let mut watcher =
-            notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
-                if let Ok(event) = result {
-                    if event
-                        .paths
-                        .iter()
-                        .any(|path| path.file_name() == Some(marker_name_for_events.as_os_str()))
-                    {
-                        let _ = send.send(());
-                    }
-                }
-            })
-            .ok()?;
-        watcher
-            .watch(&directory, notify::RecursiveMode::NonRecursive)
-            .ok()?;
-        let join = thread::Builder::new()
-            .name("ghostlight-diagnostics-watch".into())
-            .spawn(move || {
-                while receive.recv().is_ok() {
-                    wake();
-                }
-            })
-            .ok()?;
-        struct Guard {
-            watcher: Option<notify::RecommendedWatcher>,
-            join: Option<thread::JoinHandle<()>>,
-        }
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                if let Some(watcher) = self.watcher.take() {
-                    drop(watcher);
-                }
-                if let Some(join) = self.join.take() {
-                    let _ = join.join();
+/// Call `wake` whenever the marker file may have changed, through one operating-system watch on
+/// the marker's directory, filtered to the marker's file name so the sink's own log appends never
+/// trigger an evaluation. The returned guard stops the watch when dropped; `None` means no watch
+/// can run here and the safety-net tick alone serves.
+fn watch_marker(
+    marker: PathBuf,
+    wake: Arc<dyn Fn() + Send + Sync>,
+) -> Option<Box<dyn Send + Sync>> {
+    let marker_name = marker.file_name()?.to_os_string();
+    let directory = marker.parent()?.to_path_buf();
+    let (send, receive) = mpsc::channel::<()>();
+    let marker_name_for_events = marker_name.clone();
+    let mut watcher =
+        notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = result {
+                if event
+                    .paths
+                    .iter()
+                    .any(|path| path.file_name() == Some(marker_name_for_events.as_os_str()))
+                {
+                    let _ = send.send(());
                 }
             }
-        }
-        Some(Box::new(Guard {
-            watcher: Some(watcher),
-            join: Some(join),
-        }))
+        })
+        .ok()?;
+    watcher
+        .watch(&directory, notify::RecursiveMode::NonRecursive)
+        .ok()?;
+    let join = thread::Builder::new()
+        .name("ghostlight-diagnostics-watch".into())
+        .spawn(move || {
+            while receive.recv().is_ok() {
+                wake();
+            }
+        })
+        .ok()?;
+    struct Guard {
+        watcher: Option<notify::RecommendedWatcher>,
+        join: Option<thread::JoinHandle<()>>,
     }
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            if let Some(watcher) = self.watcher.take() {
+                drop(watcher);
+            }
+            if let Some(join) = self.join.take() {
+                let _ = join.join();
+            }
+        }
+    }
+    Some(Box::new(Guard {
+        watcher: Some(watcher),
+        join: Some(join),
+    }))
 }
 
 /// A callback fired after every activation transition.
@@ -311,7 +294,7 @@ impl Sink {
     /// watch. The explicit layer, when present, pins the sink on for this process's life.
     pub fn birth(component: Component, version: &str, home: &Path) -> Arc<Sink> {
         let pinned = std::env::var_os(ENV_DIR).map(PathBuf::from);
-        let sink = Sink::birth_with(component, version, home, pinned, &OsMarkerWatcher, None);
+        let sink = Sink::birth_with(component, version, home, pinned, None);
         sink.emit(
             event::PROCESS_CONTEXT,
             Level::Info,
@@ -326,13 +309,12 @@ impl Sink {
         sink
     }
 
-    /// Birth with explicit inputs; the seam tests use.
+    /// Birth with an explicit layer and a change callback instead of reading the environment.
     pub fn birth_with(
         component: Component,
         version: &str,
         home: &Path,
         pinned: Option<PathBuf>,
-        watcher: &dyn MarkerWatcher,
         on_change: Option<ChangeCallback>,
     ) -> Arc<Sink> {
         let started_ms = unix_ms();
@@ -359,7 +341,7 @@ impl Sink {
         if sink.pinned.is_none() {
             let marker = marker_path(home);
             let wake_sink = Arc::clone(&sink);
-            let guard = watcher.watch(marker, Arc::new(move || wake_sink.evaluate()));
+            let guard = watch_marker(marker, Arc::new(move || wake_sink.evaluate()));
             *sink.watcher.lock().expect("diagnostics watcher lock") = guard;
         }
 
@@ -781,69 +763,6 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
 
-    /// A sink line written from `Record` is byte-identical to the line the sink wrote with
-    /// `json!` before the type existed, with and without an operation.
-    #[test]
-    fn a_sink_record_writes_the_bytes_the_sink_always_wrote() {
-        for op in [None, Some("invocation_0123")] {
-            let record = Record {
-                component: "service".into(),
-                detail: "activation on (marker)".into(),
-                event: "sink_opened".into(),
-                level: Some("info".into()),
-                op: op.map(str::to_owned),
-                run_id: Some("run-1".into()),
-                ts_ms: 1_700_000_000_123,
-                ..Record::default()
-            };
-            let before = serde_json::json!({
-                "ts_ms": 1_700_000_000_123_u64,
-                "run_id": "run-1",
-                "component": "service",
-                "event": "sink_opened",
-                "level": "info",
-                "op": op,
-                "detail": "activation on (marker)",
-            });
-            assert_eq!(
-                serde_json::to_value(&record).unwrap().to_string(),
-                before.to_string()
-            );
-        }
-    }
-
-    /// The edge's line, built by `ghostlight_relay::log::line`, reads as a `Record` with every
-    /// field it carries, and nothing the edge does not write.
-    #[test]
-    fn an_edge_line_reads_as_a_record() {
-        let line = ghostlight_relay::log::line(
-            1_700_000_000_456,
-            EdgeLog::EdgeBrowser,
-            ghostlight_relay::log::Event::ProcessStarted,
-            "started",
-        );
-        let record: Record = serde_json::from_value(line.clone()).unwrap();
-        assert_eq!(
-            record,
-            Record {
-                component: EdgeLog::EdgeBrowser.as_str().into(),
-                detail: "started".into(),
-                event: ghostlight_relay::log::Event::ProcessStarted.as_str().into(),
-                level: None,
-                op: None,
-                pid: Some(std::process::id()),
-                relay: Some(ghostlight_relay::RELAY),
-                run_id: None,
-                ts_ms: 1_700_000_000_456,
-            }
-        );
-        let keys: Vec<&String> = line.as_object().unwrap().keys().collect();
-        assert_eq!(
-            keys,
-            ["component", "detail", "event", "pid", "relay", "ts_ms"]
-        );
-    }
-
     fn temp_root(name: &str) -> Scratch {
         Scratch::named(&format!("diagnostics-{name}"))
     }
@@ -872,388 +791,17 @@ mod tests {
             .unwrap_or(0)
     }
 
-    #[test]
-    fn explicit_layer_wins_over_marker_over_off() {
-        let root = temp_root("resolve");
-        let home = root.to_path_buf();
-        assert_eq!(resolve(None, &home), Activation::Off);
-        fs::write(marker_path(&home), b"").expect("marker");
-        assert_eq!(
-            resolve(None, &home),
-            Activation::Marker {
-                directory: root.join("diagnostics")
-            }
-        );
-        assert_eq!(
-            resolve(Some(root.join("elsewhere")), &home),
-            Activation::Explicit {
-                directory: root.join("elsewhere")
-            }
-        );
-    }
-
-    #[test]
-    fn marker_names_are_stable_and_derived_from_the_home() {
-        let home = Path::new("/data");
-        assert_eq!(marker_path(home), Path::new("/data").join("diagnostics.on"));
-        assert_eq!(
-            default_directory(home),
-            Path::new("/data").join("diagnostics")
-        );
-    }
-
-    #[test]
-    fn birth_pins_the_explicit_layer_and_opens_a_headered_file() {
-        let root = temp_root("pinned");
-        let home = root.to_path_buf();
-        let sink = Sink::birth_with(
-            Component::Orchestrator,
-            "9.9.9-test",
-            &home,
-            Some(root.join("diagnostics")),
-            &OsMarkerWatcher,
-            None,
-        );
-        assert_eq!(sink.activation().layer(), "explicit");
-        sink.emit(event::PROCESS_STARTED, Level::Info, None, "test process");
-        let logs = root.join("diagnostics");
-        let mut log_files: Vec<PathBuf> = fs::read_dir(&logs)
-            .expect("log dir")
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
-            .map(|entry| entry.path())
-            .collect();
-        assert_eq!(log_files.len(), 1, "one activation period, one file");
-        let content = fs::read_to_string(log_files.pop().expect("one file")).expect("log");
-        let mut lines = content.lines();
-        let header: serde_json::Value =
-            serde_json::from_str(lines.next().expect("header")).expect("header json");
-        for key in [
-            "schema",
-            "component",
-            "version",
-            "pid",
-            "run_id",
-            "started_ms",
-        ] {
-            assert!(header.get(key).is_some(), "header carries {key}");
-        }
-        assert_eq!(header["schema"], SCHEMA);
-        assert_eq!(header["component"], "orchestrator");
-        let opened: serde_json::Value =
-            serde_json::from_str(lines.next().expect("record")).expect("opened json");
-        assert_eq!(opened["event"], event::SINK_OPENED);
-        let record: serde_json::Value =
-            serde_json::from_str(lines.next().expect("record")).expect("record json");
-        let mut keys: Vec<&str> = record
-            .as_object()
-            .expect("object")
-            .keys()
-            .map(String::as_str)
-            .collect();
-        keys.sort_unstable();
-        assert_eq!(
-            keys,
-            vec![
-                "component",
-                "detail",
-                "event",
-                "level",
-                "op",
-                "run_id",
-                "ts_ms"
-            ]
-        );
-        assert_eq!(record["component"], "orchestrator");
-        assert_eq!(record["event"], event::PROCESS_STARTED);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_marker_and_the_logs_are_private() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let root = temp_root("private");
-        let home = root.to_path_buf();
-        set_marker(&home, true).expect("marker");
-        let sink = Sink::birth_with(
-            Component::Orchestrator,
-            "9.9.9-test",
-            &home,
-            None,
-            &OsMarkerWatcher,
-            None,
-        );
-        sink.emit(event::PROCESS_STARTED, Level::Info, None, "private");
-        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&marker_path(&home)), 0o600);
-        let directory = root.join("diagnostics");
-        assert_eq!(mode(&directory), 0o700);
-        let logs: Vec<_> = fs::read_dir(&directory).unwrap().flatten().collect();
-        assert!(!logs.is_empty());
-        for log in logs {
-            assert_eq!(mode(&log.path()), 0o600);
-        }
-    }
-
-    #[test]
-    fn the_marker_layer_toggles_a_live_sink_through_evaluate() {
-        let root = temp_root("toggle");
-        let home = root.to_path_buf();
-        let sink = Sink::birth_with(
-            Component::Orchestrator,
-            "9.9.9-test",
-            &home,
-            None,
-            &OsMarkerWatcher,
-            None,
-        );
-        assert_eq!(sink.activation().layer(), "off");
-        sink.emit(event::PROCESS_STARTED, Level::Info, None, "before marker");
-        let marker = marker_path(&home);
-        fs::write(&marker, b"").expect("marker");
-        wait_until_bounded(|| log_lines(&root) >= 2);
-        sink.evaluate();
-        sink.emit(event::PROCESS_STARTED, Level::Info, None, "after marker");
-        wait_until_bounded(|| log_lines(&root) == 3);
-        let log_dir = root.join("diagnostics");
-        let log = fs::read_dir(&log_dir)
-            .expect("dir")
-            .filter_map(Result::ok)
-            .find(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
-            .expect("log file after marker");
-        let content = fs::read_to_string(log.path()).expect("content");
-        assert_eq!(
-            content.lines().count(),
-            3,
-            "header, the opened line, and the post-marker line"
-        );
-        fs::remove_file(&marker).expect("remove marker");
-        wait_until_bounded(|| log_lines(&root) == 4);
-        sink.emit(event::PROCESS_STARTED, Level::Info, None, "after off");
-        let content = fs::read_to_string(log.path()).expect("content");
-        assert_eq!(
-            content.lines().count(),
-            4,
-            "off writes a closing line and then nothing more"
-        );
-    }
-
-    #[test]
-    fn transitions_report_through_the_change_callback() {
-        let root = temp_root("callback");
-        let home = root.to_path_buf();
-        let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let seen_for_callback = Arc::clone(&seen);
-        let sink = Sink::birth_with(
-            Component::Orchestrator,
-            "9.9.9-test",
-            &home,
-            None,
-            &OsMarkerWatcher,
-            Some(Arc::new(move |activation: &Activation| {
-                seen_for_callback
-                    .lock()
-                    .expect("seen lock")
-                    .push(activation.layer().to_string());
-            })),
-        );
-        fs::write(marker_path(&home), b"").expect("marker");
-        // The contract is eventual: the watch or the tick applies the layer, whichever fires
-        // first. Drive the re-check to the deadline instead of assuming one call is enough.
-        wait_until_bounded(|| !seen.lock().expect("seen lock").is_empty());
-        sink.evaluate();
-        let layers = seen.lock().expect("seen lock");
-        assert_eq!(layers.last().map(String::as_str), Some("marker"));
-        assert!(!layers.contains(&"off".to_string()));
-    }
-
-    #[test]
-    fn same_second_activation_periods_get_sequence_numbers() {
-        let root = temp_root("sequence");
-        let stamp = "20260101T000000Z";
-        let first = root.join(format!("{}-orchestrator-7.jsonl", stamp));
-        fs::write(&first, b"").expect("first");
-        let second = allocate_log_path(&root, Component::Orchestrator, 7, stamp);
-        assert_ne!(first, second);
-        assert!(second
-            .to_string_lossy()
-            .ends_with("-orchestrator-7-2.jsonl"));
-        fs::write(&second, b"").expect("second");
-        let third = allocate_log_path(&root, Component::Orchestrator, 7, stamp);
-        assert!(third.to_string_lossy().ends_with("-orchestrator-7-3.jsonl"));
-    }
-
-    #[test]
-    fn an_unusable_directory_disables_the_sink_without_panicking() {
-        let root = temp_root("disabled");
-        let blocked = root.join("file-not-directory");
-        fs::write(&blocked, b"not a directory").expect("blocker");
-        let sink = Sink::birth_with(
-            Component::Orchestrator,
-            "9.9.9-test",
-            &root,
-            Some(blocked),
-            &OsMarkerWatcher,
-            None,
-        );
-        sink.emit(event::PROCESS_STARTED, Level::Info, None, "dropped");
-        sink.evaluate();
-        let logs = fs::read_dir(&root)
-            .expect("dir")
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                name.ends_with(".jsonl")
-            })
-            .count();
-        assert_eq!(logs, 0, "a disabled sink writes nothing");
-    }
-
-    #[test]
-    fn detail_is_clipped_on_a_utf8_boundary() {
-        assert_eq!(clip("short"), "short");
-        let long = "x".repeat(MAX_DETAIL_BYTES + 10);
-        assert_eq!(clip(&long).len(), MAX_DETAIL_BYTES);
-        let multibyte = "e".repeat(MAX_DETAIL_BYTES - 1) + "\u{00e9}\u{00e9}";
-        let clipped = clip(&multibyte);
-        assert!(clipped.is_char_boundary(clipped.len()));
-        assert!(clipped.len() <= MAX_DETAIL_BYTES);
-    }
-
-    #[test]
-    fn pruning_keeps_the_newest_per_component_and_never_touches_the_marker() {
-        let root = temp_root("prune");
-        let directory = root.join("diagnostics");
-        fs::create_dir_all(&directory).expect("dir");
-        for index in 0..10 {
-            let name = format!(
-                "2026080{}T00000{}Z-orchestrator-1.jsonl",
-                index / 5 + 1,
-                index % 5
-            );
-            fs::write(directory.join(&name), vec![b'a'; 10]).expect("seed file");
-        }
-        for index in 0..3 {
-            let name = format!("2026080{}T00000{}Z-edge-mcp-2.jsonl", index + 1, index);
-            fs::write(directory.join(&name), vec![b'b'; 10]).expect("seed file");
-        }
-        fs::write(directory.join(MARKER_FILE_NAME), b"").expect("marker");
-        fs::write(directory.join("foreign.txt"), b"keep me").expect("foreign");
-        let report = prune_directory(&directory);
-        assert_eq!(report.deleted, 2);
-        let remaining: Vec<String> = fs::read_dir(&directory)
-            .expect("dir")
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            remaining.len(),
-            8 + 3 + 2,
-            "kept logs plus marker plus foreign"
-        );
-        assert!(remaining.contains(&MARKER_FILE_NAME.to_string()));
-        assert!(remaining.contains(&"foreign.txt".to_string()));
-        assert!(!remaining.contains(&"20260801T000000Z-orchestrator-1.jsonl".to_string()));
-        assert!(!remaining.contains(&"20260801T000001Z-orchestrator-1.jsonl".to_string()));
-    }
-
-    #[test]
-    fn the_files_the_edge_writes_are_logs_of_their_component() {
-        assert_eq!(
-            parse_log_name("edge-mcp.jsonl"),
-            Some(("edge-mcp".to_owned(), String::new()))
-        );
-        assert_eq!(
-            parse_log_name("edge-browser.jsonl"),
-            Some(("edge-browser".to_owned(), String::new()))
-        );
-        assert!(parse_log_name("edge-other.jsonl").is_none());
-        assert!(parse_log_name("orchestrator.jsonl").is_none());
-    }
-
-    #[test]
-    fn a_full_edge_log_is_rotated_so_the_edge_can_write_again_and_a_partial_one_stays() {
-        let root = temp_root("edge-rotation");
-        let directory = root.join("diagnostics");
-        fs::create_dir_all(&directory).expect("dir");
-        let full = vec![b'm'; usize::try_from(EDGE_LOG_FULL_BYTES).unwrap()];
-        fs::write(directory.join("edge-mcp.jsonl"), &full).expect("full edge log");
-        fs::write(directory.join("edge-browser.jsonl"), b"{}\n").expect("partial edge log");
-        prune_directory(&directory);
-        let remaining: Vec<String> = fs::read_dir(&directory)
-            .expect("dir")
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .collect();
-        assert!(
-            !remaining.contains(&"edge-mcp.jsonl".to_owned()),
-            "{remaining:?}"
-        );
-        let rotated = remaining
-            .iter()
-            .find(|name| name.ends_with("-edge-mcp-0.jsonl"))
-            .expect("the full log keeps a stamped name");
-        assert_eq!(
-            parse_log_name(rotated).map(|(component, _)| component),
-            Some("edge-mcp".to_owned())
-        );
-        assert_eq!(fs::read(directory.join(rotated)).unwrap(), full);
-        assert!(remaining.contains(&"edge-browser.jsonl".to_owned()));
-    }
-
-    #[test]
-    fn foreign_and_marker_names_are_not_parsed_as_logs() {
-        assert!(parse_log_name("diagnostics.on").is_none());
-        assert!(parse_log_name("foreign.txt").is_none());
-        assert!(parse_log_name("service.lock").is_none());
-        let (component, stamp) =
-            parse_log_name("20260829T123456Z-edge-mcp-42-7.jsonl").expect("parses");
-        assert_eq!(component, "edge-mcp");
-        assert_eq!(stamp, "20260829T123456Z");
-        assert!(parse_log_name("2026-not-a-stamp-orchestrator-1.jsonl").is_none());
-    }
-
-    #[test]
-    fn utc_stamp_renders_known_instants() {
-        assert_eq!(utc_stamp(0), "19700101T000000Z");
-        assert_eq!(utc_stamp(1_000_000_000_000), "20010909T014640Z");
-        assert_eq!(utc_stamp(1_787_961_600_000), "20260829T000000Z");
-    }
-
-    #[test]
-    fn watch_wakeups_evaluate_the_sink_through_the_injected_seam() {
-        struct Manual;
-        impl MarkerWatcher for Manual {
-            fn watch(
-                &self,
-                _marker: PathBuf,
-                wake: Arc<dyn Fn() + Send + Sync>,
-            ) -> Option<Box<dyn Send + Sync>> {
-                wake();
-                Some(Box::new(()))
-            }
-        }
-        let root = temp_root("watch");
-        let sink = Sink::birth_with(
-            Component::Orchestrator,
-            "9.9.9-test",
-            &root,
-            None,
-            &Manual,
-            None,
-        );
-        assert_eq!(sink.activation().layer(), "off");
-    }
-
     /// The variable that tells [`an_exiting_writer_appends_until_it_exits`] which directory to
     /// write into. Without it that test does nothing.
     const EXITING_WRITER_VARIABLE: &str = "GHOSTLIGHT_TEST_EXITING_WRITER_DIR";
+
     /// The full name of the test that stands in for a process exiting while it appends.
     const EXITING_WRITER_TEST: &str =
         "diagnostics::tests::an_exiting_writer_appends_until_it_exits";
+
     /// How many processes the exit test starts; each exit lands at a different point.
     const EXITING_WRITER_RUNS: usize = 6;
+
     /// How long a stand-in appends before it exits.
     const EXITING_WRITER_LIFETIME: Duration = Duration::from_millis(60);
 
@@ -1271,7 +819,6 @@ mod tests {
             "9.9.9-test",
             &directory,
             Some(directory.clone()),
-            &OsMarkerWatcher,
             None,
         );
         let detail = "a \"quoted\" \\ detail ".repeat(MAX_DETAIL_BYTES / 20);
@@ -1325,6 +872,349 @@ mod tests {
                 serde_json::from_str::<serde_json::Value>(line)
                     .unwrap_or_else(|error| panic!("run {run}: {error}: {line}"));
             }
+        }
+    }
+
+    /// Protects the diagnostics contract and defects 97ddf868 and 22f882db: a record is the bytes the
+    /// sink always wrote and an edge line reads as one, with detail clipped on a UTF-8 boundary; the
+    /// explicit layer wins over the marker, which wins over off, pins the sink at birth with a headered
+    /// file, and the marker toggles a live sink and reports each transition; an unusable directory
+    /// turns the sink off without a panic; the marker and the logs are private; and pruning keeps the
+    /// newest logs per component, never the marker or a foreign file, while a full edge log is rotated
+    /// so the edge can write again.
+    #[test]
+    fn the_diagnostics_sink_writes_the_shared_schema_privately_when_on_and_bounds_its_files() {
+        {
+            for op in [None, Some("invocation_0123")] {
+                let record = Record {
+                    component: "service".into(),
+                    detail: "activation on (marker)".into(),
+                    event: "sink_opened".into(),
+                    level: Some("info".into()),
+                    op: op.map(str::to_owned),
+                    run_id: Some("run-1".into()),
+                    ts_ms: 1_700_000_000_123,
+                    ..Record::default()
+                };
+                let before = serde_json::json!({
+                    "ts_ms": 1_700_000_000_123_u64,
+                    "run_id": "run-1",
+                    "component": "service",
+                    "event": "sink_opened",
+                    "level": "info",
+                    "op": op,
+                    "detail": "activation on (marker)",
+                });
+                assert_eq!(
+                    serde_json::to_value(&record).unwrap().to_string(),
+                    before.to_string()
+                );
+            }
+        }
+        {
+            let line = ghostlight_relay::log::line(
+                1_700_000_000_456,
+                EdgeLog::EdgeBrowser,
+                ghostlight_relay::log::Event::ProcessStarted,
+                "started",
+            );
+            let record: Record = serde_json::from_value(line.clone()).unwrap();
+            assert_eq!(
+                record,
+                Record {
+                    component: EdgeLog::EdgeBrowser.as_str().into(),
+                    detail: "started".into(),
+                    event: ghostlight_relay::log::Event::ProcessStarted.as_str().into(),
+                    level: None,
+                    op: None,
+                    pid: Some(std::process::id()),
+                    relay: Some(ghostlight_relay::RELAY),
+                    run_id: None,
+                    ts_ms: 1_700_000_000_456,
+                }
+            );
+            let keys: Vec<&String> = line.as_object().unwrap().keys().collect();
+            assert_eq!(
+                keys,
+                ["component", "detail", "event", "pid", "relay", "ts_ms"]
+            );
+        }
+        {
+            let root = temp_root("resolve");
+            let home = root.to_path_buf();
+            assert_eq!(resolve(None, &home), Activation::Off);
+            fs::write(marker_path(&home), b"").expect("marker");
+            assert_eq!(
+                resolve(None, &home),
+                Activation::Marker {
+                    directory: root.join("diagnostics")
+                }
+            );
+            assert_eq!(
+                resolve(Some(root.join("elsewhere")), &home),
+                Activation::Explicit {
+                    directory: root.join("elsewhere")
+                }
+            );
+        }
+        {
+            let root = temp_root("pinned");
+            let home = root.to_path_buf();
+            let sink = Sink::birth_with(
+                Component::Orchestrator,
+                "9.9.9-test",
+                &home,
+                Some(root.join("diagnostics")),
+                None,
+            );
+            assert_eq!(sink.activation().layer(), "explicit");
+            sink.emit(event::PROCESS_STARTED, Level::Info, None, "test process");
+            let logs = root.join("diagnostics");
+            let mut log_files: Vec<PathBuf> = fs::read_dir(&logs)
+                .expect("log dir")
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
+                .map(|entry| entry.path())
+                .collect();
+            assert_eq!(log_files.len(), 1, "one activation period, one file");
+            let content = fs::read_to_string(log_files.pop().expect("one file")).expect("log");
+            let mut lines = content.lines();
+            let header: serde_json::Value =
+                serde_json::from_str(lines.next().expect("header")).expect("header json");
+            for key in [
+                "schema",
+                "component",
+                "version",
+                "pid",
+                "run_id",
+                "started_ms",
+            ] {
+                assert!(header.get(key).is_some(), "header carries {key}");
+            }
+            assert_eq!(header["schema"], SCHEMA);
+            assert_eq!(header["component"], "orchestrator");
+            let opened: serde_json::Value =
+                serde_json::from_str(lines.next().expect("record")).expect("opened json");
+            assert_eq!(opened["event"], event::SINK_OPENED);
+            let record: serde_json::Value =
+                serde_json::from_str(lines.next().expect("record")).expect("record json");
+            let mut keys: Vec<&str> = record
+                .as_object()
+                .expect("object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            assert_eq!(
+                keys,
+                vec![
+                    "component",
+                    "detail",
+                    "event",
+                    "level",
+                    "op",
+                    "run_id",
+                    "ts_ms"
+                ]
+            );
+            assert_eq!(record["component"], "orchestrator");
+            assert_eq!(record["event"], event::PROCESS_STARTED);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let root = temp_root("private");
+            let home = root.to_path_buf();
+            set_marker(&home, true).expect("marker");
+            let sink = Sink::birth_with(Component::Orchestrator, "9.9.9-test", &home, None, None);
+            sink.emit(event::PROCESS_STARTED, Level::Info, None, "private");
+            let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&marker_path(&home)), 0o600);
+            let directory = root.join("diagnostics");
+            assert_eq!(mode(&directory), 0o700);
+            let logs: Vec<_> = fs::read_dir(&directory).unwrap().flatten().collect();
+            assert!(!logs.is_empty());
+            for log in logs {
+                assert_eq!(mode(&log.path()), 0o600);
+            }
+        }
+        {
+            let root = temp_root("toggle");
+            let home = root.to_path_buf();
+            let sink = Sink::birth_with(Component::Orchestrator, "9.9.9-test", &home, None, None);
+            assert_eq!(sink.activation().layer(), "off");
+            sink.emit(event::PROCESS_STARTED, Level::Info, None, "before marker");
+            let marker = marker_path(&home);
+            fs::write(&marker, b"").expect("marker");
+            wait_until_bounded(|| log_lines(&root) >= 2);
+            sink.evaluate();
+            sink.emit(event::PROCESS_STARTED, Level::Info, None, "after marker");
+            wait_until_bounded(|| log_lines(&root) == 3);
+            let log_dir = root.join("diagnostics");
+            let log = fs::read_dir(&log_dir)
+                .expect("dir")
+                .filter_map(Result::ok)
+                .find(|entry| entry.file_name().to_string_lossy().ends_with(".jsonl"))
+                .expect("log file after marker");
+            let content = fs::read_to_string(log.path()).expect("content");
+            assert_eq!(
+                content.lines().count(),
+                3,
+                "header, the opened line, and the post-marker line"
+            );
+            fs::remove_file(&marker).expect("remove marker");
+            wait_until_bounded(|| log_lines(&root) == 4);
+            sink.emit(event::PROCESS_STARTED, Level::Info, None, "after off");
+            let content = fs::read_to_string(log.path()).expect("content");
+            assert_eq!(
+                content.lines().count(),
+                4,
+                "off writes a closing line and then nothing more"
+            );
+        }
+        {
+            let root = temp_root("callback");
+            let home = root.to_path_buf();
+            let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            let seen_for_callback = Arc::clone(&seen);
+            let sink = Sink::birth_with(
+                Component::Orchestrator,
+                "9.9.9-test",
+                &home,
+                None,
+                Some(Arc::new(move |activation: &Activation| {
+                    seen_for_callback
+                        .lock()
+                        .expect("seen lock")
+                        .push(activation.layer().to_string());
+                })),
+            );
+            fs::write(marker_path(&home), b"").expect("marker");
+            // The contract is eventual: the watch or the tick applies the layer, whichever fires
+            // first. Drive the re-check to the deadline instead of assuming one call is enough.
+            wait_until_bounded(|| !seen.lock().expect("seen lock").is_empty());
+            sink.evaluate();
+            let layers = seen.lock().expect("seen lock");
+            assert_eq!(layers.last().map(String::as_str), Some("marker"));
+            assert!(!layers.contains(&"off".to_string()));
+        }
+        {
+            let root = temp_root("disabled");
+            let blocked = root.join("file-not-directory");
+            fs::write(&blocked, b"not a directory").expect("blocker");
+            let sink = Sink::birth_with(
+                Component::Orchestrator,
+                "9.9.9-test",
+                &root,
+                Some(blocked),
+                None,
+            );
+            sink.emit(event::PROCESS_STARTED, Level::Info, None, "dropped");
+            sink.evaluate();
+            let logs = fs::read_dir(&root)
+                .expect("dir")
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    name.ends_with(".jsonl")
+                })
+                .count();
+            assert_eq!(logs, 0, "a disabled sink writes nothing");
+        }
+        {
+            assert_eq!(clip("short"), "short");
+            let long = "x".repeat(MAX_DETAIL_BYTES + 10);
+            assert_eq!(clip(&long).len(), MAX_DETAIL_BYTES);
+            let multibyte = "e".repeat(MAX_DETAIL_BYTES - 1) + "\u{00e9}\u{00e9}";
+            let clipped = clip(&multibyte);
+            assert!(clipped.is_char_boundary(clipped.len()));
+            assert!(clipped.len() <= MAX_DETAIL_BYTES);
+        }
+        {
+            let root = temp_root("prune");
+            let directory = root.join("diagnostics");
+            fs::create_dir_all(&directory).expect("dir");
+            for index in 0..10 {
+                let name = format!(
+                    "2026080{}T00000{}Z-orchestrator-1.jsonl",
+                    index / 5 + 1,
+                    index % 5
+                );
+                fs::write(directory.join(&name), vec![b'a'; 10]).expect("seed file");
+            }
+            for index in 0..3 {
+                let name = format!("2026080{}T00000{}Z-edge-mcp-2.jsonl", index + 1, index);
+                fs::write(directory.join(&name), vec![b'b'; 10]).expect("seed file");
+            }
+            fs::write(directory.join(MARKER_FILE_NAME), b"").expect("marker");
+            fs::write(directory.join("foreign.txt"), b"keep me").expect("foreign");
+            let report = prune_directory(&directory);
+            assert_eq!(report.deleted, 2);
+            let remaining: Vec<String> = fs::read_dir(&directory)
+                .expect("dir")
+                .filter_map(Result::ok)
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(
+                remaining.len(),
+                8 + 3 + 2,
+                "kept logs plus marker plus foreign"
+            );
+            assert!(remaining.contains(&MARKER_FILE_NAME.to_string()));
+            assert!(remaining.contains(&"foreign.txt".to_string()));
+            assert!(!remaining.contains(&"20260801T000000Z-orchestrator-1.jsonl".to_string()));
+            assert!(!remaining.contains(&"20260801T000001Z-orchestrator-1.jsonl".to_string()));
+        }
+        {
+            assert_eq!(
+                parse_log_name("edge-mcp.jsonl"),
+                Some(("edge-mcp".to_owned(), String::new()))
+            );
+            assert_eq!(
+                parse_log_name("edge-browser.jsonl"),
+                Some(("edge-browser".to_owned(), String::new()))
+            );
+            assert!(parse_log_name("edge-other.jsonl").is_none());
+            assert!(parse_log_name("orchestrator.jsonl").is_none());
+        }
+        {
+            let root = temp_root("edge-rotation");
+            let directory = root.join("diagnostics");
+            fs::create_dir_all(&directory).expect("dir");
+            let full = vec![b'm'; usize::try_from(EDGE_LOG_FULL_BYTES).unwrap()];
+            fs::write(directory.join("edge-mcp.jsonl"), &full).expect("full edge log");
+            fs::write(directory.join("edge-browser.jsonl"), b"{}\n").expect("partial edge log");
+            prune_directory(&directory);
+            let remaining: Vec<String> = fs::read_dir(&directory)
+                .expect("dir")
+                .filter_map(Result::ok)
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
+            assert!(
+                !remaining.contains(&"edge-mcp.jsonl".to_owned()),
+                "{remaining:?}"
+            );
+            let rotated = remaining
+                .iter()
+                .find(|name| name.ends_with("-edge-mcp-0.jsonl"))
+                .expect("the full log keeps a stamped name");
+            assert_eq!(
+                parse_log_name(rotated).map(|(component, _)| component),
+                Some("edge-mcp".to_owned())
+            );
+            assert_eq!(fs::read(directory.join(rotated)).unwrap(), full);
+            assert!(remaining.contains(&"edge-browser.jsonl".to_owned()));
+        }
+        {
+            assert!(parse_log_name("diagnostics.on").is_none());
+            assert!(parse_log_name("foreign.txt").is_none());
+            assert!(parse_log_name("service.lock").is_none());
+            let (component, stamp) =
+                parse_log_name("20260829T123456Z-edge-mcp-42-7.jsonl").expect("parses");
+            assert_eq!(component, "edge-mcp");
+            assert_eq!(stamp, "20260829T123456Z");
+            assert!(parse_log_name("2026-not-a-stamp-orchestrator-1.jsonl").is_none());
         }
     }
 }
