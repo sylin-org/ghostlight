@@ -159,6 +159,9 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | BROW-11a | docs(adapter): the adapter's docs and constant names match the code | - | BROW-11's adapter half | landed (this commit) |
 | D52 | fix(adapter): Decision 5.2's receipt codes reach the refusal as a typed cause | SERV-7 | the coordinator's placement: `BrowserError::Primitive { detail, cause }` with `language::outcome::PrimitiveCause`; core-work's routing_refusal half is D52(c) in its ledger | landed (696fa557) |
 | D52(c) | fix(work): a refusal names its typed cause, and a capture over its budget says so | D52 | test-03 handed core-work's D52(c) to this lane on 2026-10-20; cross-lane in `work/mod.rs` | landed (this commit) |
+| A-D1 | fix(assets): a page text cut never splits a character and counts characters as the service does | - | the coordinator's page-asset classification, 2026-10-21 (Notes, second sweep) | todo |
+| A-D2 | fix(assets): an image input reads as a button, as fill already treats it | - | the same classification (Notes, second sweep) | todo |
+| A-D3 | fix(assets): a visual-settle wait on a target that is gone refuses it as stale | - | the same classification, lower confidence: confirm first (Notes, second sweep) | todo |
 
 ### Notes (second sweep)
 
@@ -324,3 +327,21 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   the serde mirrors' physical side. Proofs: `pointer_buttons_map_to_wire_buttons` and
   `a_wheel_turns_up_or_down_and_never_sideways` (`keys/tests.rs`) and
   `a_sideways_wheel_turn_is_refused_before_any_input` (`translate/tests/points.rs`).
+- A-D1, found on 2026-10-21 by the read-only classification of the page assets' tests: the page's
+  text cuts (`bounded` in `page-shared.js`, and the cuts in `content.js` and `world.js`) count UTF-16
+  code units and can end on the first half of a surrogate pair. A title, name or read over its bound
+  with an emoji at the cut carries the half. The 2.0.1 worker repairs it on send (P-D5), but the
+  2.0.0 store extension does not, so its answer frame fails to decode, the service drops it, and the
+  call waits out its deadline. Counting code units also cuts text with emoji before `max_chars`
+  characters and reports `truncated` early, which the service turns into a size-limited read, and
+  over-counts `value_chars` (P-D4's mismatch, page side). One root: the page's cut counts characters
+  and stops before a pair's first half, as the extension's `shared.bounded` does. The page assets
+  ship with the service, so this fix needs no store resubmission.
+- A-D2, found the same way: `INPUT_ROLES` in `content.js` has no `image` entry, so
+  `<input type=image>` reads as a `textbox`. HTML-AAM maps it to `button`, and the fill path already
+  calls it a button, so inspect contradicts fill and a selector for role `button` never finds it.
+  (A `file` input reading as a textbox is deliberate: docs/tasks/linux-1/LEDGER.md.)
+- A-D3, found the same way, lower confidence: `observe` with `visual_settle` and a locator reads its
+  element through `heldElement`, which returns nothing for a gone or unknown handle, and
+  `settleVisual(undefined)` then measures the whole document. The wait reports the page's settle
+  instead of refusing `stale_locator`. Confirm it with a row before fixing.
