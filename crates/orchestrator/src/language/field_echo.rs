@@ -19,7 +19,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::field_problem::page_text;
-use super::outcome::{counted, ActionSubject, TargetRole};
+use super::outcome::{ActionSubject, TargetRole};
+use super::phrase::{counted, NO_VALUE};
 
 /// The longest page value a sentence quotes.
 const NOW_MAX_CHARS: usize = 40;
@@ -27,8 +28,6 @@ const NOW_MAX_CHARS: usize = 40;
 const NAME_MAX_CHARS: usize = 60;
 /// The most characters the readings of one fill may take in its sentence.
 const READINGS_MAX_CHARS: usize = 260;
-/// What a sentence says a field holds when it holds nothing.
-const NO_VALUE: &str = "no value";
 
 /// The fact key that says how a given value matched a choice.
 const MATCH_KEY: &str = "match";

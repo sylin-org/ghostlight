@@ -35,7 +35,7 @@ In order. "After" names what a slice waits for.
 | LANG-10 | refactor(language): `mod.rs` splits into its module root, operations and decoding, and the catalog mounts plainly | LANG-3 | LANG-10; the move lands alone | todo |
 | LANG-5 | refactor(language): one `Tool` table derives the tool lists | LANG-10 | LANG-5; the catalog golden's order stays | todo |
 | LANG-7 | refactor(language): repeated sentences and mappings are written once | - | LANG-7 | landed |
-| LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | todo |
+| LANG-9 | refactor(language): one phrase module counts, lists and bounds | L-D3 | LANG-9; no word changes | landed |
 | LANG-8 | refactor(language): the composition sentences leave `Outcome` | LANG-9 | LANG-8; `StepNotStarted` stays, its sentence is a persisted audit summary | todo |
 | LANG-11 | docs(language): the item docs match the code | - | LANG-11 | landed (df9e4cac) |
 | LANG-12 | refactor(language): the small cleanups | - | LANG-12; `invites_control` stays while the window reads it | todo |
@@ -156,3 +156,9 @@ In order. "After" names what a slice waits for.
   value-not-accepted refusal is `refuses_value`, the 28 `place(host, "the page")` calls are
   `on_page(host)`, and `channel_off` reads `channel_switch::work_from` (renamed from the private
   `from`). The test that pins the view sentence keeps its literal, as the oracle. No word changes.
+- LANG-9: `language/phrase.rs` holds `counted`, `counted_or_none`, `article`,
+  `one_line_bounded`, the digit grouping and the one `NO_VALUE`, moved out of `outcome.rs`
+  unchanged; `field_echo`, `field_problem` and `audit` read it. Every language module can, so
+  surface's `tabs_count` and `join_list` and install's `either_of` can move onto it in their
+  lanes. The hand-written plurals in `composition.rs`, `coverage.rs` and `audit_health.rs` stay:
+  `counted` groups digits from 1,000, so adopting it there is a visible choice, not this slice.

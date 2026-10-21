@@ -19,7 +19,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use super::handle::HandleKind;
-use super::outcome::{article, counted, one_line_bounded, ActionSubject, TargetRole};
+use super::outcome::{ActionSubject, TargetRole};
+use super::phrase::{article, counted, one_line_bounded, NO_VALUE};
 
 /// The longest part of a given value a sentence quotes.
 const GIVEN_MAX_CHARS: usize = 40;
@@ -37,8 +38,6 @@ const RANGE_INPUT_TYPE: &str = "range";
 pub(super) const REJECTED_REASON: &str = "field_value_rejected";
 /// The `reason` fact of a fill the page partly undid.
 pub(super) const REVERTED_REASON: &str = "fields_reverted";
-/// What a summary says a reverted field holds when it holds nothing.
-const NO_VALUE: &str = "no value";
 /// The most reverted fields a summary describes one by one.
 const REVERTED_SHOWN_MAX: usize = 3;
 /// The most next steps a result carries.

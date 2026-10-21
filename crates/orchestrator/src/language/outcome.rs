@@ -6,6 +6,7 @@ use super::area::{LeftOut, LeftOutKey};
 use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
 use super::page_refusal::{self, PageGesture, PageRefusal};
+use super::phrase::{article, counted, counted_or_none, one_line_bounded};
 use super::wait::WaitCondition;
 use super::{adapter, deployment, setup, MAX_INSPECT_ITEMS};
 use crate::governance::ReasonCode;
@@ -2757,48 +2758,6 @@ fn dialog_observed(message: Option<&str>, prompt: Option<&PromptField>) -> Strin
     format!("{opening}{field}")
 }
 
-/// Page-authored text as one bounded line: controls and direction overrides become spaces,
-/// double quotes become single ones, and anything over `max_chars` ends in an ellipsis.
-pub(super) fn one_line_bounded(value: &str, max_chars: usize) -> Option<String> {
-    let cleaned: String = value
-        .chars()
-        .map(|character| {
-            if character.is_control()
-                || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-            {
-                ' '
-            } else if character == '"' {
-                '\''
-            } else {
-                character
-            }
-        })
-        .collect();
-    let one_line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one_line.is_empty() {
-        return None;
-    }
-    let count = one_line.chars().count();
-    if count <= max_chars {
-        return Some(one_line);
-    }
-    let mut bounded: String = one_line.chars().take(max_chars - 3).collect();
-    bounded.push_str("...");
-    Some(bounded)
-}
-
-pub(super) const fn article(noun: &str) -> &'static str {
-    match noun.as_bytes().first() {
-        Some(b'a' | b'e' | b'i' | b'o' | b'u') => "an",
-        _ => "a",
-    }
-}
-
-pub(super) fn counted(count: usize, singular: &str, plural: &str) -> String {
-    let noun = if count == 1 { singular } else { plural };
-    format!("{} {noun}", grouped(count))
-}
-
 /// The step after a listing the cap cut: how many controls were left out, and the two ways to
 /// reach one. It names the tier that matters most among those cut, because that is the one the
 /// caller most likely wants. Hidden controls never get a step, and a find has no `max_items`.
@@ -2821,27 +2780,6 @@ fn left_out_step(noun: TargetNoun, left_out: &LeftOut) -> Option<String> {
         "{} {verb} left out to fit; raise max_items (up to {MAX_INSPECT_ITEMS}) or use browser_find for one by name.",
         counted(amount, &format!("{place} {singular}"), &format!("{place} {plural}")),
     ))
-}
-
-/// "no policy layers" rather than "0 policy layers", where an absence is the usual case.
-fn counted_or_none(count: usize, singular: &str, plural: &str) -> String {
-    if count == 0 {
-        format!("no {plural}")
-    } else {
-        counted(count, singular, plural)
-    }
-}
-
-fn grouped(value: usize) -> String {
-    let digits = value.to_string();
-    let mut rendered = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            rendered.push(',');
-        }
-        rendered.push(digit);
-    }
-    rendered
 }
 
 fn measured<T: TryInto<u32>>(value: T) -> Option<u32> {

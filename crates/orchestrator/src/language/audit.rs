@@ -4,10 +4,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::composition::CompositionProgress;
 use super::outcome::{
-    counted, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CheckFailure, Outcome,
+    BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CheckFailure, Outcome,
     PromptField, Refusal, WorkspaceReason,
 };
 use super::page_refusal::{PageGesture, PageRefusal};
+use super::phrase::counted;
 use crate::intake::session::IntakeChannel;
 
 /// The explicitly permitted language projection of one terminal result.
