@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "release": "2.0.0",
   "platformSummary": "Windows (x64) and Linux (x86_64 with glibc) are supported. Release 2.0.0 was tested before publication on Windows, CachyOS and Bluefin, and its release workflow installs it from the release bundle on Ubuntu 22.04 and 24.04. Its public install was proven on Windows on 2026-10-19. Alpine and other musl systems are not supported yet; they come in 2.0.1.",
-  "extensionSummary": "The Chrome Web Store serves Chrome adapter v2.0.0, compatible with service 2.0.x under adapter protocol 4. The service gives the extension the page code it runs, so a 2.0 service update needs no extension update. A 1.x extension updates once to 2.0. Compatibility is recorded in compatibility.json.",
+  "extensionSummary": "The Chrome Web Store serves Chrome adapter v2.0.1. Compatibility is recorded in compatibility.json. Install the extension from the public listing.",
   "chromeStore": {
     "itemId": "lejccfmoeogmhemakeknjjdhkfkgncdl",
-    "publicAdapterVersion": "2.0.0"
+    "publicAdapterVersion": "2.0.1"
   },
-  "lastVerified": "2026-10-19"
+  "lastVerified": "2026-10-22"
 }
