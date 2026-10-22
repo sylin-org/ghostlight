@@ -2,9 +2,10 @@
 //!
 //! The edge authors no words. The service hands it these in every accepted [`Reply`]: for each
 //! kind of failure, a JSON-RPC response object per request method, plus a `default`. When a
-//! request is cut off or expires, the edge fills the matching template with the request's id and
-//! sends it. With no reply at all, which only happens before the first connection, the edge
-//! answers a bare internal error with an empty message.
+//! request is cut off, expires or is too large to forward, the edge fills the matching template
+//! with the request's id and sends it. With no reply at all, which only happens before the first
+//! connection, or no template for the failure, as from a service older than revision 5 for
+//! `too_large`, the edge answers a bare internal error with an empty message.
 //!
 //! [`Reply`]: super::Reply
 
@@ -26,6 +27,11 @@ pub enum Failure {
     CutOff,
     /// The request was held for a returning service until the hold limit passed.
     Expired,
+    /// The request came in a line, or would go in a frame, over [`MAX_FRAME_BYTES`], so it was
+    /// never sent (revision 5).
+    ///
+    /// [`MAX_FRAME_BYTES`]: crate::MAX_FRAME_BYTES
+    TooLarge,
 }
 
 /// The failure sentences carried by an accepted reply.
@@ -37,15 +43,21 @@ pub struct Templates {
     /// Responses for held requests that expired, by request method.
     #[serde(default)]
     pub expired: BTreeMap<String, Value>,
+    /// Responses for requests too large to forward, by request method (revision 5). Left out of
+    /// the reply when empty, so a reply without it is revision 4's byte for byte.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub too_large: BTreeMap<String, Value>,
 }
 
 impl Templates {
-    /// The template for `method` under `failure`, falling back to the `default` entry.
+    /// The template for `method` under `failure`, falling back to the `default` entry. `None`
+    /// when the reply carries neither, as an empty map does.
     #[must_use]
     pub fn template(&self, failure: Failure, method: &str) -> Option<&Value> {
         let templates = match failure {
             Failure::CutOff => &self.cut_off,
             Failure::Expired => &self.expired,
+            Failure::TooLarge => &self.too_large,
         };
         templates
             .get(method)

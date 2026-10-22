@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ghostlight_relay::endpoint::Connection;
-use ghostlight_relay::protocol::{GoodbyeReason, QuitReason, Role};
+use ghostlight_relay::protocol::{GoodbyeReason, QuitReason};
 
 use super::browser_events::reveal_once;
 use super::connections::ServiceContext;
@@ -548,7 +548,7 @@ pub(super) fn serve_desktop(
         listener::refuse(&connection, OpeningRefusal::Capacity);
         return Ok(());
     };
-    listener::accept(&connection, &context.accepted(Role::Desktop))?;
+    listener::accept(&connection, &context.accepted())?;
     let mut reader =
         SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&context.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);

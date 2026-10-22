@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use ghostlight_relay::endpoint::Connection;
-use ghostlight_relay::protocol::{self, GoodbyeReason, McpFrame, Role};
+use ghostlight_relay::protocol::{self, GoodbyeReason, McpFrame};
 use serde_json::Value;
 
 use crate::browser::transport::{SocketReader, SocketWriter};
@@ -84,7 +84,7 @@ pub(super) fn serve_mcp(
             ResumeState::unreadable()
         })
     });
-    listener::accept(&connection, &context.accepted(Role::Mcp))?;
+    listener::accept(&connection, &context.accepted_mcp(requested.relay))?;
     let attribution =
         Attribution::accepted(IntakeChannel::of_opening(requested.channel.as_deref()));
     let observation = context.sources.read(connection.peer_process_id());

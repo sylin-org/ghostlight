@@ -519,3 +519,26 @@ parent chain:
   registration again. Any other value whose file is missing still needs attention and is never
   changed.
 - Ghostlight still uses no WMI, Task Scheduler or other container escape.
+
+## Amendment (2026-10-21): a line over the relay bound is answered
+
+Decision 2 has the connector answer a cut-off or expired request from a template the service
+handed it earlier. A request it could not forward, because it was over the relay bound (8 MiB),
+had no template. The connector skipped a client line over the bound up to its newline and never answered it,
+so the agent waited forever. A shorter line whose frame passed the bound was answered from the
+`expired` template, which says the service did not come back in time. An inline upload of about
+6.3 MB or more reached one of the two, because the service's own 5 MB refusal never got the line.
+
+- The service hands a revision 5 connector a third template, `too_large`, with the others. Its
+  words say the call was larger than Ghostlight accepts in one message, so nothing was sent, and
+  its next step is to send less in one call. A revision 4 connector is handed what it was before.
+- The connector reads a skipped line through without keeping it, and keeps only each request's id
+  and method: the members of a message in any order, since the TypeScript SDK writes the id after
+  the params, and each message of a batch. It answers each request from `too_large` by its method,
+  with its id as sent. A notification needs no answer. A line whose frame would pass the bound is
+  answered the same way.
+- Before any reply, or from a service with no `too_large`, the connector answers the bare internal
+  error, as before any reply. It still authors no words.
+
+Relay revision 5 is unpublished, so the ADR-0203 amendment of the same day lifts the edge
+source lock for this change. The rules are in `crates/edge/src/forward.rs` and `forward/scan.rs`.

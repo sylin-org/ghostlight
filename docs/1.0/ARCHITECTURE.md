@@ -387,7 +387,8 @@ and the extension.
 The MCP edge passes JSON-RPC lines between the client and the service unchanged
 (`crates/edge/src/forward.rs`: the edge authors no words). It looks inside a line only to track
 outstanding request ids per direction, to answer `ping`, and to answer outstanding requests with
-the failure templates the service handed over when the service is cut off. A lone handshake or
+the failure templates the service handed over when the service is cut off, and each request of a
+line too large for the relay with its `too_large` template. A lone handshake or
 catalog listing cut off by a lost service is sent to the next service once instead, and a line
 whose write failed is held, because neither can have taken effect. The MCP session engine
 lives in the service (`intake/mcp.rs`): it negotiates the revision, serves `tools/list` and

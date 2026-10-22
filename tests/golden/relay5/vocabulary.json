@@ -56,7 +56,8 @@
   "control_result_kind": "result",
   "failure_template_kinds": [
     "cut_off",
-    "expired"
+    "expired",
+    "too_large"
   ],
   "failure_template_default": "default",
   "browser_goodbye": {

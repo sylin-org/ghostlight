@@ -1,6 +1,7 @@
 //! Relay protocol 5: the frozen contracts between the Ghostlight edges, the command line and the
 //! service (ADR-0199 Decisions 3 and 5). Revision 5 is revision 4 with the [`wake`] endpoints
-//! (ADR-0199 amendment of 2026-10-20): its frames and openings are revision 4's.
+//! (ADR-0199 amendment of 2026-10-20) and the `too_large` failure template (ADR-0197 amendment of
+//! 2026-10-21): its frames and openings are revision 4's.
 //!
 //! This crate is frozen. It holds only what a program must share with the service to stay stable
 //! across service upgrades: length-prefixed framing, the fixed home and its names, the

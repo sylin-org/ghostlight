@@ -2,7 +2,8 @@
 //!
 //! Three kinds of words live here: the refusals of a relay opening, the messages of the JSON-RPC
 //! errors the MCP session engine answers itself, and the sentences of the failure templates a
-//! MCP edge sends when it cannot reach the service. The MCP edge authors no words, so all of them
+//! MCP edge sends when it cannot reach the service or cannot forward a request too large for the
+//! relay. The MCP edge authors no words, so all of them
 //! come from this module. A call that arrives during a quit is answered as a tool result, in
 //! [`super::outcome`]'s words.
 
@@ -101,6 +102,16 @@ impl ProtocolRefusal {
     }
 }
 
+/// The largest message Ghostlight accepts, as the too-large words name it: the relay's frame
+/// bound, in MiB.
+const MESSAGE_LIMIT_MIB: usize = 8;
+
+// The words say "8 MiB"; checked against the relay's bound when the crate compiles.
+const _: () = assert!(
+    ghostlight_relay::MAX_FRAME_BYTES == MESSAGE_LIMIT_MIB * 1024 * 1024,
+    "the too-large words name the relay's frame bound"
+);
+
 /// Why the MCP edge answers a request without the service.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EdgeFailure {
@@ -108,6 +119,8 @@ pub enum EdgeFailure {
     CutOff,
     /// The request was held for a service that did not come back in time.
     Expired,
+    /// The request came in a message larger than the relay carries, so it was never sent.
+    TooLarge,
 }
 
 impl EdgeFailure {
@@ -119,6 +132,9 @@ impl EdgeFailure {
                 "Ghostlight restarted before this call finished. Whether it took effect is unknown, and it was not repeated."
             }
             Self::Expired => "Ghostlight was not running and did not start in time. Nothing was sent.",
+            Self::TooLarge => {
+                "This call was larger than Ghostlight accepts in one message (8 MiB), so nothing was sent."
+            }
         }
     }
 
@@ -130,6 +146,9 @@ impl EdgeFailure {
                 &["Read the page to see whether the call took effect before repeating it."]
             }
             Self::Expired => &[REPEAT_IN_A_MOMENT],
+            Self::TooLarge => {
+                &["Send less in one call, for example fewer or smaller inline files."]
+            }
         }
     }
 
@@ -146,6 +165,9 @@ impl EdgeFailure {
             Self::CutOff => "Ghostlight restarted before this request finished.",
             Self::Expired => {
                 "Ghostlight was not running and did not start in time. Nothing was sent."
+            }
+            Self::TooLarge => {
+                "This request was larger than Ghostlight accepts in one message (8 MiB), so nothing was sent."
             }
         }
     }

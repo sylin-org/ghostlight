@@ -37,7 +37,6 @@ use crate::intake::desktop::{
     ActOutcome, DesktopFrame, NativeAct, ShellView, TrayItemId, TrayModel,
 };
 use crate::intake::listener::control;
-use crate::intake::mcp::failure_templates;
 use crate::intake::mcp::ResumeState;
 use crate::language::outcome::{CancelCause, QuitCause, Refusal};
 use crate::scratch::Scratch;
@@ -179,7 +178,6 @@ fn serve(home: &TestHome, relayed: bool, sources: SourceReader, policy: Option<P
     let context = Arc::new(super::ServiceContext {
         instance: TEST_INSTANCE.into(),
         started_by: StartReason::Agent,
-        templates: failure_templates(),
         executor,
         workspaces,
         browser_port: port,

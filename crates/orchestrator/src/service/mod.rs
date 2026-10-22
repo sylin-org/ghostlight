@@ -70,7 +70,6 @@ use crate::diagnostics::DiagnosticsHub;
 use crate::governance::GovernanceFacade;
 use crate::install;
 use crate::install::icons::{self, IconCache, IconPlaces};
-use crate::intake::mcp::failure_templates;
 use crate::language::environment::{ELEVATED_SERVICE, QUIT_HELD};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::SourceReader;
@@ -471,7 +470,6 @@ impl ServiceHost {
         let context = Arc::new(ServiceContext {
             instance: format!("{INSTANCE_PREFIX}{}", Uuid::new_v4().simple()),
             started_by: terms.reason,
-            templates: failure_templates(),
             executor,
             workspaces,
             browser_port,

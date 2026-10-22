@@ -8,6 +8,7 @@ use crate::work::InvocationId;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use ghostlight_relay::protocol::{Failure, Templates};
+use ghostlight_relay::RELAY;
 use serde_json::{json, Value};
 
 use super::{
@@ -56,9 +57,9 @@ fn invoke_id(steps: &[Step]) -> InvocationId {
     }
 }
 
-/// The failure templates as the JSON an edge receives.
+/// The failure templates as the JSON an edge of this build's relay revision receives.
 fn templates_json() -> Value {
-    serde_json::to_value(failure_templates()).unwrap()
+    serde_json::to_value(failure_templates(RELAY)).unwrap()
 }
 
 /// ACCEPTANCE C9: the service alone negotiates the MCP revision. `initialize` echoes every
@@ -116,8 +117,8 @@ fn older_revisions_get_the_lean_json_in_the_text_block() {
         }
         assert_eq!(result["content"][1]["type"], "image");
     }
-    let templates = failure_templates();
-    for failure in [Failure::CutOff, Failure::Expired] {
+    let templates = failure_templates(RELAY);
+    for failure in [Failure::CutOff, Failure::Expired, Failure::TooLarge] {
         let answer = templates
             .template(failure, "tools/call")
             .expect("a template");
@@ -132,14 +133,15 @@ fn older_revisions_get_the_lean_json_in_the_text_block() {
 }
 
 /// ACCEPTANCE C10 and E4, and AH1 (ADR-0159): the answers the edge gives in the service's place
-/// when it cannot reach it tell the truth, already in the model's lean view. A call cut off by a
-/// restart may have taken effect, so its status and effect are unknown and repeating it is not
-/// safe; a call the service never started had no effect and is safe to repeat; and neither says
-/// its history was saved.
+/// when it cannot reach it, or cannot forward a call too large for the relay (S-D9), tell the
+/// truth, already in the model's lean view. A call cut off by a restart may have taken effect, so
+/// its status and effect are unknown and repeating it is not safe; a call the service never
+/// started, or never received, had no effect and is safe to repeat; and none says its history was
+/// saved.
 #[test]
-fn a_cut_off_call_may_have_happened_and_an_expired_one_did_not() {
+fn a_cut_off_call_may_have_happened_and_an_expired_or_too_large_one_did_not() {
     let templates = templates_json();
-    for failure in ["cut_off", "expired"] {
+    for failure in ["cut_off", "expired", "too_large"] {
         let result = &templates[failure]["tools/call"]["result"];
         assert_eq!(result["isError"], true, "{failure}");
         let envelope = &result["structuredContent"];
@@ -158,36 +160,58 @@ fn a_cut_off_call_may_have_happened_and_an_expired_one_did_not() {
     assert_eq!(cut_off["status"], json!(Status::Unknown));
     assert_eq!(cut_off["effect"], json!(Effect::Unknown));
     assert_eq!(cut_off["repeat_safe"], false);
-    let expired = &templates["expired"]["tools/call"]["result"]["structuredContent"];
-    assert_eq!(expired["effect"], json!(Effect::None));
-    assert_eq!(expired["repeat_safe"], true);
+    for failure in ["expired", "too_large"] {
+        let never_sent = &templates[failure]["tools/call"]["result"]["structuredContent"];
+        assert_eq!(never_sent["effect"], json!(Effect::None), "{failure}");
+        assert_eq!(never_sent["repeat_safe"], true, "{failure}");
+    }
 }
 
-/// Contract: the failure templates the service hands every `mcp` stream have the shape of the
-/// accepted-reply golden (tests/golden/relay4/reply.accepted.json), the templates the edge's own
-/// tests answer with (crates/edge/src/forward/tests.rs): a result for `tools/call`, an error with
-/// the golden's code for any other method, and the same template keys.
+/// Contract: the failure templates the service hands an `mcp` stream have the shape of its relay
+/// revision's accepted-reply golden (`reply.accepted.json` in tests/golden/relay4 and relay5), the
+/// templates the edge's own tests answer with (crates/edge/src/forward/tests.rs): a result for
+/// `tools/call`, an error with the golden's code for any other method, and the same kinds and
+/// keys. A revision 4 edge is handed no `too_large`, so its reply keeps revision 4's bytes.
 #[test]
 fn failure_templates_have_the_relay_fixture_shape() {
-    let fixture =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay4/reply.accepted.json");
-    let text = std::fs::read_to_string(fixture).expect("relay 4 accepted reply fixture");
-    let fixture: Value = serde_json::from_str(&text).unwrap();
-    let pinned: Templates = serde_json::from_value(fixture["templates"].clone()).unwrap();
-    let ours = failure_templates();
-    for failure in [Failure::CutOff, Failure::Expired] {
-        for method in ["tools/call", "tools/list"] {
-            let ours = ours.template(failure, method).expect("a template");
-            let pinned = pinned.template(failure, method).expect("a pinned template");
-            assert_eq!(ours.get("result").is_some(), pinned.get("result").is_some());
-            assert_eq!(ours["error"]["code"], pinned["error"]["code"]);
+    let shape = |templates: &Value| -> Vec<(String, Vec<String>)> {
+        let kinds = templates.as_object().unwrap();
+        let keys = |table: &Value| table.as_object().unwrap().keys().cloned().collect();
+        kinds
+            .iter()
+            .map(|(kind, table)| (kind.clone(), keys(table)))
+            .collect()
+    };
+    for (relay, revision) in [(4, "relay4"), (5, "relay5")] {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/golden")
+            .join(revision)
+            .join("reply.accepted.json");
+        let text = std::fs::read_to_string(fixture).expect("accepted reply fixture");
+        let fixture: Value = serde_json::from_str(&text).unwrap();
+        let pinned: Templates = serde_json::from_value(fixture["templates"].clone()).unwrap();
+        let ours = failure_templates(relay);
+        assert_eq!(
+            shape(&serde_json::to_value(&ours).unwrap()),
+            shape(&fixture["templates"]),
+            "{revision}"
+        );
+        for failure in [Failure::CutOff, Failure::Expired, Failure::TooLarge] {
+            for method in ["tools/call", "tools/list"] {
+                match (
+                    ours.template(failure, method),
+                    pinned.template(failure, method),
+                ) {
+                    (Some(ours), Some(pinned)) => {
+                        assert_eq!(ours.get("result").is_some(), pinned.get("result").is_some());
+                        assert_eq!(ours["error"]["code"], pinned["error"]["code"]);
+                    }
+                    (None, None) => {}
+                    other => panic!("{revision} {failure:?} {method}: {other:?}"),
+                }
+            }
         }
     }
-    let keys = |templates: &Templates| {
-        let names = |entries: &BTreeMap<String, Value>| entries.keys().cloned().collect::<Vec<_>>();
-        (names(&templates.cut_off), names(&templates.expired))
-    };
-    assert_eq!(keys(&ours), keys(&pinned));
 }
 
 /// A resume token an earlier build handed out. A published token keeps reading.

@@ -3,7 +3,8 @@
 //! Each test proves one rule of the MCP edge that the process journeys do not prove as precisely:
 //! what reaches the service, what the edge answers in its place, and when it starts the service.
 //! The edge's answers are compared with the whole templates of the accepted-reply golden the
-//! service also reads (`tests/golden/relay4/reply.accepted.json`), never with words restated here.
+//! service also reads (`tests/golden/relay5/reply.accepted.json`, revision 4's with `too_large`),
+//! never with words restated here.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -28,7 +29,7 @@ const STEP_GRACE: Duration = Duration::from_millis(20);
 /// The failure templates the golden accepted reply carries.
 fn golden_templates() -> Templates {
     let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay4/reply.accepted.json");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/relay5/reply.accepted.json");
     let reply: Reply = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     reply.templates.expect("the golden reply carries templates")
 }
@@ -40,6 +41,7 @@ fn golden(failure: Failure, key: &str, id: &Value) -> Value {
     let table = match failure {
         Failure::CutOff => &templates.cut_off,
         Failure::Expired => &templates.expired,
+        Failure::TooLarge => &templates.too_large,
     };
     let mut answer = table[key].clone();
     answer["id"] = id.clone();
@@ -217,19 +219,25 @@ impl Clock for FakeClock {
 struct ChannelInput {
     chunks: Receiver<Vec<u8>>,
     pending: Vec<u8>,
+    /// How much of `pending` has been read, so a chunk of many megabytes is never shifted.
+    taken: usize,
 }
 
 impl Read for ChannelInput {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if self.pending.is_empty() {
+        if self.taken == self.pending.len() {
             match self.chunks.recv() {
-                Ok(chunk) => self.pending = chunk,
+                Ok(chunk) => {
+                    self.pending = chunk;
+                    self.taken = 0;
+                }
                 Err(_) => return Ok(0),
             }
         }
-        let count = buffer.len().min(self.pending.len());
-        buffer[..count].copy_from_slice(&self.pending[..count]);
-        self.pending.drain(..count);
+        let rest = &self.pending[self.taken..];
+        let count = buffer.len().min(rest.len());
+        buffer[..count].copy_from_slice(&rest[..count]);
+        self.taken += count;
         Ok(count)
     }
 }
@@ -280,6 +288,7 @@ impl Harness {
             let stdin = ChannelInput {
                 chunks,
                 pending: Vec::new(),
+                taken: 0,
             };
             run(environment, stdin, stdout, sender, inbox)
         });
@@ -938,37 +947,111 @@ fn only_answers_to_the_live_connections_own_requests_reach_the_service() {
     assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
 }
 
-/// Every line `reader` gives under a bound of four bytes: its bytes, or `None` for a line that
-/// was skipped.
-fn lines_within_four_bytes(mut reader: impl BufRead) -> Vec<Option<Vec<u8>>> {
+/// Every line `reader` gives under a bound of `bound` bytes: its bytes, or for a line that was
+/// skipped, the requests it held.
+fn lines_within(bound: usize, mut reader: impl BufRead) -> Vec<Result<Vec<u8>, Vec<Request>>> {
     let mut lines = Vec::new();
-    while let Some(line) = read_line(&mut reader, 4).unwrap() {
+    while let Some(line) = read_line(&mut reader, bound).unwrap() {
         lines.push(match line {
-            InputLine::Line(bytes) => Some(bytes),
-            InputLine::TooLong => None,
+            InputLine::Line(bytes) => Ok(bytes),
+            InputLine::TooLong(requests) => Err(requests),
         });
     }
     lines
 }
 
-/// ACCEPTANCE C6: the MCP framing survives split and coalesced reads. Read one byte at a time or
-/// all at once, the input gives the same lines: a line over the frame bound is skipped up to its
-/// newline, so the next read starts on a line boundary, and a last line with no newline is still
-/// a line.
+/// A lone `tools/call` whose id `big` comes after its params, as the TypeScript SDK writes it,
+/// with an id, a method, an escaped quote and a brace inside the params that are not the
+/// request's, and `data` in its arguments.
+fn call_with_id_last(data: &str) -> String {
+    format!(
+        r#"{{"jsonrpc":"2.0","method":"tools/call","params":{{"name":"browser_upload","arguments":{{"id":7,"method":"ping","note":"a \"}}\" brace","data":"{data}"}}}},"id":"big"}}"#
+    )
+}
+
+/// Defect S-D9 and ACCEPTANCE C6: a line over the frame bound is skipped up to its newline
+/// without being kept, and each request it holds is answered from the `too_large` template of the
+/// last accepted reply, by its method and with its id as sent, whatever the order of its members:
+/// a lone call whose id follows its params, and each request of a batch but not its
+/// notification. A shorter line whose frame would pass the bound is answered the same way.
+/// Nothing of either reaches the service, the next line is still read, and before any reply the
+/// answer is the bare internal error. Read one byte at a time or all at once, the input gives the
+/// same lines, and a last line with no newline is still a line.
 #[test]
-fn input_lines_survive_split_and_coalesced_reads_and_an_over_long_line_is_skipped() {
-    let input = b"abcdef\nxy\nlast".to_vec();
-    let expected = [None, Some(b"xy".to_vec()), Some(b"last".to_vec())];
+fn a_line_over_the_bound_is_answered_as_too_large_for_each_request_it_holds() {
+    let input = format!("{}\nxy\nlast", call_with_id_last("x")).into_bytes();
+    let big = Request {
+        key: json!("big").to_string(),
+        id: json!("big"),
+        method: "tools/call".to_owned(),
+    };
+    let expected = [Err(vec![big]), Ok(b"xy".to_vec()), Ok(b"last".to_vec())];
     assert_eq!(
-        lines_within_four_bytes(io::Cursor::new(input.clone())),
+        lines_within(16, io::Cursor::new(input.clone())),
         expected,
         "coalesced"
     );
     let one_byte_at_a_time = BufReader::with_capacity(1, io::Cursor::new(input));
+    assert_eq!(lines_within(16, one_byte_at_a_time), expected, "split");
+
+    let harness = Harness::connected(true);
+    let padding = "x".repeat(MAX_FRAME_BYTES);
+    let lone = call_with_id_last(&padding);
+    harness.send(&lone);
     assert_eq!(
-        lines_within_four_bytes(one_byte_at_a_time),
-        expected,
-        "split"
+        harness.answer(&json!("big")),
+        golden(Failure::TooLarge, "tools/call", &json!("big"))
+    );
+    let batch = format!(
+        r#"[{{"jsonrpc":"2.0","method":"notifications/progress","params":{{"data":"{padding}"}}}},{{"jsonrpc":"2.0","id":3,"method":"resources/list"}},{{"params":{{}},"id":4,"method":"tools/call","jsonrpc":"2.0"}}]"#
+    );
+    harness.send(&batch);
+    assert_eq!(
+        harness.answer(&json!(3)),
+        golden(Failure::TooLarge, DEFAULT_TEMPLATE, &json!(3))
+    );
+    assert_eq!(
+        harness.answer(&json!(4)),
+        golden(Failure::TooLarge, "tools/call", &json!(4))
+    );
+    // Within the line bound, but each escaped quote doubles in the frame.
+    let quotes = r#"\""#.repeat(MAX_FRAME_BYTES * 3 / 8);
+    let framed = format!(
+        r#"{{"jsonrpc":"2.0","id":"framed","method":"tools/call","params":{{"q":"{quotes}"}}}}"#
+    );
+    assert!(framed.len() < MAX_FRAME_BYTES);
+    harness.send(&framed);
+    assert_eq!(
+        harness.answer(&json!("framed")),
+        golden(Failure::TooLarge, "tools/call", &json!("framed"))
+    );
+    let next = request(&json!(9), "tools/call");
+    harness.send(&next);
+    harness.wait(|| !harness.fake.received(0).is_empty());
+    harness.settle();
+    assert_eq!(
+        harness.fake.received(0),
+        [next],
+        "nothing over the bound reaches the service, and the next line does"
+    );
+    assert_eq!(
+        harness
+            .values()
+            .iter()
+            .filter(|value| !value["id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("settle-")))
+            .count(),
+        4,
+        "one answer for each request, none for the notification"
+    );
+
+    let unreplied = Harness::start(false, false);
+    unreplied.send(&lone);
+    assert_eq!(
+        unreplied.answer(&json!("big")),
+        json!({"jsonrpc": "2.0", "id": "big", "error": {"code": -32603, "message": ""}}),
+        "before any reply the edge has no words of its own"
     );
 }
 

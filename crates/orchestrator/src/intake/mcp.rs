@@ -12,7 +12,7 @@
 //! negotiated at a revision before 2025-06-18 cannot read `structuredContent`, so its text block
 //! also carries the same lean JSON after `Result: ` (ADR-0198 Decision 24). [`ResumeState`] is what lets a session continue across a service restart
 //! (Decision 12), and [`failure_templates`] holds the answers an edge gives when it cannot
-//! reach the service (Decision 2).
+//! reach the service, or cannot forward a request too large for the relay (Decision 2).
 //!
 //! A session can stand by: its instructions then say that Ghostlight is already connected to this
 //! agent, and the service answers its catalog with no tools until it is promoted. Whether it stands
@@ -138,7 +138,18 @@ pub(crate) mod result_field {
 mod reason {
     pub(super) const CUT_OFF: &str = "service_restarted";
     pub(super) const EXPIRED: &str = "service_not_started";
+    pub(super) const TOO_LARGE: &str = "too_large";
 }
+
+/// The first relay revision whose MCP edge answers a request too large to forward from the
+/// `too_large` template (ADR-0197 amendment of 2026-10-21). An older edge is handed revision 4's
+/// templates, byte for byte.
+const TOO_LARGE_RELAY: u16 = 5;
+
+const _: () = assert!(
+    TOO_LARGE_RELAY <= ghostlight_relay::RELAY,
+    "the relay this service speaks carries the too_large template"
+);
 
 /// What the holder of the stream does with one result of [`McpSession::accept`].
 #[derive(Clone, Debug, PartialEq)]
@@ -803,16 +814,23 @@ pub fn negotiate(requested: &str) -> &'static str {
         .unwrap_or(LATEST_REVISION)
 }
 
-/// The failure templates an edge answers with when it cannot reach the service.
+/// The failure templates an edge of relay revision `relay` answers with when it cannot reach the
+/// service, or cannot forward a request too large for the relay.
 ///
 /// For each failure, a JSON-RPC response for `tools/call` and a `default` for every other request,
 /// each with a null id the edge fills. The service hands them to every `mcp` stream in its
-/// accepted reply.
+/// accepted reply. Only an edge of [`TOO_LARGE_RELAY`] or later reads `too_large`, so an older one
+/// gets none, and its reply is revision 4's.
 #[must_use]
-pub fn failure_templates() -> Templates {
+pub fn failure_templates(relay: u16) -> Templates {
     Templates {
         cut_off: failure_entries(EdgeFailure::CutOff),
         expired: failure_entries(EdgeFailure::Expired),
+        too_large: if relay >= TOO_LARGE_RELAY {
+            failure_entries(EdgeFailure::TooLarge)
+        } else {
+            BTreeMap::new()
+        },
     }
 }
 
@@ -848,6 +866,13 @@ fn failure_call_result(failure: EdgeFailure) -> Value {
             Readiness::NotApplicable,
             true,
             reason::EXPIRED,
+        ),
+        EdgeFailure::TooLarge => (
+            Status::Failed,
+            Effect::None,
+            Readiness::NotApplicable,
+            true,
+            reason::TOO_LARGE,
         ),
     };
     let summary = failure.call_summary();

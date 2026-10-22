@@ -48,6 +48,9 @@ on Windows, `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` on Linux, or
 - **Strict clients and older clients.** A JSON-RPC batch is answered as one array, and a client
   older than MCP 2025-06-18 gets the result's JSON in a cut-off or expired answer too. A misspelled
   key inside a nested object is refused instead of ignored.
+- **A call too large to send** is answered instead of left waiting. A call over the 8 MiB the
+  relay carries, such as an inline upload of about 6.3 MB or more, says nothing was sent and to
+  send less in one call.
 - **`ghostlight call`** from an agent joins one session named for that agent.
 - **Organization policy.** Publishing refuses an `http://` source before it writes anything, a
   long non-ASCII organization name no longer locks a machine out, and the same publication in
@@ -80,7 +83,7 @@ on Windows, `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` on Linux, or
 
 ### Compatibility
 
-The 2.0.1 edge speaks relay protocol 5, which is protocol 4 with the wake; the 2.0.1 service admits
-both, so an agent still running a 2.0.0 edge keeps working. The extension speaks adapter protocol 4,
+The 2.0.1 edge speaks relay protocol 5, which is protocol 4 with the wake and the too-large answer;
+the 2.0.1 service admits both, so an agent still running a 2.0.0 edge keeps working. The extension speaks adapter protocol 4,
 with two words added that an older reader ignores. A 2.0.0 service and a 2.0.1 extension work
 together, and so do a 2.0.1 service and a 2.0.0 extension. The full list of changes is in the [CHANGELOG](../../CHANGELOG.md).

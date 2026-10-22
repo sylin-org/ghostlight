@@ -8,7 +8,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use ghostlight_relay::endpoint::{Connection, Listener};
-use ghostlight_relay::protocol::{Control, Reply, Role, StartReason, Templates};
+use ghostlight_relay::protocol::{Control, Reply, Role, StartReason};
 use serde_json::Value;
 
 use crate::browser::{BrowserPort, RelayBrowserPort};
@@ -17,6 +17,7 @@ use crate::governance::GovernanceFacade;
 use crate::install;
 use crate::intake::desktop::ShellView;
 use crate::intake::listener::{self, control, Judgement};
+use crate::intake::mcp::failure_templates;
 use crate::language::intake::OpeningRefusal;
 use crate::provenance::SourceReader;
 use crate::work::ApplicationExecutor;
@@ -42,8 +43,6 @@ pub(super) struct ServiceContext {
     pub(super) instance: String,
     /// Why this service was started.
     pub(super) started_by: StartReason,
-    /// The failure sentences every accepted `mcp` stream is handed.
-    pub(super) templates: Templates,
     pub(super) executor: Arc<ApplicationExecutor>,
     pub(super) workspaces: WorkspaceStore,
     pub(super) browser_port: Arc<dyn BrowserPort>,
@@ -73,13 +72,23 @@ pub(super) struct ServiceContext {
 }
 
 impl ServiceContext {
-    /// The reply that accepts an opening for `role`. Only an `mcp` stream is handed the failure
-    /// templates.
-    pub(super) fn accepted(&self, role: Role) -> Reply {
+    /// The reply that accepts a `browser`, `control` or `desktop` opening. It carries no failure
+    /// templates: only an MCP edge says them ([`Self::accepted_mcp`]).
+    pub(super) fn accepted(&self) -> Reply {
         Reply::accepted(
             env!("CARGO_PKG_VERSION").into(),
             self.instance.clone(),
-            (role == Role::Mcp).then(|| self.templates.clone()),
+            None,
+        )
+    }
+
+    /// The reply that accepts an `mcp` opening of relay revision `relay`, with the failure
+    /// templates that revision reads.
+    pub(super) fn accepted_mcp(&self, relay: u16) -> Reply {
+        Reply::accepted(
+            env!("CARGO_PKG_VERSION").into(),
+            self.instance.clone(),
+            Some(failure_templates(relay)),
         )
     }
 }
@@ -137,7 +146,7 @@ fn serve_connection(connection: Connection, judgement: Judgement, context: &Arc<
                     let Some(_opening) = context.streams.admit() else {
                         return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
                     };
-                    if listener::accept(&connection, &context.accepted(Role::Browser)).is_ok() {
+                    if listener::accept(&connection, &context.accepted()).is_ok() {
                         // The first frame on the stream is the extension's own hello.
                         let _ = context.browser.attach(connection);
                         context.workbench.refresh_live_parts();
@@ -225,7 +234,7 @@ fn serve_control(connection: Connection, operation: Option<Control>, context: &S
             return;
         }
     };
-    if listener::accept(&connection, &context.accepted(Role::Control)).is_ok() {
+    if listener::accept(&connection, &context.accepted()).is_ok() {
         let _ = listener::answer_control(&connection, &value);
     }
 }

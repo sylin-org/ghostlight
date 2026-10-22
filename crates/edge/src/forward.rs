@@ -4,9 +4,15 @@
 //! The edge reads client lines from stdin and service lines from an `mcp` relay stream, and
 //! passes each one on unchanged. It looks inside a line only to track outstanding request ids per
 //! direction, to answer `ping` itself, and to know which requests to answer when the service is
-//! cut off or does not come back in time. Those answers are the failure templates the service
-//! handed over in its last accepted reply; the edge authors no words, and before any reply
-//! it answers the bare internal error.
+//! cut off or does not come back in time, or when a line is too large to forward. Those answers
+//! are the failure templates the service handed over in its last accepted reply; the edge authors
+//! no words, and before any reply, or with no template for the failure, it answers the bare
+//! internal error.
+//!
+//! A line over [`MAX_FRAME_BYTES`] is skipped up to its newline without being kept, and each
+//! request it holds is answered from the `too_large` template ([`scan`], ADR-0197 amendment of
+//! 2026-10-21); a shorter line whose frame would pass the bound is answered the same way. Either
+//! way nothing reaches the service, and the next line is read as usual.
 //!
 //! Two kinds of request are held for the next service instead of being answered as cut off
 //! (ADR-0197 amendment of 2026-10-17). A line whose write failed never reached the service, since a
@@ -59,6 +65,8 @@ use ghostlight_relay::{HOLD_LIMIT, MAX_FRAME_BYTES};
 use serde_json::{json, Value};
 
 use crate::hold::{HeldLine, Hold, Request};
+
+mod scan;
 
 /// The JSON-RPC member names and values the edge reads or writes.
 mod rpc {
@@ -137,8 +145,9 @@ pub struct Environment {
 pub enum Event {
     /// One client line, without its newline.
     Line(Vec<u8>),
-    /// A client line longer than [`MAX_FRAME_BYTES`], which was skipped.
-    LineTooLong,
+    /// A client line longer than [`MAX_FRAME_BYTES`], which was skipped, with the requests it
+    /// held.
+    LineTooLong(Vec<Request>),
     /// The client closed stdin.
     InputClosed,
     /// A connection attempt was accepted by a service, with the failure templates its reply
@@ -327,7 +336,7 @@ impl<W: Write> Forwarder<W> {
     fn handle(&mut self, event: Event) -> io::Result<Flow> {
         match event {
             Event::Line(bytes) => self.client_line(&bytes)?,
-            Event::LineTooLong => {}
+            Event::LineTooLong(requests) => self.answer(&requests, Failure::TooLarge)?,
             Event::InputClosed => {
                 for held in self.hold.drain() {
                     self.answer(&held.requests, Failure::Expired)?;
@@ -508,14 +517,14 @@ impl<W: Write> Forwarder<W> {
     /// Its requests become outstanding before the write. A write that fails delivered nothing,
     /// because the service acts only on a whole frame, so the line goes back to the hold without
     /// its answers to this connection, and the connection is dropped. A line too large to frame
-    /// never reaches the service and its requests are answered as expired.
+    /// never reaches the service and its requests are answered as too large.
     fn deliver(&mut self, held: HeldLine, responses: &[String]) -> io::Result<()> {
         let payload = serde_json::to_vec(&McpFrame::Message {
             line: held.line.clone(),
         })
         .map_err(io::Error::other)?;
         if payload.len() > MAX_FRAME_BYTES {
-            return self.answer(&held.requests, Failure::Expired);
+            return self.answer(&held.requests, Failure::TooLarge);
         }
         for request in &held.requests {
             self.client_requests
@@ -766,8 +775,9 @@ fn without_responses(line: &str, keys: &[String]) -> Option<String> {
 enum InputLine {
     /// A line within the bound, without its newline.
     Line(Vec<u8>),
-    /// A line over the bound; its bytes were skipped up to its newline.
-    TooLong,
+    /// A line over the bound: its bytes were skipped up to its newline, and these are the
+    /// requests it held.
+    TooLong(Vec<Request>),
 }
 
 /// Read client lines on their own thread and post them as events, then [`Event::InputClosed`].
@@ -777,7 +787,7 @@ fn read_input(input: impl Read + Send + 'static, events: Sender<Event>) {
         loop {
             let event = match read_line(&mut reader, MAX_FRAME_BYTES) {
                 Ok(Some(InputLine::Line(bytes))) => Event::Line(bytes),
-                Ok(Some(InputLine::TooLong)) => Event::LineTooLong,
+                Ok(Some(InputLine::TooLong(requests))) => Event::LineTooLong(requests),
                 Ok(None) | Err(_) => {
                     let _ = events.send(Event::InputClosed);
                     return;
@@ -793,11 +803,11 @@ fn read_input(input: impl Read + Send + 'static, events: Sender<Event>) {
 /// Read one newline-terminated line of at most `limit` bytes, or `None` at the end of input.
 ///
 /// A longer line is consumed to its end without being kept, so the next read starts on a line
-/// boundary.
+/// boundary; a [`scan::Scanner`] reads its bytes on the way for the requests it holds.
 fn read_line(reader: &mut impl BufRead, limit: usize) -> io::Result<Option<InputLine>> {
     let mut line = Vec::new();
     let mut started = false;
-    let mut too_long = false;
+    let mut skipped: Option<scan::Scanner> = None;
     loop {
         let buffer = match reader.fill_buf() {
             Ok(buffer) => buffer,
@@ -813,13 +823,15 @@ fn read_line(reader: &mut impl BufRead, limit: usize) -> io::Result<Option<Input
         started = true;
         let newline = buffer.iter().position(|&byte| byte == b'\n');
         let chunk = &buffer[..newline.unwrap_or(buffer.len())];
-        if !too_long {
-            if line.len() + chunk.len() > limit {
-                too_long = true;
-                line = Vec::new();
-            } else {
-                line.extend_from_slice(chunk);
+        match skipped.as_mut() {
+            Some(scanner) => scanner.feed(chunk),
+            None if line.len() + chunk.len() > limit => {
+                let mut scanner = scan::Scanner::default();
+                scanner.feed(&std::mem::take(&mut line));
+                scanner.feed(chunk);
+                skipped = Some(scanner);
             }
+            None => line.extend_from_slice(chunk),
         }
         let used = newline.map_or(buffer.len(), |position| position + 1);
         reader.consume(used);
@@ -827,10 +839,9 @@ fn read_line(reader: &mut impl BufRead, limit: usize) -> io::Result<Option<Input
             break;
         }
     }
-    Ok(Some(if too_long {
-        InputLine::TooLong
-    } else {
-        InputLine::Line(line)
+    Ok(Some(match skipped {
+        Some(scanner) => InputLine::TooLong(scanner.finish()),
+        None => InputLine::Line(line),
     }))
 }
 

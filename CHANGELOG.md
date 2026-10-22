@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A JSON-RPC batch is answered as one array with its tool results in it, so a strict client gets
   every answer, and a client older than MCP 2025-06-18 gets the result's JSON in the text of a
   cut-off or expired answer too.
+- A call larger than the relay's 8 MiB bound, such as an inline upload of about 6.3 MB or more, is
+  answered: it was larger than Ghostlight accepts in one message, so nothing was sent, with the
+  step to send less in one call. The edge skipped such a line and never answered it, so the agent
+  waited forever, and a call just under the bound was told Ghostlight did not come back in time.
+  The words are the service's, in a `too_large` failure template (relay revision 5).
 - A field a nested object does not advertise, such as a misspelled selector key, is refused
   instead of silently dropped.
 - `ghostlight call` from an agent joins one session named for that agent's app, instead of a new

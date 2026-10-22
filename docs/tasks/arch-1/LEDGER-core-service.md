@@ -34,7 +34,7 @@ In order. "After" names what a slice waits for.
 | S-D6 | fix(intake): a client before MCP 2025-06-18 gets the lean JSON in a cut-off or expired answer too | - | tests-1's service plan (Notes) | landed (this commit) |
 | S-D7 | fix(browser): a browser with no Ghostlight extension reads as the missing extension, with the step to add it | - | found on leo-desktop-02 and by test-01, 2026-10-21 (Notes); done by test-01, cross-lane into `work/` and `install/browser_profiles.rs` under test-03's and test-04's holds | landed (this commit) |
 | S-D8 | fix(edge): a browser frame over the relay bound ends nothing | tests-1 T4 | test-02's answer to the coordinator's question, 2026-10-21 (Notes) | landed (this commit) |
-| S-D9 | fix(edge): a client line over the relay bound is answered, in the service's words | S-D8 | the coordinator's relay and edge classification, 2026-10-21 (Notes) | blocked (after 2.0.1, the owner, 2026-10-21) |
+| S-D9 | fix(edge): a client line over the relay bound is answered, in the service's words | S-D8 | the coordinator's relay and edge classification, 2026-10-21 (Notes) | landed (this commit) |
 | C19c-s | refactor(service): the service half of the completion path's leftovers | - | ADR-0203 C19c; SERV-5 | landed (this commit); no new test: diagnostics wording, ADR-0204 keeps the ceiling for promises |
 | BROW-2 | refactor(browser): the dead recovery decisions go | C16 | BROW-2 | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | C3b | fix(browser): a pinned wait reads its own browser | - | ADR-0203 C3b, moved from core | landed (this commit) |
@@ -166,6 +166,15 @@ A kill-on-close job would need the relay to break away; none has been seen.
   the id after the params), and answers each from a `too_large` template the service hands over
   with the others, in its own words with a next step (ADR-0197's Decision 2 gains the case). Before
   any reply, or from a service without that template, it answers as before any reply.
+- S-D9 as landed (ADR-0203 amendment of 2026-10-21): `Failure::TooLarge` reads the reply's
+  `too_large` table, left out when empty so a revision 4 reply keeps its bytes. The edge's
+  `forward/scan.rs` reads a skipped line for each message's id (at most 1 KiB of JSON) and method
+  (at most 256 bytes), keys in any order, strings with escapes, nested values by depth, and up to
+  1,024 messages of a batch. The service hands `too_large` only to an opening of relay revision 5
+  or later (`failure_templates(relay)`, `accepted_mcp`); its words name 8 MiB, asserted against
+  `MAX_FRAME_BYTES`, and its reason is `too_large`. `tests/golden/relay5/reply.accepted.json` is
+  revision 4's reply with the table, which the edge tests answer from. No new test: the edge's
+  over-long-line test, `golden5.rs` and the service's template tests took the cases.
 - BROW-5 as landed: `pub type Work = BrowserCommand` is gone. Its only users, `browser/mod.rs`
   with its `testing` module and the one rename in `work/tests/findings.rs`, say `BrowserCommand`,
   as the executor and the rest of the crate do. Per the skeptic, `wire.rs`'s `as physical` import

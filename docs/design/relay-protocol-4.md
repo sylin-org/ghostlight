@@ -1,10 +1,11 @@
 # Ghostlight relay protocol 4
 
 Revision 5 (ADR-0199 amendment of 2026-10-20) is this protocol with the wake endpoints of section
-11. Every frame, opening and name below holds for both revisions; only the number in `relay` and
-`edge.revision` differs. The service admits both. Revision 5's vocabulary is
-[`tests/golden/relay5/vocabulary.json`](../../tests/golden/relay5/vocabulary.json), bound by
-`crates/relay/tests/golden5.rs`.
+11 and the `too_large` failure template of section 8 (ADR-0197 amendment of 2026-10-21). Every
+frame, opening and name below holds for both revisions; only the number in `relay` and
+`edge.revision` differs, and only a revision 5 `mcp` stream is handed `too_large`. The service
+admits both. Revision 5's vocabulary and accepted reply are in
+[`tests/golden/relay5`](../../tests/golden/relay5), bound by `crates/relay/tests/golden5.rs`.
 
 The frozen contract between the service and every program that connects to it: the edge in each
 role, the one-shot command process and, later, the desktop shell. The decisions are
@@ -208,10 +209,16 @@ exits with a nonzero status.
 
 The reply's `templates` carry the only words an MCP edge may say about a failure. `cut_off` is for
 a request outstanding when the service went away, `expired` for a held request that outlived the
-hold limit. Each maps a request method to a JSON-RPC response object, with `default` for any
-method not named. The edge sets the object's `id` to the request's id, keeping its JSON type. With
-no templates at all (before the first connection) it answers a JSON-RPC internal error, code
--32603, with an empty message.
+hold limit. `too_large` (revision 5) is for a request the edge could not forward because it was
+over the largest frame: a client line over 8 MiB, or a shorter line whose `message` frame would
+pass the bound. The edge reads such a line through without keeping it, finds each request in it
+(a lone message or each message of a batch, its members in any order) and answers each one; a
+notification needs no answer. Each table maps a request method to a JSON-RPC response object,
+with `default` for any method not named. The edge sets the object's `id` to the request's id,
+keeping its JSON type. With no templates at all (before the first connection), or no table for
+the failure (`too_large` from a revision 4 service), it answers a JSON-RPC internal error, code
+-32603, with an empty message. The service hands `too_large` only to a revision 5 edge, so a
+revision 4 reply is unchanged.
 
 ## 9. Tolerance
 
@@ -240,7 +247,8 @@ change to the protocol.
 
 ## 11. Wake endpoints (revision 5)
 
-Revision 5 adds one mechanism and changes nothing above. An edge that waits for a service
+Revision 5 adds this mechanism and the `too_large` failure template of section 8, and changes
+nothing else above. An edge that waits for a service
 registers a wake endpoint, and a service that becomes ready wakes every registered edge, so the
 edge looks at once instead of at its next scheduled look. The backoff of section 10 stays: a wake
 only ends the current wait early.
