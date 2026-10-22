@@ -3221,8 +3221,8 @@ mod tests {
     /// Defect C11 (8c216920), ACCEPTANCE Executor 3 and 4: a cancellation says who cancelled and
     /// never that the browser disconnected; before dispatch it suggests nothing, except that after
     /// a quit, a replacement, an idle exit or an unknown reason the call can be repeated in a
-    /// moment; after dispatch it gives no replay advice. `service/mod.rs`
-    /// `a_call_during_a_quit_is_cancelled_with_an_audit_line_and_a_next_step_for_its_reason`
+    /// moment; after dispatch it gives no replay advice. `service/tests/quit.rs`
+    /// `a_call_ended_before_it_starts_is_cancelled_with_one_audit_line_worded_for_its_cause`
     /// reads its expected steps from this rule.
     #[test]
     fn a_cancellation_says_who_cancelled_and_suggests_a_repeat_only_when_one_is_served() {
