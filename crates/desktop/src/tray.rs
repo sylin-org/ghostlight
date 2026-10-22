@@ -49,7 +49,7 @@ pub const MAX_ID_LEN: usize = 32;
 pub const MAX_LABEL_LEN: usize = 64;
 
 /// The longest tooltip, in characters: the Windows limit.
-pub const MAX_TOOLTIP_LEN: usize = 127;
+pub const MAX_TOOLTIP_LENGTH: usize = 127;
 
 /// The colour of the dot for a working service, the band's accent `--a`.
 pub const WORKING_COLOUR: [u8; 3] = [0x5e, 0xea, 0xd4];
@@ -205,9 +205,9 @@ fn valid_id(id: &str) -> bool {
 impl TrayModel {
     /// Checks the model against the limits above. The shell renders nothing that fails.
     pub fn validate(&self) -> Result<(), TrayError> {
-        if self.tooltip.chars().count() > MAX_TOOLTIP_LEN {
+        if self.tooltip.chars().count() > MAX_TOOLTIP_LENGTH {
             return Err(model_error(format!(
-                "tooltip is longer than {MAX_TOOLTIP_LEN} characters"
+                "tooltip is longer than {MAX_TOOLTIP_LENGTH} characters"
             )));
         }
         if self.items.is_empty() || self.items.len() > MAX_ITEMS {

@@ -366,16 +366,16 @@ pub enum LinkEnd {
 
 /// What the shell shows, said in the `channel` of its opening. The service believes it: `status`
 /// reads it, and a shell started for the tray alone that finds the place taken brings no window
-/// forward. The words are the service's `ShellView`.
+/// forward. Its name and words are the service's `ShellView`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum View {
+pub enum ShellView {
     /// The shell shows its window to a person, or is about to.
     Window,
     /// The shell shows only the tray icon.
     Tray,
 }
 
-impl View {
+impl ShellView {
     /// The word in the opening's `channel`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -397,7 +397,7 @@ pub struct Link {
 /// A refused opening is [`LinkError::Refused`] with the service's own words. A first frame that is
 /// not a workbench frame, an address that is not `http://127.0.0.1:<port>/` or a bearer of the
 /// wrong shape is [`LinkError::Contract`].
-pub fn open_link(home: &std::path::Path, view: View) -> Result<(Link, Workbench), LinkError> {
+pub fn open_link(home: &std::path::Path, view: ShellView) -> Result<(Link, Workbench), LinkError> {
     let deadline = Instant::now() + OPEN_DEADLINE;
     let mut opening = Opening::new(
         Role::Desktop,
@@ -740,7 +740,7 @@ mod tests {
             ],
         );
         let (link, workbench) =
-            open_link(home.path(), View::Window).expect("the workbench is handed over");
+            open_link(home.path(), ShellView::Window).expect("the workbench is handed over");
         assert_eq!(workbench.url, URL);
         assert_eq!(workbench.bearer, BEARER);
         assert_eq!(workbench.tray, tray());
@@ -769,7 +769,7 @@ mod tests {
     fn the_stream_ending_ends_the_link() {
         let home = fresh_home();
         let service = fake_service(home.path(), accepted(), vec![workbench_frame(URL)]);
-        let (link, _) = open_link(home.path(), View::Window).unwrap();
+        let (link, _) = open_link(home.path(), ShellView::Window).unwrap();
         drop(service.join().unwrap());
         let (ended, rx) = mpsc::channel();
         link.spawn_reader(|_| {}, move |end| ended.send(end).unwrap())
@@ -788,7 +788,7 @@ mod tests {
             accepted(),
             vec![workbench_frame("http://localhost:1/")],
         );
-        let failure = open_link(home.path(), View::Window)
+        let failure = open_link(home.path(), ShellView::Window)
             .err()
             .expect("the address is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
@@ -806,7 +806,7 @@ mod tests {
                 tray: tray(),
             }],
         );
-        let failure = open_link(home.path(), View::Window)
+        let failure = open_link(home.path(), ShellView::Window)
             .err()
             .expect("the bearer is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");

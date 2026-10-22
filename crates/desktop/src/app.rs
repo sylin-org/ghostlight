@@ -48,7 +48,7 @@ use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
 
 use crate::link::{open_link, ActOutcome, DesktopFrame, Link, LinkEnd, LinkError, NativeAct};
-use crate::link::{TrayItemId, UnavailableReason, View, Workbench};
+use crate::link::{ShellView, TrayItemId, UnavailableReason, Workbench};
 use crate::machine::{self, Answer, Effect, Image, Machine, Outside, Screen};
 use crate::native::{self, ThisComputer};
 use crate::session::{self, Session, ThisSession};
@@ -306,11 +306,11 @@ impl Alarm {
 
 /// What a shell shows, as its opening says: its window while the window is open, and before the
 /// first attach the window a person's start is about to open; otherwise only the tray icon.
-fn view_of(window_open: bool, attached_before: bool, launch: Launch) -> View {
+fn view_of(window_open: bool, attached_before: bool, launch: Launch) -> ShellView {
     if window_open || (!attached_before && launch != Launch::Tray) {
-        View::Window
+        ShellView::Window
     } else {
-        View::Tray
+        ShellView::Tray
     }
 }
 
@@ -956,17 +956,17 @@ mod tests {
     /// started it, so status never claims a window a crashed shell left behind (commit 17ec7571).
     #[test]
     fn a_shell_says_it_shows_its_window_while_it_is_open_or_a_person_started_it() {
-        assert_eq!(view_of(false, false, Launch::Person), View::Window);
-        assert_eq!(view_of(false, false, Launch::Updating), View::Window);
-        assert_eq!(view_of(false, false, Launch::Tray), View::Tray);
+        assert_eq!(view_of(false, false, Launch::Person), ShellView::Window);
+        assert_eq!(view_of(false, false, Launch::Updating), ShellView::Window);
+        assert_eq!(view_of(false, false, Launch::Tray), ShellView::Tray);
         assert_eq!(
             view_of(true, true, Launch::Tray),
-            View::Window,
+            ShellView::Window,
             "reconnecting, window open"
         );
         assert_eq!(
             view_of(false, true, Launch::Person),
-            View::Tray,
+            ShellView::Tray,
             "reconnecting, window closed"
         );
     }

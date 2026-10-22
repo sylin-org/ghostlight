@@ -133,7 +133,7 @@ C3c), then the rows below.
 | SURF-10 | refactor(workbench): the small repeats go | - | SURF-10 | todo |
 | SURF-12 | refactor(workbench): watching, everywhere | - | SURF-12; the route path changes with the preview server | todo |
 | SURF-13 | refactor(window): the setup flow is one object and the click handler a table | - | SURF-13 | todo |
-| SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | todo |
+| SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | landed (this commit) |
 | SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | landed (this commit) |
 | SURF-9 | refactor(workbench): `workbench/mod.rs` splits on its seams | S3 | SURF-9; no `kit.css` rename | todo |
 | SURF-11 | refactor(window): the palette has tokens, and the desktop one module | - | SURF-11; colour values stay | todo |
@@ -221,3 +221,6 @@ C3c), then the rows below.
   three draw, to `words.js`. `view.js` drops the 37 word imports only the panes used. Updated: the
   script list in `index.html`, `ASSETS`, and the settings tests, which load both modules and read
   all three files where they read the view's source. Page tests 226 and the page journey pass.
+- SURF-14 as landed: the shell's `View` is `ShellView` and its `MAX_TOOLTIP_LEN` is
+  `MAX_TOOLTIP_LENGTH`, the service's names, so a search for one side finds the other. No wire
+  word changes and no golden moves; the two copies stay, as V-10 decided.
