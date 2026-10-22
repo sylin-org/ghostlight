@@ -41,9 +41,6 @@ impl ApplicationExecutor {
                 break;
             }
             let prepared = substitute_references(&step.arguments, &envelopes)
-                .and_then(|arguments| {
-                    arguments.ok_or_else(|| "a result reference did not resolve".into())
-                })
                 .map_err(|error| (StepCause::MissingReference, error))
                 .and_then(|arguments| {
                     crate::language::decode_flow_step(&step.tool, arguments, flow_tab.as_deref())
@@ -154,7 +151,7 @@ fn handles(lease: &WorkspaceLease) -> Vec<TabHandle> {
 fn substitute_references(
     input: &Value,
     envelopes: &HashMap<String, Value>,
-) -> Result<Option<Value>, String> {
+) -> Result<Value, String> {
     match input {
         Value::Object(object) => {
             if let Some(reference) = object.get("flow_ref") {
@@ -170,29 +167,19 @@ fn substitute_references(
                         parsed.pointer, parsed.step
                     )
                 })?;
-                return Ok(Some(resolved));
+                return Ok(resolved);
             }
             let mut replaced = Map::new();
             for (key, nested) in object {
-                match substitute_references(nested, envelopes)? {
-                    Some(value) => {
-                        replaced.insert(key.clone(), value);
-                    }
-                    None => return Ok(None),
-                }
+                replaced.insert(key.clone(), substitute_references(nested, envelopes)?);
             }
-            Ok(Some(Value::Object(replaced)))
+            Ok(Value::Object(replaced))
         }
-        Value::Array(items) => {
-            let mut replaced = Vec::with_capacity(items.len());
-            for item in items {
-                match substitute_references(item, envelopes)? {
-                    Some(value) => replaced.push(value),
-                    None => return Ok(None),
-                }
-            }
-            Ok(Some(Value::Array(replaced)))
-        }
-        other => Ok(Some(other.clone())),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| substitute_references(item, envelopes))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        other => Ok(other.clone()),
     }
 }

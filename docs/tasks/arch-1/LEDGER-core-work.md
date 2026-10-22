@@ -29,12 +29,12 @@ In order. "After" names what a slice waits for.
 | WORK-3 | refactor(work): the typed outcome builds its result too | C12b-2 | WORK-3; four sites keep their overrides | landed (39a70d19) |
 | WORK-1 | refactor(work): the upload ceiling has one home | W-D1 | WORK-1; the screenshot cap reads the adapter's `MAX_BASE64_CHARS` | landed (4237c35e) |
 | WORK-10 | refactor(work): timings and limits are named | - | WORK-10; the next-step cap and the governance backoff stay with their lanes (LANG-6, governance) | landed (1fd8d38c) |
-| WORK-7 | refactor(work): dead code goes | C19c | WORK-7; the two unused lease methods go | lease methods landed (6e38949a); `substitute_references`'s `Option` todo |
+| WORK-7 | refactor(work): dead code goes | C19c | WORK-7; the two unused lease methods go | lease methods landed (6e38949a); `substitute_references`'s `Option` landed |
 | WORK-9 | refactor(work): one name per contract | - | WORK-9; no persisted word changes; `Decision`'s two constructor names are governance's | landed (d3f0660b) |
 | WORK-13 | refactor(work): one finish for every wait | W-D3 | WORK-13 | landed (73a03f9d) |
 | WORK-6 | refactor(work): `work/mod.rs` splits on its seams | WORK-3 | WORK-6; the moves land alone; `Operation`'s handle accessors stay where they are | landed (ce416159) |
 | WORK-12 | refactor(workspace): its tests and its two books move out, and the lease helpers come in | - | WORK-12; the moves land alone | landed (8108ea82, 66a8842b, c65ec18d, dcb985e0) |
-| WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5; LANG-3 (d15f5ba5) moved all but one match; this slice takes the last | landed (this commit) |
+| WORK-5 | refactor(work): the closed vocabularies are matched as types | LANG-3 | WORK-5; LANG-3 (d15f5ba5) moved all but one match; this slice takes the last | landed (cc31b299) |
 | WORK-2b | refactor(work): `HandleKind` at the mint sites, and the crate `lock` helper here | LANG-2, SERV-7 | LANG-2 and SERV-7's adoption | workspace half landed (ec6ae3fd); `work/mod.rs`'s stage locks ride with C10c |
 | D52(c) | fix(work): `routing_refusal` passes the browser's cause through, and `capture_too_large` reaches `Refusal::CaptureTooLarge` | C12b-2, D52 | Decision 5.2's third part | taken by test-02 (109e30c3) |
 | W-D4 | fix(work): closing a handle this service does not hold says it no longer holds the tab, not that the tab is gone | C16 | Found 2026-10-21 by test-02, confirmed by leo-desktop-02 with UI Automation; goes with WORK-3's already-closed tab | landed (eac543ea) |
