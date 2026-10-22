@@ -250,6 +250,11 @@ Now:
   cut inside an emoji (a long tab title, a script's result) dropped the browser connection for
   every session; the extension now sends text well formed, and the service skips a frame it cannot
   decode.
+- The second sweep closed on 2026-10-21, with every arch-1 row landed but three the owner deferred
+  past 2.0.1 to save tokens: S-D9 (a client line over 8 MiB is answered), A-D2 and A-D3 (page-asset
+  role and settle fixes). The lanes split the remainder five ways after tests-1 closed. Next: a new
+  2.0.1 candidate, re-verified on every test machine, then the owner's store resubmission and
+  cutover.
 - tests-1 opened on 2026-10-21 (ADR-0204, the owner's mandate of meaningful tests): the 2,851
   Rust tests are cut to at most 500 before the 2.0.1 candidate, in five lanes on the test
   machines and the coordinator's ([BOOTSTRAP](tasks/tests-1/BOOTSTRAP.md)). arch-1's refactor
