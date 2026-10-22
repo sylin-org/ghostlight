@@ -4,8 +4,8 @@ The second 2.0.1 candidate on test-03, run on 2026-10-22 (UTC) by linux-claude a
 coordinator's request, repeating [the first candidate's check](alpine-2.0.1-bundle-2026-10-20.md).
 The bundle, the upgrade, `doctor`, the browser's reconnect and the desk bell all passed. The
 dialog held across a relay reconnect stalled the 2.0.0 extension as before, but this time it was
-not answered by a key, and closing its window did not end the stall: the browser stays stalled
-until its extension restarts.
+not answered by a key, and closing its window did not end the stall. With the owner's leave,
+restarting Chromium ended it; a rerun stalled the same way, and a restart ended it again.
 
 ## The system
 
@@ -99,25 +99,42 @@ keyboard bind. AT-SPI saw Chromium's windows, but not the prompt inside them. So
 not answered. Its window was closed instead, and that did not end the stall, nor did a second
 reconnect or five idle minutes.
 
+## Restarting the browser
+
+The owner authorized restarting Chromium to clear the stall.
+
+| Time (UTC) | Step | Result |
+| --- | --- | --- |
+| 02:29:36 | The extension's own process ended, to restart the extension alone | The relay ended and did not come back: `No browser is connected.` Not enough |
+| 02:30:20 | Chromium stopped gracefully, then started from its `chromium-fleet` launcher | The relay connected 10 s after the stop; `ghostlight status`: 1 agent and 1 browser connected |
+| 02:31:16 | The check above, rerun from the open desk | The same: every call after the reconnect timed out, `browser_dialog` dismiss included |
+| 02:32:05 | Chromium stopped and started again | The relay connected 1 s after the stop |
+| 02:32:07 | A navigate to the desk, then a read | `Opened sylin.org.` (0.3 s), `Read 224 words from sylin.org.` (0.4 s) |
+
+So a browser restart clears the 2.0.0 stall, as the release notes now say (178ede8f). The rerun
+still could not answer the prompt with a key, so whether answering it ends the stall on this
+build stays unshown here; 2026-10-20 showed that it did with the first candidate.
+
 ## What surprised me
 
 1. Closing the held prompt's window did not end the 2.0.0 extension's stall, where answering the
    prompt did on 2026-10-20. Not shown here: whether answering would have ended it this time.
-   2.0.1's note says to answer the dialog; it says nothing about a closed one.
-2. The first two timed-out calls after the reconnect read "before anything changed in the browser"
+   The release notes now say a closed window is not enough and to restart the browser (178ede8f).
+2. Ending the extension's own process did not restart the extension: its native host never came
+   back. Only a browser restart did.
+3. The first two timed-out calls after the reconnect read "before anything changed in the browser"
    (`failed none`) and the later ones "before the browser confirmed what the sent command did"
    (`unknown unknown`), the same split as on 2026-10-20. Both were true: none ran.
-3. A release `get.sh` will not replace a development build. That is intended, and `--restore` with
+4. A release `get.sh` will not replace a development build. That is intended, and `--restore` with
    `GHOSTLIGHT_FROM` installs the candidate. A machine left on a development build needs that flag.
 
 ## State left on test-03
 
 - Ghostlight 2.0.1 from this bundle, release channel, diagnostics on. One service, one browser relay,
   the window.
-- The store extension 2.0.0 is stalled since 01:52:07Z: every browser command times out. It needs
-  its worker restarted, by reloading the extension or restarting Chromium, which is the owner's
-  call. Nothing was changed in the browser's profile.
-- The demo tabs these runs opened stay open, except the two desk windows closed above. The session
-  accessibility flag `ScreenReaderEnabled`, set for a moment while looking for the prompt, is back
+- Chromium restarted twice, at 02:30 and 02:32, with the owner's leave, from its `chromium-fleet`
+  launcher. Its windows from before were not restored, since its profile does not restore them;
+  its profile was not changed. The store extension 2.0.0 is connected and working.
+- The desk tab of the rerun closed with the second restart. The session accessibility flag `ScreenReaderEnabled`, set for a moment while looking for the prompt, is back
   to false.
 - The bundle of run 39706944349 stays in `~/Downloads` as evidence.
