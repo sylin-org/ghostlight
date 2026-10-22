@@ -104,7 +104,7 @@ const controlsPart = ({
       word: { active: "Running", held: "Paused", ended: "Session ended" }[runtime], note, offers: OFFERS[runtime],
       acts: { hold: act(true), resume: act(), start_session: act(), end_session: act() }
     },
-    viewing: served ? {
+    watching: served ? {
       label: "Others can watch", watch, url: "http://127.0.0.1:41234/",
       word: watch ? "On: anyone on this computer can open this view" : "Off: only this window shows Ghostlight",
       acts: { set_watching: act() }
@@ -429,10 +429,10 @@ const sheetAfterBoot = {
   resume: sheetNode("controls-resume").hidden,
   start: sheetNode("controls-start").hidden,
   end: sheetNode("controls-end").hidden,
-  viewingWord: sheetNode("controls-viewing-word").textContent,
-  viewingUrl: sheetNode("controls-viewing-url").textContent,
-  viewingToggle: sheetNode("controls-viewing-toggle").textContent,
-  viewingToggleHidden: sheetNode("controls-viewing-toggle").hidden,
+  watchingWord: sheetNode("controls-watching-word").textContent,
+  watchingUrl: sheetNode("controls-watching-url").textContent,
+  watchingToggle: sheetNode("controls-watching-toggle").textContent,
+  watchingToggleHidden: sheetNode("controls-watching-toggle").hidden,
   diagnosticsWord: sheetNode("controls-diagnostics-word").textContent,
   diagnosticsPlace: sheetNode("controls-diagnostics-place").textContent,
   diagnosticsToggle: sheetNode("controls-diagnostics-toggle").textContent,
@@ -725,8 +725,8 @@ await pushed({
 const sheetAfterPush = {
   railSharing: sheetNode("rail-sharing-state").textContent,
   railDiagnostics: sheetNode("rail-diagnostics-state").textContent,
-  viewingWord: sheetNode("controls-viewing-word").textContent,
-  viewingToggle: sheetNode("controls-viewing-toggle").textContent,
+  watchingWord: sheetNode("controls-watching-word").textContent,
+  watchingToggle: sheetNode("controls-watching-toggle").textContent,
   diagnosticsWord: sheetNode("controls-diagnostics-word").textContent,
   diagnosticsToggle: sheetNode("controls-diagnostics-toggle").textContent,
   chip: sheetNode("context-chip").textContent,
@@ -1189,7 +1189,7 @@ function fakeService(kind, { served = true } = {}) {
       });
       return answer;
     }
-    if (url.pathname === "/api/controls/viewing") {
+    if (url.pathname === "/api/controls/watching") {
       state.watching = JSON.parse(init.body).watch;
       const answer = reply(200, controls(), { "ghostlight-seq": String(state.seq + 1) });
       Promise.resolve().then(() => emit({ kind: "controls_changed", controls: controls() }));
@@ -1305,14 +1305,14 @@ const watchOpening = {
   endSession: watching.text("controls-end").hidden,
   sendTest: watching.text("test-notification").hidden,
   sheetPause: watching.text("controls-hold").hidden,
-  sheetViewingToggle: watching.text("controls-viewing-toggle").hidden,
+  sheetWatchingToggle: watching.text("controls-watching-toggle").hidden,
   sheetDiagnosticsToggle: watching.text("controls-diagnostics-toggle").hidden,
   sheetReveal: watching.text("controls-diagnostics-reveal").hidden,
   sheetContinue: watching.text("settings-sharing-continue").hidden,
   sheetContinueWhy: watching.text("settings-sharing-why").textContent,
   sheetContinues: ["sharing", "browser-work", "notifications", "diagnostics"]
     .map((section) => [watching.text(`settings-${section}-continue`).hidden, watching.text(`settings-${section}-why`).textContent]),
-  sheetViewingWord: watching.text("controls-viewing-word").textContent,
+  sheetWatchingWord: watching.text("controls-watching-word").textContent,
   quitHidden: watching.text("settings-quit").hidden,
   who: watching.text("settings-sharing-who").textContent,
   rail: ["screen", "sharing", "browser-work", "notifications", "diagnostics"]
@@ -1407,7 +1407,7 @@ const controlOpening = {
   endSession: controlling.text("controls-end").hidden,
   sendTest: controlling.text("test-notification").hidden,
   sheetPause: controlling.text("controls-hold").hidden,
-  sheetViewingToggle: controlling.text("controls-viewing-toggle").hidden,
+  sheetWatchingToggle: controlling.text("controls-watching-toggle").hidden,
   sheetDiagnosticsToggle: controlling.text("controls-diagnostics-toggle").hidden,
   sheetReveal: controlling.text("controls-diagnostics-reveal").hidden,
   sheetContinues: ["sharing", "browser-work", "notifications", "diagnostics"].map((section) => controlling.text(`settings-${section}-continue`).hidden),
@@ -1467,16 +1467,16 @@ const where = (page) => ({
   pushed: [...page.bar.pushed]
 });
 const controlSnapshotsBeforeSheet = controlSnapshots();
-clickInSettings(controlling, "[data-viewing]", { dataset: { viewing: "toggle" }, disabled: false });
+clickInSettings(controlling, "[data-watching]", { dataset: { watching: "toggle" }, disabled: false });
 await controlling.settle();
 await controlling.settle();
 await controlling.settle();
-const viewingRequest = controlRequests.find((request) => request.path === "/api/controls/viewing");
+const watchingRequest = controlRequests.find((request) => request.path === "/api/controls/watching");
 const sheetAfterOff = {
   rail: controlling.text("rail-sharing-state").textContent,
   who: controlling.text("settings-sharing-who").textContent,
-  word: controlling.text("controls-viewing-word").textContent,
-  toggle: controlling.text("controls-viewing-toggle").textContent,
+  word: controlling.text("controls-watching-word").textContent,
+  toggle: controlling.text("controls-watching-toggle").textContent,
   chipTitle: controlling.text("context-chip").title,
   snapshots: controlSnapshots() - controlSnapshotsBeforeSheet
 };
@@ -1565,9 +1565,9 @@ const unserved = bootHttpPage("control", { served: false });
 await unserved.settle();
 await unserved.settle();
 const unservedSheet = {
-  viewingWord: unserved.text("controls-viewing-word").textContent,
-  viewingToggle: unserved.text("controls-viewing-toggle").hidden,
-  viewingCopy: unserved.text("controls-viewing-copy").hidden,
+  watchingWord: unserved.text("controls-watching-word").textContent,
+  watchingToggle: unserved.text("controls-watching-toggle").hidden,
+  watchingCopy: unserved.text("controls-watching-copy").hidden,
   continueLine: unserved.text("settings-sharing-continue").hidden,
   pause: unserved.text("controls-hold").hidden
 };
@@ -1653,7 +1653,7 @@ const httpChecks = [
     JSON.stringify(watchOpening.chip)],
   ["a watching page draws no control for a change it cannot make",
     watchOpening.setup === true && watchOpening.endSession === true && watchOpening.sendTest === true
-      && watchOpening.sheetViewingToggle === true && watchOpening.sheetDiagnosticsToggle === true
+      && watchOpening.sheetWatchingToggle === true && watchOpening.sheetDiagnosticsToggle === true
       && watchOpening.sheetReveal === true
       && !/>Set up<|>Update<|>Connect<|>Prepare<|Remove from|>Fix<|>Locate<|Turn on|Turn off|Open log folder/
         .test(watchOpening.roster + watchQwenPane + watchOpening.status)
@@ -1674,7 +1674,7 @@ const httpChecks = [
     watchOpening.rosterLine + watchOpening.status],
   ["Settings in a watching page shows Pause while agents run and the rest as state, with no Quit",
     watchOpening.sheetPause === false && watchOpening.quitHidden === true
-      && watchOpening.sheetViewingWord === "On: anyone on this computer can open this view"
+      && watchOpening.sheetWatchingWord === "On: anyone on this computer can open this view"
       && JSON.stringify(watchOpening.rail) === JSON.stringify([
         "Comfortable, standard text, motion follows the system", "On: anyone on this computer can open this view", "Running",
         "On", "On (marker)"]),
@@ -1733,7 +1733,7 @@ const httpChecks = [
       && controlPanes.junie.includes(">Fix</button>") && controlPanes.junie.includes(">Locate</button>")
       && controlPanes["qwen-code"].includes('data-harness-operation="download"')
       && controlOpening.sheetPause === false
-      && controlOpening.sheetViewingToggle === false && controlOpening.sheetDiagnosticsToggle === false
+      && controlOpening.sheetWatchingToggle === false && controlOpening.sheetDiagnosticsToggle === false
       && controlOpening.sheetReveal === false && controlOpening.sheetContinues.every((hidden) => hidden === true),
     JSON.stringify({ ...controlOpening, roster: undefined, status: undefined })],
   ["the window's Settings offers Quit, says who can see, and Status carries the service's sentence",
@@ -1742,8 +1742,8 @@ const httpChecks = [
       && controlOpening.addressWritten === 0,
     JSON.stringify({ quit: controlOpening.quitHidden, who: controlOpening.who, status: controlOpening.statusService })],
   ["the window with no watch view served says so once, offers no toggle, and does not send itself to the window",
-    unservedSheet.viewingWord === SHEET_NOT_SERVED && unservedSheet.viewingToggle === true
-      && unservedSheet.viewingCopy === true && unservedSheet.continueLine === true
+    unservedSheet.watchingWord === SHEET_NOT_SERVED && unservedSheet.watchingToggle === true
+      && unservedSheet.watchingCopy === true && unservedSheet.continueLine === true
       && unservedSheet.pause === false && unserved.threw === null && unserved.reported.length === 0,
     JSON.stringify({ unservedSheet, threw: unserved.threw, reported: unserved.reported })],
   ["a rail entry shows its section and writes its address in place, and the Settings tab returns to the last one",
@@ -1756,12 +1756,12 @@ const httpChecks = [
       && afterBrowserWorkHit.hash === "#settings/browser-work" && afterBrowserWorkHit.pushed.length === 0,
     JSON.stringify(afterBrowserWorkHit)],
   ["Turn off in Settings is one keyed PUT, waited for as a change; the rail, the sentence and the chip follow",
-    viewingRequest?.method === "PUT" && viewingRequest.body === '{"watch":false}'
-      && viewingRequest.headers.Authorization === "Bearer key-1" && viewingRequest.credentials === "omit"
+    watchingRequest?.method === "PUT" && watchingRequest.body === '{"watch":false}'
+      && watchingRequest.headers.Authorization === "Bearer key-1" && watchingRequest.credentials === "omit"
       && sheetAfterOff.word === "Off: only this window shows Ghostlight" && sheetAfterOff.toggle === "Turn on"
       && sheetAfterOff.rail === "Off: only this window shows Ghostlight" && sheetAfterOff.who === SHEET_PRIVATE
       && sheetAfterOff.chipTitle === SHEET_PRIVATE && sheetAfterOff.snapshots === 0,
-    JSON.stringify({ viewingRequest, sheetAfterOff })],
+    JSON.stringify({ watchingRequest, sheetAfterOff })],
   ["Quit asks inline first, Cancel puts the button back, and only the second press is one keyed POST",
     quitAsked.question && quitAsked.ask === true && quitAsked.requests === 0
       && quitCancelled.question === true && quitCancelled.ask === false && quitCancelled.requests === 0
@@ -1861,9 +1861,9 @@ const checks = [
       && sheetAfterBoot.runtimeWord === "Running" && sheetAfterBoot.hold === false
       && sheetAfterBoot.resume === true && sheetAfterBoot.start === true
       && sheetAfterBoot.service === "Ghostlight is running; 1 agent and 1 browser connected."
-      && sheetAfterBoot.viewingWord === "On: anyone on this computer can open this view"
-      && sheetAfterBoot.viewingUrl === "http://127.0.0.1:41234/"
-      && sheetAfterBoot.viewingToggle === "Turn off" && sheetAfterBoot.viewingToggleHidden === false
+      && sheetAfterBoot.watchingWord === "On: anyone on this computer can open this view"
+      && sheetAfterBoot.watchingUrl === "http://127.0.0.1:41234/"
+      && sheetAfterBoot.watchingToggle === "Turn off" && sheetAfterBoot.watchingToggleHidden === false
       && sheetAfterBoot.notificationsWord.startsWith("Send one local checkup notification"),
     JSON.stringify(sheetAfterBoot)],
   ["the rail states the sections, and the window is offered Quit and told who can see",
@@ -1882,8 +1882,8 @@ const checks = [
     JSON.stringify(sheetAfterBoot)],
   ["a pushed controls part updates Settings and takes the chip away once only the window shows Ghostlight, with no snapshot",
     sheetAfterPush.railSharing === "Off: only this window shows Ghostlight" && sheetAfterPush.railDiagnostics === "Off"
-      && sheetAfterPush.viewingWord === "Off: only this window shows Ghostlight"
-      && sheetAfterPush.viewingToggle === "Turn on" && sheetAfterPush.diagnosticsWord === "Off"
+      && sheetAfterPush.watchingWord === "Off: only this window shows Ghostlight"
+      && sheetAfterPush.watchingToggle === "Turn on" && sheetAfterPush.diagnosticsWord === "Off"
       && sheetAfterPush.diagnosticsToggle === "Turn on" && sheetAfterPush.chip === "" && sheetAfterPush.chipHidden === true
       && sheetAfterPush.chipTitle === SHEET_PRIVATE && sheetAfterPush.snapshots === 0,
     JSON.stringify(sheetAfterPush)],

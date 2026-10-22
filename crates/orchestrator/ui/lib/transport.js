@@ -108,7 +108,7 @@
     remove_user_policy: { method: DELETE, path: "/api/policy/user", tagged: true },
     apply_runtime_intent: { method: POST, path: "/api/runtime", body: ({ intent }) => ({ intent }) },
     set_diagnostics: { method: PUT, path: "/api/controls/diagnostics", body: ({ on }) => ({ on }) },
-    set_watching: { method: PUT, path: "/api/controls/viewing", body: ({ watch }) => ({ watch }) },
+    set_watching: { method: PUT, path: "/api/controls/watching", body: ({ watch }) => ({ watch }) },
     setup_act: { method: POST, path: "/api/setup/act", body: (action) => action },
     refresh_harnesses: { method: POST, path: "/api/integrations/rescan", body: () => ({}) },
     setup_detected_harnesses: { method: POST, path: "/api/integrations/setup-all", body: () => ({}) },

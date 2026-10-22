@@ -50,8 +50,8 @@
   const BROWSER_SETTINGS = Object.freeze(["effects", "captions"]);
 
   /** The data attributes the buttons are found by. */
-  const VIEWING_TOGGLE = "toggle";
-  const VIEWING_COPY = "copy";
+  const WATCHING_TOGGLE = "toggle";
+  const WATCHING_COPY = "copy";
   const DIAGNOSTICS_TOGGLE = "toggle";
   const DIAGNOSTICS_REVEAL = "reveal";
   const QUIT_ASK = "ask";
@@ -165,18 +165,18 @@
       }
     }
 
-    function drawViewing(viewing) {
-      say("controls-viewing-label", viewing.label);
-      say("controls-viewing-word", viewing.word);
-      say("controls-viewing-url", viewing.url);
-      show("controls-viewing-url", Boolean(viewing.url));
+    function drawWatching(watching) {
+      say("controls-watching-label", watching.label);
+      say("controls-watching-word", watching.word);
+      say("controls-watching-url", watching.url);
+      show("controls-watching-url", Boolean(watching.url));
       // Copying the address is for the screen that changes who can watch; a watcher is already there.
       show(
-        "controls-viewing-copy",
-        Boolean(viewing.url) && typeof copyText === "function" && Boolean(viewing.acts.set_watching?.available)
+        "controls-watching-copy",
+        Boolean(watching.url) && typeof copyText === "function" && Boolean(watching.acts.set_watching?.available)
       );
-      say("controls-viewing-toggle", viewing.watch ? words.turnOff : words.turnOn);
-      show("controls-viewing-toggle", Boolean(viewing.acts.set_watching?.available));
+      say("controls-watching-toggle", watching.watch ? words.turnOff : words.turnOn);
+      show("controls-watching-toggle", Boolean(watching.acts.set_watching?.available));
     }
 
     function drawDiagnostics(diagnostics) {
@@ -220,7 +220,7 @@
      */
     function drawContinue(part) {
       const sections = {
-        sharing: part.viewing,
+        sharing: part.watching,
         "browser-work": part.runtime,
         notifications: part.notifications,
         diagnostics: part.diagnostics
@@ -254,13 +254,13 @@
       }
       say("settings-sharing-who", part.you.sentence);
       drawRuntime(part.runtime);
-      drawViewing(part.viewing);
+      drawWatching(part.watching);
       drawDiagnostics(part.diagnostics);
       drawNotifications(part.notifications);
       drawBrowser(part.browser);
       drawContinue(part);
       drawQuit();
-      drawRailState("sharing", part.viewing.word);
+      drawRailState("sharing", part.watching.word);
       drawRailState("browser-work", part.runtime.word);
       drawRailState("notifications", part.notifications.state);
       drawRailState("diagnostics", part.diagnostics.word);
@@ -338,12 +338,12 @@
       if (!current) return;
       const intent = target.closest("[data-intent]");
       if (intent) return press(intent, () => applyIntent(intent.dataset.intent));
-      const viewing = target.closest("[data-viewing]");
-      if (viewing?.dataset.viewing === VIEWING_TOGGLE) {
-        return press(viewing, () => setWatching(!current.viewing.watch));
+      const watching = target.closest("[data-watching]");
+      if (watching?.dataset.watching === WATCHING_TOGGLE) {
+        return press(watching, () => setWatching(!current.watching.watch));
       }
-      if (viewing?.dataset.viewing === VIEWING_COPY && typeof copyText === "function") {
-        return press(viewing, () => copyText(current.viewing.url));
+      if (watching?.dataset.watching === WATCHING_COPY && typeof copyText === "function") {
+        return press(watching, () => copyText(current.watching.url));
       }
       const diagnostics = target.closest("[data-diagnostics-operation]");
       if (diagnostics?.dataset.diagnosticsOperation === DIAGNOSTICS_TOGGLE) {

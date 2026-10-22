@@ -270,13 +270,13 @@ pub const NATIVE_ACT_FAILED: &str = "This computer would not do that.";
 pub const CONTROLS_RUNTIME_LABEL: &str = "Browser work";
 
 /// The label of the Controls row for "Others can watch".
-pub const CONTROLS_VIEWING_LABEL: &str = "Others can watch";
+pub const CONTROLS_WATCHING_LABEL: &str = "Others can watch";
 
 /// The state word of "Others can watch" while it is on.
-pub const CONTROLS_VIEWING_ON: &str = "On: anyone on this computer can open this view";
+pub const CONTROLS_WATCHING_ON: &str = "On: anyone on this computer can open this view";
 
 /// The state word of "Others can watch" while it is off.
-pub const CONTROLS_VIEWING_OFF: &str = "Off: only this window shows Ghostlight";
+pub const CONTROLS_WATCHING_OFF: &str = "Off: only this window shows Ghostlight";
 
 /// The label of the Controls row for process diagnostics.
 pub const CONTROLS_DIAGNOSTICS_LABEL: &str = "Process diagnostics";

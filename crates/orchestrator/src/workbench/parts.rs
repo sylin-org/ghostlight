@@ -283,7 +283,7 @@ const DIAGNOSTICS_OFF_LAYER: &str = "off";
 
 /// What the service knows of the watch view Settings speaks for.
 #[derive(Clone, Copy, Debug)]
-pub enum ViewingFacts<'a> {
+pub enum WatchingFacts<'a> {
     /// No watch view is served, so nobody can watch and the setting cannot change.
     NotServed,
     /// A watch view is served at `url`.
@@ -303,7 +303,7 @@ pub struct ControlsFacts<'a> {
     /// Where a pause came from, while agents are paused.
     pub runtime_note: Option<&'a str>,
     /// Whether a watch view is served, and whether others may watch it.
-    pub viewing: ViewingFacts<'a>,
+    pub watching: WatchingFacts<'a>,
     /// The process-diagnostics state.
     pub diagnostics: &'a DiagnosticsReport,
     /// What is connected to the service.
@@ -323,7 +323,7 @@ pub struct ControlsPart {
     /// Agents' browser work: whether it runs, and how to pause, resume, start and end it.
     pub runtime: RuntimeControls,
     /// "Others can watch".
-    pub viewing: ViewingControls,
+    pub watching: WatchingControls,
     /// Process diagnostics.
     pub diagnostics: DiagnosticsControls,
     /// The notification test.
@@ -370,7 +370,7 @@ pub struct RuntimeActs {
 
 /// The "Others can watch" row of Settings, under Sharing.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ViewingControls {
+pub struct WatchingControls {
     /// The row's label.
     pub label: &'static str,
     /// Whether other screens on this computer may watch.
@@ -380,7 +380,7 @@ pub struct ViewingControls {
     /// The word for the state.
     pub word: &'static str,
     /// What the context may do.
-    pub acts: ViewingActs,
+    pub acts: WatchingActs,
     /// Whether a watch view is served, which decides whether watching can be changed at all.
     #[serde(skip)]
     served: bool,
@@ -388,7 +388,7 @@ pub struct ViewingControls {
 
 /// The acts of the "Others can watch" row.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ViewingActs {
+pub struct WatchingActs {
     /// Turn watching on or off.
     pub set_watching: Availability,
 }
@@ -507,27 +507,27 @@ impl ControlsPart {
                     end_session: unavailable.clone(),
                 },
             },
-            viewing: match facts.viewing {
-                ViewingFacts::NotServed => ViewingControls {
-                    label: words::CONTROLS_VIEWING_LABEL,
+            watching: match facts.watching {
+                WatchingFacts::NotServed => WatchingControls {
+                    label: words::CONTROLS_WATCHING_LABEL,
                     watch: false,
                     url: None,
                     word: words::WATCHING_NOT_SERVED,
-                    acts: ViewingActs {
+                    acts: WatchingActs {
                         set_watching: unavailable.clone(),
                     },
                     served: false,
                 },
-                ViewingFacts::Served { watching, url } => ViewingControls {
-                    label: words::CONTROLS_VIEWING_LABEL,
+                WatchingFacts::Served { watching, url } => WatchingControls {
+                    label: words::CONTROLS_WATCHING_LABEL,
                     watch: watching,
                     url: Some(url.to_owned()),
                     word: if watching {
-                        words::CONTROLS_VIEWING_ON
+                        words::CONTROLS_WATCHING_ON
                     } else {
-                        words::CONTROLS_VIEWING_OFF
+                        words::CONTROLS_WATCHING_OFF
                     },
-                    acts: ViewingActs {
+                    acts: WatchingActs {
                         set_watching: unavailable.clone(),
                     },
                     served: true,
@@ -604,7 +604,7 @@ impl ControlsPart {
             start_session: may(WebAct::StartSession),
             end_session: may(WebAct::EndSession),
         };
-        let set_watching = if self.viewing.served {
+        let set_watching = if self.watching.served {
             may(WebAct::SetWatching)
         } else {
             Availability {
@@ -612,7 +612,7 @@ impl ControlsPart {
                 why_not: Some(words::WATCHING_NOT_SERVED.to_owned()),
             }
         };
-        self.viewing.acts = ViewingActs { set_watching };
+        self.watching.acts = WatchingActs { set_watching };
         self.diagnostics.acts = DiagnosticsActs {
             set_diagnostics: may(WebAct::SetDiagnostics),
             reveal_diagnostics: may(WebAct::RevealDiagnostics),
@@ -622,8 +622,8 @@ impl ControlsPart {
         };
         self.you = YouControls {
             context: context.token(),
-            word: context.word(self.viewing.watch),
-            sentence: context.sentence(self.viewing.watch),
+            word: context.word(self.watching.watch),
+            sentence: context.sentence(self.watching.watch),
         };
     }
 }

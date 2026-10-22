@@ -206,7 +206,7 @@ const controlsFixture = {
     label: "Browser work", state: "active", word: "Running", note: null, offers: OFFERS.active,
     acts: Object.fromEntries(["hold", "resume", "start_session", "end_session"].map((act) => [act, { available: true, why_not: null }]))
   },
-  viewing: {
+  watching: {
     label: "Others can watch", watch: true, url: "http://127.0.0.1:41234/",
     word: "On: anyone on this computer can open this view",
     acts: { set_watching: { available: true, why_not: null } }
@@ -791,12 +791,12 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
     controls.runtime.state = preview.service.runtime_state;
     controls.runtime.word = { active: "Running", held: "Paused", ended: "Session ended" }[controls.runtime.state];
     controls.runtime.offers = OFFERS[controls.runtime.state];
-    controls.viewing.word = controls.viewing.watch
+    controls.watching.word = controls.watching.watch
       ? "On: anyone on this computer can open this view"
       : "Off: only this window shows Ghostlight";
     // The window wears the Sharing word while others can watch, and no chip while only it shows.
-    controls.you.word = controls.viewing.watch ? "Shared" : null;
-    controls.you.sentence = controls.viewing.watch
+    controls.you.word = controls.watching.watch ? "Shared" : null;
+    controls.you.sentence = controls.watching.watch
       ? "Others on this computer can watch this view in a browser."
       : "Watching is off: only this window shows Ghostlight.";
     controls.diagnostics.word = controls.diagnostics.on ? "On (" + controls.diagnostics.layer + ")" : "Off";
@@ -908,7 +908,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
       return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
     }
     if (command === "set_watching") {
-      preview.controls.viewing.watch = args.watch;
+      preview.controls.watching.watch = args.watch;
       publishControls();
       return preview.controls;
     }
@@ -978,7 +978,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
     "DELETE /api/policy/user": "remove_user_policy",
     "POST /api/runtime": "apply_runtime_intent",
     "PUT /api/controls/diagnostics": "set_diagnostics",
-    "PUT /api/controls/viewing": "set_watching",
+    "PUT /api/controls/watching": "set_watching",
     "POST /api/integrations/rescan": "refresh_harnesses",
     "POST /api/integrations/act": "manage_harness",
     "POST /api/setup/act": "setup_act",

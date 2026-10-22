@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex, OnceLock, TryLockError};
 
 use super::parts::{
     self, ActivityPart, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, OrganizationView,
-    StatusConfiguration, StatusPart, ViewingFacts,
+    StatusConfiguration, StatusPart, WatchingFacts,
 };
 use super::setup::{self, SetupInputs, SetupMachine, ThisComputer};
 use super::{
@@ -565,7 +565,7 @@ impl Live {
         ControlsPart::of(&ControlsFacts {
             runtime_state: gathered.runtime_state,
             runtime_note: gathered.runtime_note.as_deref(),
-            viewing: facts.map_or(ViewingFacts::NotServed, |facts| ViewingFacts::Served {
+            watching: facts.map_or(WatchingFacts::NotServed, |facts| WatchingFacts::Served {
                 watching: facts.watching.is_on(),
                 url: facts.address.url(),
             }),

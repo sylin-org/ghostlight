@@ -53,7 +53,7 @@ function part({ context = "control", watch = true, runtime = "active", layer = "
       note: runtime === "held" ? "Paused from the tray." : null, offers: OFFERS[runtime],
       acts: { hold: act(true), resume: act(), start_session: act(), end_session: act() }
     },
-    viewing: {
+    watching: {
       label: "Others can watch", watch, url, word: watch ? "On: anyone on this computer can open this view" : "Off: only this window shows Ghostlight",
       acts: { set_watching: act() }
     },
@@ -326,8 +326,8 @@ function viewOver(shown) {
 /** The ids of the action buttons that are showing. */
 function showing(shown) {
   return [
-    "controls-hold", "controls-resume", "controls-start", "controls-end", "controls-viewing-copy",
-    "controls-viewing-toggle", "controls-diagnostics-reveal", "controls-diagnostics-toggle", "test-notification"
+    "controls-hold", "controls-resume", "controls-start", "controls-end", "controls-watching-copy",
+    "controls-watching-toggle", "controls-diagnostics-reveal", "controls-diagnostics-toggle", "test-notification"
   ].filter((id) => !shown.el(id).hidden);
 }
 
@@ -423,7 +423,7 @@ test("the rail has five entries, each with a state word, and each opens a sectio
 
 test("the markup holds the ids and attributes the guards and the surface look for", () => {
   const shown = page();
-  for (const id of ["test-notification", "settings-quit", "status-service", "controls-runtime", "controls-viewing",
+  for (const id of ["test-notification", "settings-quit", "status-service", "controls-runtime", "controls-watching",
     "controls-diagnostics", "controls-notifications"]) {
     assert.ok(shown.el(id));
   }
@@ -603,9 +603,9 @@ test("the sections say what the part says, in the service's words", () => {
   assert.equal(said(shown, "controls-runtime-label"), "Browser work");
   assert.equal(said(shown, "controls-runtime-word"), "Paused");
   assert.equal(said(shown, "controls-runtime-note"), "Paused from the tray.");
-  assert.equal(said(shown, "controls-viewing-label"), "Others can watch");
-  assert.equal(said(shown, "controls-viewing-word"), "On: anyone on this computer can open this view");
-  assert.equal(said(shown, "controls-viewing-url"), "http://127.0.0.1:41234/");
+  assert.equal(said(shown, "controls-watching-label"), "Others can watch");
+  assert.equal(said(shown, "controls-watching-word"), "On: anyone on this computer can open this view");
+  assert.equal(said(shown, "controls-watching-url"), "http://127.0.0.1:41234/");
   assert.equal(said(shown, "controls-diagnostics-word"), "On (marker)");
   assert.equal(said(shown, "controls-diagnostics-place"), "~/.ghostlight/logs (2.0 KB)");
   assert.equal(said(shown, "controls-notifications-label"), "Notifications");
@@ -631,18 +631,18 @@ test("in Control every row has its button, and pressing Turn off calls setWatchi
   const shown = kit();
   shown.settings.render(part());
   assert.deepEqual(showing(shown), [
-    "controls-hold", "controls-end", "controls-viewing-copy", "controls-viewing-toggle",
+    "controls-hold", "controls-end", "controls-watching-copy", "controls-watching-toggle",
     "controls-diagnostics-reveal", "controls-diagnostics-toggle", "test-notification"
   ]);
   for (const section of SECTIONS.slice(1)) assert.equal(shown.el(`settings-${section}-continue`).hidden, true, section);
-  assert.equal(said(shown, "controls-viewing-toggle"), "Turn off");
+  assert.equal(said(shown, "controls-watching-toggle"), "Turn off");
   assert.equal(said(shown, "controls-diagnostics-toggle"), "Turn off");
 
-  shown.click(shown.el("controls-viewing-toggle"));
+  shown.click(shown.el("controls-watching-toggle"));
   shown.click(shown.el("controls-diagnostics-toggle"));
   shown.click(shown.el("controls-diagnostics-reveal"));
   shown.click(shown.el("test-notification"));
-  shown.click(shown.el("controls-viewing-copy"));
+  shown.click(shown.el("controls-watching-copy"));
   shown.click(shown.el("controls-hold"));
   shown.click(shown.el("controls-end"));
   await settle();
@@ -688,10 +688,10 @@ test("Settings shows only the runtime acts the controls part offers, never its o
 test("a switch that is off offers Turn on", async () => {
   const shown = kit();
   shown.settings.render(part({ watch: false, layer: "off" }));
-  assert.equal(said(shown, "controls-viewing-toggle"), "Turn on");
+  assert.equal(said(shown, "controls-watching-toggle"), "Turn on");
   assert.equal(said(shown, "controls-diagnostics-toggle"), "Turn on");
   assert.equal(said(shown, "controls-diagnostics-word"), "Off");
-  shown.click(shown.el("controls-viewing-toggle"));
+  shown.click(shown.el("controls-watching-toggle"));
   shown.click(shown.el("controls-diagnostics-toggle"));
   await settle();
   assert.deepEqual(shown.calls, [["setWatching", true], ["setDiagnostics", true]]);
@@ -700,14 +700,14 @@ test("a switch that is off offers Turn on", async () => {
 test("in Control with no watch view served, the state is told once and nothing sends the window to itself", () => {
   const shown = kit();
   const unserved = part();
-  unserved.viewing = {
-    ...unserved.viewing, watch: false, url: null, word: "Not serving a watch view.",
+  unserved.watching = {
+    ...unserved.watching, watch: false, url: null, word: "Not serving a watch view.",
     acts: { set_watching: { available: false, why_not: "Not serving a watch view." } }
   };
   shown.settings.render(unserved);
-  assert.equal(said(shown, "controls-viewing-word"), "Not serving a watch view.");
-  assert.equal(shown.el("controls-viewing-toggle").hidden, true);
-  assert.equal(shown.el("controls-viewing-copy").hidden, true);
+  assert.equal(said(shown, "controls-watching-word"), "Not serving a watch view.");
+  assert.equal(shown.el("controls-watching-toggle").hidden, true);
+  assert.equal(shown.el("controls-watching-copy").hidden, true);
   assert.equal(shown.el("settings-sharing-continue").hidden, true);
   assert.equal(shown.el("controls-hold").hidden, false);
 });
@@ -715,15 +715,15 @@ test("in Control with no watch view served, the state is told once and nothing s
 test("no copy button is drawn on a screen that cannot copy", () => {
   const shown = kit({ copyText: undefined });
   shown.settings.render(part());
-  assert.equal(shown.el("controls-viewing-copy").hidden, true);
-  assert.equal(shown.el("controls-viewing-url").hidden, false);
+  assert.equal(shown.el("controls-watching-copy").hidden, true);
+  assert.equal(shown.el("controls-watching-url").hidden, false);
 });
 
 test("a button cannot be pressed twice while its act is still running", async () => {
   let release;
   const shown = kit({ setWatching: (watch) => new Promise((resolve) => { release = () => resolve(watch); }) });
   shown.settings.render(part());
-  const toggle = shown.el("controls-viewing-toggle");
+  const toggle = shown.el("controls-watching-toggle");
   shown.click(toggle);
   assert.equal(toggle.disabled, true);
   shown.click(toggle);
@@ -762,7 +762,7 @@ test("in Watch each other section says where the change is made, with one Contin
     assert.equal(shown.el(`settings-${section}-closed`).hidden, true, section);
   }
   // The rest is state: the words are still there, and nothing can be pressed to change them.
-  assert.equal(said(shown, "controls-viewing-word"), "On: anyone on this computer can open this view");
+  assert.equal(said(shown, "controls-watching-word"), "On: anyone on this computer can open this view");
   assert.equal(said(shown, "controls-diagnostics-word"), "On (marker)");
   assert.equal(said(shown, "rail-sharing-state"), "On: anyone on this computer can open this view");
 
@@ -997,7 +997,7 @@ test("a browser that keeps nothing, or keeps rubbish, still draws Settings with 
   };
   const blocked = kit({ storage: broken });
   blocked.settings.render(part());
-  assert.equal(said(blocked, "controls-viewing-label"), "Others can watch");
+  assert.equal(said(blocked, "controls-watching-label"), "Others can watch");
   assert.deepEqual(blocked.settings.personal(), { density: "comfortable", text: "standard", motion: "system" });
   const compact = blocked.document.querySelectorAll("[data-personal]")
     .find((button) => button.dataset.value === "compact");

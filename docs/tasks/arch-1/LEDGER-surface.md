@@ -131,7 +131,7 @@ C3c), then the rows below.
 | SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | landed (this commit) |
 | SURF-8 | refactor(workbench): what a watcher may do is said once | - | SURF-8; test-01 | landed (this commit) |
 | SURF-10 | refactor(workbench): the small repeats go | - | SURF-10; test-01 | landed (this commit) |
-| SURF-12 | refactor(workbench): watching, everywhere | - | SURF-12; the route path changes with the preview server | todo |
+| SURF-12 | refactor(workbench): watching, everywhere | - | SURF-12; the route path changes with the preview server; test-01 | landed (this commit) |
 | SURF-13 | refactor(window): the setup flow is one object and the click handler a table | - | SURF-13 | landed (this commit) |
 | SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | landed (this commit) |
 | SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | landed (this commit) |

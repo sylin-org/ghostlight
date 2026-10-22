@@ -102,7 +102,7 @@ enum Api {
     PutPolicy,
     DeletePolicy,
     SetDiagnostics,
-    SetViewing,
+    SetWatching,
     SetupAll,
     HarnessAct,
     TestNotification,
@@ -207,9 +207,9 @@ static ROUTES: [Route; 21] = [
         SMALL_BODY,
     ),
     route(
-        Api::SetViewing,
+        Api::SetWatching,
         Method::Put,
-        "/api/controls/viewing",
+        "/api/controls/watching",
         Does::Act(WebAct::SetWatching),
         SMALL_BODY,
     ),
@@ -715,7 +715,7 @@ fn api(
         Api::PutPolicy => acted(shared, put_policy(shared, head, &body)),
         Api::DeletePolicy => acted(shared, delete_policy(shared, head)),
         Api::SetDiagnostics => acted(shared, set_diagnostics(shared, &projection, &body)),
-        Api::SetViewing => acted(shared, set_viewing(shared, &projection, &body)),
+        Api::SetWatching => acted(shared, set_watching(shared, &projection, &body)),
         Api::SetupAll => acted(shared, setup_all(shared, &body)),
         Api::HarnessAct => acted(shared, harness_act(shared, &projection, &body)),
         Api::TestNotification => test_notification(shared, &body),
@@ -801,7 +801,7 @@ struct DiagnosticsArguments {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ViewingArguments {
+struct WatchingArguments {
     watch: bool,
 }
 
@@ -1078,8 +1078,8 @@ fn set_diagnostics(shared: &Shared, projection: &Projection, body: &[u8]) -> Res
     json_response(Status::Ok, &projection.diagnostics_report(&report))
 }
 
-fn set_viewing(shared: &Shared, projection: &Projection, body: &[u8]) -> Response {
-    let arguments: ViewingArguments = match decode(body) {
+fn set_watching(shared: &Shared, projection: &Projection, body: &[u8]) -> Response {
+    let arguments: WatchingArguments = match decode(body) {
         Ok(arguments) => arguments,
         Err(response) => return response,
     };

@@ -408,9 +408,9 @@ fn runtime_state(fixture: &Fixture) -> RuntimeControlState {
     fixture.facade.look().status().service.runtime_state
 }
 
-fn set_viewing(fixture: &Fixture, watch: bool) -> Reply {
+fn set_watching(fixture: &Fixture, watch: bool) -> Reply {
     fixture.control(
-        Call::new("PUT", "/api/controls/viewing").body(&json!({ "watch": watch }).to_string()),
+        Call::new("PUT", "/api/controls/watching").body(&json!({ "watch": watch }).to_string()),
     )
 }
 
@@ -435,7 +435,9 @@ fn act_call(act: WebAct) -> Call {
         WebAct::SetDiagnostics => {
             Call::new("PUT", "/api/controls/diagnostics").body(r#"{"on":true}"#)
         }
-        WebAct::SetWatching => Call::new("PUT", "/api/controls/viewing").body(r#"{"watch":false}"#),
+        WebAct::SetWatching => {
+            Call::new("PUT", "/api/controls/watching").body(r#"{"watch":false}"#)
+        }
         WebAct::SetupAll => post("/api/integrations/setup-all", "{}"),
         WebAct::HarnessAct => post(
             "/api/integrations/act",
@@ -673,7 +675,7 @@ fn access_is_decided_per_route_by_the_bearer_and_the_live_watching_switch() {
     // Watching goes off: from the next request on, a tab is closed and the window is not.
     let cache = zed_icon_cache(&fixture, UNREADABLE_PNG);
     fixture.facade.attach_icons(cache);
-    assert_eq!(set_viewing(&fixture, false).status, 200);
+    assert_eq!(set_watching(&fixture, false).status, 200);
     let closed = fixture.watch(get("/api/context"));
     assert_eq!(closed.status, 200);
     let closed = closed.json();
@@ -729,7 +731,7 @@ fn access_is_decided_per_route_by_the_bearer_and_the_live_watching_switch() {
     assert_eq!(runtime_state(&fixture), RuntimeControlState::Held);
 
     // And on again: a tab watches from the next request.
-    assert_eq!(set_viewing(&fixture, true).status, 200);
+    assert_eq!(set_watching(&fixture, true).status, 200);
     assert_eq!(
         fixture.watch(get("/api/context")).json()["context"],
         WebContext::Watch.token()
@@ -1050,6 +1052,8 @@ fn a_request_the_gate_does_not_admit_is_answered_before_any_route_runs() {
         "/lib/../app.js",
         "/lib/%2e%2e/app.js",
         "/api/other",
+        // The watching switch's path before SURF-12 named it after watching.
+        "/api/controls/viewing",
         "/app.js%00",
         "/lib\\view.js",
         "/index.html",
@@ -1412,7 +1416,7 @@ fn every_route_takes_exactly_its_arguments_and_anything_else_changes_nothing() {
         calls.push(post(route, r#"{"x":1}"#));
     }
     for body in [r#"{"watch":"yes"}"#, "{}", r#"{"watch":false,"extra":1}"#] {
-        calls.push(Call::new("PUT", "/api/controls/viewing").body(body));
+        calls.push(Call::new("PUT", "/api/controls/watching").body(body));
     }
     calls.push(Call::new("PUT", "/api/controls/diagnostics").body(r#"{"on":"yes"}"#));
     calls.push(

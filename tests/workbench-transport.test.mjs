@@ -59,7 +59,7 @@ const parts = {
   },
   integrations: { harnesses: [{ id: "codex" }] },
   diagnostics: { diagnostics: [{ label: "Ghostlight" }] },
-  controls: { viewing: { watch: true }, you: { context: "control" } }
+  controls: { watching: { watch: true }, you: { context: "control" } }
 };
 
 test("a snapshot is one GET naming the six parts, put back into today's flat shape", async () => {
@@ -223,7 +223,7 @@ test("the other acts go where the table sends them", async () => {
   assert.deepEqual(seen, [
     'POST /api/policy/preview {"document":"{}"}',
     'PUT /api/controls/diagnostics {"on":true}',
-    'PUT /api/controls/viewing {"watch":false}',
+    'PUT /api/controls/watching {"watch":false}',
     "POST /api/integrations/rescan {}",
     "POST /api/integrations/setup-all {}",
     'POST /api/integrations/locate {"id":"codex"}',
