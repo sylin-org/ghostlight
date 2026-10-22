@@ -1,11 +1,22 @@
-//! Orchestrator-owned desktop read model, user intents, and operating-system presentation port.
+//! The workbench the desktop window shows: the orchestrator's disposable read model of its own
+//! work, and the one facade every screen, the tray and the loopback server reach it through.
+//!
+//! This module holds the projection, fed from the closed domain-event vocabulary and the audit
+//! records, and the numbered changes it publishes; the facade over the orchestrator's owners,
+//! which carries out a person's intents (runtime control, policy writes, client acts, setup
+//! steps, native acts); and the records both answer with. Search is in `search`, the places the
+//! workbench opens in `destination`, and the ports to the operating system and the screens, with
+//! their failures, in `ports`.
 
 mod address;
 pub mod context;
+mod destination;
 mod history;
 mod input;
 mod live;
 pub mod parts;
+mod ports;
+mod search;
 pub mod setup;
 #[cfg(test)]
 mod surface_tests;
@@ -13,17 +24,26 @@ mod watching;
 pub mod web;
 
 pub use address::PageAddress;
+pub use destination::WorkbenchDestination;
 pub use history::{HistoryStep, StepHistoryState};
 pub use input::{
     validate_policy_document, validate_search_query, POLICY_DOCUMENT_LIMIT, SEARCH_QUERY_LIMIT,
 };
 pub use live::Look;
+pub use ports::{
+    NativeActError, NotificationKind, WorkbenchError, WorkbenchEvent, WorkbenchEventSink,
+    WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
+    WorkbenchPresentationPort, WorkbenchQuitPort, WorkbenchTrayPort,
+};
+pub use search::{SearchHit, SearchKind};
 pub use watching::Watching;
+
+use ports::native;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -52,7 +72,6 @@ use crate::sync::lock;
 use crate::workspace::WorkspaceStore;
 
 const HISTORY_LIMIT: usize = 500;
-const SEARCH_LIMIT: usize = 100;
 const PREVIEW_DETAIL_LIMIT: usize = 8;
 
 /// What a candidate policy would have done to work this machine already did.
@@ -859,147 +878,6 @@ impl WorkbenchFacade {
         Ok(self.setup_view())
     }
 
-    /// Search what the window shows: its pages, the work in flight, the agents and browsers
-    /// connected now, the agents on this computer, the browser-work setting, the checks, and the
-    /// recorded actions, newest first.
-    ///
-    /// A hit matches on the words a person reads for it, never on an opaque id: a recorded action
-    /// on its tool, its sentence, the host it landed on, its agent, its browser and its outcome,
-    /// so "sylin" finds the actions on sylin.org. Matching allocates nothing per record and only a
-    /// match is worded, so a long history stays quick to search. At most [`SEARCH_LIMIT`] hits.
-    #[must_use]
-    pub fn search(&self, query: &str) -> Vec<SearchHit> {
-        let query = query.trim().to_ascii_lowercase();
-        if query.is_empty() {
-            return Vec::new();
-        }
-        let look = self.look();
-        let gathered = look.gathered();
-        let mut hits = Hits::new(&query);
-        for (page, view) in [
-            (&words::SEARCH_GLANCE, PageAddress::Monitor),
-            (&words::SEARCH_INTEGRATIONS, PageAddress::Integrations),
-            (&words::SEARCH_STATUS, PageAddress::Status),
-            (&words::SEARCH_POLICY, PageAddress::Policy),
-            (&words::SEARCH_SETTINGS, PageAddress::Settings),
-        ] {
-            if hits.finds(&[page.title, page.detail]) {
-                hits.push(SearchHit::new(
-                    SearchKind::Destination,
-                    view.as_str(),
-                    page.title,
-                    page.detail.to_owned(),
-                    view,
-                ));
-            }
-        }
-        for operation in &gathered.operations {
-            let phase = operation.phase.word();
-            if hits.finds_action(&operation.tool, &[&operation.agent.name, phase]) {
-                hits.push(SearchHit::new(
-                    SearchKind::Operation,
-                    &operation.invocation,
-                    &words::tool_words(&operation.tool),
-                    words::search_operation_detail(&operation.agent.name, phase),
-                    PageAddress::Monitor,
-                ));
-            }
-        }
-        for session in &gathered.sessions {
-            let line = words::session_line(
-                session.tab_count,
-                session.browser.as_deref(),
-                session.running_operations > 0,
-                session.channel == IntakeChannel::Cli,
-            );
-            if hits.finds(&[&session.agent.name, &line]) {
-                hits.push(SearchHit::new(
-                    SearchKind::Session,
-                    &session.id,
-                    &session.agent.name,
-                    line,
-                    PageAddress::Monitor,
-                ));
-            }
-        }
-        for browser in &gathered.browsers {
-            let detail = words::search_browser_detail(browser.tab_count);
-            if hits.finds(&[&browser.family, &detail]) {
-                hits.push(SearchHit::new(
-                    SearchKind::Browser,
-                    &browser.id,
-                    &browser.family,
-                    detail,
-                    PageAddress::Monitor,
-                ));
-            }
-        }
-        for harness in &gathered.harnesses {
-            let word = words::harness_state_word(
-                harness.state,
-                harness.copy_only,
-                parts::in_use(harness, &gathered.sessions),
-            );
-            if hits.finds(&[&harness.label, word]) {
-                hits.push(SearchHit::new(
-                    SearchKind::Installation,
-                    &harness.id,
-                    &harness.label,
-                    word.to_owned(),
-                    PageAddress::Integrations,
-                ));
-            }
-        }
-        let runtime = crate::language::control::state_word(gathered.runtime_state);
-        if hits.finds(&[words::CONTROLS_RUNTIME_LABEL, runtime]) {
-            hits.push(SearchHit::new(
-                SearchKind::Configuration,
-                RUNTIME_SETTING_ID,
-                words::CONTROLS_RUNTIME_LABEL,
-                runtime.to_owned(),
-                PageAddress::SettingsBrowserWork,
-            ));
-        }
-        for diagnostic in &gathered.checks() {
-            if hits.finds(&[&diagnostic.label, &diagnostic.detail]) {
-                hits.push(SearchHit::new(
-                    SearchKind::Diagnostic,
-                    diagnostic.id.as_str(),
-                    &diagnostic.label,
-                    diagnostic.detail.clone(),
-                    PageAddress::Status,
-                ));
-            }
-        }
-        for item in &self.projection.history() {
-            let outcome = words::search_outcome(item.outcome);
-            let browser = item.browser.as_deref().unwrap_or_default();
-            if hits.finds_action(
-                &item.tool,
-                &[
-                    &item.summary,
-                    item.observed.host.as_deref().unwrap_or_default(),
-                    &item.agent.name,
-                    browser,
-                    outcome.unwrap_or_default(),
-                ],
-            ) {
-                hits.push(SearchHit {
-                    outcome: outcome.map(|_| item.outcome),
-                    timestamp_ms: Some(item.timestamp_ms),
-                    ..SearchHit::new(
-                        SearchKind::History,
-                        &item.invocation,
-                        &words::search_action_title(&item.tool, &item.summary),
-                        words::search_action_detail(&item.agent.name, browser),
-                        PageAddress::Monitor,
-                    )
-                });
-            }
-        }
-        hits.found
-    }
-
     /// Apply an explicit local-human runtime control through the authoritative owners.
     ///
     /// The authority's state is the whole effect: it is checked before every browser effect, with
@@ -1256,98 +1134,8 @@ impl WorkbenchFacade {
     }
 }
 
-/// Best-effort operating-system presentation port.
-pub trait WorkbenchPresentationPort: Send + Sync {
-    /// Reveal and focus the existing native workbench surface, at `address` when one is given.
-    fn reveal(&self, address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError>;
-
-    /// Deliver one high-signal, content-free notification.
-    fn notify(&self, notification: WorkbenchNotification)
-        -> Result<(), WorkbenchPresentationError>;
-}
-
-/// What only the operating system can do for the workbench: open a link, open a folder, ask for
-/// a file.
-///
-/// The service owns what to open and when; the adapter that implements this owns how this
-/// computer does it. It is kept apart from [`WorkbenchPresentationPort`] so a presentation
-/// adapter that only shows and notifies needs none of it.
-pub trait WorkbenchNativeActs: Send + Sync {
-    /// Open an address in the person's browser. The facade passes only `https://` addresses.
-    fn open_url(&self, url: &str) -> Result<(), WorkbenchPresentationError>;
-
-    /// Show a folder in the file manager.
-    fn open_folder(&self, path: &Path) -> Result<(), WorkbenchPresentationError>;
-
-    /// Ask the person to choose a file, under `title`. Answers `None` when they close the dialog.
-    /// The dialog blocks the calling thread until the person answers.
-    fn pick_file(&self, title: &str) -> Result<Option<PathBuf>, WorkbenchPresentationError>;
-}
-
-/// What ends the service when the person asks for it.
-///
-/// The service attaches it, so the workbench asks for a Quit without depending on how the service
-/// ends.
-pub trait WorkbenchQuitPort: Send + Sync {
-    /// Begin a person's Quit. Returns at once; the service finishes what is in flight first.
-    fn quit(&self);
-}
-
-/// What draws the tray when the service describes it differently.
-///
-/// The service attaches it, so the workbench says what the tray is without depending on how it
-/// reaches the shell that draws it.
-pub trait WorkbenchTrayPort: Send + Sync {
-    /// The tray changed. This returns at once: it is called from inside the refresh of the live
-    /// parts, so it must not wait on anything slow.
-    fn tray_changed(&self, model: TrayModel);
-}
-
 /// The start every address the service opens has.
 const SECURE_SCHEME: &str = "https://";
-
-/// Why a native act did not happen.
-#[derive(Debug, Error)]
-pub enum NativeActError {
-    /// No adapter is attached, or this computer refused.
-    #[error(transparent)]
-    Workbench(#[from] WorkbenchError),
-    /// The client roster refused: an unknown product or a path that is not a client.
-    #[error(transparent)]
-    Harness(#[from] HarnessError),
-    /// Process diagnostics are off, so there is no folder to show.
-    #[error("{}", words::DIAGNOSTICS_OFF)]
-    DiagnosticsOff,
-    /// The address is not a secure one.
-    #[error("{}", words::LINK_NOT_SECURE)]
-    LinkNotSecure,
-}
-
-/// A refusal of the adapter, as the failure of the act.
-fn native(error: WorkbenchPresentationError) -> NativeActError {
-    WorkbenchError::from(error).into()
-}
-
-/// Best-effort outbound port for sequenced workbench changes.
-///
-/// Delivery failures are presentation failures. The adapter contains them, and they never reach
-/// domain authority, governance, or completion truth.
-pub trait WorkbenchEventSink: Send + Sync {
-    /// Deliver one sequenced change to the attached presentation surface.
-    fn publish(&self, event: WorkbenchEvent);
-}
-
-/// One sequenced workbench change fact for a disposable presentation surface.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct WorkbenchEvent {
-    /// Monotonic publication sequence.
-    ///
-    /// A surface that receives a sequence other than its last plus one has missed a change and
-    /// must resynchronize from a fresh snapshot rather than trust its local cache.
-    pub seq: u64,
-    /// What changed.
-    pub change: WorkbenchChange,
-}
 
 /// Closed vocabulary of workbench changes worth rendering without a full snapshot.
 ///
@@ -1455,76 +1243,6 @@ impl RuntimeSource {
             Self::Watcher => words::PAUSED_FROM_WATCHER,
             Self::Tray => words::PAUSED_FROM_TRAY,
             Self::Browser => words::PAUSED_FROM_BROWSER,
-        }
-    }
-}
-
-/// One content-free notification decision made by the orchestrator.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct WorkbenchNotification {
-    /// Semantic reason for the notification.
-    pub kind: NotificationKind,
-    /// Fixed Ghostlight-authored title.
-    pub title: String,
-    /// Fixed Ghostlight-authored body.
-    pub body: String,
-}
-
-/// Closed notification reasons.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NotificationKind {
-    /// Governance blocked work.
-    Blocked,
-    /// The user explicitly tested notifications.
-    Checkup,
-}
-
-/// Failure of the replaceable operating-system presentation adapter.
-#[derive(Clone, Debug, Error, Eq, PartialEq)]
-pub enum WorkbenchPresentationError {
-    /// Native notification delivery failed.
-    #[error("native presentation failed: {0}")]
-    Native(String),
-    /// The computer refused an open or a dialog. The text is the computer's own.
-    #[error("{0}")]
-    ActFailed(String),
-    /// There is no window program to carry the request out, or it went away before it answered.
-    #[error("{}", words::PRESENTATION_UNAVAILABLE)]
-    Unavailable,
-}
-
-/// Failure at the typed workbench application boundary.
-#[derive(Clone, Debug, Error, Eq, PartialEq)]
-pub enum WorkbenchError {
-    /// No native presentation adapter is currently attached.
-    #[error("{}", words::PRESENTATION_UNAVAILABLE)]
-    PresentationUnavailable,
-    /// Native presentation rejected the request.
-    #[error(transparent)]
-    Presentation(WorkbenchPresentationError),
-    /// No service is attached to end.
-    #[error("{}", words::QUIT_UNAVAILABLE)]
-    QuitUnavailable,
-    /// A setup step names a browser or profile this computer no longer offers, or is not a step
-    /// the service performs.
-    #[error("{}", words::SETUP_STEP_NOT_OFFERED)]
-    SetupStepNotOffered,
-    /// A setup step would start a process while the session is ending.
-    #[error("{}", words::SETUP_SESSION_ENDING)]
-    SetupSessionEnding,
-    /// The computer would not start the browser a setup step names.
-    #[error("{}", words::SETUP_BROWSER_NOT_STARTED)]
-    SetupBrowserNotStarted,
-}
-
-impl From<WorkbenchPresentationError> for WorkbenchError {
-    /// A presentation adapter with nothing to talk to is the facade's own unavailable failure, so
-    /// a person reads one failure however the adapter came to be missing.
-    fn from(error: WorkbenchPresentationError) -> Self {
-        match error {
-            WorkbenchPresentationError::Unavailable => Self::PresentationUnavailable,
-            other => Self::Presentation(other),
         }
     }
 }
@@ -1921,144 +1639,6 @@ pub enum DiagnosticSeverity {
     Failing,
 }
 
-/// Every place the workbench is willing to send someone.
-///
-/// The surface names a destination; the orchestrator owns the address. A closed vocabulary is the
-/// difference between "the workbench can open a link" and "the workbench can open any URL": there
-/// is no free string to smuggle a destination through, so a page that is not on this list cannot
-/// be reached from here however the surface is coaxed.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkbenchDestination {
-    /// The Ghostlight project page.
-    Home,
-    /// The live demo stage.
-    Demo,
-    /// The guided "which mode fits me" aid.
-    DecisionAid,
-    /// The source repository.
-    Source,
-    /// Installing Ghostlight and connecting a client.
-    InstallGuide,
-    /// Writing and applying a governance manifest.
-    GovernanceGuide,
-    /// Driving Ghostlight from a script or shell.
-    ScriptingGuide,
-    /// Shipping the audit trail into a SIEM.
-    AuditGuide,
-    /// What the product promises, and how each claim is checked.
-    TrustCenter,
-    /// Every architectural decision, and why it was taken.
-    DecisionRecords,
-    /// The licensing split in plain language.
-    LicensingGuide,
-    /// The rest of the Sylin toolkit.
-    SylinTools,
-    /// Google's download page for Chrome, which the setup view offers a person with no browser
-    /// Ghostlight supports.
-    GetChrome,
-}
-
-/// The branch of the source repository that holds the documentation of the published product.
-/// A person running a release reads the documents of the product they run, and `main` is that
-/// branch from the cutover on.
-macro_rules! documentation_branch {
-    () => {
-        "main"
-    };
-}
-
-/// One document of the source repository, on the documentation branch.
-macro_rules! repository_document {
-    ($path:literal) => {
-        concat!(
-            "https://github.com/sylin-org/ghostlight/blob/",
-            documentation_branch!(),
-            "/",
-            $path
-        )
-    };
-}
-
-impl WorkbenchDestination {
-    /// Resolve the exact address. Every one of these was checked to resolve when it was added.
-    ///
-    /// Documentation links name the branch of `documentation_branch!`, so a release shows the
-    /// documents of the product it is.
-    #[must_use]
-    pub const fn url(self) -> &'static str {
-        match self {
-            Self::Home => "https://sylin.org/ghostlight/",
-            Self::Demo => "https://sylin.org/ghostlight/demo/",
-            Self::DecisionAid => "https://sylin.org/ghostlight/decision-aid/",
-            Self::Source => "https://github.com/sylin-org/ghostlight",
-            Self::InstallGuide => {
-                repository_document!("docs/guides/installation.md")
-            }
-            Self::GovernanceGuide => {
-                repository_document!("docs/guides/governance-configuration.md")
-            }
-            Self::ScriptingGuide => {
-                repository_document!("docs/guides/scripting.md")
-            }
-            Self::AuditGuide => {
-                repository_document!("docs/guides/siem-integration.md")
-            }
-            Self::TrustCenter => {
-                repository_document!("docs/trust/README.md")
-            }
-            Self::DecisionRecords => {
-                repository_document!("docs/adr/README.md")
-            }
-            Self::LicensingGuide => {
-                repository_document!("docs/guides/licensing.md")
-            }
-            Self::SylinTools => "https://sylin.org/tools/",
-            Self::GetChrome => "https://www.google.com/chrome/",
-        }
-    }
-
-    /// The full vocabulary, so a new destination cannot be added without the guards seeing it.
-    #[must_use]
-    pub const fn all() -> [Self; 13] {
-        [
-            Self::Home,
-            Self::Demo,
-            Self::DecisionAid,
-            Self::Source,
-            Self::InstallGuide,
-            Self::GovernanceGuide,
-            Self::ScriptingGuide,
-            Self::AuditGuide,
-            Self::TrustCenter,
-            Self::DecisionRecords,
-            Self::LicensingGuide,
-            Self::SylinTools,
-            Self::GetChrome,
-        ]
-    }
-
-    /// The token the surface uses to name this destination.
-    #[must_use]
-    pub const fn key(self) -> &'static str {
-        match self {
-            Self::Home => "home",
-            Self::Demo => "demo",
-            Self::DecisionAid => "decision_aid",
-            Self::Source => "source",
-            Self::InstallGuide => "install_guide",
-            Self::GovernanceGuide => "governance_guide",
-            Self::ScriptingGuide => "scripting_guide",
-            Self::AuditGuide => "audit_guide",
-            Self::TrustCenter => "trust_center",
-            Self::DecisionRecords => "decision_records",
-            Self::LicensingGuide => "licensing_guide",
-            Self::SylinTools => "sylin_tools",
-            Self::GetChrome => "get_chrome",
-        }
-    }
-}
-
 /// Explicit user-facing runtime actions.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -2093,125 +1673,6 @@ pub struct WorkbenchIntentResult {
     pub runtime_state: RuntimeControlState,
     /// Fixed user-facing outcome.
     pub message: String,
-}
-
-/// One search result, worded for the person who searched (`crate::language::workbench`).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct SearchHit {
-    /// Result category.
-    pub kind: SearchKind,
-    /// Opaque result identity: for a recorded action its invocation, so the window can open its
-    /// row.
-    pub id: String,
-    /// What the hit is, in a person's words.
-    pub title: String,
-    /// The second line, in a person's words.
-    pub detail: String,
-    /// When a recorded action settled; the window says how long ago.
-    pub timestamp_ms: Option<u64>,
-    /// How a recorded action ended, present only when its row says so in a word
-    /// ([`words::search_outcome`]).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<crate::language::history::OutcomeClass>,
-    /// The page, and the section of Settings, that shows what the hit found.
-    pub view: PageAddress,
-}
-
-impl SearchHit {
-    fn new(kind: SearchKind, id: &str, title: &str, detail: String, view: PageAddress) -> Self {
-        Self {
-            kind,
-            id: id.to_owned(),
-            title: title.to_owned(),
-            detail,
-            timestamp_ms: None,
-            outcome: None,
-            view,
-        }
-    }
-}
-
-/// Closed search-result categories.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SearchKind {
-    /// A first-class workbench destination.
-    Destination,
-    /// Current operation.
-    Operation,
-    /// Admitted session.
-    Session,
-    /// Terminal history record.
-    History,
-    /// Connected browser instance.
-    Browser,
-    /// Checkup finding.
-    Diagnostic,
-    /// Runtime or authority configuration.
-    Configuration,
-    /// Supported development-harness registration.
-    Installation,
-}
-
-/// The search identity of the browser-work setting.
-const RUNTIME_SETTING_ID: &str = "runtime-control";
-
-/// The hits of one search: what matches `query`, up to [`SEARCH_LIMIT`].
-struct Hits<'a> {
-    query: &'a str,
-    found: Vec<SearchHit>,
-}
-
-impl<'a> Hits<'a> {
-    const fn new(query: &'a str) -> Self {
-        Self {
-            query,
-            found: Vec::new(),
-        }
-    }
-
-    /// Whether there is room for another hit and one of `fields` holds the query, ignoring ASCII
-    /// case. The query is already lower case.
-    fn finds(&self, fields: &[&str]) -> bool {
-        self.found.len() < SEARCH_LIMIT
-            && fields
-                .iter()
-                .any(|field| holds_folded(field, self.query.as_bytes()))
-    }
-
-    /// Whether there is room for another hit and the catalog `tool` or one of `fields` holds the
-    /// query. A tool matches by its name or by its words, so "fill form" and "browser_fill_form"
-    /// both find `browser_fill_form`.
-    fn finds_action(&self, tool: &str, fields: &[&str]) -> bool {
-        self.finds(fields)
-            || (self.found.len() < SEARCH_LIMIT && holds_tool(tool, self.query.as_bytes()))
-    }
-
-    fn push(&mut self, hit: SearchHit) {
-        self.found.push(hit);
-    }
-}
-
-/// Whether the catalog name `tool` holds `needle`, reading an underscore and a space as the same
-/// character, so the tool's words match its name ([`words::tool_words`]).
-fn holds_tool(tool: &str, needle: &[u8]) -> bool {
-    let same = |left: u8, right: u8| {
-        left.eq_ignore_ascii_case(&right) || matches!((left, right), (b'_', b' ') | (b' ', b'_'))
-    };
-    tool.as_bytes().windows(needle.len()).any(|window| {
-        window
-            .iter()
-            .zip(needle)
-            .all(|(&left, &right)| same(left, right))
-    })
-}
-
-/// Whether `field` holds `needle`, comparing ASCII letters without case and allocating nothing.
-fn holds_folded(field: &str, needle: &[u8]) -> bool {
-    field
-        .as_bytes()
-        .windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn unix_ms() -> u64 {

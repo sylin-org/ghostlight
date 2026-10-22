@@ -2226,7 +2226,7 @@ test("the refusal row and the card name one organization, in the service's words
   assert.doesNotMatch(VIEW_SOURCE, /[Yy]our organization/, "the page names no organization of its own");
 });
 
-// WorkbenchDestination in workbench/mod.rs, less get_chrome, which only the setup view offers. The
+// WorkbenchDestination in workbench/destination.rs, less get_chrome, which only the setup view offers. The
 // Rust table's own test pins the same names.
 const PRODUCT_DESTINATIONS = [
   "home", "demo", "decision_aid", "source", "install_guide", "governance_guide", "scripting_guide",

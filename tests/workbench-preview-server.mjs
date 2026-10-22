@@ -533,7 +533,7 @@ const withCappedHistory = (flat) => ({ ...flat, history: [...flat.history, ...ol
 /**
  * The page with no browser connected, as the service says it: At a glance names what starts on
  * request, and the Status Browser check passes when `starts` would start on an agent's request or
- * warns that it waits for one when nothing would (`gatherStatus` in `workbench/mod.rs`).
+ * warns that it waits for one when nothing would (`Live::status` in `workbench/live.rs`).
  */
 const disconnected = (flat, starts) => ({
   ...flat,

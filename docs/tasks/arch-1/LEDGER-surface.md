@@ -135,7 +135,7 @@ C3c), then the rows below.
 | SURF-13 | refactor(window): the setup flow is one object and the click handler a table | - | SURF-13 | landed (this commit) |
 | SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | landed (this commit) |
 | SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | landed (this commit) |
-| SURF-9 | refactor(workbench): `workbench/mod.rs` splits on its seams | S3 | SURF-9; no `kit.css` rename | todo |
+| SURF-9 | refactor(workbench): `workbench/mod.rs` splits on its seams | S3 | SURF-9; no `kit.css` rename; test-01 | landed (this commit) |
 | SURF-11 | refactor(window): the palette has tokens, and the desktop one module | - | SURF-11; colour values stay | landed (this commit) |
 - U-D4, found by tests-1's pilot cut of `service/mod.rs` on 2026-10-21: the service test
   `the_browser_toolbar_pauses_through_the_workbench_and_says_so` required a second

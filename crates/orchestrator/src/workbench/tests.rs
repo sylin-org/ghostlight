@@ -1,9 +1,9 @@
-//! Tests of the workbench read model and its facade, `mod.rs`: how domain events and audit
-//! records become live work, history and numbered changes, and what the facade answers the
-//! window, the tray and every Settings page (readiness, search, previews, runtime control, the
-//! opener, the setup part and the one agent count). Each test names the ACCEPTANCE gate, contract
-//! or defect it protects. The loopback server's own tests are in `web/tests.rs`, which borrows
-//! [`RecordingActs`] from here.
+//! Tests of the workbench read model and its facade (`mod.rs`, with `search.rs`, `destination.rs`
+//! and `ports.rs`): how domain events and audit records become live work, history and numbered
+//! changes, and what the facade answers the window, the tray and every Settings page (readiness,
+//! search, previews, runtime control, the opener, the setup part and the one agent count). Each
+//! test names the ACCEPTANCE gate, contract or defect it protects. The loopback server's own tests
+//! are in `web/tests.rs`, which borrows [`RecordingActs`] from here.
 
 use std::io;
 use std::sync::{Arc, Mutex};
