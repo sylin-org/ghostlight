@@ -40,5 +40,9 @@ on the owner's Windows machine) at the owner's direction ("do the full run!"). T
 - Alpine (musl), test-03, df856a6c: `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` picked the
   musl images; version 2.0.1, doctor Ready; the store extension updated to 2.0.1 by itself and was
   active after a browser restart; the desk bell passed.
-- Windows (leo-desktop-02) and Bluefin were asked for the same run; their sessions were offline at
-  publication, and their records are added when they report.
+- Windows, leo-desktop-02, test-04, 499358bf: `irm https://sylin.org/ghostlight/get.ps1 | iex`
+  installed 2.0.1; doctor Ready with the store's 2.0.1 extension; the desk bell passed, its tab in
+  the ghost and "Claude Code" group; `npx -y ghostlight@2.0.1 deployment install --restore` from npm
+  installed and started the service.
+- Bluefin was asked for the same run; its session was offline, and its record is added when it
+  reports.

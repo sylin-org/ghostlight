@@ -254,7 +254,7 @@ Now:
   the Chrome Web Store adapter 2.0.1 at 100%, the MCP Registry record and `main` at the release.
   WinGet's manifest is microsoft/winget-pkgs#458539. The custody record is
   [testing/release-2.0.1-2026-10-22.md](testing/release-2.0.1-2026-10-22.md); the public install
-  is proven on Alpine, with Windows and Bluefin to follow when their sessions are back.
+  is proven on Alpine and Windows, with Bluefin to follow when its session is back.
 - The 2.0.1 extension (`aaa234b1...`, from candidate run 39669867246) was submitted to the Chrome Web
   Store on 2026-10-22 through `scripts/publish-extension.ps1`, at the owner's go: uploaded, then
   submitted for review as DEFAULT_PUBLISH, so it goes public when Google approves it. State:
