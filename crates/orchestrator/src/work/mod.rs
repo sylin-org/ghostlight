@@ -317,10 +317,7 @@ impl ApplicationExecutor {
 
     /// Show a sustained admission wait on the existing operation surface, without a popup.
     pub(crate) fn show_waiting(&self, prepared: &PreparedInvocation) {
-        let mut stage = prepared
-            .stage
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut stage = crate::sync::lock(&prepared.stage);
         if stage.running_or_finished
             || stage.waiting_reported
             || prepared.received.elapsed() < WAITING_SHOWN_AFTER
@@ -429,10 +426,7 @@ impl ApplicationExecutor {
             && !cancellation.is_cancelled()
             && Instant::now() < deadline
         {
-            let mut stage = prepared
-                .stage
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut stage = crate::sync::lock(&prepared.stage);
             stage.running_or_finished = true;
             drop(stage);
             self.emit(DomainEvent::WorkStarted {
@@ -468,11 +462,7 @@ impl ApplicationExecutor {
         } else {
             self.workspace_failure(&context, WorkspaceError::UnknownWorkspace)
         };
-        prepared
-            .stage
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .running_or_finished = true;
+        crate::sync::lock(&prepared.stage).running_or_finished = true;
         if let Some(lease) = lease.as_ref() {
             pending::report_forgotten(lease, &mut terminal);
         }
