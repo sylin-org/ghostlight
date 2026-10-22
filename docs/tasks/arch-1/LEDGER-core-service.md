@@ -49,7 +49,7 @@ In order. "After" names what a slice waits for.
 | SERV-11 | refactor(service): one name per meaning on the service side | SERV-3 | SERV-11's service half | landed (this commit); the `cli/` names and its "authority" docs are install's half |
 | SERV-14 | docs(service): the module docs map the crate | SERV-11 | SERV-14 | todo |
 | BROW-1 | refactor(browser): protocol 4's frames and hello validators move into protocol 4 | C3c | BROW-1 as corrected; the registry stays in `browser/`; cross-lane `browser/adapter/` | todo |
-| BROW-5 | refactor(browser): the `Work` alias goes | - | BROW-5 | todo |
+| BROW-5 | refactor(browser): the `Work` alias goes | - | BROW-5 | landed (this commit) |
 | BROW-8 | refactor(browser): the port's literals are named | - | BROW-8's port half; `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` as a check, not a tie | todo |
 | BROW-11 | docs(browser): the port's docs match the code | BROW-1 | BROW-11's port half | todo |
 | BROW-12 | refactor(browser): one SHA-256 helper | - | BROW-12's hash part | landed with the adapter's BROW-12a (52753883); nothing of it is left in this lane's files, and governance's own hex writers are policy's |
@@ -166,3 +166,8 @@ A kill-on-close job would need the relay to break away; none has been seen.
   the id after the params), and answers each from a `too_large` template the service hands over
   with the others, in its own words with a next step (ADR-0197's Decision 2 gains the case). Before
   any reply, or from a service without that template, it answers as before any reply.
+- BROW-5 as landed: `pub type Work = BrowserCommand` is gone. Its only users, `browser/mod.rs`
+  with its `testing` module and the one rename in `work/tests/findings.rs`, say `BrowserCommand`,
+  as the executor and the rest of the crate do. Per the skeptic, `wire.rs`'s `as physical` import
+  stays: renaming it would leave the layer's `Physical*` types, so the layer would still have two
+  names.

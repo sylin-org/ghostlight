@@ -13,7 +13,7 @@ use super::documents::{inventory, open, policy_file};
 use super::execution::workspace_with_a_target;
 use super::replacement::{one_same, removed};
 use super::*;
-use crate::browser::adapter::BrowserCommand as Work;
+use crate::browser::adapter::BrowserCommand;
 use crate::browser::adapter::PhysicalSemantic;
 use crate::browser::{BrowserPort, BrowserSummary};
 use crate::governance::CapabilitySet;
@@ -30,11 +30,11 @@ impl BrowserPort for HeldRead {
     fn call(
         &self,
         browser: &str,
-        command: Work,
+        command: BrowserCommand,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
-        if matches!(command, Work::InDocuments { .. }) {
+        if matches!(command, BrowserCommand::InDocuments { .. }) {
             if let Some(entered) = self.entered.lock().unwrap().take() {
                 entered.send(()).unwrap();
                 let release = self.release.lock().unwrap().take().unwrap();
@@ -359,7 +359,7 @@ fn a_flow_step_meets_what_the_same_call_meets_outside_a_flow() {
     assert_eq!(again.facts["stale"], "removed");
     assert!(browser.calls()[before..]
         .iter()
-        .all(|call| matches!(call, Work::QuerySemantic(PhysicalSemantic { .. }))));
+        .all(|call| matches!(call, BrowserCommand::QuerySemantic(PhysicalSemantic { .. }))));
 
     // Its tab.
     let (executor, browser, _, workspace_a, _) = fixture();

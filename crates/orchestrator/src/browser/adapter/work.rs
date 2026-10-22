@@ -15,9 +15,6 @@ use crate::language::{
     ScrollAmount, ScrollDirection,
 };
 
-/// The service's internal browser work vocabulary, by its executor name.
-pub type Work = BrowserCommand;
-
 /// Browser-local readiness observed by the adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

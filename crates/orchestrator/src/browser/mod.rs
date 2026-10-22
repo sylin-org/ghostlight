@@ -13,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::browser::adapter::chromium::protocol4::{self, link::Line, link::Link, wire};
-use crate::browser::adapter::{BrowserEvent, BrowserOutcome, RuntimeControlState, Work};
+use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome, RuntimeControlState};
 use crate::browser::adapter::{
     PhysicalClick, PhysicalDiagnosticsRead, PhysicalDrag, PhysicalFill, PhysicalPointClick,
     PhysicalPointDrag, PhysicalPointDrop, PhysicalPointWheel, PhysicalPressKey, PhysicalScroll,
@@ -116,66 +116,66 @@ pub struct BrowserDispatch<'a> {
 /// A command that names no tab, or several (a listing, an open, a diagnostics clear, the
 /// recording's own commands and presentation), has none.
 #[must_use]
-pub fn addressed_tab(command: &Work) -> Option<u64> {
+pub fn addressed_tab(command: &BrowserCommand) -> Option<u64> {
     match command {
-        Work::InDocuments { primitive, .. } => addressed_tab(primitive),
-        Work::DescribeDocuments { tab_id, .. }
-        | Work::FocusTab { tab_id }
-        | Work::AdoptTab { tab_id, .. }
-        | Work::Navigate { tab_id, .. }
-        | Work::TraverseHistory { tab_id, .. }
-        | Work::Reload { tab_id, .. }
-        | Work::CloseTab { tab_id, .. }
-        | Work::NavigateDiscardingBeforeUnload { tab_id, .. }
-        | Work::ReadText { tab_id, .. }
-        | Work::ReadDocument { tab_id, .. }
-        | Work::Inspect { tab_id, .. }
-        | Work::InspectTree { tab_id, .. }
-        | Work::Find { tab_id, .. }
-        | Work::Screenshot { tab_id, .. }
-        | Work::ScreenshotRegion { tab_id, .. }
-        | Work::DescribeTargets { tab_id, .. }
-        | Work::QuerySemantic(PhysicalSemantic { tab_id, .. })
-        | Work::Activate(PhysicalClick { tab_id, .. })
-        | Work::ActivatePoint(PhysicalPointClick {
+        BrowserCommand::InDocuments { primitive, .. } => addressed_tab(primitive),
+        BrowserCommand::DescribeDocuments { tab_id, .. }
+        | BrowserCommand::FocusTab { tab_id }
+        | BrowserCommand::AdoptTab { tab_id, .. }
+        | BrowserCommand::Navigate { tab_id, .. }
+        | BrowserCommand::TraverseHistory { tab_id, .. }
+        | BrowserCommand::Reload { tab_id, .. }
+        | BrowserCommand::CloseTab { tab_id, .. }
+        | BrowserCommand::NavigateDiscardingBeforeUnload { tab_id, .. }
+        | BrowserCommand::ReadText { tab_id, .. }
+        | BrowserCommand::ReadDocument { tab_id, .. }
+        | BrowserCommand::Inspect { tab_id, .. }
+        | BrowserCommand::InspectTree { tab_id, .. }
+        | BrowserCommand::Find { tab_id, .. }
+        | BrowserCommand::Screenshot { tab_id, .. }
+        | BrowserCommand::ScreenshotRegion { tab_id, .. }
+        | BrowserCommand::DescribeTargets { tab_id, .. }
+        | BrowserCommand::QuerySemantic(PhysicalSemantic { tab_id, .. })
+        | BrowserCommand::Activate(PhysicalClick { tab_id, .. })
+        | BrowserCommand::ActivatePoint(PhysicalPointClick {
             at: PhysicalViewPoint { tab_id, .. },
             ..
         })
-        | Work::WheelAt(PhysicalPointWheel {
+        | BrowserCommand::WheelAt(PhysicalPointWheel {
             at: PhysicalViewPoint { tab_id, .. },
             ..
         })
-        | Work::Scroll(PhysicalScroll { tab_id, .. })
-        | Work::SetZoom { tab_id, .. }
-        | Work::ResizeWindow { tab_id, .. }
-        | Work::Hover { tab_id, .. }
-        | Work::HoverPoint(PhysicalViewPoint { tab_id, .. })
-        | Work::Fill(PhysicalFill { tab_id, .. })
-        | Work::TypeText(PhysicalTypeText { tab_id, .. })
-        | Work::DescribeFocused { tab_id }
-        | Work::TypeFocused(PhysicalTypeFocused { tab_id, .. })
-        | Work::PressKey(PhysicalPressKey { tab_id, .. })
-        | Work::Drag(PhysicalDrag { tab_id, .. })
-        | Work::DragPoints(PhysicalPointDrag { tab_id, .. })
-        | Work::UploadFiles { tab_id, .. }
-        | Work::DropImageAt(PhysicalPointDrop {
+        | BrowserCommand::Scroll(PhysicalScroll { tab_id, .. })
+        | BrowserCommand::SetZoom { tab_id, .. }
+        | BrowserCommand::ResizeWindow { tab_id, .. }
+        | BrowserCommand::Hover { tab_id, .. }
+        | BrowserCommand::HoverPoint(PhysicalViewPoint { tab_id, .. })
+        | BrowserCommand::Fill(PhysicalFill { tab_id, .. })
+        | BrowserCommand::TypeText(PhysicalTypeText { tab_id, .. })
+        | BrowserCommand::DescribeFocused { tab_id }
+        | BrowserCommand::TypeFocused(PhysicalTypeFocused { tab_id, .. })
+        | BrowserCommand::PressKey(PhysicalPressKey { tab_id, .. })
+        | BrowserCommand::Drag(PhysicalDrag { tab_id, .. })
+        | BrowserCommand::DragPoints(PhysicalPointDrag { tab_id, .. })
+        | BrowserCommand::UploadFiles { tab_id, .. }
+        | BrowserCommand::DropImageAt(PhysicalPointDrop {
             at: PhysicalViewPoint { tab_id, .. },
             ..
         })
-        | Work::EvaluateScript { tab_id, .. }
-        | Work::Observe(PhysicalWait { tab_id, .. })
-        | Work::InspectDialog { tab_id }
-        | Work::HandleDialog { tab_id, .. }
-        | Work::ReadDiagnostics(PhysicalDiagnosticsRead { tab_id, .. })
-        | Work::StartRecording { tab_id } => Some(*tab_id),
-        Work::ListTabs
-        | Work::OpenTab { .. }
-        | Work::ClearDiagnostics { .. }
-        | Work::StatusRecording { .. }
-        | Work::StopRecording { .. }
-        | Work::ExportRecording { .. }
-        | Work::DiscardRecording { .. }
-        | Work::Present { .. } => None,
+        | BrowserCommand::EvaluateScript { tab_id, .. }
+        | BrowserCommand::Observe(PhysicalWait { tab_id, .. })
+        | BrowserCommand::InspectDialog { tab_id }
+        | BrowserCommand::HandleDialog { tab_id, .. }
+        | BrowserCommand::ReadDiagnostics(PhysicalDiagnosticsRead { tab_id, .. })
+        | BrowserCommand::StartRecording { tab_id } => Some(*tab_id),
+        BrowserCommand::ListTabs
+        | BrowserCommand::OpenTab { .. }
+        | BrowserCommand::ClearDiagnostics { .. }
+        | BrowserCommand::StatusRecording { .. }
+        | BrowserCommand::StopRecording { .. }
+        | BrowserCommand::ExportRecording { .. }
+        | BrowserCommand::DiscardRecording { .. }
+        | BrowserCommand::Present { .. } => None,
     }
 }
 
@@ -190,7 +190,7 @@ pub trait BrowserPort: Send + Sync {
     fn call(
         &self,
         browser: &str,
-        command: Work,
+        command: BrowserCommand,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError>;
@@ -203,7 +203,7 @@ pub trait BrowserPort: Send + Sync {
     fn call_guarded(
         &self,
         browser: &str,
-        command: Work,
+        command: BrowserCommand,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         (dispatch.admit)()?;
@@ -1122,7 +1122,7 @@ impl RelayBrowserPort {
     fn call_inner(
         &self,
         browser: &str,
-        command: Work,
+        command: BrowserCommand,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         if dispatch.cancelled.load(Ordering::SeqCst) {
@@ -1191,7 +1191,7 @@ impl BrowserPort for RelayBrowserPort {
     fn call(
         &self,
         browser: &str,
-        command: Work,
+        command: BrowserCommand,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
@@ -1210,7 +1210,7 @@ impl BrowserPort for RelayBrowserPort {
     fn call_guarded(
         &self,
         browser: &str,
-        command: Work,
+        command: BrowserCommand,
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         self.call_inner(browser, command, dispatch)
@@ -1625,7 +1625,9 @@ pub(crate) mod testing {
     use std::sync::Mutex;
     use std::time::Instant;
 
-    use crate::browser::adapter::{BrowserOutcome, PhysicalWait, RuntimeControlState, Work};
+    use crate::browser::adapter::{
+        BrowserCommand, BrowserOutcome, PhysicalWait, RuntimeControlState,
+    };
     use crate::sync::lock;
 
     use super::{BrowserError, BrowserPort, BrowserSummary};
@@ -1640,7 +1642,7 @@ pub(crate) mod testing {
             std::collections::HashMap<u64, crate::browser::adapter::documents::DocumentInventory>,
         >,
         scopes: Mutex<Vec<crate::browser::adapter::documents::DocumentScope>>,
-        calls: Mutex<Vec<Work>>,
+        calls: Mutex<Vec<BrowserCommand>>,
         routed: Mutex<Vec<String>>,
         outcomes: Mutex<VecDeque<Queued>>,
         control_states: Mutex<Vec<RuntimeControlState>>,
@@ -1719,7 +1721,7 @@ pub(crate) mod testing {
                 written: false,
             });
         }
-        pub fn calls(&self) -> Vec<Work> {
+        pub fn calls(&self) -> Vec<BrowserCommand> {
             lock(&self.calls).clone()
         }
         pub fn control_states(&self) -> Vec<RuntimeControlState> {
@@ -1774,12 +1776,12 @@ pub(crate) mod testing {
         fn answer(
             &self,
             browser: &str,
-            command: Work,
+            command: BrowserCommand,
         ) -> (Result<BrowserOutcome, BrowserError>, bool) {
             use crate::browser::adapter::documents::{
                 DocumentInventory, DocumentObservation, PhysicalDocument,
             };
-            if let Work::DescribeDocuments {
+            if let BrowserCommand::DescribeDocuments {
                 tab_id,
                 locators,
                 points,
@@ -1808,7 +1810,7 @@ pub(crate) mod testing {
                     true,
                 );
             }
-            if let Work::InDocuments { scope, primitive } = command {
+            if let BrowserCommand::InDocuments { scope, primitive } = command {
                 lock(&self.scopes).push(scope.clone());
                 let (outcome, written) = self.answer(browser, *primitive);
                 return (
@@ -1824,13 +1826,13 @@ pub(crate) mod testing {
             }
             if matches!(
                 &command,
-                Work::Observe(PhysicalWait {
+                BrowserCommand::Observe(PhysicalWait {
                     condition: crate::language::PageCondition::VisualSettle,
                     ..
                 })
             ) {
                 let tab_id = match &command {
-                    Work::Observe(PhysicalWait { tab_id, .. }) => *tab_id,
+                    BrowserCommand::Observe(PhysicalWait { tab_id, .. }) => *tab_id,
                     _ => unreachable!(),
                 };
                 lock(&self.routed).push(browser.into());
@@ -1884,7 +1886,7 @@ pub(crate) mod testing {
         fn call(
             &self,
             browser: &str,
-            command: Work,
+            command: BrowserCommand,
             _deadline: Instant,
             _cancelled: &AtomicBool,
         ) -> Result<BrowserOutcome, BrowserError> {
@@ -1894,7 +1896,7 @@ pub(crate) mod testing {
         fn call_guarded(
             &self,
             browser: &str,
-            command: Work,
+            command: BrowserCommand,
             dispatch: super::BrowserDispatch<'_>,
         ) -> Result<BrowserOutcome, BrowserError> {
             (dispatch.admit)()?;
