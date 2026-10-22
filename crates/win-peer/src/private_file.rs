@@ -11,7 +11,7 @@ use std::os::windows::io::FromRawHandle;
 use std::path::Path;
 use std::ptr::null_mut;
 
-use crate::token::{sid_text, LocalMemory, ProcessToken};
+use crate::token::{sid_text, LocalMemory};
 
 type Handle = *mut c_void;
 const SDDL_REVISION: u32 = 1;
@@ -102,7 +102,7 @@ extern "system" {
 /// Create the new file `path`, writable by this process and closed to everyone but this user and
 /// SYSTEM. An existing path, a link included, is refused.
 pub(super) fn create(path: &Path) -> io::Result<File> {
-    let sid = ProcessToken::current()?.user_sid()?;
+    let sid = ghostlight_relay::os::current_user_sid()?;
     // Protected DACL: only this user and SYSTEM. Never inherit a broad parent-directory grant.
     create_with(path, &format!("O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;SY)"))
 }
@@ -158,7 +158,7 @@ fn create_with(path: &Path, sddl: &str) -> io::Result<File> {
 /// granting entry whose trustee this cannot read. Deny entries are not subtracted, so the answer
 /// never understates.
 pub(super) fn others_can_read(path: &Path) -> io::Result<bool> {
-    let user = ProcessToken::current()?.user_sid()?;
+    let user = ghostlight_relay::os::current_user_sid()?;
     let name = wide_path(path)?;
     let mut owner = null_mut();
     let mut dacl: *mut Acl = null_mut();
@@ -253,7 +253,6 @@ fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
 mod tests {
     use super::{create, create_with, open_to_others, others_can_read, SYSTEM_SID};
     use crate::scratch::Scratch;
-    use crate::token::ProcessToken;
 
     /// Covers the access-list FFI (unsafe): only a file whose list grants the
     /// current user and SYSTEM alone is closed to everyone else, and a file another principal owns is
@@ -266,7 +265,7 @@ mod tests {
             drop(create(&private).expect("the private file is created"));
             assert!(!others_can_read(&private).expect("its access list is read"));
 
-            let sid = ProcessToken::current().unwrap().user_sid().unwrap();
+            let sid = ghostlight_relay::os::current_user_sid().unwrap();
             let owner_only = format!("O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;SY)");
             for (label, grant, open) in [
                 ("read", "(A;;FR;;;BU)", true),

@@ -17,6 +17,10 @@ description.workspace = true
 # The governance guard checks each manifest and accepts win-peer with `allow` and relay with
 # `deny`.
 
+# The current user's SID comes from the relay, the other audited surface, which already reads it.
+[target.'cfg(windows)'.dependencies]
+ghostlight-relay = { path = "../relay" }
+
 [lints.rust]
 unsafe_code = "allow"
 

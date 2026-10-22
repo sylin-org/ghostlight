@@ -450,7 +450,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | SERV-6c | refactor(cli): the CLI reads the service's vocabulary as types | - | SERV-6's CLI half | moved: test-01 took SERV-6 whole (15b38451) |
 | SERV-13 | refactor(cli): install and uninstall run as two flows that collect, then print | - | SERV-13 as corrected; the printed order stays | landed (this commit); one step list with a Direction, not two lists |
 | SERV-11c | refactor(cli): one name per meaning in `cli/` | SERV-13 | SERV-11's CLI half | landed (this commit) |
-| EXT-2 | refactor(win-peer): the user's SID comes from relay | - | EXT-2 | todo |
+| EXT-2 | refactor(win-peer): the user's SID comes from relay | - | EXT-2 | landed (this commit) |
 | I-lock | refactor(install): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (this commit) |
 
 ### Notes, second sweep

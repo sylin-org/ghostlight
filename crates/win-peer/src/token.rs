@@ -13,9 +13,6 @@ type Handle = *mut c_void;
 /// Access right: query a token.
 const TOKEN_QUERY: u32 = 0x0008;
 
-/// `TOKEN_INFORMATION_CLASS` value for the token's user.
-const TOKEN_USER_CLASS: u32 = 1;
-
 /// `TOKEN_INFORMATION_CLASS` value for the token's elevation.
 const TOKEN_ELEVATION_CLASS: u32 = 20;
 
@@ -26,13 +23,6 @@ const MAX_INFORMATION_BYTES: u32 = 64 * 1024;
 #[repr(C)]
 struct TokenElevation {
     token_is_elevated: u32,
-}
-
-/// The C `TOKEN_USER`: the user's SID and its attributes.
-#[repr(C)]
-struct TokenUser {
-    sid: *mut c_void,
-    attributes: u32,
 }
 
 #[link(name = "advapi32")]
@@ -121,16 +111,6 @@ impl ProcessToken {
         Ok(elevation.token_is_elevated != 0)
     }
 
-    /// The token's user as a SID string (`S-1-5-21-...`).
-    pub(crate) fn user_sid(&self) -> io::Result<String> {
-        let buffer = self.query(TOKEN_USER_CLASS, size_of::<TokenUser>())?;
-        // SAFETY: a successful user query wrote a TOKEN_USER at the start of the aligned buffer,
-        // which is at least that long and outlives the borrow.
-        let user = unsafe { &*buffer.as_ptr().cast::<TokenUser>() };
-        // SAFETY: user.sid points at the SID inside the buffer, which lives until this returns.
-        unsafe { sid_text(user.sid) }
-    }
-
     /// Read one token information class of at least `at_least` bytes into storage aligned for
     /// the structure and the pointers it holds.
     fn query(&self, class: u32, at_least: usize) -> io::Result<Vec<usize>> {
@@ -171,7 +151,7 @@ mod tests {
     fn this_process_reads_its_own_token_and_window_station() {
         let token = ProcessToken::current().expect("the process token opens");
         token.is_elevated().expect("the elevation can be read");
-        let sid = token.user_sid().expect("the user can be read");
+        let sid = ghostlight_relay::os::current_user_sid().expect("the user can be read");
         assert!(sid.starts_with("S-1-"), "{sid} is a SID string");
 
         if !crate::interactive_window_station() {

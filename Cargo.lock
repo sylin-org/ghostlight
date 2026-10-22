@@ -948,6 +948,9 @@ dependencies = [
 [[package]]
 name = "ghostlight-win-peer"
 version = "2.0.1"
+dependencies = [
+ "ghostlight-relay",
+]
 
 [[package]]
 name = "gio"
