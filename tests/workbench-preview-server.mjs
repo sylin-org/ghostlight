@@ -367,8 +367,8 @@ const snapshot = {
     { id: "workspace_script", agent: agentNamed("Command line"), channel: "cli", tab_count: 1, browser: "Chrome" }
   ],
   operations: [
-    { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: ago(12000), phase: "running" },
-    { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: WAITING_FOR_WORK, capability: "write", started_at_ms: ago(35000), phase: "waiting" }
+    { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", activity_code: "read", capability: "read", started_at_ms: ago(12000), phase: "running" },
+    { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: WAITING_FOR_WORK, activity_code: "fill", capability: "write", started_at_ms: ago(35000), phase: "waiting" }
   ],
   // The rows the service says are in use: a live session of the agent with its entry in place.
   harnesses_in_use: ["codex", "claude-code"],
@@ -467,14 +467,14 @@ const policyView = {
 
 // Representative work the monitor can page through, so the conveyor is reviewable.
 const script = [
-  { tool: "browser_navigate", activity: "Navigating", capability: "action", ms: 1700, effect: "committed", summary: "Opened example.com.", observed: { host: "example.com", readiness: "complete" } },
-  { tool: "browser_read", activity: "Reading page", capability: "read", ms: 900, effect: "none", summary: "Read 1,240 words from example.com.", observed: { host: "example.com", count: 1240 } },
-  { tool: "browser_find", activity: "Finding on page", capability: "read", ms: 700, effect: "none", summary: "Found 7 matches.", observed: { count: 7 } },
-  { tool: "browser_fill_form", activity: "Filling form", capability: "write", ms: 2400, effect: "wrote", summary: "Filled 3 fields on example.com and submitted the form.", observed: { host: "example.com", readiness: "complete", count: 3 } },
-  { tool: "browser_screenshot", activity: "Screenshot", capability: "read", ms: 1100, effect: "none", summary: "Captured the viewport at 1280x720.", observed: { width: 1280, height: 720 } },
-  { tool: "browser_click", activity: "Clicking", capability: "action", ms: 800, effect: "clicked", summary: "Clicked a button on example.com.", observed: { host: "example.com", readiness: "interactive" } },
-  { tool: "browser_wait", activity: "Waiting", capability: "read", ms: 1900, effect: "none", summary: "The target appeared on example.com in 2 seconds.", observed: { host: "example.com", readiness: "complete", count: 2 } },
-  { tool: "browser_execute", activity: "Running JavaScript", capability: "execute", ms: 1500, effect: "executed", summary: "Executed JavaScript on example.com.", observed: { host: "example.com", readiness: "complete" } }
+  { tool: "browser_navigate", activity: "Navigating", activity_code: "navigate", capability: "action", ms: 1700, effect: "committed", summary: "Opened example.com.", observed: { host: "example.com", readiness: "complete" } },
+  { tool: "browser_read", activity: "Reading page", activity_code: "read", capability: "read", ms: 900, effect: "none", summary: "Read 1,240 words from example.com.", observed: { host: "example.com", count: 1240 } },
+  { tool: "browser_find", activity: "Finding on page", activity_code: "find", capability: "read", ms: 700, effect: "none", summary: "Found 7 matches.", observed: { count: 7 } },
+  { tool: "browser_fill_form", activity: "Filling form", activity_code: "fill", capability: "write", ms: 2400, effect: "wrote", summary: "Filled 3 fields on example.com and submitted the form.", observed: { host: "example.com", readiness: "complete", count: 3 } },
+  { tool: "browser_screenshot", activity: "Screenshot", activity_code: "screenshot", capability: "read", ms: 1100, effect: "none", summary: "Captured the viewport at 1280x720.", observed: { width: 1280, height: 720 } },
+  { tool: "browser_click", activity: "Clicking", activity_code: "click", capability: "action", ms: 800, effect: "clicked", summary: "Clicked a button on example.com.", observed: { host: "example.com", readiness: "interactive" } },
+  { tool: "browser_wait", activity: "Waiting", activity_code: "wait", capability: "read", ms: 1900, effect: "none", summary: "The target appeared on example.com in 2 seconds.", observed: { host: "example.com", readiness: "complete", count: 2 } },
+  { tool: "browser_execute", activity: "Running JavaScript", activity_code: "script", capability: "execute", ms: 1500, effect: "executed", summary: "Executed JavaScript on example.com.", observed: { host: "example.com", readiness: "complete" } }
 ];
 
 // A stable H4 scenario exercises the real bundled view with bounded synthetic receipts.
@@ -854,7 +854,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
     counter += 1;
     const blocked = counter % 9 === 0;
     const spec = blocked
-      ? { tool: "browser_execute", activity: "Running JavaScript", capability: "execute", ms: 900, effect: "none" }
+      ? { tool: "browser_execute", activity: "Running JavaScript", activity_code: "script", capability: "execute", ms: 900, effect: "none" }
       : window.__GHOSTLIGHT_SCRIPT__[step++ % window.__GHOSTLIGHT_SCRIPT__.length];
     const session = preview.sessions[counter % preview.sessions.length];
     const operation = {
@@ -862,6 +862,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
       workspace: session.id,
       tool: spec.tool,
       activity: spec.activity,
+      activity_code: spec.activity_code,
       capability: spec.capability,
       started_at_ms: Date.now(),
       phase: "running",

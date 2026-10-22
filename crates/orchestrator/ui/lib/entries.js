@@ -16,6 +16,7 @@
       workspace: operation.workspace,
       tool: operation.tool,
       activity: operation.activity,
+      activityCode: operation.activity_code,
       capability: operation.capability,
       provenance: operation.provenance ?? null,
       agent: operation.agent ?? null,
@@ -35,6 +36,7 @@
       // No activity when the record was restored rather than watched: the medallion then comes
       // from the tool. Defaulting to the quiet label is what made every row identical.
       activity: existing?.activity,
+      activityCode: existing?.activityCode,
       capability: record.capability,
       startedAt: existing?.startedAt,
       endedAt: record.timestamp_ms,

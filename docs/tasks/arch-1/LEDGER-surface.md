@@ -127,7 +127,7 @@ C3c), then the rows below.
 | U-D5 | fix(workbench): a window with the bearer always finds room among the workbench's connections | - | found by test-01's tests-1 classification, 2026-10-21 (Notes, second sweep); test-01 took it first in `workbench/` | landed (9db6e896) |
 | U-D6 | fix(workbench): a refused HEAD request carries no body | - | the same classification; test-01 | landed (dc1c4fbf) |
 | SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1; test-01 | landed (this commit) |
-| SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | todo |
+| SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | landed (this commit) |
 | SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | landed (this commit) |
 | SURF-8 | refactor(workbench): what a watcher may do is said once | - | SURF-8; test-01 | landed (this commit) |
 | SURF-10 | refactor(workbench): the small repeats go | - | SURF-10; test-01 | landed (this commit) |
@@ -245,3 +245,15 @@ C3c), then the rows below.
   before. Named: `SEARCH_DEBOUNCE_MS` (140), `ELAPSED_TICK_MS` (100), `AGES_TICK_MS` (15 s),
   the early-change bound `EARLY_CHANGES` (200, which was `FEED_LIMIT`), and the store's
   `LATCH_GRACE_MS` (60). Page tests 226, the page journey and the headless history journey pass.
+- SURF-4 as landed: `words.js`'s `ACTIVITY_GLYPH` keys on the `activity_code` S5 put on the wire
+  (one entry per `PresentationActivity`, the same glyph each English label had) in place of the
+  displayed words, and the page's entries carry the code (`activityCode`), a settled row keeping
+  the one it was watched with. A row with no code, restored rather than watched, still wears its
+  tool's glyph. The deliberate visible change the skeptic named: waiting work now wears the glyph of
+  what it will do, as it does once it runs. So a waiting `browser_tabs` call is scan, not its
+  tool's navigate, and `browser_flow` and a `browser_record` other than start likewise, and the
+  medallion no longer changes when the work starts. Pins, as rows in kept tests: the closed-names
+  test requires a medallion for exactly the service's activities (an exhaustive match), and the
+  medallion test checks that waiting and running quiet work wear scan whatever the label says. The
+  preview server sends the code with its operations. The extension's and `page-shared.js`'s
+  label tables are frozen with the 2.0.1 package and stay.

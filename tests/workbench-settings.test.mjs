@@ -2262,6 +2262,14 @@ test("each catalog tool wears the medallion chosen for it", () => {
     assert.ok(Words.GLYPHS[glyph], glyph);
     assert.equal(Words.glyphFor({ tool }), Words.GLYPHS[glyph], tool);
   }
+  // Watched work wears its activity's medallion, keyed by the service's code and not its words,
+  // waiting or running alike (SURF-4): a waiting browser_tabs call's quiet work is the scan it
+  // shows once it runs, no longer its tool's navigate, and a reworded label changes nothing.
+  for (const activity of ["Waiting for earlier browser work", "Ghostlight", "Something else"]) {
+    assert.equal(Words.glyphFor({ tool: "browser_tabs", activity, activityCode: "quiet" }), Words.GLYPHS.scan, activity);
+  }
+  assert.equal(Words.glyphFor({ tool: "browser_flow", activityCode: "read" }), Words.GLYPHS.scan);
+  assert.equal(Words.glyphFor({ tool: "browser_click", activityCode: "click" }), Words.GLYPHS.pointer);
 });
 
 /* -------------------------------- the stylesheets -------------------------------- */

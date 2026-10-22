@@ -751,25 +751,31 @@
     toward: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h10M9.5 5l3 3-3 3"/></svg>'
   });
 
-  const ACTIVITY_GLYPH = {
-    "Ghostlight": "scan",
-    "Navigating": "navigate",
-    "Clicking": "pointer",
-    "Hovering": "pointer",
-    "Dragging": "pointer",
-    "Typing": "keyboard",
-    "Keyboard": "keyboard",
-    "Scrolling": "navigate",
-    "Reading page": "scan",
-    "Finding on page": "lens",
-    "Screenshot": "camera",
-    "Zooming": "scan",
-    "Filling form": "keyboard",
-    "Uploading file": "gear",
-    "Running JavaScript": "gear",
-    "Waiting": "wait",
-    "Browser dialog": "wait"
-  };
+  /**
+   * The medallion each activity wears, keyed by the service's activity code (`activity_code`,
+   * `PresentationActivity`), so a reworded label keeps its glyph and waiting work wears the glyph
+   * of what it will do. Work with no code, such as a row restored rather than watched, wears its
+   * tool's.
+   */
+  const ACTIVITY_GLYPH = Object.freeze({
+    quiet: "scan",
+    navigate: "navigate",
+    click: "pointer",
+    hover: "pointer",
+    drag: "pointer",
+    type: "keyboard",
+    key: "keyboard",
+    scroll: "navigate",
+    read: "scan",
+    find: "lens",
+    screenshot: "camera",
+    zoom: "scan",
+    fill: "keyboard",
+    upload: "gear",
+    script: "gear",
+    wait: "wait",
+    dialog: "wait"
+  });
 
   const CAPABILITY_CLASS = {
     read: "cap-read",
@@ -1102,7 +1108,7 @@
   };
 
   const glyphFor = entry =>
-    GLYPHS[ACTIVITY_GLYPH[entry.activity] ?? TOOL_GLYPH[entry.tool] ?? "scan"];
+    GLYPHS[ACTIVITY_GLYPH[entry.activityCode] ?? TOOL_GLYPH[entry.tool] ?? "scan"];
   /** How the service joins a set of capabilities into one label, as in "read + action". */
   const CAPABILITY_JOIN = " + ";
 

@@ -420,6 +420,58 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
         );
     }
 
+    // The medallions the page keys on the activity code: one for each activity the service sends
+    // (SURF-4), so no activity falls through to its tool's glyph.
+    use crate::browser::adapter::PresentationActivity as Activity;
+    let activities = [
+        Activity::Quiet,
+        Activity::Navigate,
+        Activity::Click,
+        Activity::Hover,
+        Activity::Drag,
+        Activity::Type,
+        Activity::Key,
+        Activity::Scroll,
+        Activity::Read,
+        Activity::Find,
+        Activity::Screenshot,
+        Activity::Zoom,
+        Activity::Fill,
+        Activity::Upload,
+        Activity::Script,
+        Activity::Wait,
+        Activity::Dialog,
+    ];
+    for activity in activities {
+        match activity {
+            Activity::Quiet
+            | Activity::Navigate
+            | Activity::Click
+            | Activity::Hover
+            | Activity::Drag
+            | Activity::Type
+            | Activity::Key
+            | Activity::Scroll
+            | Activity::Read
+            | Activity::Find
+            | Activity::Screenshot
+            | Activity::Zoom
+            | Activity::Fill
+            | Activity::Upload
+            | Activity::Script
+            | Activity::Wait
+            | Activity::Dialog => {}
+        }
+    }
+    assert_eq!(
+        page_table(PAGE_WORDS, "ACTIVITY_GLYPH")
+            .into_iter()
+            .map(|(code, _)| code.to_owned())
+            .collect::<BTreeSet<_>>(),
+        activities.into_iter().map(wire).collect::<BTreeSet<_>>(),
+        "the page has a medallion for exactly the activities the service sends"
+    );
+
     // The page's copies of the operation phases, the runtime states and the window contexts.
     let table = |source: &str, name: &str| -> BTreeSet<String> {
         page_table(source, name)
