@@ -28,6 +28,7 @@ use ghostlight_relay::endpoint::Connection as RelayConnection;
 use ghostlight_relay::protocol::{goodbye_frame, GoodbyeReason};
 use serde_json::Value;
 use thiserror::Error;
+use uuid::Uuid;
 
 // A native message inside Chromium's ordinary worker-idle window keeps the browser shore
 // observable without conflating a silent browser operation with a dead adapter.
@@ -35,20 +36,13 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
 // How often a call waiting for its browser looks again.
 const AVAILABILITY_POLL: Duration = Duration::from_millis(40);
-// A product name is a label a person reads next to a browser they already recognize, not a
-// place for an adapter to write prose.
-const BROWSER_NAME_MAX_CHARS: usize = 40;
 // A protocol-4 extension names the most specific brand among the browser's user-agent brands and
 // leaves out the generic Chromium brand, so a browser that reports no name calls itself Chromium.
 pub(crate) const UNBRANDED_BROWSER_NAME: &str = "Chromium";
 /// The most browser connections the port holds at once; a new browser past it is refused.
 const MAX_BROWSER_CONNECTIONS: usize = 16;
-/// The longest browser identity or extension life an adapter may report, prefix included.
-const OPAQUE_ID_MAX_BYTES: usize = 80;
-// Every browser identity an adapter mints starts with this prefix.
-const BROWSER_ID_PREFIX: &str = "browser_";
-// Every extension life an adapter mints starts with this prefix.
-const LIFE_PREFIX: &str = "life_";
+/// Every connection id the port mints starts with this prefix.
+const CONNECTION_PREFIX: &str = "connection_";
 /// How long a runtime-control frame may take to reach one browser, and a registration to answer.
 const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -441,16 +435,6 @@ impl Connection {
     }
 }
 
-/// What one browser's registered connection can do right now.
-enum Reachability {
-    /// No connection is registered for the browser.
-    Absent,
-    /// The connection's liveness has lapsed.
-    Silent,
-    /// The connection can take work.
-    Available,
-}
-
 /// One connected browser as the orchestrator, the workbench, and the model see it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserSummary {
@@ -600,11 +584,11 @@ impl AdapterRegistry {
     }
 
     /// What one browser's connection can do right now.
-    fn reachability(&self, browser: &str, now: Instant, timeout: Duration) -> Reachability {
+    fn reachability(&self, browser: &str, now: Instant, timeout: Duration) -> Availability {
         match self.connections.get(browser) {
-            None => Reachability::Absent,
-            Some(connection) if !connection.available(now, timeout) => Reachability::Silent,
-            Some(_) => Reachability::Available,
+            None => Availability::Absent,
+            Some(connection) if !connection.available(now, timeout) => Availability::NotAnswering,
+            Some(_) => Availability::Available,
         }
     }
 
@@ -715,11 +699,9 @@ impl Liveness {
         }
     }
 
-    /// Begin one liveness probe and return the heartbeat frame that carries it.
-    fn probe(&self) -> wire::Outbound {
-        wire::Outbound::Heartbeat {
-            sequence: self.state().begin_probe(),
-        }
+    /// Begin one liveness probe and return the sequence it carries.
+    fn begin_probe(&self) -> u32 {
+        self.state().begin_probe()
     }
 
     fn state(&self) -> MutexGuard<'_, ConnectionLiveness> {
@@ -1011,7 +993,7 @@ impl RelayBrowserPort {
             if !adapters.connections.contains_key(&browser_id)
                 && adapters.connections.len() >= MAX_BROWSER_CONNECTIONS
             {
-                connection.line.writer.close();
+                connection.line.end();
                 return Err(BrowserError::Protocol(
                     "browser connection capacity reached".into(),
                 ));
@@ -1055,32 +1037,92 @@ impl RelayBrowserPort {
         }
     }
 
-    /// Start the timer side of one connection's liveness.
+    /// The service epoch a protocol's acceptance names.
+    pub(crate) fn service_epoch(&self) -> &str {
+        &self.service_epoch
+    }
+
+    /// The page assets every protocol-4 connection receives when it is accepted.
+    pub(crate) fn assets(&self) -> &wire::Assets {
+        &self.assets
+    }
+
+    /// The runtime control state, locked: a protocol that must not let a later publish overtake
+    /// the state it writes holds this while it writes.
+    pub(crate) fn control_state(&self) -> MutexGuard<'_, RuntimeControlState> {
+        lock(&self.control_state)
+    }
+
+    /// Register one connection a protocol accepted, under the browser identity its hello named,
+    /// and hand back what that protocol's reader reports through.
     ///
     /// # Errors
     ///
-    /// Detaches the connection and reports the failure when the thread cannot start.
-    fn spawn_heartbeat(
+    /// Refuses a new browser once the port holds its connection capacity, and closes the line.
+    pub(crate) fn admit(&self, admitted: Admitted) -> Result<Registration, BrowserError> {
+        let tag = ConnectionTag {
+            browser_id: admitted.browser_id,
+            connection_id: format!("{CONNECTION_PREFIX}{}", Uuid::new_v4().simple()),
+        };
+        let liveness = Arc::new(Liveness::new(
+            tag.browser_id.clone(),
+            lock(&self.lifecycle).clone(),
+            Instant::now(),
+        ));
+        self.register(
+            Connection {
+                id: tag.connection_id.clone(),
+                line: admitted.line,
+                adapter_version: admitted.adapter_version,
+                browser_id: tag.browser_id.clone(),
+                browser_name: admitted.browser_name,
+                life: admitted.life,
+                liveness: Arc::clone(&liveness),
+            },
+            admitted.attended,
+        )?;
+        Ok(Registration {
+            adapters: Arc::clone(&self.adapters),
+            notifications: self.notifications(),
+            tag,
+            liveness,
+        })
+    }
+
+    /// Start the timer side of one admitted connection's liveness, probing over `line`.
+    ///
+    /// # Errors
+    ///
+    /// Withdraws the connection and reports the failure when the thread cannot start.
+    pub(crate) fn watch(
         &self,
-        tag: &ConnectionTag,
-        writer: Arc<SocketWriter>,
-        liveness: Arc<Liveness>,
+        registration: &Registration,
+        line: Line,
     ) -> Result<(), BrowserError> {
         let adapters = Arc::clone(&self.adapters);
         let settings = self.heartbeat;
-        let heartbeat_tag = tag.clone();
+        let tag = registration.tag.clone();
+        let liveness = Arc::clone(&registration.liveness);
         if let Err(error) = thread::Builder::new()
             .name("ghostlight-browser-heartbeat".into())
             .spawn(move || {
-                heartbeat_adapter(&writer, &liveness, &adapters, &heartbeat_tag, settings);
+                heartbeat_adapter(&line, &liveness, &adapters, &tag, settings);
             })
         {
             // A connection with nobody probing it would go stale and stay registered, so undo
             // the registration rather than leave a connection no thread watches.
-            self.detach_registered(&tag.browser_id, &tag.connection_id);
+            self.withdraw(registration);
             return Err(BrowserError::Protocol(error.to_string()));
         }
         Ok(())
+    }
+
+    /// Withdraw an admitted connection whose protocol could not start serving it.
+    pub(crate) fn withdraw(&self, registration: &Registration) {
+        self.detach_registered(
+            &registration.tag.browser_id,
+            &registration.tag.connection_id,
+        );
     }
 
     /// Remove a registered connection, but only the exact one named -- never a connection that
@@ -1129,31 +1171,13 @@ impl RelayBrowserPort {
         cancelled: &AtomicBool,
     ) -> Availability {
         poll_until(until, cancelled, || {
-            let reachability =
-                lock(&self.adapters).reachability(browser, Instant::now(), self.heartbeat.timeout);
-            match reachability {
-                Reachability::Available => ControlFlow::Break(Availability::Available),
-                Reachability::Absent => ControlFlow::Continue(Availability::Absent),
-                Reachability::Silent => ControlFlow::Continue(Availability::NotAnswering),
+            match lock(&self.adapters).reachability(browser, Instant::now(), self.heartbeat.timeout)
+            {
+                Availability::Available => ControlFlow::Break(Availability::Available),
+                waiting => ControlFlow::Continue(waiting),
             }
         })
     }
-}
-
-/// Tell an extension that does not speak adapter protocol 4 to update, then close its socket.
-/// Best effort: the extension may already be gone.
-fn refuse_incompatible(stream: RelayConnection) {
-    let Ok(writer) = SocketWriter::new(stream) else {
-        return;
-    };
-    let _ = writer.native_until(
-        &wire::Outbound::Error {
-            code: wire::error_code::ADAPTER_INCOMPATIBLE.into(),
-            message: crate::language::adapter::ADAPTER_INCOMPATIBLE.into(),
-        },
-        Instant::now() + CONTROL_DELIVERY_TIMEOUT,
-    );
-    writer.close();
 }
 
 impl BrowserPort for RelayBrowserPort {
@@ -1265,18 +1289,15 @@ impl BrowserPort for RelayBrowserPort {
     /// rest.
     fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
         *lock(&self.control_state) = state;
-        let frame = wire::Outbound::ControlState {
-            state: state.into(),
-        };
-        let writers: Vec<_> = lock(&self.adapters)
+        let lines: Vec<_> = lock(&self.adapters)
             .connections
             .values()
-            .map(|connection| Arc::clone(&connection.line.writer))
+            .map(|connection| connection.line.clone())
             .collect();
         let mut published = Ok(());
         let deadline = Instant::now() + CONTROL_DELIVERY_TIMEOUT;
-        for writer in writers {
-            if writer.native_until(&frame, deadline).is_err() {
+        for line in lines {
+            if line.control_state(state, deadline).is_err() {
                 published = Err(BrowserError::DisconnectedAfterDispatch);
             }
         }
@@ -1284,8 +1305,64 @@ impl BrowserPort for RelayBrowserPort {
     }
 }
 
+/// What a protocol tells the port about a connection whose hello it accepted.
+pub(crate) struct Admitted {
+    /// What each command carried over the connection uses.
+    pub(crate) line: Line,
+    /// The adapter version the hello reported.
+    pub(crate) adapter_version: String,
+    /// The browser identity the hello named.
+    pub(crate) browser_id: String,
+    /// The browser's product name, as the protocol validated it.
+    pub(crate) browser_name: String,
+    /// The extension life the hello reported, if it reported a valid one.
+    pub(crate) life: Option<String>,
+    /// Whether the browser holds a focused window now.
+    pub(crate) attended: bool,
+}
+
+/// One admitted connection as the protocol that reads it reports to the port: whether it still
+/// serves its browser, that browser's attention, its events, its acknowledgements and its end.
+#[derive(Clone)]
+pub(crate) struct Registration {
+    adapters: Arc<Mutex<AdapterRegistry>>,
+    notifications: AdapterNotifications,
+    tag: ConnectionTag,
+    liveness: Arc<Liveness>,
+}
+
+impl Registration {
+    /// Whether this connection is still the one serving its browser.
+    pub(crate) fn is_current(&self) -> bool {
+        is_current(&self.adapters, &self.tag)
+    }
+
+    /// The browser now holds a focused window.
+    pub(crate) fn attended(&self) {
+        lock(&self.adapters).attend(&self.tag.browser_id);
+    }
+
+    /// Hand one event from the browser to the event sink.
+    pub(crate) fn event(&self, event: BrowserEvent) {
+        if let Some(sink) = &self.notifications.sink {
+            sink.on_event(&self.tag.browser_id, event);
+        }
+    }
+
+    /// The browser acknowledged the liveness probe `sequence`.
+    pub(crate) fn acknowledge(&self, sequence: u32) {
+        self.liveness.acknowledge(sequence, Instant::now());
+    }
+
+    /// The connection's stream ended: forget it, and tell the sink and the lifecycle observer.
+    pub(crate) fn end(&self) {
+        end_connection(&self.adapters, &self.tag, &self.notifications);
+    }
+}
+
 /// The notification targets one adapter reader reports to: the typed event sink and the
 /// lifecycle observer.
+#[derive(Clone)]
 struct AdapterNotifications {
     sink: Option<Arc<dyn BrowserEventSink>>,
     lifecycle: Option<Arc<dyn AdapterLifecycleObserver>>,
@@ -1319,21 +1396,21 @@ fn end_connection(
 /// The timer side of liveness. A full heartbeat timeout without any acknowledgement hides the
 /// connection from new work; only a closed socket fails the calls already waiting.
 fn heartbeat_adapter(
-    writer: &SocketWriter,
+    line: &Line,
     liveness: &Liveness,
     adapters: &Mutex<AdapterRegistry>,
     tag: &ConnectionTag,
     settings: HeartbeatSettings,
 ) {
     loop {
-        if writer.wait_closed(settings.interval) {
+        if line.writer.wait_closed(settings.interval) {
             return;
         }
         if !is_current(adapters, tag) {
             return;
         }
         liveness.expire(Instant::now(), settings.timeout);
-        if writer.native(&liveness.probe()).is_err() {
+        if line.heartbeat(liveness.begin_probe()).is_err() {
             liveness.mark_stale();
             return;
         }
@@ -1367,27 +1444,7 @@ fn is_current(adapters: &Mutex<AdapterRegistry>, tag: &ConnectionTag) -> bool {
 /// collapse: the relay reads end-of-stream and exits, and the browser observes its port
 /// disconnect.
 fn retire(previous: &Connection) {
-    previous
-        .line
-        .receipts
-        .fail_all(&BrowserError::DisconnectedAfterDispatch);
-    previous.line.writer.close();
-}
-
-/// Validate the bounded product name an adapter reports for itself. A browser that reports none
-/// is Chromium ([`UNBRANDED_BROWSER_NAME`]), so its connection is named and remembered like any
-/// other browser's.
-pub(crate) fn validated_browser_name(name: Option<String>) -> Result<String, BrowserError> {
-    let Some(name) = name else {
-        return Ok(UNBRANDED_BROWSER_NAME.to_owned());
-    };
-    let acceptable = !name.trim().is_empty()
-        && name.chars().count() <= BROWSER_NAME_MAX_CHARS
-        && !name.chars().any(char::is_control);
-    if !acceptable {
-        return Err(BrowserError::Authentication);
-    }
-    Ok(name)
+    previous.line.end();
 }
 
 /// Look with `look` until it is done, `until` passes or `cancelled` is set, sleeping at most
@@ -1412,15 +1469,6 @@ fn poll_until<T>(
                 .min(AVAILABILITY_POLL),
         );
     }
-}
-
-fn valid_opaque_id(value: &str, prefix: &str) -> bool {
-    value.starts_with(prefix)
-        && value.len() > prefix.len()
-        && value.len() <= OPAQUE_ID_MAX_BYTES
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 /// Truth-preserving physical-browser failure classes.
@@ -1612,330 +1660,4 @@ impl BrowserError {
 mod contract_tests;
 
 #[cfg(test)]
-pub(crate) mod testing {
-    use std::collections::VecDeque;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Mutex;
-    use std::time::Instant;
-
-    use crate::browser::adapter::{
-        BrowserCommand, BrowserOutcome, PhysicalWait, RuntimeControlState,
-    };
-    use crate::sync::lock;
-
-    use super::{BrowserError, BrowserPort, BrowserSummary};
-
-    /// The browser a fake stands in for when a test does not care which one it is.
-    pub const FAKE_BROWSER: &str = "browser_fake";
-
-    /// Deterministic browser port for executor contract tests.
-    #[derive(Debug)]
-    pub struct FakeBrowser {
-        documents: Mutex<
-            std::collections::HashMap<u64, crate::browser::adapter::documents::DocumentInventory>,
-        >,
-        scopes: Mutex<Vec<crate::browser::adapter::documents::DocumentScope>>,
-        calls: Mutex<Vec<BrowserCommand>>,
-        routed: Mutex<Vec<String>>,
-        outcomes: Mutex<VecDeque<Queued>>,
-        control_states: Mutex<Vec<RuntimeControlState>>,
-        connected: Mutex<Vec<BrowserSummary>>,
-        returning: Mutex<bool>,
-        last_connected: Mutex<Option<String>>,
-        installed: Mutex<std::collections::HashMap<String, String>>,
-        arrivals: Mutex<std::collections::HashMap<String, u64>>,
-        lives: Mutex<std::collections::HashMap<String, String>>,
-        launches: Mutex<super::LaunchGuard>,
-    }
-
-    /// One answer the fake will give, and whether it wrote the command to the browser first.
-    #[derive(Debug)]
-    struct Queued {
-        outcome: Result<BrowserOutcome, BrowserError>,
-        written: bool,
-    }
-
-    impl Default for FakeBrowser {
-        fn default() -> Self {
-            Self {
-                documents: Mutex::default(),
-                scopes: Mutex::default(),
-                calls: Mutex::default(),
-                routed: Mutex::default(),
-                outcomes: Mutex::default(),
-                control_states: Mutex::default(),
-                connected: Mutex::new(vec![summary(FAKE_BROWSER, true)]),
-                returning: Mutex::new(false),
-                last_connected: Mutex::new(None),
-                installed: Mutex::default(),
-                arrivals: Mutex::default(),
-                lives: Mutex::default(),
-                launches: Mutex::default(),
-            }
-        }
-    }
-
-    /// One connected browser, as a test wants to describe it.
-    pub fn summary(id: &str, attended: bool) -> BrowserSummary {
-        BrowserSummary {
-            id: id.into(),
-            name: super::UNBRANDED_BROWSER_NAME.into(),
-            adapter_version: "1.0.0".into(),
-            attended,
-        }
-    }
-
-    impl FakeBrowser {
-        /// Supply explicit document evidence for a governed executor fixture.
-        pub fn set_documents(
-            &self,
-            tab: u64,
-            inventory: crate::browser::adapter::documents::DocumentInventory,
-        ) {
-            lock(&self.documents).insert(tab, inventory);
-        }
-        /// Document constraints sent to this browser, separate from physical operation calls.
-        pub fn scopes(&self) -> Vec<crate::browser::adapter::documents::DocumentScope> {
-            lock(&self.scopes).clone()
-        }
-        /// Queue the next answer of a command the fake writes to the browser, whatever the
-        /// answer says.
-        pub fn push(&self, outcome: Result<BrowserOutcome, BrowserError>) {
-            lock(&self.outcomes).push_back(Queued {
-                outcome,
-                written: true,
-            });
-        }
-        /// Queue the next answer of a command the fake fails before writing any of it, as a port
-        /// does when the connection is gone before its first frame.
-        pub fn push_unwritten(&self, outcome: Result<BrowserOutcome, BrowserError>) {
-            lock(&self.outcomes).push_back(Queued {
-                outcome,
-                written: false,
-            });
-        }
-        pub fn calls(&self) -> Vec<BrowserCommand> {
-            lock(&self.calls).clone()
-        }
-        pub fn control_states(&self) -> Vec<RuntimeControlState> {
-            lock(&self.control_states).clone()
-        }
-        /// Which browser each dispatch was routed to, in order.
-        pub fn routed(&self) -> Vec<String> {
-            lock(&self.routed).clone()
-        }
-        /// Replace the connected inventory this port reports. Each listed browser that was
-        /// reported as an installed browser counts as one arrival of that installed browser.
-        pub fn connect(&self, browsers: Vec<BrowserSummary>) {
-            {
-                let installed = lock(&self.installed);
-                let mut arrivals = lock(&self.arrivals);
-                for browser in &browsers {
-                    if let Some(installed) = installed.get(&browser.id) {
-                        *arrivals.entry(installed.clone()).or_default() += 1;
-                    }
-                }
-            }
-            *lock(&self.connected) = browsers;
-        }
-        /// Report evidence that a browser is about to connect, as a relay does after a service
-        /// start or while a connection initializes.
-        pub fn set_returning(&self, returning: bool) {
-            *lock(&self.returning) = returning;
-        }
-        /// Remember `browser`, a native-host id, as the installed browser that last connected.
-        pub fn remember_last_connected(&self, browser: &str) {
-            *lock(&self.last_connected) = Some(browser.into());
-        }
-        /// Report that the browser identity `browser` connected as the installed browser
-        /// `installed`, a native-host id.
-        pub fn remember_installed(&self, browser: &str, installed: &str) {
-            lock(&self.installed).insert(browser.into(), installed.into());
-        }
-        /// Report `life` as the extension life the connection of `browser` named in its hello,
-        /// or no life for `None`.
-        pub fn set_life(&self, browser: &str, life: Option<&str>) {
-            let mut lives = lock(&self.lives);
-            match life {
-                Some(life) => lives.insert(browser.into(), life.into()),
-                None => lives.remove(browser),
-            };
-        }
-    }
-
-    impl FakeBrowser {
-        /// Answer one command, with whether the fake wrote it to the browser. Every command is
-        /// written except one answered from [`Self::push_unwritten`].
-        fn answer(
-            &self,
-            browser: &str,
-            command: BrowserCommand,
-        ) -> (Result<BrowserOutcome, BrowserError>, bool) {
-            use crate::browser::adapter::documents::{
-                DocumentInventory, DocumentObservation, PhysicalDocument,
-            };
-            if let BrowserCommand::DescribeDocuments {
-                tab_id,
-                locators,
-                points,
-                focused,
-                ..
-            } = &command
-            {
-                let mut inventory = lock(&self.documents)
-                    .get(tab_id)
-                    .cloned()
-                    .unwrap_or_default();
-                if locators.is_empty() && points.is_empty() && !focused {
-                    inventory.subjects.clear();
-                } else if inventory.subjects.is_empty() {
-                    inventory.subjects = inventory
-                        .documents
-                        .first()
-                        .map(|document| vec![document.id.clone()])
-                        .unwrap_or_default();
-                }
-                return (
-                    Ok(BrowserOutcome::Documents {
-                        tab_id: *tab_id,
-                        inventory,
-                    }),
-                    true,
-                );
-            }
-            if let BrowserCommand::InDocuments { scope, primitive } = command {
-                lock(&self.scopes).push(scope.clone());
-                let (outcome, written) = self.answer(browser, *primitive);
-                return (
-                    outcome.map(|result| BrowserOutcome::InDocuments {
-                        observation: DocumentObservation {
-                            visited: scope.allowed,
-                            ..DocumentObservation::default()
-                        },
-                        result: Box::new(result),
-                    }),
-                    written,
-                );
-            }
-            if matches!(
-                &command,
-                BrowserCommand::Observe(PhysicalWait {
-                    condition: crate::language::PageCondition::VisualSettle,
-                    ..
-                })
-            ) {
-                let tab_id = match &command {
-                    BrowserCommand::Observe(PhysicalWait { tab_id, .. }) => *tab_id,
-                    _ => unreachable!(),
-                };
-                lock(&self.routed).push(browser.into());
-                lock(&self.calls).push(command);
-                if let Some(queued) = lock(&self.outcomes).pop_front() {
-                    return (queued.outcome, queued.written);
-                }
-                return (
-                    Ok(BrowserOutcome::Observed {
-                        tab_id,
-                        satisfied: true,
-                        elapsed_ms: 0,
-                        readiness: crate::browser::adapter::BrowserReadiness::Complete,
-                    }),
-                    true,
-                );
-            }
-            lock(&self.routed).push(browser.into());
-            lock(&self.calls).push(command);
-            let Queued {
-                outcome: result,
-                written,
-            } = lock(&self.outcomes).pop_front().unwrap_or_else(|| Queued {
-                outcome: Err(BrowserError::primitive("no fake outcome")),
-                written: true,
-            });
-            if let Ok(
-                BrowserOutcome::TabOpened { tab, .. }
-                | BrowserOutcome::Navigated { tab, .. }
-                | BrowserOutcome::Typed { tab, .. },
-            ) = &result
-            {
-                lock(&self.documents).insert(
-                    tab.tab_id,
-                    DocumentInventory {
-                        documents: vec![PhysicalDocument {
-                            id: format!("document_{}", tab.tab_id),
-                            url: tab.url.clone(),
-                            parent: None,
-                            supported: true,
-                        }],
-                        ..DocumentInventory::default()
-                    },
-                );
-            }
-            (result, written)
-        }
-    }
-
-    impl BrowserPort for FakeBrowser {
-        fn call(
-            &self,
-            browser: &str,
-            command: BrowserCommand,
-            _deadline: Instant,
-            _cancelled: &AtomicBool,
-        ) -> Result<BrowserOutcome, BrowserError> {
-            self.answer(browser, command).0
-        }
-
-        fn call_guarded(
-            &self,
-            browser: &str,
-            command: BrowserCommand,
-            dispatch: super::BrowserDispatch<'_>,
-        ) -> Result<BrowserOutcome, BrowserError> {
-            (dispatch.admit)()?;
-            let (outcome, written) = self.answer(browser, command);
-            if written {
-                dispatch.written.store(true, Ordering::SeqCst);
-            }
-            outcome
-        }
-
-        fn browsers(&self) -> Vec<BrowserSummary> {
-            lock(&self.connected).clone()
-        }
-
-        fn browser_returning(&self) -> bool {
-            *lock(&self.returning)
-        }
-
-        fn last_connected_browser(&self) -> Option<String> {
-            lock(&self.last_connected).clone()
-        }
-
-        fn installed_browser_of(&self, browser: &str) -> Option<String> {
-            lock(&self.installed).get(browser).cloned()
-        }
-
-        fn arrivals_of(&self, installed: &str) -> u64 {
-            lock(&self.arrivals).get(installed).copied().unwrap_or(0)
-        }
-
-        fn note_start(&self, installed: &str, now: Instant, window: std::time::Duration) -> bool {
-            let arrivals = self.arrivals_of(installed);
-            lock(&self.launches).note(installed, arrivals, now, window)
-        }
-
-        fn forget_start(&self, installed: &str) {
-            lock(&self.launches).forget(installed);
-        }
-
-        fn life_of(&self, browser: &str) -> Option<String> {
-            lock(&self.lives).get(browser).cloned()
-        }
-
-        fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {
-            lock(&self.control_states).push(state);
-            Ok(())
-        }
-    }
-}
+pub(crate) mod testing;

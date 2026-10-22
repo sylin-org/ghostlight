@@ -21,6 +21,7 @@ use super::connection::{ReceiptResult, Receipts};
 use super::scope::{PlannedCall, Scope};
 use super::wire::{self, PrimitiveName};
 use super::world::{self, EffectClass};
+use crate::browser::adapter::RuntimeControlState;
 use crate::browser::transport::{SocketWriter, DELIVERY_TIMEOUT};
 use crate::browser::{BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
 use crate::install::icons::sha256_hex;
@@ -349,6 +350,42 @@ pub struct Line {
     pub writer: Arc<SocketWriter>,
     /// The calls awaiting receipts on the connection.
     pub receipts: Arc<Receipts>,
+}
+
+impl Line {
+    /// Send one liveness probe, the heartbeat that carries `sequence`.
+    ///
+    /// # Errors
+    ///
+    /// The frame could not be written.
+    pub fn heartbeat(&self, sequence: u32) -> Result<(), FrameError> {
+        self.writer.native(&wire::Outbound::Heartbeat { sequence })
+    }
+
+    /// Tell the extension the runtime control state, by `deadline`.
+    ///
+    /// # Errors
+    ///
+    /// The frame could not be written in time.
+    pub fn control_state(
+        &self,
+        state: RuntimeControlState,
+        deadline: Instant,
+    ) -> Result<(), FrameError> {
+        self.writer.native_until(
+            &wire::Outbound::ControlState {
+                state: state.into(),
+            },
+            deadline,
+        )
+    }
+
+    /// End the connection: every call still waiting fails, and the stream closes.
+    pub fn end(&self) {
+        self.receipts
+            .fail_all(&BrowserError::DisconnectedAfterDispatch);
+        self.writer.close();
+    }
 }
 
 /// One command's primitives over one connection, and the facts their receipts reported.

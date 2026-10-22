@@ -456,7 +456,7 @@ fn a_connected_browser_is_remembered_for_the_next_service_by_its_name() {
 
     // Plain Chromium's brands are all generic, so its extension reports no name: it is
     // Chromium, the family every adapter belongs to, remembered and read by that name.
-    let family = crate::browser::validated_browser_name(None).expect("an unnamed browser is named");
+    let family = crate::browser::UNBRANDED_BROWSER_NAME.to_owned();
     let mut hello = FakeExtension::hello("browser_plain");
     hello.as_object_mut().unwrap().remove("browser_name");
     let (service, extension) = pair().unwrap();

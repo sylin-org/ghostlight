@@ -48,7 +48,7 @@ In order. "After" names what a slice waits for.
 | SERV-12 | refactor(diagnostics): one typed record | - | SERV-12; optional fields, relay's writer pinned by a round-trip test | moved to test-01 (LEDGER-core-language.md), 2026-10-21 |
 | SERV-11 | refactor(service): one name per meaning on the service side | SERV-3 | SERV-11's service half | landed (this commit); the `cli/` names and its "authority" docs are install's half |
 | SERV-14 | docs(service): the module docs map the crate | SERV-11 | SERV-14 | landed (two commits, this one the last: the cli doc names the modules SERV-11c renamed); cross-lane `cli/mod.rs` and `cli/caller.rs`, docs and one named constant |
-| BROW-1 | refactor(browser): protocol 4's frames and hello validators move into protocol 4 | C3c | BROW-1 as corrected; the registry stays in `browser/`; cross-lane `browser/adapter/` | todo |
+| BROW-1 | refactor(browser): protocol 4's frames and hello validators move into protocol 4 | C3c | BROW-1 as corrected; the registry stays in `browser/`; cross-lane `browser/adapter/` | landed (this commit) |
 | BROW-5 | refactor(browser): the `Work` alias goes | - | BROW-5 | landed (this commit) |
 | BROW-8 | refactor(browser): the port's literals are named | - | BROW-8's port half; `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` as a check, not a tie | landed (this commit) |
 | BROW-11 | docs(browser): the port's docs match the code | BROW-1 | BROW-11's port half | todo |
@@ -189,3 +189,20 @@ A kill-on-close job would need the relay to break away; none has been seen.
   `poll_until`, which looks, stops on an answer or on the deadline or a cancel, and sleeps at most
   `AVAILABILITY_POLL`. `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` was already a const assertion from the
   adapter's BROW-8a, so nothing ties the frozen limit to the internal one.
+- BROW-1 as landed (the skeptic's shape): the registry, liveness and heartbeat stay in
+  `browser/`; protocol 4 takes what is its own. `browser/mod.rs` builds no wire frame: the
+  heartbeat, control state and a connection's end are `Line` methods in `protocol4/link.rs`
+  (`heartbeat`, `control_state`, `end`), and `Liveness::probe` became `begin_probe`, a sequence.
+  The hello validators (`validated_browser_name`, `valid_opaque_id`), their prefixes and bounds,
+  and `refuse_incompatible` move to `protocol4/connection.rs`; `UNBRANDED_BROWSER_NAME`, the
+  family every adapter belongs to, stays with the port. The narrow registration call:
+  `connection.rs` no longer reaches the port's fields or private methods. It reads
+  `service_epoch()`, `assets()` and the locked `control_state()`, registers through
+  `admit(Admitted)`, which mints the connection id and liveness and returns a `Registration`,
+  and starts serving through `watch` (the heartbeat) or `withdraw`. The reader reports through
+  the `Registration` alone (`is_current`, `attended`, `event`, `acknowledge`, `end`), so its 14
+  private imports are now 6 purpose-built ones. The private `Reachability` folds into the
+  `Availability` it was mapped to, and `testing::FakeBrowser` moves to `browser/testing.rs`.
+  `mod.rs` goes from 1,989 to 1,663 lines. Tests inside `browser/` still read private fields where
+  they set up a race (`connection/tests.rs`, `contract_tests/controls.rs`), as Rust lets a child
+  module do. 382 service tests pass unchanged in count.

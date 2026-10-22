@@ -886,16 +886,15 @@ mod tests {
         }
 
         // an_unnamed_adapter_reads_as_chromium_the_way_the_port_maps_it
-        let unnamed =
-            crate::browser::validated_browser_name(None).expect("an unnamed browser is named");
-        let here = browsers_here(&computer, &[connected(&unnamed)]);
+        let unnamed = crate::browser::UNBRANDED_BROWSER_NAME;
+        let here = browsers_here(&computer, &[connected(unnamed)]);
         assert_eq!(
             here.facts
                 .iter()
                 .filter(|fact| fact.connected)
                 .map(|fact| fact.id.as_str())
                 .collect::<Vec<_>>(),
-            [browser_id_named(&unnamed).expect("a family")],
+            [browser_id_named(unnamed).expect("a family")],
             "an unnamed adapter is the Chromium row and no other"
         );
         assert_eq!(fact(&here, "chromium").short, OTHER_BROWSER_SHORT);

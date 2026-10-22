@@ -432,13 +432,14 @@ fn a_connection_registered_after_a_publish_missed_it_ends_on_the_published_state
     let port = port();
     let (fake, attached) = attach(&port, &FakeExtension::hello(FOUR));
     attached.unwrap();
-    let (writer, _) = channel(&port, FOUR);
+    let (writer, receipts) = channel(&port, FOUR);
+    let line = super::Line { writer, receipts };
     // A hold stored after `hello_accepted` carried `active`, whose snapshot predates the
     // registration and so never reached this connection.
-    *lock(&port.control_state) = RuntimeControlState::Held;
-    super::settle_control_state(&port, &writer, wire::RuntimeControlState::Active);
+    *port.control_state() = RuntimeControlState::Held;
+    super::settle_control_state(&port, &line, wire::RuntimeControlState::Active);
     // A connection whose `hello_accepted` already carried the state hears nothing more.
-    super::settle_control_state(&port, &writer, wire::RuntimeControlState::Held);
+    super::settle_control_state(&port, &line, wire::RuntimeControlState::Held);
     port.publish_control_state(RuntimeControlState::Ended)
         .unwrap();
 

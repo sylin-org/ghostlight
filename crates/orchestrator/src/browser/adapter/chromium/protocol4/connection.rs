@@ -17,17 +17,16 @@ use std::time::Instant;
 use ghostlight_relay::endpoint::Connection as RelayConnection;
 use ghostlight_relay::frame::FrameError;
 use serde_json::Value;
-use uuid::Uuid;
 
 use super::link::Line;
 use super::wire;
 use crate::browser::adapter::BrowserEvent;
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
-    end_connection, is_current, lock, refuse_incompatible, valid_opaque_id, validated_browser_name,
-    AdapterNotifications, AdapterRegistry, BrowserError, Connection, ConnectionTag, Liveness,
-    RelayBrowserPort, BROWSER_ID_PREFIX, CONTROL_DELIVERY_TIMEOUT, LIFE_PREFIX,
+    Admitted, BrowserError, Registration, RelayBrowserPort, CONTROL_DELIVERY_TIMEOUT,
+    UNBRANDED_BROWSER_NAME,
 };
+use crate::sync::lock;
 
 /// Longest engine version a hello may report.
 const ENGINE_VERSION_MAX_CHARS: usize = 32;
@@ -39,8 +38,15 @@ const KIND_FIELD: &str = "kind";
 const HELLO_KIND: &str = "hello";
 /// The hello field naming the protocol the extension speaks.
 const PROTOCOL_FIELD: &str = "protocol";
-/// The prefix of every connection identity.
-const CONNECTION_PREFIX: &str = "connection_";
+// A product name is a label a person reads next to a browser they already recognize, not a
+// place for an adapter to write prose.
+const BROWSER_NAME_MAX_CHARS: usize = 40;
+/// The longest browser identity or extension life a hello may report, prefix included.
+const OPAQUE_ID_MAX_BYTES: usize = 80;
+/// Every browser identity an extension mints starts with this prefix.
+const BROWSER_ID_PREFIX: &str = "browser_";
+/// Every extension life an extension mints starts with this prefix.
+const LIFE_PREFIX: &str = "life_";
 /// The receipt field naming the request it answers.
 const CORRELATION_FIELD: &str = "correlation";
 
@@ -121,64 +127,47 @@ pub(crate) fn attach(
     }
     let hello = validated_hello(hello)?;
     let browser_name = validated_browser_name(hello.browser_name)?;
-    let liveness = Arc::new(Liveness::new(
-        hello.browser_id.clone(),
-        lock(&port.lifecycle).clone(),
-        Instant::now(),
-    ));
     let writer = Arc::new(
         SocketWriter::new(stream).map_err(|error| BrowserError::Protocol(error.to_string()))?,
     );
-    let carried: wire::RuntimeControlState = (*lock(&port.control_state)).into();
+    let carried = wire::RuntimeControlState::from(*port.control_state());
     writer
         .native(&wire::Outbound::HelloAccepted {
-            service_epoch: port.service_epoch.clone(),
+            service_epoch: port.service_epoch().into(),
             service_version: env!("CARGO_PKG_VERSION").into(),
             control_state: carried,
-            assets: (*port.assets).clone(),
+            assets: port.assets().clone(),
         })
         .map_err(|error| {
             writer.close();
             BrowserError::Protocol(error.to_string())
         })?;
-    let receipts = Arc::new(Receipts::default());
-    let tag = ConnectionTag {
-        browser_id: hello.browser_id,
-        connection_id: format!("{CONNECTION_PREFIX}{}", Uuid::new_v4().simple()),
+    let line = Line {
+        writer,
+        receipts: Arc::new(Receipts::default()),
     };
+    let registration = port.admit(Admitted {
+        line: line.clone(),
+        adapter_version: hello.adapter_version,
+        browser_id: hello.browser_id,
+        browser_name,
+        life: hello.life,
+        attended: hello.attended,
+    })?;
+    settle_control_state(port, &line, carried);
     let reading = Reading {
         reader,
-        writer: Arc::clone(&writer),
-        receipts: Arc::clone(&receipts),
-        notifications: port.notifications(),
-        adapters: Arc::clone(&port.adapters),
-        tag: tag.clone(),
-        liveness: Arc::clone(&liveness),
+        line: line.clone(),
+        registration: registration.clone(),
     };
-    port.register(
-        Connection {
-            id: tag.connection_id.clone(),
-            line: Line {
-                writer: Arc::clone(&writer),
-                receipts,
-            },
-            adapter_version: hello.adapter_version,
-            browser_id: tag.browser_id.clone(),
-            browser_name,
-            life: hello.life,
-            liveness: Arc::clone(&liveness),
-        },
-        hello.attended,
-    )?;
-    settle_control_state(port, &writer, carried);
     if let Err(error) = thread::Builder::new()
         .name("ghostlight-browser-reader".into())
         .spawn(move || reading.run())
     {
-        port.detach_registered(&tag.browser_id, &tag.connection_id);
+        port.withdraw(&registration);
         return Err(BrowserError::Protocol(error.to_string()));
     }
-    port.spawn_heartbeat(&tag, writer, liveness)
+    port.watch(&registration, line)
 }
 
 /// Send a just-registered connection the port's control state when it is no longer the state its
@@ -189,19 +178,54 @@ pub(crate) fn attach(
 /// frame is written, so a later publish cannot store a newer state and reach this connection
 /// before this older frame does. A writer that cannot deliver the frame closes itself, and the
 /// connection's reader then ends it.
-fn settle_control_state(
-    port: &RelayBrowserPort,
-    writer: &SocketWriter,
-    carried: wire::RuntimeControlState,
-) {
-    let current = lock(&port.control_state);
-    let state = wire::RuntimeControlState::from(*current);
-    if state != carried {
-        let _ = writer.native_until(
-            &wire::Outbound::ControlState { state },
-            Instant::now() + CONTROL_DELIVERY_TIMEOUT,
-        );
+fn settle_control_state(port: &RelayBrowserPort, line: &Line, carried: wire::RuntimeControlState) {
+    let current = port.control_state();
+    if wire::RuntimeControlState::from(*current) != carried {
+        let _ = line.control_state(*current, Instant::now() + CONTROL_DELIVERY_TIMEOUT);
     }
+}
+
+/// Tell an extension that does not speak adapter protocol 4 to update, then close its socket.
+/// Best effort: the extension may already be gone.
+fn refuse_incompatible(stream: RelayConnection) {
+    let Ok(writer) = SocketWriter::new(stream) else {
+        return;
+    };
+    let _ = writer.native_until(
+        &wire::Outbound::Error {
+            code: wire::error_code::ADAPTER_INCOMPATIBLE.into(),
+            message: crate::language::adapter::ADAPTER_INCOMPATIBLE.into(),
+        },
+        Instant::now() + CONTROL_DELIVERY_TIMEOUT,
+    );
+    writer.close();
+}
+
+/// Validate the bounded product name a hello reports. An extension leaves the generic Chromium
+/// brand out, so a browser that reports none is Chromium ([`UNBRANDED_BROWSER_NAME`]), and its
+/// connection is named and remembered like any other browser's.
+fn validated_browser_name(name: Option<String>) -> Result<String, BrowserError> {
+    let Some(name) = name else {
+        return Ok(UNBRANDED_BROWSER_NAME.to_owned());
+    };
+    let acceptable = !name.trim().is_empty()
+        && name.chars().count() <= BROWSER_NAME_MAX_CHARS
+        && !name.chars().any(char::is_control);
+    if !acceptable {
+        return Err(BrowserError::Authentication);
+    }
+    Ok(name)
+}
+
+/// Whether `value` is an opaque id an extension mints: `prefix`, then letters, digits and
+/// underscores, bounded.
+fn valid_opaque_id(value: &str, prefix: &str) -> bool {
+    value.starts_with(prefix)
+        && value.len() > prefix.len()
+        && value.len() <= OPAQUE_ID_MAX_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 /// The protocol a first frame names, or zero when it names none this service can read.
@@ -279,12 +303,8 @@ fn browser_event(event: wire::Event) -> Option<BrowserEvent> {
 /// Everything one connection's reader thread owns.
 struct Reading {
     reader: SocketReader,
-    writer: Arc<SocketWriter>,
-    receipts: Arc<Receipts>,
-    notifications: AdapterNotifications,
-    adapters: Arc<Mutex<AdapterRegistry>>,
-    tag: ConnectionTag,
-    liveness: Arc<Liveness>,
+    line: Line,
+    registration: Registration,
 }
 
 impl Reading {
@@ -301,10 +321,8 @@ impl Reading {
                 Ok(None) | Err(_) => break,
             }
         }
-        self.writer.close();
-        self.receipts
-            .fail_all(&BrowserError::DisconnectedAfterDispatch);
-        end_connection(&self.adapters, &self.tag, &self.notifications);
+        self.line.end();
+        self.registration.end();
     }
 
     /// Act on one frame. A frame this service cannot read is ignored, except a receipt, whose
@@ -316,7 +334,8 @@ impl Reading {
                 if frame.get(KIND_FIELD).and_then(Value::as_str) == Some(RECEIPT_KIND) {
                     if let Some(correlation) = frame.get(CORRELATION_FIELD).and_then(Value::as_str)
                     {
-                        self.receipts
+                        self.line
+                            .receipts
                             .deliver(correlation, Err(BrowserError::Protocol(error.to_string())));
                     }
                 }
@@ -326,11 +345,11 @@ impl Reading {
         match inbound {
             wire::Inbound::Receipt(receipt) => {
                 let correlation = receipt.correlation.clone();
-                self.receipts.deliver(&correlation, Ok(receipt));
+                self.line.receipts.deliver(&correlation, Ok(receipt));
             }
             wire::Inbound::Event { event } => self.event(event),
             wire::Inbound::HeartbeatAck { sequence } => {
-                self.liveness.acknowledge(sequence, Instant::now());
+                self.registration.acknowledge(sequence);
             }
             wire::Inbound::Hello(_) | wire::Inbound::Error { .. } | wire::Inbound::Unknown => {}
         }
@@ -338,15 +357,15 @@ impl Reading {
 
     /// Apply one event from the connection that currently serves its browser.
     fn event(&self, event: wire::Event) {
-        if !is_current(&self.adapters, &self.tag) {
+        if !self.registration.is_current() {
             return;
         }
         if matches!(event, wire::Event::Attended) {
-            lock(&self.adapters).attend(&self.tag.browser_id);
+            self.registration.attended();
             return;
         }
-        if let (Some(sink), Some(event)) = (&self.notifications.sink, browser_event(event)) {
-            sink.on_event(&self.tag.browser_id, event);
+        if let Some(event) = browser_event(event) {
+            self.registration.event(event);
         }
     }
 }
