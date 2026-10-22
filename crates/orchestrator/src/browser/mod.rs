@@ -458,7 +458,7 @@ pub struct BrowserSummary {
     /// second mapping table would add a lookup without adding a guarantee.
     pub id: String,
     /// The product name a person and the history know this browser by: the bounded name its
-    /// adapter reports, or Chromium ([`UNBRANDED_BROWSER_NAME`]) when it reports none.
+    /// adapter reports, or Chromium when it reports none.
     pub name: String,
     /// Adapter version currently serving this browser.
     pub adapter_version: String,
