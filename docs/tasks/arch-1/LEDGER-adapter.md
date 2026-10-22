@@ -159,7 +159,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | D52(c) | fix(work): a refusal names its typed cause, and a capture over its budget says so | D52 | test-03 handed core-work's D52(c) to this lane on 2026-10-20; cross-lane in `work/mod.rs` | landed (this commit) |
 | A-D1 | fix(assets): a page text cut never splits a character and counts characters as the service does | - | the coordinator's page-asset classification, 2026-10-21 (Notes, second sweep) | landed (this commit) |
 | A-D2 | fix(assets): an image input reads as a button, as fill already treats it | - | the same classification (Notes, second sweep) | landed (this commit) |
-| A-D3 | fix(assets): a visual-settle wait on a target that is gone refuses it as stale | - | the same classification, lower confidence: confirm first (Notes, second sweep) | todo |
+| A-D3 | fix(assets): a visual-settle wait on a target that is gone refuses it as stale | - | the same classification, lower confidence: confirm first (Notes, second sweep) | landed (this commit) |
 | A-D4 | fix(adapter): a read, a listing or a tree across documents never asks for more than one relay frame carries | P-D6 | the coordinator, from test-02's gap-3 analysis, 2026-10-21 | landed (this commit) |
 
 ### Notes (second sweep)
@@ -373,3 +373,11 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   button HTML-AAM and the fill path already call it, and a selector for role `button` finds it.
   The proof is a row in the kept "native controls get their HTML-AAM roles" test, which read
   `textbox` before the fix. `assets.sha256` regenerates; no packaged extension file changes.
+- A-D3 as landed: confirmed first. Rows in the kept stale-locator tests, for a visual-settle
+  `observe` on an unknown handle and on a removed one, answered `ok` before the fix, because
+  `heldElement` returned nothing and `settleVisual` measured the whole document. The settle's
+  target is now resolved like every other call's (`resolve(message.locator, ctx)`), so a gone or
+  unknown handle refuses `stale_locator` (`unknown` or `removed`), and a re-rendered control is
+  followed as elsewhere. The `visual_settle: true` that follows a met `target_present` or
+  `target_absent` condition still reads the held element, the condition being what it waited for.
+  `assets.sha256` regenerates; no packaged extension file changes.

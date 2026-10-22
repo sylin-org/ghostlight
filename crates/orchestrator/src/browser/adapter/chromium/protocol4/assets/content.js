@@ -2553,7 +2553,9 @@ ${line}` : line;
     });
 
     if (message.condition === "visual_settle") {
-      const targetElement = message.locator ? heldElement(message.locator) : document;
+      // The target is resolved like any other call's: a gone or unknown one refuses
+      // stale_locator rather than letting the whole document's settle stand in for it.
+      const targetElement = message.locator ? resolve(message.locator, ctx) : document;
       const visual = await sensor.settleVisual(targetElement, settleOptions(message.timeout_ms));
       if (!visual.settled) return unmet(readiness());
       return { satisfied: true, elapsed_ms: elapsed(), readiness: readiness() };

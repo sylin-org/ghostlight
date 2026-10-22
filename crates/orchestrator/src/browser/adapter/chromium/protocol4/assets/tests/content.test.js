@@ -2038,6 +2038,9 @@ test("a locator from another world or an unminted one is stale_locator", async (
     assert.deepEqual(await detailOf(second, message), { stale: "unknown" }, kind);
   }
   assert.deepEqual(await detailOf(second, { kind: "describe", locators: ["locator_1"] }), { stale: "unknown" });
+  // A-D3: a visual settle on an unknown handle refuses it, and never measures the page instead.
+  assert.deepEqual(await detailOf(second, { kind: "observe", condition: "visual_settle", locator: foreign, timeout_ms: 200 }),
+    { stale: "unknown" });
   const unminted = { kind: "describe", locators: [`locator_${own.split("_")[1]}_999`] };
   assert.deepEqual(await detailOf(second, unminted), { stale: "unknown" });
   assert.equal(await second.codeOf({ kind: "describe", locators: [own] }), null);
@@ -2049,6 +2052,8 @@ test("a locator for a removed element is stale_locator", async () => {
   harness.input.isConnected = false;
   assert.equal(await staleWordOf(harness, { kind: "describe", locators: [locator] }), "removed");
   assert.equal(await staleWordOf(harness, { kind: "box", locator }), "removed");
+  // A-D3: so does a visual settle on it.
+  assert.equal(await staleWordOf(harness, { kind: "observe", condition: "visual_settle", locator, timeout_ms: 200 }), "removed");
 });
 
 test("a removed locator says removed again on a second use", async () => {
