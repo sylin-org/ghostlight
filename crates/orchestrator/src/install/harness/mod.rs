@@ -1,0 +1,5167 @@
+//! The harness feature: Ghostlight's explicit, ownership-checked registration in each agent's MCP
+//! configuration on each host, and the agent catalog it is read from.
+//!
+//! A harness is one agent's MCP configuration on one host: one row of [`ROSTER`]. The registry
+//! inspects each, installs, fixes and removes Ghostlight's own entry in the dialect the client
+//! reads, and leaves every entry Ghostlight does not own as it is.
+
+use std::collections::BTreeMap;
+use std::env;
+use std::ffi::{OsStr, OsString};
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+
+use ghostlight_relay::route::MCP_ARGUMENT;
+use jsonc_parser::cst::{CstInputValue, CstObject, CstObjectProp, CstRootNode};
+use jsonc_parser::{parse_to_serde_value, ParseOptions};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use thiserror::Error;
+use toml_edit::{value, Array, DocumentMut, Item, Table};
+
+use crate::agent::image::{monogram, Monogram};
+use crate::agent::Agent;
+use crate::language::deployment as words;
+use crate::sync::lock;
+
+use super::{apps, files, layout, paths, user_dirs, user_path};
+
+use super::container::{AppContainer, Residence};
+use super::files::{Access, Link, Replace};
+use super::icons::{AgentIconSources, AppPlace, KnownFolder, ProgramPlace};
+use super::layout::{
+    program_file_name, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, WINDOWS_PROGRAM_SUFFIX,
+};
+use super::packaged::{CopyPlace, DataRoots, Packages, SettingsCopy};
+use super::user_dirs::UserDirs;
+
+pub(super) const SERVER_NAME: &str = "ghostlight";
+/// The key of the program an entry starts, in every dialect.
+const COMMAND_KEY: &str = "command";
+/// The key of the program's arguments, in the dialects that keep them apart from the command.
+const ARGS_KEY: &str = "args";
+/// The key of the servers collection in the dialects that keep it at the top as `mcpServers`.
+const MCP_SERVERS_KEY: &str = "mcpServers";
+/// The key of the servers collection in the dialects that call it `servers`, at the top or
+/// below `mcp`.
+const SERVERS_KEY: &str = "servers";
+/// The key of the servers collection in Zed's settings.
+const CONTEXT_SERVERS_KEY: &str = "context_servers";
+/// The key of the `mcp` object that holds the servers, or holds `servers`, in its dialects.
+const MCP_KEY: &str = "mcp";
+/// The Codex table that holds every MCP server.
+const CODEX_SERVERS_KEY: &str = "mcp_servers";
+/// The key of a Codex entry's own fixed environment.
+const CODEX_ENV_KEY: &str = "env";
+/// The key of the variables a Codex entry forwards to its program.
+const CODEX_ENV_VARS_KEY: &str = "env_vars";
+/// The key of a forwarded variable's name, when it is written as a table.
+const CODEX_FORWARD_NAME_KEY: &str = "name";
+/// The key of where a forwarded variable is read from, when it is written as a table.
+const CODEX_FORWARD_SOURCE_KEY: &str = "source";
+/// A forwarded variable read from Codex's own process, the default.
+const CODEX_SOURCE_LOCAL: &str = "local";
+/// A forwarded variable read from Codex's remote session.
+const CODEX_SOURCE_REMOTE: &str = "remote";
+/// The key of the kind of server an entry describes, in the dialects that need one.
+const TYPE_KEY: &str = "type";
+/// The arguments that make the edge the MCP relay, in every client's entry.
+const MCP_ARGUMENTS: [&str; 1] = [MCP_ARGUMENT];
+/// How a client's detail names an owned entry that starts the retired MCP connector.
+const RETIRED_ENTRY: words::RetiredEntry<'static> = words::RetiredEntry {
+    connector: RETIRED_MCP_CONNECTOR_NAME,
+    edge: EDGE_COMMAND_NAME,
+    argument: MCP_ARGUMENT,
+};
+/// The package name of the Claude desktop app, which reads the Claude Desktop configuration.
+const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
+/// The package name of the Codex desktop app.
+const CODEX_PACKAGE: &str = "OpenAI.Codex";
+/// The age past which a replace's temporary file beside a configuration is no write in flight
+/// but one an interrupted write left behind. A write takes milliseconds.
+const STRAY_TEMPORARY_AGE: Duration = Duration::from_secs(60);
+/// The variable that names Codex's own directory, which holds its `config.toml`.
+pub(super) const CODEX_HOME_VARIABLE: &str = "CODEX_HOME";
+/// The variable that names Claude Code's own directory: Claude Code reads its [`CLAUDE_CODE_FILE`]
+/// there in place of the person's home.
+pub(super) const CLAUDE_CONFIG_VARIABLE: &str = "CLAUDE_CONFIG_DIR";
+/// The file Claude Code keeps its user-scope MCP servers in, in its own directory or the home.
+const CLAUDE_CODE_FILE: &str = ".claude.json";
+/// The variable that names Crush's whole configuration file, in place of its default.
+pub(super) const CRUSH_CONFIG_VARIABLE: &str = "CRUSH_GLOBAL_CONFIG";
+// Codex filters its stdio child's environment. Linux demand-start needs the invoking
+// desktop session, not captured machine-local values or a second service-only route.
+const CODEX_DESKTOP_ENVIRONMENT: &[&str] = &[
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_CURRENT_DESKTOP",
+    "XAUTHORITY",
+];
+
+/// Cached, explicit registry of supported development harness integrations.
+///
+/// The cached roster is written only under the action lock: every act scans under the lock it
+/// holds, and [`Self::refresh`] waits for it, so a scan that began before an act's write can never
+/// store its older roster over the act's result.
+#[derive(Clone)]
+pub struct HarnessRegistry {
+    inner: Arc<RegistryInner>,
+}
+
+struct RegistryInner {
+    context: HarnessContext,
+    summaries: Mutex<Vec<HarnessSummary>>,
+    /// Held by every act and every scan, and always taken before `summaries`.
+    action: Mutex<()>,
+}
+
+impl HarnessRegistry {
+    /// Discover the current user context and perform one initial read-only check.
+    #[must_use]
+    pub fn discover() -> Self {
+        Self::with_context(HarnessContext::system())
+    }
+
+    pub(super) fn with_context(context: HarnessContext) -> Self {
+        let registry = Self {
+            inner: Arc::new(RegistryInner {
+                context,
+                summaries: Mutex::new(Vec::new()),
+                action: Mutex::new(()),
+            }),
+        };
+        let _ = registry.refresh();
+        registry
+    }
+
+    /// A registry over client configurations below `directory` that start `edge` and keeps
+    /// its located paths in `state`, for tests that must not touch this user's clients.
+    #[cfg(test)]
+    pub(crate) fn isolated(directory: &Path, edge: &Path, state: &Path) -> Self {
+        Self::with_context(isolated_context(directory, edge, state))
+    }
+
+    /// Like [`Self::isolated`], run from inside `container`: the configurations below
+    /// `directory/config` are that app's private view.
+    #[cfg(test)]
+    pub(crate) fn isolated_inside(
+        directory: &Path,
+        edge: &Path,
+        state: &Path,
+        container: AppContainer,
+    ) -> Self {
+        let mut context = isolated_context(directory, edge, state);
+        context.private_view = Some(PrivateView {
+            container,
+            roots: vec![directory.join("config")],
+        });
+        Self::with_context(context)
+    }
+
+    /// Return the last complete, immutable harness check.
+    #[must_use]
+    pub fn summaries(&self) -> Vec<HarnessSummary> {
+        lock(&self.inner.summaries).clone()
+    }
+
+    /// Re-check every supported harness without changing its configuration.
+    ///
+    /// It waits for an act in progress, so the roster it stores is never older than an act's.
+    pub fn refresh(&self) -> Result<Vec<HarnessSummary>, HarnessError> {
+        let _action = lock(&self.inner.action);
+        Ok(self.scan())
+    }
+
+    /// Give every cached row the symbol its agent wears now, after the agents' icons changed,
+    /// without reading any client configuration again. Returns the roster as it now stands.
+    ///
+    /// It waits for an act or scan in progress, so a scan that read the older icons never stores
+    /// them over this.
+    pub fn resymbol(&self) -> Vec<HarnessSummary> {
+        let _action = lock(&self.inner.action);
+        let mut summaries = lock(&self.inner.summaries);
+        for summary in summaries.iter_mut() {
+            if let Some(agent) = catalog_agent(&summary.agent.id) {
+                summary.agent = agent;
+            }
+        }
+        summaries.clone()
+    }
+
+    /// Inspect every supported harness and store the roster. The caller holds the action lock.
+    fn scan(&self) -> Vec<HarnessSummary> {
+        let summaries: Vec<HarnessSummary> = definitions(&self.inner.context)
+            .into_iter()
+            .map(|definition| inspect(&self.inner.context, &definition))
+            .collect();
+        *lock(&self.inner.summaries) = summaries.clone();
+        summaries
+    }
+
+    /// Apply one explicit check, install, fix, or uninstall action.
+    pub fn apply(
+        &self,
+        id: &str,
+        action: HarnessAction,
+    ) -> Result<HarnessActionResult, HarnessError> {
+        let _action = lock(&self.inner.action);
+        let definition = definition(&self.inner.context, id)?;
+        let result = match action {
+            HarnessAction::Check => HarnessActionResult {
+                changed: false,
+                message: words::harness_checked(&definition.label),
+                summary: inspect(&self.inner.context, &definition),
+            },
+            HarnessAction::Install => apply_install(&self.inner.context, &definition)?,
+            HarnessAction::Fix => apply_fix(&self.inner.context, &definition)?,
+            HarnessAction::Uninstall => apply_uninstall(&self.inner.context, &definition)?,
+        };
+        self.scan();
+        Ok(result)
+    }
+
+    /// Set up or update every detected target Ghostlight can change safely.
+    ///
+    /// Current registrations, targets that are not detected and targets whose configuration the
+    /// app container this process runs in keeps private are left alone. Malformed and foreign
+    /// registrations remain blocked by the same per-target ownership check used by
+    /// [`Self::apply`]. One target failing does not prevent an independent target from becoming
+    /// ready; the result names the failures and the refreshed roster carries their evidence.
+    pub fn setup_detected(&self) -> Result<HarnessSetupResult, HarnessError> {
+        let _action = lock(&self.inner.action);
+        let initial = self.scan();
+        let states: BTreeMap<&str, HarnessState> = initial
+            .iter()
+            .map(|summary| (summary.id.as_str(), summary.state))
+            .collect();
+        let eligible: Vec<HarnessDefinition> = definitions(&self.inner.context)
+            .into_iter()
+            .filter(|definition| {
+                definition.is_writable_from(&self.inner.context)
+                    && matches!(
+                        states.get(definition.id),
+                        Some(HarnessState::Available | HarnessState::Updatable)
+                    )
+            })
+            .collect();
+
+        let mut set_up = 0;
+        let mut updated = 0;
+        let mut failures = Vec::new();
+        for definition in eligible {
+            let state = states
+                .get(definition.id)
+                .copied()
+                .unwrap_or(HarnessState::NotDetected);
+            match apply_install(&self.inner.context, &definition) {
+                Ok(result) if result.changed => match state {
+                    HarnessState::Available => set_up += 1,
+                    HarnessState::Updatable => updated += 1,
+                    _ => {}
+                },
+                Ok(_) => {}
+                Err(error) => failures.push(HarnessSetupFailure {
+                    id: definition.id.into(),
+                    name: definition.label,
+                    detail: bounded_disclosure(&error.to_string())
+                        .unwrap_or_else(|| words::CLIENT_CHANGE_FAILED.into()),
+                }),
+            }
+        }
+
+        let summaries = self.scan();
+        let needs_attention = summaries
+            .iter()
+            .filter(|summary| summary.state == HarnessState::NeedsAttention)
+            .count();
+        let message = words::setup_message(set_up, updated, needs_attention, failures.len());
+        Ok(HarnessSetupResult {
+            set_up,
+            updated,
+            needs_attention,
+            failures,
+            message,
+        })
+    }
+
+    /// Remove the temporary files interrupted configuration writes left beside the
+    /// configurations Ghostlight writes: the file of every agent it can change from here and its
+    /// own location state. A temporary younger than [`STRAY_TEMPORARY_AGE`] may be a write in
+    /// flight and stays. Returns how many were removed; one that cannot be removed is left.
+    pub fn remove_stray_temporaries(&self) -> usize {
+        self.remove_stray_temporaries_at(SystemTime::now())
+    }
+
+    /// [`Self::remove_stray_temporaries`], judging each temporary's age at `now`.
+    fn remove_stray_temporaries_at(&self, now: SystemTime) -> usize {
+        let _action = lock(&self.inner.action);
+        let context = &self.inner.context;
+        let mut directories: Vec<PathBuf> = definitions(context)
+            .into_iter()
+            .filter(|definition| definition.is_writable_from(context))
+            .map(|definition| {
+                CONFIGURATION_WRITE
+                    .target(&definition.path)
+                    .unwrap_or(definition.path)
+            })
+            .chain(std::iter::once(context.locations.clone()))
+            .filter_map(|path| path.parent().map(Path::to_path_buf))
+            .collect();
+        directories.sort();
+        directories.dedup();
+        directories
+            .iter()
+            .map(|directory| remove_stray_temporaries_in(directory, now))
+            .sum()
+    }
+
+    /// Return the closed official download destination of one host, by its harness id.
+    ///
+    /// Fails with `UnknownHarness` for an id outside the roster and with `NoDownload` for a host
+    /// that has no official download page.
+    pub fn download_url(&self, id: &str) -> Result<&'static str, HarnessError> {
+        definition(&self.inner.context, id)?
+            .download_url
+            .ok_or_else(|| HarnessError::NoDownload(id.into()))
+    }
+
+    /// Persist one user-selected executable or configuration path after validating it.
+    pub fn locate(&self, id: &str, path: &Path) -> Result<HarnessActionResult, HarnessError> {
+        let _action = lock(&self.inner.action);
+        let definition = definition(&self.inner.context, id)?;
+        if !path.is_file() {
+            return Err(HarnessError::LocatedPathInvalid(path.to_path_buf()));
+        }
+        let mut overrides = read_location_overrides(&self.inner.context)?;
+        let located = overrides.entry(id.into()).or_default();
+        if definition.accepts_config_path(path) {
+            validate_located_config(path, definition.dialect)?;
+            located.config = Some(path.to_path_buf());
+        } else if is_executable_file(path, self.inner.context.windows) {
+            located.executable = Some(path.to_path_buf());
+        } else {
+            return Err(HarnessError::LocatedPathInvalid(path.to_path_buf()));
+        }
+        write_location_overrides(&self.inner.context, &overrides)?;
+        let summaries = self.scan();
+        let summary = summaries
+            .into_iter()
+            .find(|summary| summary.id == id)
+            .ok_or_else(|| HarnessError::UnknownHarness(id.into()))?;
+        let message = if matches!(definition.dialect, ConfigDialect::Manual(_)) {
+            manual_setup_sentence(&definition)
+        } else {
+            words::client_location_kept(&summary.label)
+        };
+        Ok(HarnessActionResult {
+            changed: true,
+            message,
+            summary,
+        })
+    }
+}
+
+/// A context over client configurations below `directory`, for tests that must not touch this
+/// user's clients.
+#[cfg(test)]
+fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessContext {
+    HarnessContext {
+        home: directory.join("home"),
+        config_root: directory.join("config"),
+        codex_config: directory.join("codex").join("config.toml"),
+        claude_config_dir: None,
+        crush_config: None,
+        edge: edge.to_path_buf(),
+        path_entries: Vec::new(),
+        locations: state.join(layout::HARNESS_LOCATIONS_NAME),
+        windows: false,
+        linux: cfg!(target_os = "linux"),
+        local_app_data: None,
+        private_view: None,
+    }
+}
+
+pub(super) fn definition(
+    context: &HarnessContext,
+    id: &str,
+) -> Result<HarnessDefinition, HarnessError> {
+    definitions(context)
+        .into_iter()
+        .find(|definition| definition.id == id)
+        .ok_or_else(|| HarnessError::UnknownHarness(id.into()))
+}
+
+/// User-visible harness management action.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessAction {
+    /// Re-read current state only.
+    Check,
+    /// Add or update Ghostlight's owned registration.
+    Install,
+    /// Replace one foreign entry occupying Ghostlight's registration key.
+    Fix,
+    /// Remove only Ghostlight's owned registration.
+    Uninstall,
+}
+
+/// Current state of one supported harness integration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessState {
+    /// The harness has not been detected in the current user context.
+    NotDetected,
+    /// The harness is detected without a Ghostlight registration.
+    Available,
+    /// The exact current Ghostlight registration is present.
+    Installed,
+    /// A Ghostlight-owned registration starts something other than the installed edge.
+    Updatable,
+    /// A malformed or foreign entry requires deliberate manual attention.
+    NeedsAttention,
+}
+
+impl HarnessState {
+    /// Whether an install writes an entry for a target in this state: one that has none yet,
+    /// detected or not, or one an older Ghostlight wrote.
+    #[must_use]
+    pub const fn takes_install(self) -> bool {
+        matches!(self, Self::NotDetected | Self::Available | Self::Updatable)
+    }
+
+    /// Whether the configuration itself holds an entry Ghostlight owns, current or not, which an
+    /// uninstall removes. Inspection shows every owned registration (current, updatable or
+    /// retired) as one of these states and nothing else as them.
+    #[must_use]
+    pub const fn holds_owned_entry(self) -> bool {
+        matches!(self, Self::Installed | Self::Updatable)
+    }
+}
+
+/// What inspection saw that put a target in [`HarnessState::NeedsAttention`]. Each cause is
+/// said as itself, never as another (ADR-0135).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Attention {
+    /// Ghostlight's own npm launcher sits under Ghostlight's name, asking npm for the version
+    /// its pin names.
+    Launcher(LauncherPin),
+    /// An entry Ghostlight does not own sits under Ghostlight's name.
+    ForeignEntry,
+    /// The configuration file could not be parsed.
+    Malformed,
+    /// The configuration file could not be read.
+    Unreadable,
+}
+
+/// Immutable user-facing integration summary.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct HarnessSummary {
+    /// Stable product-owned harness identifier.
+    pub id: String,
+    /// Stable product id shared by coexisting targets.
+    pub product_id: String,
+    /// User-facing harness name.
+    pub name: String,
+    /// What a person reads for this target: the name, plus the host in parentheses when
+    /// several targets share the name, such as `Cline (Cursor)`.
+    pub label: String,
+    /// User-facing concrete target label.
+    pub target: String,
+    /// The agent this target sets up, as the window names and shows it.
+    pub agent: Agent,
+    /// Current registration state.
+    pub state: HarnessState,
+    /// Fixed outcome-oriented detail.
+    pub detail: String,
+    /// Optional precomposed proof behind a blocked state, authored by the orchestrator
+    /// (ADR-0135).
+    ///
+    /// Present only for a foreign entry or Ghostlight's npm launcher. For a foreign entry it names
+    /// the program found where Ghostlight's entry belongs and its argument count, never its
+    /// arguments (ADR-0135 as narrowed by the ADR-0199 amendment of 2026-10-15). For the
+    /// launcher it names the package and the version the entry asks npm for. The surface renders
+    /// it verbatim and authors no words of its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+    /// Why the target needs attention, present exactly when `state` is
+    /// [`HarnessState::NeedsAttention`]. `detail` says it to the window; a dry run words its line
+    /// from it.
+    #[serde(skip)]
+    pub attention: Option<Attention>,
+    /// Whether an explicit install can be attempted.
+    pub can_install: bool,
+    /// Whether an explicit fix can replace a foreign entry under Ghostlight's key.
+    pub can_fix: bool,
+    /// Whether an owned registration, current or not, can be removed: Ghostlight's entry in
+    /// `config_path`, or one an earlier install left in another copy of the agent's settings.
+    pub can_uninstall: bool,
+    /// Whether this host has a closed official download destination on this platform.
+    pub can_download: bool,
+    /// This host's official download page, present exactly when `can_download` is. It is public,
+    /// so every audience is given it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_url: Option<String>,
+    /// Whether the native Locate action is available.
+    pub can_locate: bool,
+    /// Whether Ghostlight never edits this target's file, so copying its setup and pasting it in
+    /// is the only way to connect it.
+    pub copy_only: bool,
+    /// Whether this process runs inside an app container that keeps this target's configuration
+    /// private: what it reads here is that app's view, and a change would reach only that app.
+    /// Install, Fix and Uninstall are then never offered, and `detail` says why.
+    pub private_view: bool,
+    /// Exact configuration destination currently resolved for this target.
+    pub config_path: String,
+    /// Whether `config_path` is the private copy of the agent's settings kept by the agent's own
+    /// Microsoft Store app below `%LOCALAPPDATA%\Packages`, which is the copy that app reads.
+    pub packaged: bool,
+    /// Another copy of the agent's settings file that exists besides `config_path`, such as a
+    /// plain `%APPDATA%` file an earlier install left, or another package's copy. Ghostlight's
+    /// entry goes in `config_path`; Uninstall also removes Ghostlight's own entry from this copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub other_copy: Option<String>,
+    /// Every copy of the agent's settings besides `config_path` that holds an entry Ghostlight
+    /// owns: the copies Uninstall removes Ghostlight's entry from, besides `config_path` when that
+    /// holds one too. A dry run names them, so it says what Uninstall changes.
+    #[serde(skip)]
+    pub owned_copies: Vec<String>,
+    /// Exact installed command line available for manual setup.
+    pub connector_command: String,
+    /// Smallest complete manual configuration document for this target.
+    pub manual_setup: String,
+}
+
+/// The install and uninstall option that includes clients not currently detected, and widens an
+/// agent id given to `--client` to every host of the agent.
+pub const ALL_CLIENTS_OPTION: &str = "--all-clients";
+
+/// How a `--client` value names a host.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientName {
+    /// The value is the host's own harness id. It selects that host in any state.
+    Host,
+    /// The value is the catalog id of the host's agent and not the host's own id. It selects the
+    /// host when the host is detected, or in any state with [`ALL_CLIENTS_OPTION`], so naming an
+    /// agent never writes into a host the person does not have.
+    Agent,
+}
+
+impl HarnessSummary {
+    /// Whether an uninstall finds an entry Ghostlight owns here, current or not: in the
+    /// configuration itself or in another copy of the agent's settings. `can_uninstall` is this
+    /// where the configuration may be changed from this process; a run that may not change it
+    /// reads this to say what it leaves.
+    #[must_use]
+    pub fn has_entry_to_remove(&self) -> bool {
+        self.state.holds_owned_entry() || !self.owned_copies.is_empty()
+    }
+
+    /// How the `--client` value `id` names this host, ignoring case: by its harness id, by its
+    /// agent's catalog id, or not at all. A harness id that is also its agent's id names the host.
+    #[must_use]
+    pub fn named_by(&self, id: &str) -> Option<ClientName> {
+        if self.id.eq_ignore_ascii_case(id) {
+            Some(ClientName::Host)
+        } else if self.agent.id.eq_ignore_ascii_case(id) {
+            Some(ClientName::Agent)
+        } else {
+            None
+        }
+    }
+
+    /// Whether the `--client` value `id` selects this host. Its harness id always does. Its
+    /// agent's id does when the host is detected, or whatever its state when `all_clients` is set.
+    #[must_use]
+    pub fn is_selected_by(&self, id: &str, all_clients: bool) -> bool {
+        match self.named_by(id) {
+            Some(ClientName::Host) => true,
+            Some(ClientName::Agent) => all_clients || self.state != HarnessState::NotDetected,
+            None => false,
+        }
+    }
+}
+
+/// Every value `ghostlight install --client` and `ghostlight uninstall --client` accept, in roster
+/// order, for the help text, the refusal of an unknown value and the shell completions.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientIds {
+    /// Every agent's catalog id, once. Each selects the agent's detected hosts, or every host of
+    /// it with [`ALL_CLIENTS_OPTION`].
+    pub agents: Vec<&'static str>,
+    /// The harness id of every host that no agent id names: the hosts of an agent that runs on
+    /// more than one. Each selects that one host.
+    pub hosts: Vec<&'static str>,
+}
+
+impl ClientIds {
+    /// The agent ids, then the host ids.
+    pub fn all(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.agents.iter().chain(&self.hosts).copied()
+    }
+}
+
+/// The `--client` values the roster offers. A harness id is a persisted key (the person's located
+/// paths are stored under it), so every one of them stays a value even when its agent's id is
+/// also listed.
+#[must_use]
+pub fn client_ids() -> ClientIds {
+    let mut agents: Vec<&'static str> = Vec::new();
+    for row in ROSTER {
+        if !agents.contains(&row.agent_id) {
+            agents.push(row.agent_id);
+        }
+    }
+    let hosts = ROSTER
+        .iter()
+        .map(|row| row.id)
+        .filter(|id| !agents.contains(id))
+        .collect();
+    ClientIds { agents, hosts }
+}
+
+/// Definite result of one explicit harness action.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct HarnessActionResult {
+    /// Whether a configuration file changed.
+    pub changed: bool,
+    /// State observed after the action.
+    pub summary: HarnessSummary,
+    /// Fixed user-facing outcome.
+    pub message: String,
+}
+
+/// Definite aggregate result of setting up every safely changeable detected target.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct HarnessSetupResult {
+    /// Missing registrations added for detected targets.
+    pub set_up: usize,
+    /// Stale Ghostlight-owned registrations updated to start the installed edge.
+    pub updated: usize,
+    /// Refused malformed or foreign targets still requiring a person's attention.
+    pub needs_attention: usize,
+    /// Independent target writes that failed for an environmental reason.
+    pub failures: Vec<HarnessSetupFailure>,
+    /// Product-owned plain-language outcome for the workbench.
+    pub message: String,
+}
+
+/// One target the aggregate setup could not change.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct HarnessSetupFailure {
+    /// Stable target id.
+    pub id: String,
+    /// User-facing product name.
+    pub name: String,
+    /// Bounded typed failure rendered by the existing harness boundary.
+    pub detail: String,
+}
+
+#[derive(Clone)]
+pub(super) struct HarnessContext {
+    pub(super) home: PathBuf,
+    /// The directory agents keep their per-user settings in: `%APPDATA%` on Windows and
+    /// `$XDG_CONFIG_HOME`, or `~/.config`, elsewhere.
+    pub(super) config_root: PathBuf,
+    pub(super) codex_config: PathBuf,
+    /// The directory [`CLAUDE_CONFIG_VARIABLE`] names, when this process or the person's stored
+    /// environment sets it ([`claude_config_dir`]): Claude Code reads its [`CLAUDE_CODE_FILE`]
+    /// there in place of the home.
+    pub(super) claude_config_dir: Option<PathBuf>,
+    /// The file [`CRUSH_CONFIG_VARIABLE`] names, when it is set: Crush reads it in place of its
+    /// default file.
+    pub(super) crush_config: Option<PathBuf>,
+    pub(super) edge: PathBuf,
+    pub(super) path_entries: Vec<PathBuf>,
+    pub(super) locations: PathBuf,
+    /// Whether the computer runs Windows: paths compare ignoring case and programs end in `.exe`.
+    pub(super) windows: bool,
+    /// Whether the computer runs Linux, where Codex's entry forwards the desktop session
+    /// ([`CODEX_DESKTOP_ENVIRONMENT`]).
+    pub(super) linux: bool,
+    /// The person's `%LOCALAPPDATA%` on Windows, below which each Store app keeps its private
+    /// copy of the data roots ([`packaged`]); none elsewhere, where no copy is looked for.
+    pub(super) local_app_data: Option<PathBuf>,
+    /// Set when this process runs inside an app container: configuration below its `AppData`
+    /// roots is that app's private view, which no other app reads.
+    pub(super) private_view: Option<PrivateView>,
+}
+
+/// The app container this process runs in and the directories it redirects.
+#[derive(Clone)]
+pub(super) struct PrivateView {
+    pub(super) container: AppContainer,
+    pub(super) roots: Vec<PathBuf>,
+}
+
+impl HarnessContext {
+    /// The app whose private view holds the configuration of `definition`, when this process
+    /// writes there and the client is not that app itself: an app reads the very view it
+    /// writes, so its own configuration is written like any other.
+    fn private_to(&self, definition: &HarnessDefinition) -> Option<&AppContainer> {
+        let view = self.private_view.as_ref()?;
+        if self.inside_own_app(definition.own_package) {
+            return None;
+        }
+        view.roots
+            .iter()
+            .any(|root| paths::lies_within(&definition.path, root, self.windows))
+            .then_some(&view.container)
+    }
+
+    /// Whether this process runs inside the container of `own_package`, the packaged app of a
+    /// client, whose private view is the one that client reads.
+    fn inside_own_app(&self, own_package: Option<&str>) -> bool {
+        self.private_view
+            .as_ref()
+            .is_some_and(|view| own_package.is_some_and(|package| view.container.is_app(package)))
+    }
+
+    fn system() -> Self {
+        let windows = cfg!(target_os = "windows");
+        let dirs = UserDirs::system();
+        let home = dirs.home().to_path_buf();
+        let roots = environment_roots(&dirs, &|name| env::var_os(name), windows);
+        let layout = layout::Layout::current();
+        let edge = layout
+            .as_ref()
+            .map(layout::Layout::bin)
+            .unwrap_or_default()
+            .join(program_file_name(EDGE_COMMAND_NAME, windows));
+        let path_entries = dirs.path_entries().to_vec();
+        let locations = layout.map_or_else(
+            |_| PathBuf::from(layout::HARNESS_LOCATIONS_NAME),
+            |layout| layout.harness_locations(),
+        );
+        let local_app_data = windows.then(|| dirs.local());
+        let private_view = local_app_data.as_ref().and_then(|local| {
+            Residence::detect()
+                .container()
+                .map(|container| PrivateView {
+                    container: container.clone(),
+                    roots: vec![roots.config_root.clone(), local.clone()],
+                })
+        });
+        Self {
+            home,
+            config_root: roots.config_root,
+            codex_config: roots.codex_config,
+            claude_config_dir: claude_config_dir(
+                env::var_os(CLAUDE_CONFIG_VARIABLE),
+                stored_variable(CLAUDE_CONFIG_VARIABLE),
+                &|name| env::var(name).ok(),
+            ),
+            crush_config: user_dirs::directory(CRUSH_CONFIG_VARIABLE),
+            edge,
+            path_entries,
+            locations,
+            windows,
+            linux: cfg!(target_os = "linux"),
+            local_app_data,
+            private_view,
+        }
+    }
+
+    /// The Store packages of this look that keep a private copy of a data root: one listing on
+    /// Windows, none elsewhere.
+    fn packages(&self) -> Packages {
+        match &self.local_app_data {
+            Some(local) if self.windows => Packages::listed(DataRoots {
+                roaming: self.config_root.clone(),
+                local: local.clone(),
+            }),
+            _ => Packages::none(),
+        }
+    }
+}
+
+/// Claude Code's own directory: the value of [`CLAUDE_CONFIG_VARIABLE`] in this process's
+/// environment, else the one stored in the person's environment, expanded when it holds
+/// references. A value that is empty counts as none, as it does for Claude Code.
+///
+/// The stored value is what every program the person starts receives. It matters to the
+/// long-lived service, whose own environment is whatever its first starter passed on, which may
+/// be a client that filters its child's environment.
+fn claude_config_dir(
+    process: Option<OsString>,
+    stored: Option<user_path::PathValue>,
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> Option<PathBuf> {
+    if let Some(directory) = process.filter(|directory| !directory.is_empty()) {
+        return Some(PathBuf::from(directory));
+    }
+    let stored = stored?;
+    let text = if stored.expandable {
+        user_path::expand(&stored.text, lookup)
+    } else {
+        stored.text
+    };
+    (!text.is_empty()).then(|| PathBuf::from(text))
+}
+
+/// The variable `name` as the person's environment stores it, in the per-user registry. A value
+/// that cannot be read counts as none.
+#[cfg(windows)]
+fn stored_variable(name: &str) -> Option<user_path::PathValue> {
+    user_path::Registry.variable(name).ok().flatten()
+}
+
+/// The variable `name` as the person's environment stores it: nowhere a process can read on
+/// this system, where it lives in the person's shell startup files.
+#[cfg(not(windows))]
+fn stored_variable(_name: &str) -> Option<user_path::PathValue> {
+    None
+}
+
+/// The configuration roots of the person's directories `dirs`, with Codex's own directory where
+/// `lookup` names one. A variable that is empty or relative names none ([`user_dirs`]), so no
+/// client's file lands in the working directory.
+fn environment_roots(
+    dirs: &UserDirs,
+    lookup: user_dirs::Lookup<'_>,
+    windows: bool,
+) -> HarnessRoots {
+    harness_roots(
+        dirs.home(),
+        Some(dirs.xdg_config()),
+        Some(dirs.roaming()),
+        user_dirs::directory_in(lookup, CODEX_HOME_VARIABLE),
+        windows,
+    )
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HarnessRoots {
+    /// The directory agents keep their per-user settings in: `%APPDATA%` on Windows and
+    /// `$XDG_CONFIG_HOME`, or `~/.config`, elsewhere.
+    pub(super) config_root: PathBuf,
+    pub(super) codex_config: PathBuf,
+}
+
+pub(super) fn harness_roots(
+    home: &Path,
+    xdg_config_home: Option<PathBuf>,
+    app_data: Option<PathBuf>,
+    codex_home: Option<PathBuf>,
+    windows: bool,
+) -> HarnessRoots {
+    let config_root = if windows {
+        app_data.unwrap_or_else(|| home.join("AppData/Roaming"))
+    } else {
+        xdg_config_home.unwrap_or_else(|| home.join(".config"))
+    };
+    let codex_config = codex_home
+        .unwrap_or_else(|| home.join(".codex"))
+        .join("config.toml");
+    HarnessRoots {
+        config_root,
+        codex_config,
+    }
+}
+
+/// One roster row as it stands on one computer: the row, and what this look resolved for it.
+/// The row's fields read through it ([`std::ops::Deref`]).
+#[derive(Clone)]
+pub(super) struct HarnessDefinition {
+    pub(super) row: &'static AgentRow,
+    /// The name a person reads: `name`, with the host added when several targets share the name.
+    pub(super) label: String,
+    pub(super) path: PathBuf,
+    pub(super) default_path: PathBuf,
+    pub(super) located_executable: Option<PathBuf>,
+    pub(super) located_stale: bool,
+    /// Every place this look found the agent's settings may be, the one it reads first leading
+    /// ([`Packages::copies`]): the Store packages' private copies, then the plain path.
+    pub(super) copies: Vec<SettingsCopy>,
+}
+
+impl std::ops::Deref for HarnessDefinition {
+    type Target = AgentRow;
+
+    fn deref(&self) -> &AgentRow {
+        self.row
+    }
+}
+
+impl HarnessDefinition {
+    /// Whether an act may write this client's file from here: Ghostlight writes it, and it is not
+    /// private to the app container this process runs in.
+    fn is_writable_from(&self, context: &HarnessContext) -> bool {
+        !matches!(self.dialect, ConfigDialect::Manual(_)) && context.private_to(self).is_none()
+    }
+
+    /// Whether `path` is the private copy of the agent's settings kept by its own Store app, on
+    /// Windows (`windows`) or another system.
+    fn packaged(&self, windows: bool) -> bool {
+        self.copies.iter().any(|copy| {
+            copy.place == CopyPlace::OwnPackage
+                && paths::spelled_alike(&copy.file, &self.path, windows)
+        })
+    }
+
+    /// The configuration files of the agent's other copies of its settings that exist: what
+    /// `path` is not, but an earlier install or another package may still hold, on Windows
+    /// (`windows`) or another system.
+    fn other_copies(&self, windows: bool) -> impl Iterator<Item = &Path> {
+        self.copies
+            .iter()
+            .filter(move |copy| {
+                !paths::spelled_alike(&copy.file, &self.path, windows) && copy.file.is_file()
+            })
+            .map(|copy| copy.file.as_path())
+    }
+
+    fn accepts_config_path(&self, path: &Path) -> bool {
+        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+            return false;
+        };
+        self.default_path.file_name() == Some(OsStr::new(name)) || self.candidates.contains(&name)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ConfigDialect {
+    Json(JsonDialect),
+    /// A client whose file Ghostlight never parses or writes: a person pastes the setup.
+    Manual(ManualDialect),
+    CodexToml,
+    OpenCode,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ManualDialect {
+    Goose,
+    Continue,
+}
+
+/// How Ghostlight reads and writes one client's file once its dialect is resolved: JSON in one of
+/// its dialects, or Codex's TOML. OpenCode resolves to the JSON form its file holds.
+#[derive(Clone, Copy)]
+enum Format {
+    Json(JsonDialect),
+    Codex,
+}
+
+impl ConfigDialect {
+    /// The format of a client's file, or the manual dialect of a client whose file Ghostlight
+    /// never reads or writes. Only OpenCode reads `source`, its file's text, so each copy an act
+    /// edits resolves its own form.
+    fn format(
+        self,
+        context: &HarnessContext,
+        source: impl FnOnce() -> Result<String, HarnessError>,
+    ) -> Result<Result<Format, ManualDialect>, HarnessError> {
+        Ok(match self {
+            Self::Json(dialect) => Ok(Format::Json(dialect)),
+            Self::CodexToml => Ok(Format::Codex),
+            Self::OpenCode => Ok(Format::Json(opencode_dialect(context, &source()?)?)),
+            Self::Manual(dialect) => Err(dialect),
+        })
+    }
+}
+
+impl Format {
+    /// The state of Ghostlight's entry in the file at `path`, which exists.
+    fn inspect(
+        self,
+        context: &HarnessContext,
+        path: &Path,
+    ) -> Result<RegistrationState, HarnessError> {
+        let source = fs::read_to_string(path).map_err(HarnessError::Read)?;
+        match self {
+            Self::Json(dialect) => inspect_json(&source, dialect, &context.edge, context.windows),
+            Self::Codex => inspect_toml(&source, context),
+        }
+    }
+
+    /// Make the edit `intent` to Ghostlight's entry in the file at `path`. Whether it changed.
+    fn edit(
+        self,
+        context: &HarnessContext,
+        path: &Path,
+        intent: RegistrationEdit,
+    ) -> Result<bool, HarnessError> {
+        match self {
+            Self::Json(dialect) => edit_json_with(context, path, dialect, intent),
+            Self::Codex => edit_toml_with(context, path, intent),
+        }
+    }
+
+    /// The setup a person pastes into a file of this format.
+    fn manual_setup(self, context: &HarnessContext) -> Result<String, HarnessError> {
+        match self {
+            Self::Codex => {
+                let mut entry = Item::Table(Table::new());
+                entry[COMMAND_KEY] = value(context.edge.to_string_lossy().into_owned());
+                entry[ARGS_KEY] = value(mcp_arguments_array());
+                forward_codex_desktop_environment(&mut entry, context.linux)?;
+                let mut document = DocumentMut::new();
+                document[CODEX_SERVERS_KEY] = Item::Table(Table::new());
+                document[CODEX_SERVERS_KEY][SERVER_NAME] = entry;
+                Ok(document.to_string())
+            }
+            Self::Json(dialect) => manual_json_setup(&context.edge, dialect),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum JsonDialect {
+    McpServers,
+    Copilot,
+    Servers,
+    ContextServers,
+    Crush,
+    OpenCodeV1,
+    OpenCodeV2,
+    ZCode,
+}
+
+/// One agent Ghostlight can set up, on one host: who the agent is, how the window shows it (its
+/// monogram, and where the app's own icon may be found), and where its MCP configuration lives on
+/// a computer. The roster is the one record of all of it, and the catalog of agents beside the
+/// command line and an unknown agent ([`crate::agent`]).
+pub(super) struct AgentRow {
+    /// The harness id: one per host the agent runs on.
+    pub(super) id: &'static str,
+    /// The agent's catalog id: one per agent, shared by every host it runs on, and the id every
+    /// place the window names the agent carries ([`Agent::id`]). It is the catalog's own, never
+    /// the product id, which two agents can share.
+    pub(super) agent_id: &'static str,
+    /// The product id, shared by every host of one product.
+    pub(super) product_id: &'static str,
+    /// The product name, as the install summary says it.
+    pub(super) name: &'static str,
+    /// The names the agent's client is known to report for itself on an MCP connection besides
+    /// its harness id and product name.
+    pub(super) aliases: &'static [&'static str],
+    pub(super) target: &'static str,
+    /// The agent's packaged monogram tile, the image the window serves for it when no better one
+    /// is found ([`crate::agent::image`]): the same for every host of one agent.
+    pub(super) monogram: Monogram,
+    pub(super) download_url: Option<&'static str>,
+    /// Where the configuration file is on the computer a context describes when the agent has
+    /// none yet: the file a new configuration is written to.
+    pub(super) path: fn(&HarnessContext) -> PathBuf,
+    /// The file names the agent reads beside `path`, in the order it prefers them, when it reads
+    /// more than one: the first that exists is its file. Empty when it reads only `path`.
+    pub(super) candidates: &'static [&'static str],
+    pub(super) executables: &'static [&'static str],
+    pub(super) dialect: ConfigDialect,
+    /// The package name of the packaged app that reads this configuration, when the client is one.
+    pub(super) own_package: Option<&'static str>,
+    /// Where this host's own app icon may be found, in order ([`icons`]). Empty when the host has
+    /// no app of its own or none is known with confidence.
+    pub(super) app_places: &'static [AppPlace],
+    /// The catalog id of the agent whose icon stands for this one when none of its own is found:
+    /// a terminal tool wears its vendor's desktop app's icon. `None` shows the agent's monogram
+    /// instead.
+    pub(super) icon_family: Option<&'static str>,
+    /// The catalog ids of the agents whose apps this host is known to run inside: Claude Code
+    /// inside Claude Desktop, a Cline extension inside its editor. A connection is said to be the
+    /// agent "in" an app only when this list names that app ([`runs_inside`]). Empty when the host
+    /// runs on its own or no host app is known with confidence.
+    pub(super) runs_inside: &'static [&'static str],
+}
+
+/// Where every Cline host keeps its MCP settings below its own storage directory.
+const CLINE_SETTINGS: &str = "settings/cline_mcp_settings.json";
+
+/// The id of the Cline extension, which names its storage directory in every editor.
+const CLINE_EXTENSION: &str = "saoudrizwan.claude-dev";
+
+/// Where Cline's installation guide is, for the editors whose own store does not list it.
+const CLINE_INSTALL_URL: &str = "https://docs.cline.bot/getting-started/installing-cline";
+
+/// Cline's settings file inside `editor`'s configuration, written as one join so the path keeps
+/// the separators the editors' own paths use.
+fn cline_settings(context: &HarnessContext, editor: &str) -> PathBuf {
+    context
+        .config_root
+        .join(format!("{editor}/User/globalStorage/{CLINE_EXTENSION}"))
+        .join(CLINE_SETTINGS)
+}
+
+/// The files OpenCode reads in its configuration directory, in the order it prefers them.
+const OPENCODE_FILES: &[&str] = &["opencode.jsonc", "opencode.json"];
+
+/// The files Kilo Code reads in its configuration directory, in the order it prefers them: its
+/// own, then OpenCode's.
+const KILO_FILES: &[&str] = &["kilo.jsonc", "kilo.json", "opencode.jsonc", "opencode.json"];
+
+/// Where the Codex desktop app's icon may be found: its Store package. The Codex CLI shares the
+/// agent, so it wears the app's icon.
+const CODEX_APP_PLACES: &[AppPlace] = &[AppPlace::WindowsPackage(CODEX_PACKAGE)];
+
+/// Where Claude Desktop's icon may be found: its Store package, then the per-user installer's
+/// program.
+const CLAUDE_DESKTOP_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsPackage(CLAUDE_DESKTOP_PACKAGE),
+    AppPlace::WindowsExe(&[ProgramPlace::Below(
+        KnownFolder::LocalAppData,
+        "AnthropicClaude/claude.exe",
+    )]),
+];
+
+/// Folders a catalog agent's own programs live in that none of its icon sources names, by agent id.
+/// The Claude desktop app downloads Claude Code into
+/// `%APPDATA%\Claude\claude-code\<version>\<build>\claude.exe`, which lies in no folder of the
+/// desktop app's own, so without this entry the caller walk passed it and stopped at the desktop
+/// app's `claude.exe` (ADR-0106, amendment of 2026-10-21).
+const AGENT_APP_FOLDERS: &[(&str, KnownFolder, &str)] = &[(
+    "claude-code",
+    KnownFolder::RoamingAppData,
+    "Claude/claude-code",
+)];
+
+/// Where Cursor's icon may be found: its per-user install, the launcher on `PATH`, and its Linux
+/// desktop entry.
+const CURSOR_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
+        ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/cursor/Cursor.exe"),
+        ProgramPlace::OnPath("cursor"),
+    ]),
+    AppPlace::LinuxDesktop(&["cursor"]),
+];
+
+/// Where Visual Studio Code's icon may be found: the program its `code` launcher starts, its
+/// per-user and machine-wide installs, and its desktop entry from a package, the Snap or the
+/// Flatpak.
+const VSCODE_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
+        ProgramPlace::OnPath("code"),
+        ProgramPlace::Below(
+            KnownFolder::LocalAppData,
+            "Programs/Microsoft VS Code/Code.exe",
+        ),
+        ProgramPlace::Below(KnownFolder::ProgramFiles, "Microsoft VS Code/Code.exe"),
+    ]),
+    AppPlace::LinuxDesktop(&["code", "code_code", "com.visualstudio.code"]),
+];
+
+/// Where Windsurf's icon may be found: its per-user install, the launcher on `PATH`, and its
+/// Linux desktop entry.
+const WINDSURF_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
+        ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Windsurf/Windsurf.exe"),
+        ProgramPlace::OnPath("windsurf"),
+    ]),
+    AppPlace::LinuxDesktop(&["windsurf"]),
+];
+
+/// Where Zed's icon may be found: its per-user install, the program on `PATH`, and its Linux
+/// desktop entry.
+const ZED_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
+        ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Zed/Zed.exe"),
+        ProgramPlace::OnPath("zed"),
+    ]),
+    AppPlace::LinuxDesktop(&["dev.zed.Zed", "zed"]),
+];
+
+/// Where Kiro's icon may be found: its per-user install, the launcher on `PATH`, and its Linux
+/// desktop entry.
+const KIRO_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[
+        ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Kiro/Kiro.exe"),
+        ProgramPlace::OnPath("kiro"),
+    ]),
+    AppPlace::LinuxDesktop(&["kiro"]),
+];
+
+/// Where Antigravity's icon may be found: its per-user install and its Linux desktop entry.
+const ANTIGRAVITY_APP_PLACES: &[AppPlace] = &[
+    AppPlace::WindowsExe(&[ProgramPlace::Below(
+        KnownFolder::LocalAppData,
+        "Programs/Antigravity/Antigravity.exe",
+    )]),
+    AppPlace::LinuxDesktop(&["antigravity"]),
+];
+
+/// Every agent Ghostlight can set up, one row per host.
+pub(super) const ROSTER: &[AgentRow] = &[
+    AgentRow {
+        aliases: &["codex-mcp-client"],
+        download_url: Some("https://developers.openai.com/codex/cli/"),
+        executables: &["codex"],
+        app_places: CODEX_APP_PLACES,
+        ..AgentRow::new(
+            "codex",
+            "Codex",
+            "User",
+            monogram!("codex.svg"),
+            |context| context.codex_config.clone(),
+            ConfigDialect::CodexToml,
+        )
+    },
+    AgentRow {
+        download_url: Some("https://claude.com/product/claude-code"),
+        executables: &["claude"],
+        icon_family: Some("claude-desktop"),
+        runs_inside: &["claude-desktop"],
+        ..AgentRow::new(
+            "claude-code",
+            "Claude Code",
+            "User",
+            monogram!("claude-code.svg"),
+            |context| {
+                context
+                    .claude_config_dir
+                    .as_ref()
+                    .unwrap_or(&context.home)
+                    .join(CLAUDE_CODE_FILE)
+            },
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        aliases: &["claude-ai"],
+        own_package: Some(CLAUDE_DESKTOP_PACKAGE),
+        app_places: CLAUDE_DESKTOP_APP_PLACES,
+        ..AgentRow::new(
+            "claude-desktop",
+            "Claude Desktop",
+            "User",
+            monogram!("claude-desktop.svg"),
+            |context| {
+                context
+                    .config_root
+                    .join("Claude/claude_desktop_config.json")
+            },
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        aliases: &["cursor-vscode"],
+        download_url: Some("https://cursor.com/downloads"),
+        executables: &["cursor", "cursor-agent"],
+        app_places: CURSOR_APP_PLACES,
+        ..AgentRow::new(
+            "cursor",
+            "Cursor",
+            "User",
+            monogram!("cursor.svg"),
+            |context| context.home.join(".cursor/mcp.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://code.visualstudio.com/download"),
+        executables: &["code"],
+        app_places: VSCODE_APP_PLACES,
+        ..AgentRow::new(
+            "vscode",
+            "Visual Studio Code",
+            "User",
+            monogram!("vscode.svg"),
+            |context| context.config_root.join("Code/User/mcp.json"),
+            ConfigDialect::Json(JsonDialect::Servers),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://windsurf.com/editor/download"),
+        executables: &["windsurf"],
+        app_places: WINDSURF_APP_PLACES,
+        ..AgentRow::new(
+            "windsurf",
+            "Windsurf",
+            "User",
+            monogram!("windsurf.svg"),
+            |context| context.home.join(".codeium/windsurf/mcp_config.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        product_id: "windsurf",
+        download_url: Some("https://windsurf.com/editor/download"),
+        executables: &["devin", "devin-desktop", "surf"],
+        ..AgentRow::new(
+            "devin",
+            "Devin",
+            "Devin user",
+            monogram!("windsurf.svg"),
+            |context| context.config_root.join("devin/mcp_config.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://zed.dev/download"),
+        executables: &["zed", "zeditor"],
+        app_places: ZED_APP_PLACES,
+        ..AgentRow::new(
+            "zed",
+            "Zed",
+            "User",
+            monogram!("zed.svg"),
+            |context| {
+                if context.windows {
+                    context.config_root.join("Zed/settings.json")
+                } else {
+                    context.config_root.join("zed/settings.json")
+                }
+            },
+            ConfigDialect::Json(JsonDialect::ContextServers),
+        )
+    },
+    AgentRow {
+        executables: &["zcode"],
+        ..AgentRow::new(
+            "zcode",
+            "ZCode",
+            "User",
+            monogram!("zcode.svg"),
+            |context| context.home.join(".zcode/cli/config.json"),
+            ConfigDialect::Json(JsonDialect::ZCode),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://opencode.ai/docs"),
+        candidates: OPENCODE_FILES,
+        executables: &["opencode", "opencode2"],
+        ..AgentRow::new(
+            "opencode",
+            "OpenCode",
+            "User",
+            monogram!("opencode.svg"),
+            |context| context.home.join(".config/opencode/opencode.json"),
+            ConfigDialect::OpenCode,
+        )
+    },
+    AgentRow {
+        download_url: Some("https://github.com/charmbracelet/crush"),
+        executables: &["crush"],
+        ..AgentRow::new(
+            "crush",
+            "Crush",
+            "User",
+            monogram!("crush.svg"),
+            |context| {
+                context
+                    .crush_config
+                    .clone()
+                    .unwrap_or_else(|| context.home.join(".config/crush/crush.json"))
+            },
+            ConfigDialect::Json(JsonDialect::Crush),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://github.com/github/copilot-cli"),
+        executables: &["copilot"],
+        ..AgentRow::new(
+            "copilot-cli",
+            "GitHub Copilot CLI",
+            "CLI",
+            monogram!("copilot-cli.svg"),
+            |context| context.home.join(".copilot/mcp-config.json"),
+            ConfigDialect::Json(JsonDialect::Copilot),
+        )
+    },
+    AgentRow {
+        agent_id: "cline",
+        product_id: "cline",
+        download_url: Some("https://docs.cline.bot/cline-cli/overview"),
+        executables: &["cline"],
+        ..AgentRow::new(
+            "cline-cli",
+            "Cline",
+            "CLI",
+            monogram!("cline.svg"),
+            |context| context.home.join(".cline/data").join(CLINE_SETTINGS),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        agent_id: "cline",
+        product_id: "cline",
+        download_url: Some(
+            "https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev",
+        ),
+        runs_inside: &["vscode"],
+        ..AgentRow::new(
+            "cline-vscode",
+            "Cline",
+            "Visual Studio Code",
+            monogram!("cline.svg"),
+            |context| cline_settings(context, "Code"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        agent_id: "cline",
+        product_id: "cline",
+        download_url: Some(CLINE_INSTALL_URL),
+        runs_inside: &["cursor"],
+        ..AgentRow::new(
+            "cline-cursor",
+            "Cline",
+            "Cursor",
+            monogram!("cline.svg"),
+            |context| cline_settings(context, "Cursor"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        agent_id: "cline",
+        product_id: "cline",
+        download_url: Some(CLINE_INSTALL_URL),
+        runs_inside: &["windsurf"],
+        ..AgentRow::new(
+            "cline-windsurf",
+            "Cline",
+            "Windsurf",
+            monogram!("cline.svg"),
+            |context| cline_settings(context, "Windsurf"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://kiro.dev/downloads/"),
+        executables: &["kiro", "kiro-cli"],
+        app_places: KIRO_APP_PLACES,
+        ..AgentRow::new(
+            "kiro",
+            "Kiro",
+            "CLI and IDE",
+            monogram!("kiro.svg"),
+            |context| context.home.join(".kiro/settings/mcp.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://qwenlm.github.io/qwen-code-docs/en/users/installation/"),
+        executables: &["qwen"],
+        ..AgentRow::new(
+            "qwen-code",
+            "Qwen Code",
+            "CLI",
+            monogram!("qwen-code.svg"),
+            |context| context.home.join(".qwen/settings.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://junie.jetbrains.com/docs/get-started-with-junie-cli.html"),
+        executables: &["junie"],
+        ..AgentRow::new(
+            "junie",
+            "Junie",
+            "CLI and JetBrains",
+            monogram!("junie.svg"),
+            |context| context.home.join(".junie/mcp/mcp.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://kilo.ai/"),
+        candidates: KILO_FILES,
+        executables: &["kilo"],
+        ..AgentRow::new(
+            "kilo-code",
+            "Kilo Code",
+            "CLI",
+            monogram!("kilo-code.svg"),
+            |context| context.config_root.join("kilo").join("kilo.json"),
+            ConfigDialect::Json(JsonDialect::OpenCodeV1),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://block.github.io/goose/docs/getting-started/installation/"),
+        executables: &["goose"],
+        ..AgentRow::new(
+            "goose",
+            "goose",
+            "CLI and desktop",
+            monogram!("goose.svg"),
+            |context| context.config_root.join("goose/config.yaml"),
+            ConfigDialect::Manual(ManualDialect::Goose),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://docs.continue.dev/cli/quickstart"),
+        executables: &["cn"],
+        ..AgentRow::new(
+            "continue",
+            "Continue",
+            "CLI and IDE",
+            monogram!("continue.svg"),
+            |context| context.home.join(".continue/config.yaml"),
+            ConfigDialect::Manual(ManualDialect::Continue),
+        )
+    },
+    AgentRow {
+        download_url: Some("https://antigravity.google/download?platform=linux"),
+        executables: &["agy"],
+        app_places: ANTIGRAVITY_APP_PLACES,
+        ..AgentRow::new(
+            "antigravity",
+            "Antigravity",
+            "CLI",
+            monogram!("antigravity.svg"),
+            |context| context.home.join(".gemini/config/mcp_config.json"),
+            ConfigDialect::Json(JsonDialect::McpServers),
+        )
+    },
+];
+
+impl AgentRow {
+    /// The row of agent `id` on one host, named `name` there: the agent and its product share the
+    /// id, and it has no aliases, candidates, programs, package, icons or host app. A row states
+    /// what differs from this with struct update.
+    const fn new(
+        id: &'static str,
+        name: &'static str,
+        target: &'static str,
+        monogram: Monogram,
+        path: fn(&HarnessContext) -> PathBuf,
+        dialect: ConfigDialect,
+    ) -> Self {
+        Self {
+            id,
+            agent_id: id,
+            product_id: id,
+            name,
+            aliases: &[],
+            target,
+            monogram,
+            download_url: None,
+            path,
+            candidates: &[],
+            executables: &[],
+            dialect,
+            own_package: None,
+            app_places: &[],
+            icon_family: None,
+            runs_inside: &[],
+        }
+    }
+
+    /// Whether the agent's client calls itself `reported`: its catalog id, its harness id, its
+    /// product name or one of its aliases, ignoring case. The product id is not matched, because
+    /// two products can share one: Devin's product id is Windsurf's id.
+    fn is_called(&self, reported: &str) -> bool {
+        [self.agent_id, self.id, self.name]
+            .iter()
+            .chain(self.aliases)
+            .any(|known| known.eq_ignore_ascii_case(reported))
+    }
+
+    /// The agent of this row, as the window names and shows it: the same for every host of one
+    /// agent.
+    fn agent(&self) -> Agent {
+        Agent::listed(self.agent_id, self.name, self.monogram)
+    }
+
+    /// The names of the Store packages of this host's own app: its packaged app, and the
+    /// packages its icon sources name.
+    fn store_packages(&self) -> Vec<&'static str> {
+        self.own_package
+            .into_iter()
+            .chain(self.app_places.iter().filter_map(|source| match source {
+                AppPlace::WindowsPackage(name) => Some(*name),
+                AppPlace::WindowsExe(_) | AppPlace::LinuxDesktop(_) => None,
+            }))
+            .collect()
+    }
+
+    /// Every place the agent's settings may be on the computer `context` describes, among the
+    /// Store `packages` of this look, the one it reads first leading; in each, the configuration
+    /// file is the first of the candidates beside the file `path` names that exists, else that
+    /// file.
+    ///
+    /// Inside the container of the agent's own app, the plain path is that app's merged view: it
+    /// shows the app's own private copy when that copy leads, so it is not another copy then.
+    fn copies_on(&self, context: &HarnessContext, packages: &Packages) -> Vec<SettingsCopy> {
+        let mut copies = packages.copies(&(self.path)(context), &self.store_packages(), |file| {
+            self.candidates
+                .iter()
+                .map(|candidate| file.with_file_name(candidate))
+                .find(|candidate| candidate.exists())
+                .unwrap_or_else(|| file.to_path_buf())
+        });
+        let own_leads = copies
+            .first()
+            .is_some_and(|copy| copy.place == CopyPlace::OwnPackage);
+        if own_leads && context.inside_own_app(self.own_package) {
+            copies.retain(|copy| copy.place != CopyPlace::Plain);
+        }
+        copies
+    }
+
+    /// The row as it stands on the computer `context` describes, among the Store `packages` of
+    /// this look, before any location the person chose.
+    pub(super) fn on(
+        &'static self,
+        context: &HarnessContext,
+        packages: &Packages,
+    ) -> HarnessDefinition {
+        let copies = self.copies_on(context, packages);
+        let path = copies
+            .first()
+            .map_or_else(|| (self.path)(context), |copy| copy.file.clone());
+        HarnessDefinition {
+            row: self,
+            label: self.name.to_owned(),
+            default_path: path.clone(),
+            path,
+            located_executable: None,
+            located_stale: false,
+            copies,
+        }
+    }
+}
+
+/// Every roster row as this look finds it: the Store packages are listed once for all of them.
+fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
+    let packages = context.packages();
+    let mut rows: Vec<HarnessDefinition> = ROSTER
+        .iter()
+        .map(|row| row.on(context, &packages))
+        .collect();
+    let overrides = read_location_overrides(context).unwrap_or_default();
+    for definition in &mut rows {
+        if let Some(located) = overrides.get(definition.id) {
+            if let Some(path) = &located.config {
+                if path.is_file() {
+                    definition.path = path.clone();
+                } else {
+                    definition.located_stale = true;
+                }
+            }
+            if let Some(path) = &located.executable {
+                if is_executable_file(path, context.windows) {
+                    definition.located_executable = Some(path.clone());
+                } else {
+                    definition.located_stale = true;
+                }
+            }
+        }
+    }
+    let shared: Vec<&'static str> = rows
+        .iter()
+        .filter(|row| rows.iter().filter(|other| other.name == row.name).count() > 1)
+        .map(|row| row.name)
+        .collect();
+    for definition in &mut rows {
+        if shared.contains(&definition.name) {
+            definition.label = format!("{} ({})", definition.name, definition.target);
+        }
+    }
+    rows
+}
+
+/// The roster's agent whose client calls itself `reported`, ignoring case and surrounding space;
+/// none for a name Ghostlight does not know. A roster row matches its catalog id, its harness id,
+/// its product name and its aliases, never its product id. Every host of one agent names the same
+/// agent, because the name a client reports does not say the host.
+///
+/// The name stays the client's own claim: it names the agent for a person and grants nothing.
+#[must_use]
+pub fn agent_called(reported: &str) -> Option<Agent> {
+    let reported = reported.trim();
+    ROSTER
+        .iter()
+        .find(|row| row.is_called(reported))
+        .map(AgentRow::agent)
+}
+
+/// The catalog agent whose catalog id is `agent_id`, as the window names and shows it; none for an
+/// id outside the catalog.
+#[must_use]
+pub fn catalog_agent(agent_id: &str) -> Option<Agent> {
+    ROSTER
+        .iter()
+        .find(|row| row.agent_id == agent_id)
+        .map(AgentRow::agent)
+}
+
+/// Whether the catalog knows that the agent `agent_id` runs inside the app of the agent `host_id`
+/// on one of its hosts ([`AgentRow::runs_inside`]). False for any id outside the catalog.
+#[must_use]
+pub fn runs_inside(agent_id: &str, host_id: &str) -> bool {
+    ROSTER
+        .iter()
+        .filter(|row| row.agent_id == agent_id)
+        .any(|row| row.runs_inside.contains(&host_id))
+}
+
+/// Whether the roster row `harness_id`, one host of an agent, is known to run inside the app of
+/// the agent `host_id` ([`AgentRow::runs_inside`]). False for any id outside the roster.
+#[must_use]
+pub fn host_runs_inside(harness_id: &str, host_id: &str) -> bool {
+    ROSTER
+        .iter()
+        .any(|row| row.id == harness_id && row.runs_inside.contains(&host_id))
+}
+
+/// The packaged monogram tile of the catalog agent `agent_id`; none for an id outside the catalog.
+#[must_use]
+pub fn monogram_of(agent_id: &str) -> Option<Monogram> {
+    ROSTER
+        .iter()
+        .find(|row| row.agent_id == agent_id)
+        .map(|row| row.monogram)
+}
+
+/// Every roster row's monogram tile, for tests that check the packaged tiles.
+#[cfg(test)]
+pub(crate) fn monograms() -> Vec<Monogram> {
+    ROSTER.iter().map(|row| row.monogram).collect()
+}
+
+/// One catalog agent's app as the roster gives it: every host's install places and commands in
+/// roster order, and the first icon family a host names.
+struct AgentApp {
+    agent_id: &'static str,
+    name: &'static str,
+    places: Vec<AppPlace>,
+    commands: Vec<&'static str>,
+    family: Option<&'static str>,
+}
+
+/// The roster grouped by agent, one entry per agent in roster order.
+fn agent_apps() -> Vec<AgentApp> {
+    let mut apps: Vec<AgentApp> = Vec::new();
+    for row in ROSTER {
+        if let Some(app) = apps.iter_mut().find(|app| app.agent_id == row.agent_id) {
+            app.places.extend_from_slice(row.app_places);
+            app.commands.extend_from_slice(row.executables);
+            app.family = app.family.or(row.icon_family);
+        } else {
+            apps.push(AgentApp {
+                agent_id: row.agent_id,
+                name: row.name,
+                places: row.app_places.to_vec(),
+                commands: row.executables.to_vec(),
+                family: row.icon_family,
+            });
+        }
+    }
+    apps
+}
+
+/// Where each catalog agent's own icon may be found, one entry per agent in roster order: its name,
+/// its hosts' app places in roster order, and the first family a host names.
+#[must_use]
+pub fn icon_catalog() -> Vec<AgentIconSources> {
+    agent_apps()
+        .into_iter()
+        .map(|app| AgentIconSources {
+            agent_id: app.agent_id,
+            name: app.name,
+            sources: app.places,
+            family: app.family,
+        })
+        .collect()
+}
+
+/// Where each catalog agent's app may be installed, one entry per agent in roster order: its
+/// hosts' app places and the commands they are started by, in roster order ([`apps`]).
+#[must_use]
+pub fn app_catalog() -> Vec<apps::AgentAppSources> {
+    agent_apps()
+        .into_iter()
+        .map(|app| apps::AgentAppSources {
+            agent_id: app.agent_id,
+            sources: app.places,
+            commands: app.commands,
+            folders: AGENT_APP_FOLDERS
+                .iter()
+                .filter(|(agent_id, ..)| *agent_id == app.agent_id)
+                .map(|(_, known, relative)| (*known, *relative))
+                .collect(),
+        })
+        .collect()
+}
+
+fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
+    let detected = definition.path.exists()
+        || product_config_parent_exists(context, &definition.path)
+        || definition
+            .located_executable
+            .as_ref()
+            .is_some_and(|path| path.is_file())
+        || definition
+            .executables
+            .iter()
+            .any(|name| executable_on_path(context, name));
+    let edge_ready = context.edge.is_file();
+    let manual = matches!(definition.dialect, ConfigDialect::Manual(_));
+    // A change made inside another app's container would reach only that app, so none is offered.
+    let private = context.private_to(definition);
+    let registration = registration_state(context, definition);
+    let retired = matches!(registration, Ok(RegistrationState::Retired));
+    // One reading of the registration gives the state, the words naming a blocked cause, the
+    // evidence beside them, the attention cause and whether Fix may replace the entry. The blocked
+    // causes are named from what the inspection actually saw, never conflated (ADR-0135).
+    let reading = match &registration {
+        Ok(RegistrationState::Missing) => Reading::plain(if detected {
+            HarnessState::Available
+        } else {
+            HarnessState::NotDetected
+        }),
+        Ok(RegistrationState::Current) => Reading::plain(HarnessState::Installed),
+        Ok(RegistrationState::Updatable | RegistrationState::Retired) => {
+            Reading::plain(HarnessState::Updatable)
+        }
+        Ok(RegistrationState::Launcher(launcher)) => Reading {
+            state: HarnessState::NeedsAttention,
+            cause: Some(words::launcher_detail(launcher)),
+            evidence: Some(words::launcher_evidence(launcher, &context.edge)),
+            attention: Some(Attention::Launcher(launcher.pin)),
+            fixable: true,
+        },
+        Ok(RegistrationState::Foreign(found_command)) => Reading {
+            state: HarnessState::NeedsAttention,
+            cause: Some(words::CLIENT_FOREIGN_ENTRY.into()),
+            evidence: Some(match found_command {
+                Some(found) => {
+                    words::other_program_evidence(&found.program, found.arguments, &context.edge)
+                }
+                None => words::no_command_evidence(&context.edge),
+            }),
+            attention: Some(Attention::ForeignEntry),
+            fixable: true,
+        },
+        Err(error @ HarnessError::Malformed(_)) => Reading {
+            state: HarnessState::NeedsAttention,
+            cause: Some(error.to_string()),
+            evidence: None,
+            attention: Some(Attention::Malformed),
+            fixable: false,
+        },
+        Err(_) => Reading {
+            state: HarnessState::NeedsAttention,
+            cause: Some(words::CLIENT_UNREADABLE.into()),
+            evidence: None,
+            attention: Some(Attention::Unreadable),
+            fixable: false,
+        },
+    };
+    let Reading {
+        state,
+        cause,
+        evidence,
+        attention,
+        fixable,
+    } = reading;
+    // A container's private view comes first: the cause behind it cannot be acted on here.
+    let mut detail: String = match (private, cause) {
+        (Some(container), _) if !manual => words::client_kept_private(&container.app),
+        (_, Some(cause)) => cause,
+        _ if manual => manual_setup_sentence(definition),
+        _ => words::client_detail(state, edge_ready, retired.then_some(RETIRED_ENTRY)),
+    };
+    if definition.located_stale {
+        detail = words::with_located_path_missing(&detail);
+    }
+    let changeable = private.is_none();
+    let can_fix = changeable && edge_ready && fixable;
+    let owned_copies = owned_other_copies(context, definition);
+    let mut summary = HarnessSummary {
+        id: definition.id.into(),
+        product_id: definition.product_id.into(),
+        name: definition.name.into(),
+        label: definition.label.clone(),
+        target: definition.target.into(),
+        agent: Agent::listed(definition.agent_id, definition.name, definition.monogram),
+        state,
+        detail,
+        evidence,
+        attention,
+        can_install: changeable && edge_ready && !manual && state.takes_install(),
+        can_fix,
+        can_uninstall: false,
+        can_download: definition.download_url.is_some(),
+        download_url: definition.download_url.map(str::to_owned),
+        can_locate: true,
+        copy_only: manual,
+        private_view: !changeable,
+        config_path: definition.path.to_string_lossy().into_owned(),
+        packaged: definition.packaged(context.windows),
+        other_copy: definition
+            .other_copies(context.windows)
+            .next()
+            .map(|path| path.to_string_lossy().into_owned()),
+        owned_copies: owned_copies
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+        connector_command: mcp_command_line(&context.edge),
+        manual_setup: manual_setup(context, definition)
+            .unwrap_or_else(|_| words::manual_setup_command(&mcp_command_line(&context.edge))),
+    };
+    summary.can_uninstall = changeable && summary.has_entry_to_remove();
+    summary
+}
+
+/// What one reading of a registration means for its summary.
+struct Reading {
+    state: HarnessState,
+    /// The words naming a blocked cause, when the registration has one.
+    cause: Option<String>,
+    evidence: Option<String>,
+    attention: Option<Attention>,
+    /// Whether Fix may replace the entry.
+    fixable: bool,
+}
+
+impl Reading {
+    /// A state with no blocked cause.
+    const fn plain(state: HarnessState) -> Self {
+        Self {
+            state,
+            cause: None,
+            evidence: None,
+            attention: None,
+            fixable: false,
+        }
+    }
+}
+
+fn product_config_parent_exists(context: &HarnessContext, path: &Path) -> bool {
+    let Some(parent) = path.parent().filter(|parent| parent.exists()) else {
+        return false;
+    };
+    // A product-specific settings directory is useful installation evidence. A generic home or
+    // configuration root is not: treating `$HOME` as Claude Code detection made that harness
+    // appear installed on every ordinary machine and would make aggregate setup overreach.
+    ![&context.home, &context.config_root]
+        .into_iter()
+        .any(|root| paths::spelled_alike(parent, root, context.windows))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RegistrationState {
+    Missing,
+    Current,
+    Updatable,
+    /// An owned entry starts `ghostlight-mcp-connector`, a program this release does not install.
+    Retired,
+    /// The entry starts Ghostlight's own npm launcher. Ghostlight did not write it and cannot ask
+    /// npm what it runs (ADR-0028), so it is never current, and only Fix changes it (ADR-0203
+    /// Decision 10.3).
+    Launcher(NpmLauncher),
+    /// An entry sits under Ghostlight's key that Ghostlight does not own. The payload names
+    /// the program found there, when one could be read (ADR-0135); never its arguments.
+    Foreign(Option<ForeignCommand>),
+}
+
+impl RegistrationState {
+    /// Whether the entry is Ghostlight's own, whatever its age: the one owned-entry predicate
+    /// (ADR-0203 Decision 10.2).
+    const fn is_owned(&self) -> bool {
+        matches!(self, Self::Current | Self::Updatable | Self::Retired)
+    }
+}
+
+/// What Ghostlight discloses about a foreign entry's command: the program and how many
+/// arguments follow it, and nothing of their text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ForeignCommand {
+    /// The bounded file name of the program.
+    program: String,
+    /// The `args` array length plus every further word of a whole-command-line `command`.
+    arguments: usize,
+}
+
+impl ForeignCommand {
+    /// Reduce a foreign entry's command to its program and argument count. A command that
+    /// names an existing file is that program whole. Any other command is cut at its first
+    /// whitespace before a file name is taken, so no word after the program is ever read as a
+    /// path. A command with no file name part yields `None`.
+    fn from_entry(command: &str, args: Option<&[&str]>) -> Option<Self> {
+        let (program_path, extra_words) = if Path::new(command).is_file() {
+            (command, 0)
+        } else {
+            let mut words = command.split_whitespace();
+            let first = words.next()?;
+            (first, words.count())
+        };
+        let file_name = Path::new(program_path).file_name()?.to_string_lossy();
+        let program = bounded_disclosure(&file_name)?;
+        Some(Self {
+            program,
+            arguments: args.map_or(0, <[&str]>::len) + extra_words,
+        })
+    }
+}
+
+/// The program that runs an npm package.
+const NPX_PROGRAM: &str = "npx";
+
+/// The Windows command interpreter some clients start `npx` through, and its switch that runs the
+/// command after it.
+const WINDOWS_SHELL: (&str, &str) = ("cmd", "/c");
+
+/// The `npx` options a launcher entry may carry before the package. They answer npm's own
+/// prompts and choose nothing.
+const NPX_QUIET_OPTIONS: [&str; 4] = ["-y", "--yes", "-q", "--quiet"];
+
+/// The npm package Ghostlight's launcher is published as.
+const NPM_PACKAGE: &str = "ghostlight";
+
+/// The npm tag for whichever version npm serves as the newest.
+const NPM_LATEST_TAG: &str = "latest";
+
+/// The characters besides letters and digits a version, range or tag after `ghostlight@` is
+/// written with. A spec with any other character, such as a URL or a path, is not the launcher.
+const NPM_SPEC_MARKS: &str = ".-+^~=*<>";
+
+/// The first major release whose npm launcher starts a Ghostlight that works with this one: 2.0
+/// changed the relay and the extension's protocol.
+pub const FIRST_LAUNCHER_MAJOR: u64 = 2;
+
+/// Which version Ghostlight's npm launcher entry asks npm for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LauncherPin {
+    /// No version, the `latest` tag or another name npm resolves: npm chooses the version at each
+    /// launch.
+    Unpinned,
+    /// A release before 2.0, such as 1.x, whose launcher starts a Ghostlight that cannot work
+    /// with this one.
+    Earlier,
+    /// A 2.0 or later version or range.
+    Pinned,
+}
+
+impl LauncherPin {
+    /// The pin the package `spec` after `ghostlight@` names, or none.
+    fn of(spec: Option<&str>) -> Self {
+        let Some(spec) = spec.filter(|spec| !spec.is_empty() && *spec != NPM_LATEST_TAG) else {
+            return Self::Unpinned;
+        };
+        let version = spec.trim_start_matches(['^', '~', '=', 'v']);
+        let major: String = version.chars().take_while(char::is_ascii_digit).collect();
+        match major.parse::<u64>() {
+            Ok(major) if major < FIRST_LAUNCHER_MAJOR => Self::Earlier,
+            Ok(_) => Self::Pinned,
+            Err(_) => Self::Unpinned,
+        }
+    }
+}
+
+/// Ghostlight's own npm launcher as an entry starts it: `npx` with only quiet options, the
+/// `ghostlight` package, and no command or `mcp`, through `cmd /c` or not.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NpmLauncher {
+    /// Which version the entry asks npm for.
+    pub pin: LauncherPin,
+    /// The package as the entry names it, `ghostlight` or `ghostlight@<version>`, bounded for
+    /// disclosure.
+    pub package: String,
+}
+
+impl NpmLauncher {
+    /// The launcher an entry starting `command` with `args` names, or none when it starts anything
+    /// else. A command that names an existing file is that program whole; any other command is
+    /// read as a whole command line.
+    fn from_entry(command: &str, args: Option<&[&str]>) -> Option<Self> {
+        let mut words: Vec<&str> = if Path::new(command).is_file() {
+            vec![command]
+        } else {
+            command.split_whitespace().collect()
+        };
+        words.extend(args.unwrap_or_default().iter().copied());
+        let mut words = words.into_iter().peekable();
+        if words
+            .peek()
+            .is_some_and(|word| command_name(word, WINDOWS_SHELL.0))
+        {
+            words.next();
+            if !words
+                .next()
+                .is_some_and(|word| word.eq_ignore_ascii_case(WINDOWS_SHELL.1))
+            {
+                return None;
+            }
+        }
+        if !words
+            .next()
+            .is_some_and(|word| command_name(word, NPX_PROGRAM))
+        {
+            return None;
+        }
+        let package = words.find(|word| !NPX_QUIET_OPTIONS.contains(word))?;
+        let spec = match package.strip_prefix(NPM_PACKAGE)? {
+            "" => None,
+            rest => Some(rest.strip_prefix('@')?),
+        };
+        if spec.is_some_and(|spec| {
+            !spec
+                .chars()
+                .all(|mark| mark.is_ascii_alphanumeric() || NPM_SPEC_MARKS.contains(mark))
+        }) {
+            return None;
+        }
+        let rest: Vec<&str> = words.collect();
+        if !(rest.is_empty() || rest == [MCP_ARGUMENT]) {
+            return None;
+        }
+        Some(Self {
+            pin: LauncherPin::of(spec),
+            package: bounded_disclosure(package)?,
+        })
+    }
+}
+
+/// The refusal of an install or an uninstall that finds an entry Ghostlight does not own under its
+/// key, starting `command` with `args` when it names a command: Ghostlight's npm launcher is said
+/// as itself, anything else as foreign.
+fn unowned_entry_refusal(command: Option<&str>, args: Option<&[&str]>) -> HarnessError {
+    match command.and_then(|command| NpmLauncher::from_entry(command, args)) {
+        Some(_) => HarnessError::LauncherEntry,
+        None => HarnessError::ForeignEntry,
+    }
+}
+
+/// The state of Ghostlight's entry in `definition`'s own configuration file.
+fn registration_state(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+) -> Result<RegistrationState, HarnessError> {
+    registration_state_at(context, definition, &definition.path)
+}
+
+/// The state of Ghostlight's entry in the file at `path`, read as the configuration of
+/// `definition`.
+fn registration_state_at(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+    path: &Path,
+) -> Result<RegistrationState, HarnessError> {
+    if !path.exists() {
+        return Ok(RegistrationState::Missing);
+    }
+    let read = || fs::read_to_string(path).map_err(HarnessError::Read);
+    match definition.dialect.format(context, read)? {
+        Ok(format) => format.inspect(context, path),
+        Err(_) => Ok(RegistrationState::Missing),
+    }
+}
+
+fn inspect_json(
+    source: &str,
+    dialect: JsonDialect,
+    edge: &Path,
+    windows: bool,
+) -> Result<RegistrationState, HarnessError> {
+    let parsed = parse_jsonc(source)?;
+    Ok(
+        json_entry(&parsed, dialect).map_or(RegistrationState::Missing, |entry| {
+            json_entry_state(entry, dialect, edge, windows)
+        }),
+    )
+}
+
+/// The state of `entry`, Ghostlight's key in a file written in `dialect`, for `edge`. It is the
+/// one reading of whether the entry is current: inspection reports it and an install that finds
+/// it current changes nothing. Current means every key Ghostlight owns holds its value: the
+/// command and its arguments name this edge, and the dialect's `type` is set. The defaults and
+/// every key the client added decide nothing (ADR-0203 Decision 10.1).
+fn json_entry_state(
+    entry: &Value,
+    dialect: JsonDialect,
+    edge: &Path,
+    windows: bool,
+) -> RegistrationState {
+    let Some(command) = json_entry_command(entry, dialect) else {
+        return RegistrationState::Foreign(None);
+    };
+    let args = json_entry_args(entry, dialect);
+    match command_registration_state(command, args.as_deref(), edge, windows) {
+        RegistrationState::Current
+            if json_entry_type(dialect)
+                .is_some_and(|kind| entry.get(TYPE_KEY).and_then(Value::as_str) != Some(kind)) =>
+        {
+            RegistrationState::Updatable
+        }
+        state => state,
+    }
+}
+
+fn inspect_toml(source: &str, context: &HarnessContext) -> Result<RegistrationState, HarnessError> {
+    let document = parse_toml(source)?;
+    document
+        .get(CODEX_SERVERS_KEY)
+        .and_then(Item::as_table)
+        .and_then(|servers| servers.get(SERVER_NAME))
+        .map_or(Ok(RegistrationState::Missing), |entry| {
+            toml_entry_state(entry, context)
+        })
+}
+
+/// The state of `entry`, Ghostlight's key in Codex's file, for the edge and the computer `context`
+/// describes: the one reading inspection reports and an install acts on. Current means the
+/// command and its arguments name this edge and, on Linux, the forwarding list holds every
+/// desktop variable Ghostlight needs; every other key is the client's (ADR-0203 Decision 10.1).
+/// Refuses an owned entry whose forwarding list Codex would not accept.
+fn toml_entry_state(
+    entry: &Item,
+    context: &HarnessContext,
+) -> Result<RegistrationState, HarnessError> {
+    let command = entry
+        .get(COMMAND_KEY)
+        .and_then(Item::as_str)
+        .unwrap_or_default();
+    let args = toml_entry_args(entry);
+    let state =
+        command_registration_state(command, args.as_deref(), &context.edge, context.windows);
+    if !state.is_owned() {
+        return Ok(state);
+    }
+    // Every entry this install owns is validated, so inspection refuses the same malformed
+    // members an edit of that entry refuses.
+    let missing = missing_codex_desktop_environment(entry, context.linux)?;
+    if state == RegistrationState::Current && !missing.is_empty() {
+        return Ok(RegistrationState::Updatable);
+    }
+    Ok(state)
+}
+
+/// The desktop session variables a Codex entry on a Linux computer (`linux`) does not yet hand
+/// to its stdio child; none on any other computer. Refuses an entry whose forwarding list is not
+/// one Codex accepts.
+fn missing_codex_desktop_environment(
+    entry: &Item,
+    linux: bool,
+) -> Result<Vec<&'static str>, HarnessError> {
+    if !linux {
+        return Ok(Vec::new());
+    }
+    let forwarded = entry
+        .get(CODEX_ENV_VARS_KEY)
+        .map(|item| {
+            let values = item.as_array().ok_or(HarnessError::Malformed(None))?;
+            // Validate every member before deciding whether any handoff is missing.
+            // Codex accepts a name or a closed name/source object, not arbitrary TOML.
+            for value in values.iter() {
+                let valid = value.as_str().is_some()
+                    || value.as_inline_table().is_some_and(|table| {
+                        table
+                            .get(CODEX_FORWARD_NAME_KEY)
+                            .and_then(toml_edit::Value::as_str)
+                            .is_some()
+                            && table.get(CODEX_FORWARD_SOURCE_KEY).is_none_or(|source| {
+                                matches!(
+                                    source.as_str(),
+                                    Some(CODEX_SOURCE_LOCAL | CODEX_SOURCE_REMOTE)
+                                )
+                            })
+                            && table.iter().all(|(key, _)| {
+                                matches!(key, CODEX_FORWARD_NAME_KEY | CODEX_FORWARD_SOURCE_KEY)
+                            })
+                    });
+                if !valid {
+                    return Err(HarnessError::Malformed(None));
+                }
+            }
+            Ok(values)
+        })
+        .transpose()?;
+    Ok(CODEX_DESKTOP_ENVIRONMENT
+        .iter()
+        .copied()
+        .filter(|name| {
+            let explicit = entry
+                .get(CODEX_ENV_KEY)
+                .and_then(|env| env.get(name))
+                .and_then(Item::as_str)
+                .is_some();
+            let local = forwarded.is_some_and(|values| {
+                values.iter().any(|value| {
+                    value.as_str() == Some(name)
+                        || value.as_inline_table().is_some_and(|table| {
+                            table
+                                .get(CODEX_FORWARD_NAME_KEY)
+                                .and_then(toml_edit::Value::as_str)
+                                == Some(name)
+                                && table
+                                    .get(CODEX_FORWARD_SOURCE_KEY)
+                                    .and_then(toml_edit::Value::as_str)
+                                    .is_none_or(|source| source == CODEX_SOURCE_LOCAL)
+                        })
+                })
+            });
+            !explicit && !local
+        })
+        .collect())
+}
+
+fn forward_codex_desktop_environment(entry: &mut Item, linux: bool) -> Result<(), HarnessError> {
+    let missing = missing_codex_desktop_environment(entry, linux)?;
+    if !missing.is_empty() {
+        if entry.get(CODEX_ENV_VARS_KEY).is_none() {
+            entry[CODEX_ENV_VARS_KEY] = value(Array::new());
+        }
+        let forwarded = entry[CODEX_ENV_VARS_KEY]
+            .as_array_mut()
+            .expect("the environment array was validated above");
+        for name in missing {
+            forwarded.push(name);
+        }
+    }
+    Ok(())
+}
+
+fn apply_install(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+) -> Result<HarnessActionResult, HarnessError> {
+    refuse_private(context, definition)?;
+    if !context.edge.is_file() {
+        return Err(HarnessError::EdgeMissing);
+    }
+    let changed = edit_at(
+        context,
+        definition,
+        &definition.path,
+        RegistrationEdit::Install,
+    )?;
+    let summary = inspect(context, definition);
+    Ok(HarnessActionResult {
+        changed,
+        message: if changed {
+            words::client_registered(&summary.label)
+        } else {
+            words::client_already_current(&summary.label)
+        },
+        summary,
+    })
+}
+
+/// Remove Ghostlight's entry from its configuration and also from every other copy of the
+/// agent's settings that holds an entry Ghostlight owns, since an earlier install may have written
+/// either. A copy that holds no owned entry, or cannot be read, is left as it is. When only other
+/// copies hold one, the configuration itself is left as it is too, so a foreign entry or an
+/// unreadable text there does not stop their cleanup.
+fn apply_uninstall(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+) -> Result<HarnessActionResult, HarnessError> {
+    refuse_private(context, definition)?;
+    let others = owned_other_copies(context, definition);
+    let mut changed =
+        if others.is_empty() || holds_owned_entry(context, definition, &definition.path) {
+            uninstall_at(context, definition, &definition.path)?
+        } else {
+            false
+        };
+    for other in others {
+        changed |= uninstall_at(context, definition, other)?;
+    }
+    let summary = inspect(context, definition);
+    Ok(HarnessActionResult {
+        changed,
+        message: if changed {
+            words::client_removed(&summary.label)
+        } else {
+            words::client_had_no_entry(&summary.label)
+        },
+        summary,
+    })
+}
+
+/// The other copies of the agent's settings, besides the configuration itself, that hold an entry
+/// Ghostlight owns. Uninstall removes Ghostlight's entry from each, and inspection names them, so
+/// what a dry run says and what Uninstall does come from this one reading.
+fn owned_other_copies<'a>(
+    context: &HarnessContext,
+    definition: &'a HarnessDefinition,
+) -> Vec<&'a Path> {
+    definition
+        .other_copies(context.windows)
+        .filter(|path| holds_owned_entry(context, definition, path))
+        .collect()
+}
+
+/// Whether the file at `path`, read as the configuration of `definition`, holds an entry
+/// Ghostlight owns, current or not.
+fn holds_owned_entry(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+    path: &Path,
+) -> bool {
+    registration_state_at(context, definition, path).is_ok_and(|state| state.is_owned())
+}
+
+/// Remove Ghostlight's own entry from the file at `path`, read as the configuration of
+/// `definition`. Whether the file changed.
+fn uninstall_at(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+    path: &Path,
+) -> Result<bool, HarnessError> {
+    edit_at(context, definition, path, RegistrationEdit::Uninstall)
+}
+
+/// Make the edit `intent` to Ghostlight's entry in the file at `path`, read as the configuration
+/// of `definition`. Whether the file changed. A client whose file Ghostlight never writes is
+/// refused with its manual setup.
+fn edit_at(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+    path: &Path,
+    intent: RegistrationEdit,
+) -> Result<bool, HarnessError> {
+    match definition.dialect.format(context, || read_or_empty(path))? {
+        Ok(format) => format.edit(context, path, intent),
+        Err(_) => Err(manual_refusal(definition)),
+    }
+}
+
+fn apply_fix(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+) -> Result<HarnessActionResult, HarnessError> {
+    refuse_private(context, definition)?;
+    if !context.edge.is_file() {
+        return Err(HarnessError::EdgeMissing);
+    }
+    let launcher = matches!(
+        registration_state(context, definition),
+        Ok(RegistrationState::Launcher(_))
+    );
+    let changed = edit_at(context, definition, &definition.path, RegistrationEdit::Fix)?;
+    let summary = inspect(context, definition);
+    Ok(HarnessActionResult {
+        changed,
+        message: if launcher {
+            words::launcher_fixed(&summary.label)
+        } else {
+            words::client_fixed(&summary.label)
+        },
+        summary,
+    })
+}
+
+/// Refuse a change that would reach only the private view of the app container this process runs
+/// in.
+fn refuse_private(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+) -> Result<(), HarnessError> {
+    match context.private_to(definition) {
+        Some(container) => Err(HarnessError::PrivateView(container.app.clone())),
+        None => Ok(()),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RegistrationEdit {
+    Install,
+    Uninstall,
+    Fix,
+}
+
+impl RegistrationEdit {
+    const fn installs(self) -> bool {
+        !matches!(self, Self::Uninstall)
+    }
+
+    const fn replaces_foreign(self) -> bool {
+        matches!(self, Self::Fix)
+    }
+}
+
+/// Make the edit `intent` to Ghostlight's entry in the JSON file at `path`, written in `dialect`,
+/// for the edge and the computer `context` describes. Whether the file changed.
+///
+/// An install edits an entry Ghostlight owns in place and keeps every key that is the client's;
+/// it writes the whole entry only where there is none. Fix replaces a foreign entry whole.
+fn edit_json_with(
+    context: &HarnessContext,
+    path: &Path,
+    dialect: JsonDialect,
+    intent: RegistrationEdit,
+) -> Result<bool, HarnessError> {
+    let edge = context.edge.as_path();
+    let source = read_or_empty(path)?;
+    let parsed = parse_jsonc(&source)?;
+    let current = json_entry(&parsed, dialect);
+    if let Some(entry) = current {
+        let foreign = !json_entry_owned(entry, dialect, edge, context.windows);
+        if foreign && !intent.replaces_foreign() {
+            return Err(unowned_entry_refusal(
+                json_entry_command(entry, dialect),
+                json_entry_args(entry, dialect).as_deref(),
+            ));
+        }
+        if !foreign && intent.replaces_foreign() {
+            return Err(HarnessError::NotFixable);
+        }
+        if intent == RegistrationEdit::Install
+            && json_entry_state(entry, dialect, edge, context.windows) == RegistrationState::Current
+        {
+            return Ok(false);
+        }
+    } else if intent.replaces_foreign() {
+        return Err(HarnessError::NoEntryToFix);
+    } else if !intent.installs() {
+        return Ok(false);
+    }
+    let root = CstRootNode::parse(&source, &jsonc_options()).map_err(malformed_json_at)?;
+    let object = root
+        .object_value_or_create()
+        .ok_or(HarnessError::Malformed(None))?;
+    let collection = json_collection(&object, dialect, intent.installs())?;
+    if intent.installs() {
+        let collection = collection.ok_or(HarnessError::Malformed(None))?;
+        match (collection.get(SERVER_NAME), current) {
+            (Some(existing), Some(found)) if intent == RegistrationEdit::Install => {
+                update_owned_json_entry(&existing, found, edge, dialect)?;
+            }
+            (Some(existing), _) => {
+                existing.set_value(cst_input(expected_json_entry(edge, dialect)))
+            }
+            (None, _) => {
+                collection.append(SERVER_NAME, cst_input(expected_json_entry(edge, dialect)));
+            }
+        }
+    } else if let Some(entry) = collection.and_then(|collection| collection.get(SERVER_NAME)) {
+        entry.remove();
+    }
+    let rendered = root.to_string();
+    replace_with_backup(path, rendered.as_bytes())?;
+    Ok(true)
+}
+
+/// Make the edit `intent` to Ghostlight's entry in the Codex TOML file at `path`, for the edge and
+/// the computer `context` describes. Whether the file changed.
+fn edit_toml_with(
+    context: &HarnessContext,
+    path: &Path,
+    intent: RegistrationEdit,
+) -> Result<bool, HarnessError> {
+    let edge = context.edge.as_path();
+    let source = read_or_empty(path)?;
+    let mut document = parse_toml(&source)?;
+    let existing = document
+        .get(CODEX_SERVERS_KEY)
+        .and_then(Item::as_table)
+        .and_then(|servers| servers.get(SERVER_NAME));
+    if let Some(entry) = existing {
+        let command = entry
+            .get(COMMAND_KEY)
+            .and_then(Item::as_str)
+            .unwrap_or_default();
+        let args = toml_entry_args(entry);
+        let foreign = !command_owned(command, args.as_deref(), edge, context.windows);
+        if foreign && !intent.replaces_foreign() {
+            return Err(unowned_entry_refusal(Some(command), args.as_deref()));
+        }
+        if !foreign && intent.replaces_foreign() {
+            return Err(HarnessError::NotFixable);
+        }
+        if intent == RegistrationEdit::Install
+            && toml_entry_state(entry, context)? == RegistrationState::Current
+        {
+            return Ok(false);
+        }
+    } else if intent.replaces_foreign() {
+        return Err(HarnessError::NoEntryToFix);
+    } else if !intent.installs() {
+        return Ok(false);
+    }
+    let mut updated = if intent == RegistrationEdit::Fix {
+        Item::Table(Table::new())
+    } else {
+        existing
+            .cloned()
+            .unwrap_or_else(|| Item::Table(Table::new()))
+    };
+    if intent.installs() {
+        updated[COMMAND_KEY] = value(edge.to_string_lossy().into_owned());
+        updated[ARGS_KEY] = value(mcp_arguments_array());
+        forward_codex_desktop_environment(&mut updated, context.linux)?;
+        if !document.contains_key(CODEX_SERVERS_KEY) {
+            document[CODEX_SERVERS_KEY] = Item::Table(Table::new());
+        }
+        let servers = document[CODEX_SERVERS_KEY]
+            .as_table_mut()
+            .ok_or(HarnessError::Malformed(None))?;
+        servers[SERVER_NAME] = updated;
+    } else if let Some(servers) = document[CODEX_SERVERS_KEY].as_table_mut() {
+        servers.remove(SERVER_NAME);
+        if servers.is_empty() {
+            document.remove(CODEX_SERVERS_KEY);
+        }
+    }
+    replace_with_backup(path, document.to_string().as_bytes())?;
+    Ok(true)
+}
+
+/// The keys from a client's root to the object that holds its servers, in `dialect`.
+const fn collection_path(dialect: JsonDialect) -> &'static [&'static str] {
+    match dialect {
+        JsonDialect::McpServers | JsonDialect::Copilot => &[MCP_SERVERS_KEY],
+        JsonDialect::Servers => &[SERVERS_KEY],
+        JsonDialect::ContextServers => &[CONTEXT_SERVERS_KEY],
+        JsonDialect::Crush | JsonDialect::OpenCodeV1 => &[MCP_KEY],
+        JsonDialect::OpenCodeV2 | JsonDialect::ZCode => &[MCP_KEY, SERVERS_KEY],
+    }
+}
+
+fn json_entry(root: &Value, dialect: JsonDialect) -> Option<&Value> {
+    collection_path(dialect)
+        .iter()
+        .try_fold(root, |object, key| object.get(key))?
+        .get(SERVER_NAME)
+}
+
+/// The `type` Ghostlight's entry carries in `dialect`, where the dialect needs one to start a
+/// local program. Ghostlight owns it beside the command and its arguments.
+const fn json_entry_type(dialect: JsonDialect) -> Option<&'static str> {
+    match dialect {
+        JsonDialect::Copilot | JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => Some("local"),
+        JsonDialect::Servers | JsonDialect::Crush => Some("stdio"),
+        JsonDialect::McpServers | JsonDialect::ContextServers | JsonDialect::ZCode => None,
+    }
+}
+
+/// The keys Ghostlight sets in its entry in `dialect` for `edge` at every install: the command,
+/// its arguments and the dialect's `type`. Every key named neither here nor in
+/// [`json_entry_defaults`] is the client's (ADR-0203 Decision 10.1).
+fn json_owned_keys(edge: &Path, dialect: JsonDialect) -> Vec<(&'static str, Value)> {
+    let command = edge.to_string_lossy().into_owned();
+    let mut keys: Vec<(&'static str, Value)> = json_entry_type(dialect)
+        .map(|kind| (TYPE_KEY, json!(kind)))
+        .into_iter()
+        .collect();
+    match dialect {
+        JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => {
+            keys.push((COMMAND_KEY, json!([command, MCP_ARGUMENT])));
+        }
+        JsonDialect::McpServers
+        | JsonDialect::Copilot
+        | JsonDialect::Servers
+        | JsonDialect::ContextServers
+        | JsonDialect::Crush
+        | JsonDialect::ZCode => {
+            keys.push((COMMAND_KEY, json!(command)));
+            keys.push((ARGS_KEY, json!(MCP_ARGUMENTS)));
+        }
+    }
+    keys
+}
+
+/// The keys Ghostlight writes into its entry in `dialect` only when the entry lacks them. The
+/// client may change or remove them, and they never make an entry stale.
+fn json_entry_defaults(dialect: JsonDialect) -> Vec<(&'static str, Value)> {
+    match dialect {
+        JsonDialect::Copilot => vec![("env", json!({})), ("tools", json!(["*"]))],
+        JsonDialect::McpServers | JsonDialect::ContextServers | JsonDialect::ZCode => {
+            vec![("env", json!({}))]
+        }
+        JsonDialect::OpenCodeV1 => vec![("enabled", json!(true))],
+        JsonDialect::Servers | JsonDialect::Crush | JsonDialect::OpenCodeV2 => Vec::new(),
+    }
+}
+
+/// The whole entry Ghostlight writes in `dialect` for `edge` where the file holds none: every key
+/// it owns and every default.
+fn expected_json_entry(edge: &Path, dialect: JsonDialect) -> Value {
+    Value::Object(
+        json_owned_keys(edge, dialect)
+            .into_iter()
+            .chain(json_entry_defaults(dialect))
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
+}
+
+/// Bring `existing`, the entry Ghostlight owns, whose value `found` was read, up to date for
+/// `edge` in place: each owned key that differs is set, each missing owned key or default is
+/// added, and every other key and comment stays as the client wrote it.
+fn update_owned_json_entry(
+    existing: &CstObjectProp,
+    found: &Value,
+    edge: &Path,
+    dialect: JsonDialect,
+) -> Result<(), HarnessError> {
+    let entry = existing
+        .object_value()
+        .ok_or(HarnessError::Malformed(None))?;
+    for (key, value) in json_owned_keys(edge, dialect) {
+        match entry.get(key) {
+            Some(_) if found.get(key) == Some(&value) => {}
+            Some(member) => member.set_value(cst_input(value)),
+            None => {
+                entry.append(key, cst_input(value));
+            }
+        }
+    }
+    for (key, value) in json_entry_defaults(dialect) {
+        if entry.get(key).is_none() {
+            entry.append(key, cst_input(value));
+        }
+    }
+    Ok(())
+}
+
+fn json_collection(
+    root: &CstObject,
+    dialect: JsonDialect,
+    create: bool,
+) -> Result<Option<CstObject>, HarnessError> {
+    let mut object = root.clone();
+    for key in collection_path(dialect) {
+        let child = if create {
+            object.object_value_or_create(key)
+        } else {
+            object.object_value(key)
+        };
+        match child {
+            Some(child) => object = child,
+            // A key that holds something other than an object cannot take Ghostlight's entry.
+            None if create && object.get(key).is_some() => {
+                return Err(HarnessError::Malformed(None))
+            }
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(object))
+}
+
+fn cst_input(value: Value) -> CstInputValue {
+    match value {
+        Value::Null => CstInputValue::Null,
+        Value::Bool(value) => value.into(),
+        Value::Number(value) => CstInputValue::Number(value.to_string()),
+        Value::String(value) => CstInputValue::String(escape_cst_string(&value)),
+        Value::Array(values) => CstInputValue::Array(values.into_iter().map(cst_input).collect()),
+        Value::Object(values) => CstInputValue::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, cst_input(value)))
+                .collect(),
+        ),
+    }
+}
+
+fn escape_cst_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '\u{08}' => escaped.push_str("\\b"),
+            '\u{0c}' => escaped.push_str("\\f"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(escaped, "\\u{:04x}", character as u32);
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn json_entry_owned(entry: &Value, dialect: JsonDialect, edge: &Path, windows: bool) -> bool {
+    json_entry_command(entry, dialect).is_some_and(|command| {
+        let args = json_entry_args(entry, dialect);
+        command_owned(command, args.as_deref(), edge, windows)
+    })
+}
+
+fn json_entry_command(entry: &Value, dialect: JsonDialect) -> Option<&str> {
+    match dialect {
+        JsonDialect::McpServers
+        | JsonDialect::Copilot
+        | JsonDialect::Servers
+        | JsonDialect::ContextServers
+        | JsonDialect::Crush
+        | JsonDialect::ZCode => entry.get(COMMAND_KEY).and_then(Value::as_str),
+        JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => entry
+            .get(COMMAND_KEY)
+            .and_then(Value::as_array)
+            .and_then(|command| command.first())
+            .and_then(Value::as_str),
+    }
+}
+
+fn json_entry_args(entry: &Value, dialect: JsonDialect) -> Option<Vec<&str>> {
+    let values: &[Value] = match dialect {
+        JsonDialect::McpServers
+        | JsonDialect::Copilot
+        | JsonDialect::Servers
+        | JsonDialect::ContextServers
+        | JsonDialect::Crush
+        | JsonDialect::ZCode => entry.get(ARGS_KEY)?.as_array()?,
+        JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => {
+            let command = entry.get(COMMAND_KEY)?.as_array()?;
+            command.get(1..)?
+        }
+    };
+    values.iter().map(Value::as_str).collect()
+}
+
+/// The sentence a person reads for a client whose file Ghostlight never edits.
+fn manual_setup_sentence(definition: &HarnessDefinition) -> String {
+    let file = definition
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy());
+    words::manual_setup(file.as_deref())
+}
+
+fn manual_refusal(definition: &HarnessDefinition) -> HarnessError {
+    HarnessError::ManualSetup(manual_setup_sentence(definition))
+}
+
+pub(super) fn manual_setup(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+) -> Result<String, HarnessError> {
+    match definition
+        .dialect
+        .format(context, || read_or_empty(&definition.path))?
+    {
+        Ok(format) => format.manual_setup(context),
+        Err(dialect) => Ok(manual_yaml_setup(&context.edge, dialect)),
+    }
+}
+
+pub(super) fn manual_json_setup(edge: &Path, dialect: JsonDialect) -> Result<String, HarnessError> {
+    let entry = expected_json_entry(edge, dialect);
+    let document =
+        collection_path(dialect)
+            .iter()
+            .rev()
+            .fold(json!({ SERVER_NAME: entry }), |inner, key| {
+                let key: &str = key;
+                json!({ key: inner })
+            });
+    serde_json::to_string_pretty(&document).map_err(|_| HarnessError::Malformed(None))
+}
+
+fn manual_yaml_setup(edge: &Path, dialect: ManualDialect) -> String {
+    let command = serde_json::to_string(&edge.to_string_lossy())
+        .expect("a filesystem path is always representable as a JSON/YAML string");
+    let arguments = serde_json::to_string(&MCP_ARGUMENTS)
+        .expect("fixed arguments are always representable as a JSON/YAML string");
+    match dialect {
+        ManualDialect::Goose => format!(
+            "extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: {command}\n    args: {arguments}\n    envs: {{}}\n    timeout: 300\n"
+        ),
+        ManualDialect::Continue => format!(
+            "name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: {command}\n    args: {arguments}\n"
+        ),
+    }
+}
+
+fn toml_entry_args(entry: &Item) -> Option<Vec<&str>> {
+    entry
+        .get(ARGS_KEY)?
+        .as_array()?
+        .iter()
+        .map(toml_edit::Value::as_str)
+        .collect()
+}
+
+fn command_name(command: &str, expected: &str) -> bool {
+    Path::new(command)
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case(expected))
+}
+
+fn command_owned(command: &str, args: Option<&[&str]>, edge: &Path, windows: bool) -> bool {
+    command_name(command, EDGE_COMMAND_NAME)
+        || command_name(command, RETIRED_MCP_CONNECTOR_NAME)
+        || legacy_relay_owned(command, args, edge, windows)
+}
+
+fn legacy_relay_owned(command: &str, args: Option<&[&str]>, edge: &Path, windows: bool) -> bool {
+    if !command_name(command, "ghostlight-relay") || args != Some(&["--role", "agent"]) {
+        return false;
+    }
+    let Some(actual_root) = Path::new(command).parent().and_then(Path::parent) else {
+        return false;
+    };
+    let Some(expected_root) = edge.parent().and_then(Path::parent) else {
+        return false;
+    };
+    paths::same_location_on(actual_root, expected_root, windows)
+}
+
+fn command_registration_state(
+    command: &str,
+    args: Option<&[&str]>,
+    edge: &Path,
+    windows: bool,
+) -> RegistrationState {
+    if !command_owned(command, args, edge, windows) {
+        return NpmLauncher::from_entry(command, args).map_or_else(
+            || RegistrationState::Foreign(ForeignCommand::from_entry(command, args)),
+            RegistrationState::Launcher,
+        );
+    }
+    let current = command_name(command, EDGE_COMMAND_NAME)
+        && paths::same_location_on(Path::new(command), edge, windows)
+        && args == Some(&MCP_ARGUMENTS[..]);
+    if current {
+        RegistrationState::Current
+    } else if command_name(command, RETIRED_MCP_CONNECTOR_NAME) {
+        RegistrationState::Retired
+    } else {
+        RegistrationState::Updatable
+    }
+}
+
+/// Maximum visible characters disclosed from a blocked target's existing content (ADR-0135).
+const EVIDENCE_MAX_CHARS: usize = 200;
+
+/// Bound one piece of found content for disclosure.
+///
+/// Control characters and bidi overrides are stripped, whitespace collapses to single spaces,
+/// and the result is capped, so file-authored text can never smuggle formatting into a card.
+fn bounded_disclosure(value: &str) -> Option<String> {
+    let cleaned: String = value
+        .chars()
+        .filter(|character| {
+            (!character.is_control() || character.is_whitespace())
+                && !matches!(
+                    character,
+                    '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+                )
+        })
+        .collect();
+    let one_line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.is_empty() {
+        return None;
+    }
+    let count = one_line.chars().count();
+    if count <= EVIDENCE_MAX_CHARS {
+        return Some(one_line);
+    }
+    let mut bounded: String = one_line.chars().take(EVIDENCE_MAX_CHARS - 3).collect();
+    bounded.push_str("...");
+    Some(bounded)
+}
+
+fn opencode_dialect(context: &HarnessContext, source: &str) -> Result<JsonDialect, HarnessError> {
+    let parsed = parse_jsonc(if source.trim().is_empty() {
+        "{}"
+    } else {
+        source
+    })?;
+    let mcp = parsed.get(MCP_KEY).and_then(Value::as_object);
+    let v2 = mcp.is_some_and(|mcp| mcp.contains_key(SERVERS_KEY))
+        || !mcp.is_some_and(|mcp| mcp.contains_key(SERVER_NAME))
+            && executable_on_path(context, "opencode2")
+            && !executable_on_path(context, "opencode");
+    Ok(if v2 {
+        JsonDialect::OpenCodeV2
+    } else {
+        JsonDialect::OpenCodeV1
+    })
+}
+
+fn jsonc_options() -> ParseOptions {
+    ParseOptions {
+        allow_comments: true,
+        allow_loose_object_property_names: false,
+        allow_trailing_commas: true,
+    }
+}
+
+/// A JSON-with-comments parse error reduced to its line.
+fn malformed_json_at(error: jsonc_parser::errors::ParseError) -> HarnessError {
+    HarnessError::Malformed(Some(error.line_display()))
+}
+
+/// Parse a TOML configuration. A parse error is reduced to the line its span starts on.
+fn parse_toml(source: &str) -> Result<DocumentMut, HarnessError> {
+    source.parse::<DocumentMut>().map_err(|error| {
+        let line = error.span().map(|span| {
+            let start = span.start.min(source.len());
+            1 + source.as_bytes()[..start]
+                .iter()
+                .filter(|byte| **byte == b'\n')
+                .count()
+        });
+        HarnessError::Malformed(line)
+    })
+}
+
+fn parse_jsonc(source: &str) -> Result<Value, HarnessError> {
+    let value = if source.trim().is_empty() {
+        Value::Object(Default::default())
+    } else {
+        parse_to_serde_value(source, &jsonc_options())
+            .map_err(malformed_json_at)?
+            .ok_or(HarnessError::Malformed(None))?
+    };
+    if !value.is_object() {
+        return Err(HarnessError::Malformed(None));
+    }
+    Ok(value)
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct LocationOverride {
+    executable: Option<PathBuf>,
+    config: Option<PathBuf>,
+}
+
+type LocationOverrides = BTreeMap<String, LocationOverride>;
+
+fn read_location_overrides(context: &HarnessContext) -> Result<LocationOverrides, HarnessError> {
+    match fs::read_to_string(&context.locations) {
+        Ok(source) => serde_json::from_str(&source)
+            .map_err(|error| HarnessError::MalformedLocationState(error.to_string())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+        Err(error) => Err(HarnessError::Read(error)),
+    }
+}
+
+/// Write the located paths owner-only: they are a record about the person, not the client's file,
+/// so they take Ghostlight's own private replace and no backup copy beside them.
+fn write_location_overrides(
+    context: &HarnessContext,
+    overrides: &LocationOverrides,
+) -> Result<(), HarnessError> {
+    let bytes = serde_json::to_vec_pretty(overrides)
+        .map_err(|error| HarnessError::MalformedLocationState(error.to_string()))?;
+    files::atomic_replace(&context.locations, &bytes).map_err(HarnessError::Write)
+}
+
+fn validate_located_config(path: &Path, dialect: ConfigDialect) -> Result<(), HarnessError> {
+    let toml = match dialect {
+        ConfigDialect::Manual(_) => return Ok(()),
+        ConfigDialect::CodexToml => true,
+        ConfigDialect::Json(_) | ConfigDialect::OpenCode => false,
+    };
+    let source = fs::read_to_string(path).map_err(HarnessError::Read)?;
+    if toml {
+        parse_toml(&source).map(|_| ())
+    } else {
+        parse_jsonc(&source).map(|_| ())
+    }
+}
+
+fn is_executable_file(path: &Path, windows: bool) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    if windows {
+        return path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|extension| {
+                WINDOWS_PROGRAM_SUFFIX
+                    .strip_prefix('.')
+                    .is_some_and(|suffix| extension.eq_ignore_ascii_case(suffix))
+            });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+/// How Ghostlight replaces a client's configuration: the client's access kept, the old file
+/// copied beside it first, and a link written through. A configuration tracked through a link (a
+/// synced dotfiles repository, say) is a deliberate choice, so it stays a link to the file it
+/// names.
+const CONFIGURATION_WRITE: Replace = Replace {
+    access: Access::Kept,
+    backup: true,
+    link: Link::Follow,
+};
+
+/// Remove from `directory` each replace temporary ([`files::is_temporary`]) that is at least
+/// [`STRAY_TEMPORARY_AGE`] old at `now`. Returns how many were removed.
+fn remove_stray_temporaries_in(directory: &Path, now: SystemTime) -> usize {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| files::is_temporary(&entry.file_name()))
+        .filter(|entry| {
+            entry
+                .metadata()
+                .ok()
+                .filter(fs::Metadata::is_file)
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age >= STRAY_TEMPORARY_AGE)
+        })
+        .filter(|entry| fs::remove_file(entry.path()).is_ok())
+        .count()
+}
+
+/// Replace a client's configuration at `path` with `bytes`, as [`CONFIGURATION_WRITE`] says.
+fn replace_with_backup(path: &Path, bytes: &[u8]) -> Result<(), HarnessError> {
+    CONFIGURATION_WRITE
+        .write(path, bytes)
+        .map_err(HarnessError::Write)
+}
+
+fn read_or_empty(path: &Path) -> Result<String, HarnessError> {
+    match fs::read_to_string(path) {
+        Ok(source) => Ok(source),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(HarnessError::Read(error)),
+    }
+}
+
+fn executable_on_path(context: &HarnessContext, name: &str) -> bool {
+    let executable = program_file_name(name, context.windows);
+    context
+        .path_entries
+        .iter()
+        .any(|directory| directory.join(&executable).is_file())
+}
+
+/// The command line that starts the MCP relay of the edge at `edge`: its path, quoted when the
+/// path holds a space, then the `mcp` argument.
+fn mcp_command_line(edge: &Path) -> String {
+    let path = edge.to_string_lossy();
+    let path = if path.contains(char::is_whitespace) {
+        format!("\"{path}\"")
+    } else {
+        path.into_owned()
+    };
+    format!("{path} {}", MCP_ARGUMENTS.join(" "))
+}
+
+/// The arguments of an edge entry as a TOML array.
+fn mcp_arguments_array() -> Array {
+    MCP_ARGUMENTS.iter().copied().collect()
+}
+
+/// Safe harness registration failure.
+#[derive(Debug, Error)]
+pub enum HarnessError {
+    /// Unsupported identifier supplied by the presentation adapter.
+    #[error("{}", words::unknown_client_id(.0))]
+    UnknownHarness(String),
+    /// The selected host does not have an official download on this platform.
+    #[error("{}", words::no_client_download(.0))]
+    NoDownload(String),
+    /// The installed edge is unavailable.
+    #[error("{}", words::EDGE_MISSING)]
+    EdgeMissing,
+    /// The harness config could not be read.
+    #[error("{}", words::configuration_unreadable(&.0.to_string()))]
+    Read(io::Error),
+    /// The harness config could not be written.
+    #[error("{}", words::configuration_unwritable(&.0.to_string()))]
+    Write(io::Error),
+    /// The config is not structurally safe to edit. The payload is the 1-indexed line of the
+    /// parse error, when the parser located one. Nothing the file says is ever carried.
+    #[error("{}", words::configuration_malformed(*.0))]
+    Malformed(Option<usize>),
+    /// The client's file is never edited by Ghostlight; the person pastes the setup.
+    #[error("{0}")]
+    ManualSetup(String),
+    /// A foreign server uses Ghostlight's registration name.
+    #[error("{}", words::FOREIGN_ENTRY_LEFT)]
+    ForeignEntry,
+    /// Ghostlight's npm launcher holds Ghostlight's registration name; only Fix changes it.
+    #[error("{}", words::LAUNCHER_ENTRY_LEFT)]
+    LauncherEntry,
+    /// A Fix found Ghostlight's own entry where it expected a foreign one.
+    #[error("{}", words::NOT_FIXABLE)]
+    NotFixable,
+    /// A Fix found no entry under Ghostlight's name.
+    #[error("{}", words::NOTHING_TO_FIX)]
+    NoEntryToFix,
+    /// A located path is neither a matching configuration nor an executable.
+    #[error("{}", words::located_path_invalid(.0))]
+    LocatedPathInvalid(PathBuf),
+    /// Ghostlight's own located-path state is malformed.
+    #[error("{}", words::location_state_malformed(.0))]
+    MalformedLocationState(String),
+    /// The change would reach only the private view of the app container named here.
+    #[error("{}", words::client_kept_private(.0))]
+    PrivateView(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::user_dirs::{self, UserDirs};
+    use crate::install::packaged;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use serde_json::{json, Value};
+
+    use crate::install::files::assert_owner_only;
+    use crate::scratch::Scratch;
+
+    use jsonc_parser::parse_to_serde_value;
+
+    use super::{
+        agent_called, command_registration_state, definition, definitions, environment_roots,
+        expected_json_entry, harness_roots, holds_owned_entry, inspect, inspect_json, inspect_toml,
+        json_entry_defaults, program_file_name, remove_stray_temporaries_in, replace_with_backup,
+        AppContainer, Attention, ForeignCommand, Format, HarnessAction, HarnessContext,
+        HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect,
+        LauncherPin, NpmLauncher, Packages, PrivateView, RegistrationEdit, RegistrationState,
+        CODEX_HOME_VARIABLE, EDGE_COMMAND_NAME, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME, ROSTER,
+        SERVER_NAME,
+    };
+
+    /// The name of the roster's agent whose client calls itself `reported`.
+    fn named(reported: &str) -> Option<String> {
+        agent_called(reported).map(|agent| agent.name)
+    }
+
+    fn temporary(name: &str) -> Scratch {
+        Scratch::named(&format!("harness-{name}"))
+    }
+
+    fn edge(directory: &Path) -> PathBuf {
+        let edge = directory.join(program_file_name(EDGE_COMMAND_NAME, cfg!(windows)));
+        fs::write(&edge, b"test").unwrap();
+        edge
+    }
+
+    fn context(directory: &Path) -> HarnessContext {
+        HarnessContext {
+            home: directory.join("home"),
+            config_root: directory.join("config"),
+            codex_config: directory.join("codex/config.toml"),
+            claude_config_dir: None,
+            crush_config: None,
+            edge: edge(directory),
+            path_entries: Vec::new(),
+            locations: directory.join("config/ghostlight/harness-locations.json"),
+            windows: false,
+            linux: cfg!(target_os = "linux"),
+            local_app_data: None,
+            private_view: None,
+        }
+    }
+
+    /// The names in `directory`, sorted.
+    fn names_in(directory: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// A registry over `context` whose Cline CLI settings hold `entry` under Ghostlight's key, and
+    /// the path of that file.
+    fn cline_with_entry(context: &HarnessContext, entry: &Value) -> (HarnessRegistry, PathBuf) {
+        let path = context
+            .home
+            .join(".cline/data/settings/cline_mcp_settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&json!({"mcpServers": {"ghostlight": entry}})).unwrap(),
+        )
+        .unwrap();
+        (HarnessRegistry::with_context(context.clone()), path)
+    }
+
+    fn cline_summary(registry: &HarnessRegistry) -> HarnessSummary {
+        registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "cline-cli")
+            .expect("Cline CLI stays in the closed roster")
+    }
+
+    /// A blocked card names what was actually found beside the claim (ADR-0135).
+    fn inspected_summary(directory: &Path) -> HarnessSummary {
+        inspected_summary_of(directory, "claude-desktop")
+    }
+
+    fn inspected_summary_of(directory: &Path, id: &str) -> HarnessSummary {
+        let context = context(directory);
+        let definition = definitions(&context)
+            .into_iter()
+            .find(|definition| definition.id == id)
+            .expect("the target stays in the closed roster");
+        inspect(&context, &definition)
+    }
+
+    fn claude_desktop_config(directory: &Path) -> PathBuf {
+        let path = directory
+            .join("config")
+            .join("Claude/claude_desktop_config.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        path
+    }
+
+    /// Every JSON dialect Ghostlight writes.
+    const JSON_DIALECTS: [JsonDialect; 8] = [
+        JsonDialect::McpServers,
+        JsonDialect::Copilot,
+        JsonDialect::Servers,
+        JsonDialect::ContextServers,
+        JsonDialect::Crush,
+        JsonDialect::OpenCodeV1,
+        JsonDialect::OpenCodeV2,
+        JsonDialect::ZCode,
+    ];
+
+    /// A file in `dialect` that holds `entry` under Ghostlight's key.
+    fn json_file_holding(dialect: JsonDialect, entry: Value) -> String {
+        let file = match dialect {
+            JsonDialect::McpServers | JsonDialect::Copilot => {
+                json!({"mcpServers": {SERVER_NAME: entry}})
+            }
+            JsonDialect::Servers => json!({"servers": {SERVER_NAME: entry}}),
+            JsonDialect::ContextServers => json!({"context_servers": {SERVER_NAME: entry}}),
+            JsonDialect::Crush | JsonDialect::OpenCodeV1 => json!({"mcp": {SERVER_NAME: entry}}),
+            JsonDialect::OpenCodeV2 | JsonDialect::ZCode => {
+                json!({"mcp": {"servers": {SERVER_NAME: entry}}})
+            }
+        };
+        serde_json::to_string_pretty(&file).unwrap()
+    }
+
+    /// A context run from inside the container of the app `package`, whose `AppData` is the
+    /// directory `config`, with a Claude Desktop configuration present.
+    fn inside_container(directory: &Path, package: &str) -> (HarnessContext, PathBuf) {
+        let mut context = context(directory);
+        context.private_view = Some(PrivateView {
+            container: AppContainer {
+                app: package.into(),
+            },
+            roots: vec![directory.join("config")],
+        });
+        let desktop = context
+            .config_root
+            .join("Claude/claude_desktop_config.json");
+        fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        fs::write(&desktop, r#"{"mcpServers":{}}"#).unwrap();
+        (context, desktop)
+    }
+
+    /// The Store Claude Desktop's package family, as the owner's computer has it.
+    const STORE_FAMILY: &str = "Claude_pzs8sxrjxfjjc";
+
+    /// A person's own settings in Claude Desktop's file, which every act keeps byte for byte.
+    const PERSON_SETTINGS: &str =
+        "{\n  // Kept as written.\n  \"theme\": \"dark\",\n  \"mcpServers\": {\n    \"other\": {\"command\": \"other-server\"}\n  }\n}\n";
+
+    /// A Windows computer below `directory`: `%APPDATA%` is `config` and `%LOCALAPPDATA%` is
+    /// `local`, where Store packages keep their private copies.
+    fn windows_context(directory: &Path) -> HarnessContext {
+        let mut context = context(directory);
+        context.windows = true;
+        context.local_app_data = Some(directory.join("local"));
+        context
+    }
+
+    /// Claude Desktop's plain settings file on the computer `context` describes.
+    fn plain_desktop(context: &HarnessContext) -> PathBuf {
+        context
+            .config_root
+            .join("Claude/claude_desktop_config.json")
+    }
+
+    /// The Store edition's own Claude folder on the computer `context` describes, made.
+    fn store_folder(context: &HarnessContext) -> PathBuf {
+        package_folder(context, STORE_FAMILY)
+    }
+
+    /// The Claude folder in the private copy of `%APPDATA%` of package `family`, made.
+    fn package_folder(context: &HarnessContext, family: &str) -> PathBuf {
+        let folder = packaged::private_root(
+            context.local_app_data.as_deref().unwrap(),
+            family,
+            packaged::DataRoot::Roaming,
+        )
+        .join("Claude");
+        fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    /// Claude Desktop's settings holding only Ghostlight's current entry for `context`'s edge.
+    fn current_settings(context: &HarnessContext) -> String {
+        format!(
+            "{{\"mcpServers\":{{\"ghostlight\":{{\"command\":{},\"args\":[\"mcp\"]}}}}}}",
+            serde_json::to_string(&context.edge.to_string_lossy()).unwrap()
+        )
+    }
+
+    fn desktop_summary(registry: &HarnessRegistry) -> HarnessSummary {
+        registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "claude-desktop")
+            .unwrap()
+    }
+
+    fn has_entry(path: &Path) -> bool {
+        let text = fs::read_to_string(path).unwrap();
+        parse_to_serde_value(&text, &super::jsonc_options())
+            .unwrap()
+            .expect("the file holds a document")["mcpServers"]
+            .get(SERVER_NAME)
+            .is_some()
+    }
+
+    /// Protects workbench gates 8 and 10 and arch-1 slices I2 and I4: an entry is Ghostlight's only
+    /// when it starts this edge or a retired Ghostlight program with the exact signature and install
+    /// root, under any spelling Windows allows. The edge with other arguments or another path is
+    /// updatable, an entry naming the retired connector is retired rather than installed, a
+    /// hand-registered service command stays foreign, and every state shown as owned holds an owned
+    /// entry.
+    #[test]
+    fn an_entry_is_ghostlights_only_when_it_starts_this_edge_or_a_retired_ghostlight() {
+        {
+            let directory = temporary("legacy-relay");
+            let install_root = directory.join("bin");
+            let current = install_root
+                .join("v1")
+                .join(program_file_name(EDGE_COMMAND_NAME, cfg!(windows)));
+            let legacy = install_root.join("v0").join(if cfg!(windows) {
+                "ghostlight-relay.exe"
+            } else {
+                "ghostlight-relay"
+            });
+            assert_eq!(
+                command_registration_state(
+                    legacy.to_string_lossy().as_ref(),
+                    Some(&["--role", "agent"]),
+                    &current,
+                    cfg!(windows),
+                ),
+                RegistrationState::Updatable
+            );
+            assert!(matches!(
+                command_registration_state(
+                    legacy.to_string_lossy().as_ref(),
+                    Some(&["--role", "browser"]),
+                    &current,
+                    cfg!(windows),
+                ),
+                RegistrationState::Foreign(Some(_))
+            ));
+            assert!(matches!(
+                command_registration_state(
+                    directory
+                        .join("foreign/v0")
+                        .join(legacy.file_name().unwrap())
+                        .to_string_lossy()
+                        .as_ref(),
+                    Some(&["--role", "agent"]),
+                    &current,
+                    cfg!(windows),
+                ),
+                RegistrationState::Foreign(Some(_))
+            ));
+        }
+        #[cfg(windows)]
+        {
+            let directory = temporary("legacy-relay-slashes");
+            let install_root = directory.join("bin");
+            let current = install_root
+                .join("v1")
+                .join(program_file_name(EDGE_COMMAND_NAME, true));
+            let legacy = install_root.join("v0").join("ghostlight-relay.exe");
+            let respelled = legacy.to_string_lossy().replace('\\', "/").to_uppercase();
+            assert_eq!(
+                command_registration_state(&respelled, Some(&["--role", "agent"]), &current, true),
+                RegistrationState::Updatable
+            );
+        }
+        {
+            // A hand-written entry that runs the service image, which has no MCP stdio mode, is
+            // foreign evidence (ADR-0141): install and remove never overwrite it; only the
+            // confirmed Fix may.
+            let directory = temporary("zcode-foreign-orchestrator");
+            let path = directory.join("config.json");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            let orchestrator = directory
+                .join(program_file_name("ghostlight-service", cfg!(windows)))
+                .to_string_lossy()
+                .replace('\\', "\\\\");
+            let source = format!(
+            "{{\"mcp\":{{\"servers\":{{\"ghostlight\":{{\"command\":\"{orchestrator}\",\"args\":[],\"env\":{{}}}}}}}}}}"
+        );
+            fs::write(&path, &source).unwrap();
+            for install in [true, false] {
+                assert!(matches!(
+                    Format::Json(JsonDialect::ZCode).edit(
+                        &context,
+                        &path,
+                        if install {
+                            RegistrationEdit::Install
+                        } else {
+                            RegistrationEdit::Uninstall
+                        }
+                    ),
+                    Err(HarnessError::ForeignEntry)
+                ));
+            }
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            let state = inspect_json(&source, JsonDialect::ZCode, &edge, cfg!(windows)).unwrap();
+            assert!(
+                matches!(state, RegistrationState::Foreign(Some(_))),
+                "{state:?}"
+            );
+        }
+        {
+            let directory = temporary("retired");
+            let current = edge(&directory);
+            let old = directory
+                .join("old")
+                .join(program_file_name(RETIRED_MCP_CONNECTOR_NAME, cfg!(windows)));
+            let source = serde_json::json!({
+                "mcpServers": {
+                    "ghostlight": {
+                        "command": old,
+                        "args": [],
+                        "env": {}
+                    }
+                }
+            })
+            .to_string();
+            assert_eq!(
+                inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
+                RegistrationState::Retired
+            );
+        }
+        {
+            let directory = temporary("updatable");
+            let current = edge(&directory);
+            let elsewhere = directory
+                .join("elsewhere")
+                .join(program_file_name(EDGE_COMMAND_NAME, cfg!(windows)));
+            for (command, args) in [
+                (current.clone(), serde_json::json!([])),
+                (current.clone(), serde_json::json!(["serve"])),
+                (elsewhere, serde_json::json!(["mcp"])),
+            ] {
+                let source = serde_json::json!({
+                    "mcpServers": {"ghostlight": {"command": command, "args": args, "env": {}}}
+                })
+                .to_string();
+                assert_eq!(
+                    inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows))
+                        .unwrap(),
+                    RegistrationState::Updatable
+                );
+            }
+        }
+        {
+            let directory = temporary("owned-states");
+            let context = context(&directory);
+            let claude = definition(&context, "claude-code").unwrap();
+            fs::create_dir_all(claude.path.parent().unwrap()).unwrap();
+            let entry = |command: &Path, arguments: &str| {
+                format!(
+                "{{\"mcpServers\": {{\"{SERVER_NAME}\": {{\"command\": {}, \"args\": [{arguments}]}}}}}}",
+                serde_json::to_string(&command.to_string_lossy()).unwrap()
+            )
+            };
+            let mcp = format!("\"{MCP_ARGUMENT}\"");
+            let older = directory
+                .join("older")
+                .join(context.edge.file_name().unwrap());
+            let retired = directory.join("older").join(RETIRED_MCP_CONNECTOR_NAME);
+            let seeds = [
+                (entry(&context.edge, &mcp), true),
+                (entry(&older, &mcp), true),
+                (entry(&retired, ""), true),
+                (entry(Path::new("alien-agent"), ""), false),
+                ("{\"mcpServers\": {".to_owned(), false),
+                ("{}".to_owned(), false),
+            ];
+            for (text, owned) in seeds {
+                fs::write(&claude.path, &text).unwrap();
+                let state = inspect(&context, &claude).state;
+                assert_eq!(
+                    holds_owned_entry(&context, &claude, &claude.path),
+                    owned,
+                    "{text}"
+                );
+                assert_eq!(state.holds_owned_entry(), owned, "{text}: {state:?}");
+            }
+        }
+    }
+
+    /// Protects workbench gate 8: setting up everything adds what is missing and updates what is owned
+    /// on detected agents only, and leaves not-detected, blocked and container-private targets as
+    /// they are.
+    #[test]
+    fn set_up_everything_touches_only_detected_changeable_targets() {
+        {
+            let directory = temporary("setup-detected");
+            let mut context = context(&directory);
+            let binaries = directory.join("bin");
+            fs::create_dir_all(&binaries).unwrap();
+            fs::write(binaries.join("qwen"), b"test").unwrap();
+            fs::write(binaries.join("zcode"), b"test").unwrap();
+            context.path_entries = vec![binaries];
+
+            let codex = context.codex_config.clone();
+            fs::create_dir_all(codex.parent().unwrap()).unwrap();
+            let old_connector = directory.join("old/ghostlight-mcp-connector");
+            fs::write(
+                &codex,
+                format!(
+                    "[mcp_servers.ghostlight]\ncommand = {}\nargs = []\n",
+                    serde_json::to_string(&old_connector.to_string_lossy()).unwrap()
+                ),
+            )
+            .unwrap();
+
+            let blocked = context
+                .home
+                .join(".cline/data/settings/cline_mcp_settings.json");
+            fs::create_dir_all(blocked.parent().unwrap()).unwrap();
+            fs::write(
+                &blocked,
+                r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#,
+            )
+            .unwrap();
+
+            let registry = HarnessRegistry::with_context(context);
+            let actionable: Vec<_> = registry
+                .summaries()
+                .into_iter()
+                .filter(|summary| {
+                    matches!(
+                        summary.state,
+                        HarnessState::Available | HarnessState::Updatable
+                    )
+                })
+                .map(|summary| (summary.id, summary.state))
+                .collect();
+            assert_eq!(
+                actionable,
+                vec![
+                    ("codex".into(), HarnessState::Updatable),
+                    ("zcode".into(), HarnessState::Available),
+                    ("qwen-code".into(), HarnessState::Available),
+                ]
+            );
+            let result = registry.setup_detected().unwrap();
+            assert_eq!(result.set_up, 2);
+            assert_eq!(result.updated, 1);
+            assert_eq!(result.needs_attention, 1);
+            assert!(result.failures.is_empty());
+            assert!(result.message.contains("set up 2 and updated 1"));
+
+            let summaries = registry.summaries();
+            for id in ["codex", "qwen-code", "zcode"] {
+                assert_eq!(
+                    summaries
+                        .iter()
+                        .find(|summary| summary.id == id)
+                        .unwrap()
+                        .state,
+                    HarnessState::Installed,
+                    "{id}"
+                );
+            }
+            assert_eq!(
+                summaries
+                    .iter()
+                    .find(|summary| summary.id == "cline-cli")
+                    .unwrap()
+                    .state,
+                HarnessState::NeedsAttention
+            );
+            assert_eq!(
+                summaries
+                    .iter()
+                    .find(|summary| summary.id == "cursor")
+                    .unwrap()
+                    .state,
+                HarnessState::NotDetected
+            );
+
+            let repeated = registry.setup_detected().unwrap();
+            assert_eq!(repeated.set_up, 0);
+            assert_eq!(repeated.updated, 0);
+            assert!(repeated.message.contains("already ready"));
+            assert_eq!(
+                fs::read_to_string(&blocked).unwrap(),
+                r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#
+            );
+        }
+        {
+            let directory = temporary("private-view");
+            let (context, desktop) = inside_container(&directory, "OpenAI.Codex");
+            let before = fs::read(&desktop).unwrap();
+            let registry = HarnessRegistry::with_context(context);
+
+            let summaries = registry.summaries();
+            let claude = summaries
+                .iter()
+                .find(|summary| summary.id == "claude-desktop")
+                .unwrap();
+            assert!(claude.private_view);
+            assert_eq!(claude.state, HarnessState::Available);
+            assert!(!claude.can_install && !claude.can_fix && !claude.can_uninstall);
+            assert!(
+                claude.can_locate,
+                "Locate writes only Ghostlight's own state"
+            );
+            let codex = summaries
+                .iter()
+                .find(|summary| summary.id == "codex")
+                .unwrap();
+            assert!(!codex.private_view);
+            assert!(codex.can_install);
+
+            // Every act inspection does not offer is refused, with the sentence that says why.
+            for action in [
+                HarnessAction::Install,
+                HarnessAction::Fix,
+                HarnessAction::Uninstall,
+            ] {
+                let refused = registry.apply("claude-desktop", action).unwrap_err();
+                assert!(
+                    matches!(refused, HarnessError::PrivateView(ref app) if app == "OpenAI.Codex")
+                );
+                assert_eq!(refused.to_string(), claude.detail);
+            }
+            assert_eq!(fs::read(&desktop).unwrap(), before);
+            assert!(
+                registry
+                    .apply("codex", HarnessAction::Install)
+                    .unwrap()
+                    .changed
+            );
+            // Setting up everything leaves the private one out rather than failing on it.
+            let everything = registry.setup_detected().unwrap();
+            assert!(everything.failures.is_empty(), "{:?}", everything.failures);
+            assert_eq!(fs::read(&desktop).unwrap(), before);
+        }
+    }
+
+    /// Protects defects 567cf210 and 218d386f: what a scan reports about a foreign or malformed entry
+    /// names only the program found and its argument count, or the line of a fault, and nothing else
+    /// from the file, so no secret, argument or control character leaves it.
+    #[test]
+    fn evidence_names_only_the_found_program_and_nothing_from_the_file() {
+        {
+            let directory = temporary("foreign-evidence");
+            let path = claude_desktop_config(&directory);
+            let expected_edge = edge(&directory);
+            let command = if cfg!(windows) {
+                "C:/tools/other\u{202e}-server.exe"
+            } else {
+                "/opt/tools/other\u{202e}-server"
+            };
+            let entry = serde_json::json!({
+                "mcpServers": {
+                    "ghostlight": {
+                        "command": command,
+                        "args": ["--token", "sk-test-secret", "launch-it"],
+                    }
+                }
+            });
+            fs::write(&path, entry.to_string()).unwrap();
+
+            let summary = inspected_summary(&directory);
+
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert!(
+                summary.detail.starts_with("A foreign entry holds"),
+                "{}",
+                summary.detail
+            );
+            let evidence = summary.evidence.expect("foreign entries carry evidence");
+            assert!(evidence.contains("other-server"), "{evidence}");
+            assert!(!evidence.contains('\u{202e}'), "{evidence}");
+            assert!(evidence.contains("3 arguments"), "{evidence}");
+            assert!(
+                evidence.contains(&expected_edge.display().to_string()),
+                "{evidence}"
+            );
+            assert!(evidence.contains("changed nothing"), "{evidence}");
+            for hidden in ["sk-test-secret", "--token", "launch-it"] {
+                assert!(!evidence.contains(hidden), "{evidence}");
+            }
+            assert!(!summary.can_install);
+            assert!(summary.can_fix);
+        }
+        {
+            let directory = temporary("foreign-count");
+            let path = claude_desktop_config(&directory);
+            edge(&directory);
+            let write = |entry: serde_json::Value| {
+                fs::write(
+                    &path,
+                    serde_json::json!({ "mcpServers": { "ghostlight": entry } }).to_string(),
+                )
+                .unwrap();
+                inspected_summary(&directory).evidence.expect("evidence")
+            };
+
+            let one = write(serde_json::json!({ "command": "/opt/tools/other", "args": ["a"] }));
+            assert!(one.contains("with 1 argument,"), "{one}");
+            let none = write(serde_json::json!({ "command": "/opt/tools/other" }));
+            assert!(none.contains("with no arguments,"), "{none}");
+
+            let line = write(serde_json::json!({
+                "command": "C:/tools/other-server.exe --token sk-test-secret"
+            }));
+            assert!(line.contains("`other-server.exe`"), "{line}");
+            assert!(line.contains("2 arguments"), "{line}");
+            assert!(
+                !line.contains("--token") && !line.contains("sk-test-secret"),
+                "{line}"
+            );
+        }
+        {
+            let directory = temporary("malformed-evidence");
+            let path = claude_desktop_config(&directory);
+            edge(&directory);
+            fs::write(&path, "{\n  \"token\" \"sk-test-secret\"\n}\n").unwrap();
+
+            let summary = inspected_summary(&directory);
+
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(
+                summary.detail,
+                "This configuration could not be parsed at line 2; it was left untouched."
+            );
+            assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
+            assert!(!summary.can_fix);
+            let serialized = serde_json::to_string(&summary).unwrap();
+            assert!(!serialized.contains("sk-test-secret"), "{serialized}");
+
+            let codex = context(&directory).codex_config;
+            fs::create_dir_all(codex.parent().unwrap()).unwrap();
+            fs::write(&codex, "[mcp_servers.ghostlight]\ntoken = sk-test-secret\n").unwrap();
+
+            let summary = inspected_summary_of(&directory, "codex");
+
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(
+                summary.detail,
+                "This configuration could not be parsed at line 2; it was left untouched."
+            );
+            assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
+            let serialized = serde_json::to_string(&summary).unwrap();
+            assert!(!serialized.contains("sk-test-secret"), "{serialized}");
+        }
+        {
+            let line = ForeignCommand::from_entry(
+                "C:/tools/other-server.exe --token sk/test-secret",
+                None,
+            )
+            .expect("a program is named");
+            assert_eq!(line.program, "other-server.exe");
+            assert_eq!(line.arguments, 2);
+
+            let npx = ForeignCommand::from_entry("npx -y @scope/server-x --api-key abc", None)
+                .expect("a program is named");
+            assert_eq!(npx.program, "npx");
+            assert_eq!(npx.arguments, 4);
+
+            let both = ForeignCommand::from_entry("npx -y @scope/server-x", Some(&["--port", "9"]))
+                .expect("a program is named");
+            assert_eq!(both.program, "npx");
+            assert_eq!(both.arguments, 4);
+
+            let directory = temporary("foreign-spaced-file");
+            let spaced = directory.join("tools with spaces").join("other-server");
+            fs::create_dir_all(spaced.parent().unwrap()).unwrap();
+            fs::write(&spaced, "").unwrap();
+            let whole = ForeignCommand::from_entry(&spaced.to_string_lossy(), Some(&["serve"]))
+                .expect("a program is named");
+            assert_eq!(whole.program, "other-server");
+            assert_eq!(whole.arguments, 1);
+        }
+        {
+            let directory = temporary("unblocked-evidence");
+            let path = claude_desktop_config(&directory);
+            let expected_edge = edge(&directory);
+            let installed = serde_json::json!({
+                "mcpServers": {
+                    "ghostlight": {
+                        "command": expected_edge,
+                        "args": ["mcp"],
+                        "env": {},
+                    }
+                }
+            });
+            fs::write(&path, installed.to_string()).unwrap();
+            let summary = inspected_summary(&directory);
+            assert_eq!(summary.state, HarnessState::Installed);
+            assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
+
+            fs::write(&path, r#"{"mcpServers":{"ghostlight":{"env":{}}}}"#).unwrap();
+            let summary = inspected_summary(&directory);
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            let evidence = summary.evidence.clone().expect("commandless foreign entry");
+            assert!(evidence.contains("without a usable command"), "{evidence}");
+
+            // With the configuration root gone, nothing about the target remains blocked or
+            // disclosed.
+            fs::remove_dir_all(directory.join("config")).unwrap();
+            let summary = inspected_summary(&directory);
+            assert_eq!(summary.state, HarnessState::NotDetected);
+            assert!(summary.evidence.is_none());
+        }
+    }
+
+    /// Protects arch-1 slice I3 and defects 5d589e1d, 4af49885 and f51130d0: an update sets only the
+    /// keys Ghostlight owns and keeps everything else the client wrote, in every dialect: a current
+    /// entry under another spelling is left byte for byte, a dialect that needs a type gains it, and
+    /// Codex keeps its custom, inline and malformed environment members while gaining desktop
+    /// forwarding on Linux. A write never leaves a temporary behind, and an install sweeps the ones an
+    /// interrupted write left.
+    #[test]
+    fn an_update_sets_only_ghostlights_keys_and_keeps_the_clients() {
+        {
+            let directory = temporary("write-fails");
+            // A directory where the configuration should be: the backup copy fails, after the
+            // temporary was written.
+            let path = directory.join("settings.json");
+            fs::create_dir_all(&path).unwrap();
+
+            assert!(replace_with_backup(&path, b"{}").is_err());
+            assert_eq!(names_in(&directory), ["settings.json"]);
+
+            let written = directory.join("other.json");
+            replace_with_backup(&written, b"{}").unwrap();
+            assert_eq!(names_in(&directory), ["other.json", "settings.json"]);
+        }
+        {
+            use std::time::{Duration, SystemTime};
+
+            let directory = temporary("stray-temporaries");
+            let context = context(&directory);
+            let claude = definition(&context, "claude-code").unwrap();
+            let settings = claude.path.parent().unwrap().to_path_buf();
+            fs::create_dir_all(&settings).unwrap();
+            let stray = ".ghostlight-0123456789abcdef0123456789abcdef.tmp";
+            fs::write(settings.join(stray), b"{}").unwrap();
+            fs::write(settings.join("notes.tmp"), b"theirs").unwrap();
+
+            // Just written, it may be a write in flight.
+            assert_eq!(remove_stray_temporaries_in(&settings, SystemTime::now()), 0);
+            assert!(settings.join(stray).is_file());
+
+            let later = SystemTime::now() + Duration::from_secs(3600);
+            assert_eq!(remove_stray_temporaries_in(&settings, later), 1);
+            assert!(!settings.join(stray).exists());
+            assert!(settings.join("notes.tmp").is_file());
+
+            // The registry looks beside each configuration it can change.
+            fs::write(settings.join(stray), b"{}").unwrap();
+            let registry = HarnessRegistry::with_context(context);
+            assert_eq!(registry.remove_stray_temporaries(), 0);
+            assert_eq!(registry.remove_stray_temporaries_at(later), 1);
+            assert!(!settings.join(stray).exists());
+        }
+        {
+            let directory = temporary("current-agrees");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            // The edge spelled another way, with none of the defaults and a key of the client's own:
+            // what a dry run reads as current, an install leaves byte for byte.
+            let respelled = edge
+                .parent()
+                .unwrap()
+                .join(".")
+                .join(edge.file_name().unwrap());
+            for dialect in JSON_DIALECTS {
+                let mut entry = expected_json_entry(&respelled, dialect);
+                let members = entry.as_object_mut().unwrap();
+                for (key, _) in json_entry_defaults(dialect) {
+                    members.remove(key);
+                }
+                members.insert("disabled".into(), json!(true));
+                let source = json_file_holding(dialect, entry);
+                let path = directory.join(format!("{dialect:?}.json"));
+                fs::write(&path, &source).unwrap();
+                assert_eq!(
+                    inspect_json(&source, dialect, &edge, context.windows).unwrap(),
+                    RegistrationState::Current,
+                    "{dialect:?}"
+                );
+                assert!(
+                    !Format::Json(dialect)
+                        .edit(&context, &path, RegistrationEdit::Install)
+                        .unwrap(),
+                    "{dialect:?}"
+                );
+                assert_eq!(fs::read_to_string(&path).unwrap(), source, "{dialect:?}");
+            }
+            let forwarded = if context.linux {
+                format!("env_vars = {:?}\n", super::CODEX_DESKTOP_ENVIRONMENT)
+            } else {
+                String::new()
+            };
+            let source = format!(
+            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenabled = false\n{forwarded}",
+            respelled.to_string_lossy(),
+            super::MCP_ARGUMENTS
+        );
+            let path = directory.join("config.toml");
+            fs::write(&path, &source).unwrap();
+            assert_eq!(
+                inspect_toml(&source, &context).unwrap(),
+                RegistrationState::Current
+            );
+            assert!(!Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .unwrap());
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        }
+        {
+            let directory = temporary("type-owned");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            for dialect in JSON_DIALECTS {
+                let Some(kind) = super::json_entry_type(dialect) else {
+                    continue;
+                };
+                let mut entry = expected_json_entry(&edge, dialect);
+                let members = entry.as_object_mut().unwrap();
+                members.remove(super::TYPE_KEY);
+                members.insert("timeout".into(), json!(5000));
+                let source = json_file_holding(dialect, entry);
+                let path = directory.join(format!("{dialect:?}.json"));
+                fs::write(&path, &source).unwrap();
+                assert_eq!(
+                    inspect_json(&source, dialect, &edge, context.windows).unwrap(),
+                    RegistrationState::Updatable,
+                    "{dialect:?}"
+                );
+                assert!(Format::Json(dialect)
+                    .edit(&context, &path, RegistrationEdit::Install)
+                    .unwrap());
+                let written = fs::read_to_string(&path).unwrap();
+                let parsed: Value = serde_json::from_str(&written).unwrap();
+                let entry = super::json_entry(&parsed, dialect).unwrap();
+                assert_eq!(entry[super::TYPE_KEY], kind, "{dialect:?}");
+                assert_eq!(entry["timeout"], 5000, "{dialect:?}");
+                assert_eq!(
+                    inspect_json(&written, dialect, &edge, context.windows).unwrap(),
+                    RegistrationState::Current,
+                    "{dialect:?}"
+                );
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let directory = temporary("codex-desktop");
+            let path = directory.join("config.toml");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            // The current registration lacking the Linux desktop forwarding: updatable for that
+            // alone, so the edit adds the forwarding and keeps every custom field.
+            let source = format!(
+            "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}, {{ name = \"WAYLAND_DISPLAY\" }}, {{ name = \"CUSTOM_REMOTE\", source = \"remote\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
+            edge.to_string_lossy(),
+            super::MCP_ARGUMENTS
+        );
+            fs::write(&path, &source).unwrap();
+            assert_eq!(
+                inspect_toml(&source, &context).unwrap(),
+                RegistrationState::Updatable
+            );
+            assert!(Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .unwrap());
+            let installed = fs::read_to_string(&path).unwrap();
+            let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
+            let entry = &document["mcp_servers"]["ghostlight"];
+            assert_eq!(entry["startup_timeout_sec"].as_integer(), Some(45));
+            assert_eq!(
+                entry["env"]["XAUTHORITY"].as_str(),
+                Some("/explicit/test-authority")
+            );
+            assert_eq!(entry["env_vars"].as_array().unwrap().len(), 7);
+            let original = source.parse::<toml_edit::DocumentMut>().unwrap();
+            for (before, after) in original["mcp_servers"]["ghostlight"]["env_vars"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(entry["env_vars"].as_array().unwrap().iter())
+            {
+                assert_eq!(before.to_string(), after.to_string());
+            }
+            assert_eq!(
+                document["mcp_servers"]["other"]["command"].as_str(),
+                Some("other-server")
+            );
+            assert!(installed.contains("# keep me"));
+            assert!(
+                super::missing_codex_desktop_environment(entry, context.linux)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(!Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .unwrap());
+            assert_eq!(fs::read_to_string(&path).unwrap(), installed);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let directory = temporary("codex-malformed-env");
+            let path = directory.join("config.toml");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            let source = format!(
+            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenv_vars = \"not-an-array\"\n",
+            edge.to_string_lossy(),
+            super::MCP_ARGUMENTS
+        );
+            fs::write(&path, &source).unwrap();
+            assert!(inspect_toml(&source, &context).is_err());
+            assert!(Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            assert_eq!(
+                inspect_toml(
+                    &source,
+                    &HarnessContext {
+                        windows: true,
+                        linux: false,
+                        ..context
+                    }
+                )
+                .unwrap(),
+                RegistrationState::Current
+            );
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let directory = temporary("codex-malformed-env-members");
+            let path = directory.join("config.toml");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            // The edge command with its current arguments is the current registration. The retired
+            // connector command is a retired one. Both are owned, so both refuse malformed members.
+            let arguments = format!("{:?}", super::MCP_ARGUMENTS);
+            for members in [
+            "123",
+            "true",
+            "[]",
+            "{}",
+            "{ name = 123 }",
+            "{ source = \"local\" }",
+            "{ name = \"DISPLAY\", source = 123 }",
+            "{ name = \"DISPLAY\", source = \"bogus\" }",
+            "{ name = \"DISPLAY\", extra = true }",
+            "\"DISPLAY\", \"WAYLAND_DISPLAY\", \"XDG_RUNTIME_DIR\", \"DBUS_SESSION_BUS_ADDRESS\", \"XDG_CURRENT_DESKTOP\", \"XAUTHORITY\", 123",
+        ] {
+            for command in [&edge, &directory.join("old/ghostlight-mcp-connector")] {
+                for source in [
+                    format!(
+                        "# preserve exactly\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {arguments}\nenv_vars = [{members}]\n",
+                        command.to_string_lossy()
+                    ),
+                    format!(
+                        "# preserve exactly\n[mcp_servers]\nghostlight = {{ command = {:?}, args = {arguments}, env_vars = [{members}] }}\n",
+                        command.to_string_lossy()
+                    ),
+                ] {
+                    fs::write(&path, &source).unwrap();
+                    assert!(
+                        inspect_toml(&source, &context).is_err(),
+                        "inspection accepted {source}"
+                    );
+                    assert!(Format::Codex.edit(&context, &path, RegistrationEdit::Install).is_err());
+                    assert_eq!(fs::read_to_string(&path).unwrap(), source);
+                }
+            }
+        }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let directory = temporary("codex-inline-env");
+            let path = directory.join("config.toml");
+            let context = context(&directory);
+            let edge = context.edge.clone();
+            // The edge command with no arguments is an updatable registration on purpose.
+            fs::write(&path, format!(
+            "[mcp_servers]\nghostlight = {{ command = {:?}, args = [], startup_timeout_sec = 45 }}\n",
+            edge.to_string_lossy()
+        )).unwrap();
+            assert!(Format::Codex
+                .edit(&context, &path, RegistrationEdit::Install)
+                .unwrap());
+            let installed = fs::read_to_string(&path).unwrap();
+            let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
+            assert_eq!(
+                document["mcp_servers"]["ghostlight"]["startup_timeout_sec"].as_integer(),
+                Some(45)
+            );
+            assert_eq!(
+                inspect_toml(&installed, &context).unwrap(),
+                RegistrationState::Current
+            );
+        }
+    }
+
+    /// Protects arch-1 slice I4 and defects 765736e1 and 41a3f8bf: uninstall removes Ghostlight's entry
+    /// from every copy of an agent's settings that holds one, the plain copy and a stale entry
+    /// included, names each removal in the dry run, and leaves everything else.
+    #[test]
+    fn uninstall_removes_every_owned_entry_from_every_copy_and_nothing_else() {
+        {
+            let directory = temporary("store-uninstall");
+            let context = windows_context(&directory);
+            let registry = HarnessRegistry::with_context(context.clone());
+            let plain = plain_desktop(&context);
+            fs::create_dir_all(plain.parent().unwrap()).unwrap();
+            fs::write(&plain, PERSON_SETTINGS).unwrap();
+            // An earlier non-Store install set up the plain copy.
+            registry
+                .apply("claude-desktop", HarnessAction::Install)
+                .unwrap();
+            let private = store_folder(&context).join("claude_desktop_config.json");
+            fs::write(&private, PERSON_SETTINGS).unwrap();
+            registry
+                .apply("claude-desktop", HarnessAction::Install)
+                .unwrap();
+            assert!(has_entry(&plain) && has_entry(&private));
+            // A foreign entry in a third copy is never removed.
+            let foreign = packaged::private_root(
+                context.local_app_data.as_deref().unwrap(),
+                "Other.Claude_abc123",
+                packaged::DataRoot::Roaming,
+            )
+            .join("Claude/claude_desktop_config.json");
+            fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+            let foreign_text =
+                r#"{"mcpServers":{"ghostlight":{"command":"node","args":["x.js"]}}}"#;
+            fs::write(&foreign, foreign_text).unwrap();
+            registry.refresh().unwrap();
+            assert_eq!(
+                desktop_summary(&registry).owned_copies,
+                [plain.to_string_lossy()],
+                "only the copy that holds Ghostlight's own entry is named"
+            );
+
+            let removed = registry
+                .apply("claude-desktop", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed);
+            assert!(!has_entry(&plain) && !has_entry(&private));
+            for copy in [&plain, &private] {
+                let text = fs::read_to_string(copy).unwrap();
+                assert!(text.contains("// Kept as written."), "{text}");
+                assert!(
+                    text.contains("\"other\": {\"command\": \"other-server\"}"),
+                    "{text}"
+                );
+            }
+            assert_eq!(fs::read_to_string(&foreign).unwrap(), foreign_text);
+        }
+        {
+            let directory = temporary("store-left-plain");
+            let context = windows_context(&directory);
+            let plain = plain_desktop(&context);
+            fs::create_dir_all(plain.parent().unwrap()).unwrap();
+            fs::write(&plain, current_settings(&context)).unwrap();
+            let private = store_folder(&context).join("claude_desktop_config.json");
+            fs::write(&private, PERSON_SETTINGS).unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+
+            let summary = desktop_summary(&registry);
+            assert_eq!(summary.state, HarnessState::Available);
+            assert!(
+                summary.can_uninstall,
+                "the plain copy's entry can be removed"
+            );
+            assert_eq!(summary.owned_copies, [plain.to_string_lossy()]);
+            let selected = crate::cli::setup::select_harnesses(
+                &registry.summaries(),
+                &crate::cli::parse::SetupOptions::default(),
+                false,
+            )
+            .unwrap();
+            assert!(selected
+                .iter()
+                .any(|summary| summary.id == "claude-desktop"));
+
+            let removed = registry
+                .apply("claude-desktop", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed);
+            assert!(!has_entry(&plain));
+            assert_eq!(fs::read_to_string(&private).unwrap(), PERSON_SETTINGS);
+            assert!(!removed.summary.can_uninstall);
+            assert!(removed.summary.owned_copies.is_empty());
+        }
+        {
+            let directory = temporary("whole-uninstall-stale");
+            let context = context(&directory);
+            let claude = definition(&context, "claude-code").unwrap();
+            fs::create_dir_all(claude.path.parent().unwrap()).unwrap();
+            let older = directory
+                .join("older")
+                .join(context.edge.file_name().unwrap());
+            fs::write(
+            &claude.path,
+            format!(
+                "{{\"mcpServers\": {{\"{SERVER_NAME}\": {{\"command\": {}, \"args\": [\"{MCP_ARGUMENT}\"]}}}}}}",
+                serde_json::to_string(&older.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+            let registry = HarnessRegistry::with_context(context);
+            let stale = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "claude-code")
+                .unwrap();
+            assert_eq!(stale.state, HarnessState::Updatable);
+            assert!(stale.can_uninstall, "a stale owned entry is one to remove");
+            assert_eq!(
+                crate::language::deployment::client_would_remove(
+                    &stale.label,
+                    stale.state,
+                    stale.attention,
+                    &stale.owned_copies
+                ),
+                format!("Would remove Ghostlight from {}.", stale.label)
+            );
+
+            // A whole uninstall, naming no client, selects it and takes the entry out.
+            let selected = crate::cli::setup::select_harnesses(
+                &registry.summaries(),
+                &crate::cli::parse::SetupOptions::default(),
+                false,
+            )
+            .unwrap();
+            assert!(selected.iter().any(|summary| summary.id == "claude-code"));
+            let removed = registry
+                .apply("claude-code", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed);
+            assert!(
+                removed
+                    .message
+                    .starts_with(&format!("Ghostlight was removed from {}.", stale.label)),
+                "{}",
+                removed.message
+            );
+            assert!(!has_entry(&claude.path));
+            assert!(!removed.summary.can_uninstall);
+        }
+        {
+            let directory = temporary("store-attention");
+            let context = windows_context(&directory);
+            let plain = plain_desktop(&context);
+            fs::create_dir_all(plain.parent().unwrap()).unwrap();
+            fs::write(&plain, current_settings(&context)).unwrap();
+            let private = store_folder(&context).join("claude_desktop_config.json");
+            let broken = "{\"mcpServers\": {";
+            fs::write(&private, broken).unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+
+            let summary = desktop_summary(&registry);
+            assert_eq!(PathBuf::from(&summary.config_path), private);
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(summary.attention, Some(Attention::Malformed));
+            assert!(summary.can_uninstall);
+            assert_eq!(summary.owned_copies, [plain.to_string_lossy()]);
+
+            let removed = registry
+                .apply("claude-desktop", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed);
+            assert!(!has_entry(&plain));
+            assert_eq!(fs::read_to_string(&private).unwrap(), broken);
+            assert!(removed.summary.owned_copies.is_empty());
+            assert_eq!(removed.summary.attention, Some(Attention::Malformed));
+
+            fs::write(
+                &private,
+                r#"{"mcpServers":{"ghostlight":{"command":"node"}}}"#,
+            )
+            .unwrap();
+            registry.refresh().unwrap();
+            assert_eq!(
+                desktop_summary(&registry).attention,
+                Some(Attention::ForeignEntry)
+            );
+        }
+    }
+
+    /// Protects workbench gate 10, arch-1 slice I1 and defects c51204ca, 1d220361 and 0a0ef063:
+    /// Ghostlight writes the file each agent reads in the effective environment. Empty or relative
+    /// root variables resolve below the home; XDG, APPDATA, CODEX_HOME, CRUSH_GLOBAL_CONFIG and
+    /// CLAUDE_CONFIG_DIR are honored, the last read from the person's environment when the process
+    /// has none; a host reads the first of its candidates that exists. A located path is validated,
+    /// kept owner-only, persists as detection evidence and is reported when it goes missing.
+    #[test]
+    fn each_agents_file_is_the_one_it_reads_in_the_effective_environment() {
+        {
+            let home = if cfg!(windows) {
+                "C:/Users/test"
+            } else {
+                "/home/test"
+            };
+            let lookup = |name: &str| match name {
+                user_dirs::USER_PROFILE_VARIABLE | user_dirs::HOME_VARIABLE => {
+                    Some(OsString::from(home))
+                }
+                user_dirs::XDG_CONFIG_HOME_VARIABLE | CODEX_HOME_VARIABLE => Some(OsString::new()),
+                user_dirs::APP_DATA_VARIABLE => Some(OsString::from("Roaming")),
+                _ => None,
+            };
+            let only_home =
+                |name: &str| (name == user_dirs::HOME_VARIABLE).then(|| OsString::from(home));
+            assert_eq!(
+                UserDirs::from_lookup(&only_home, true).home(),
+                Path::new("")
+            );
+            let home = Path::new(home);
+
+            for windows in [false, true] {
+                let dirs = UserDirs::from_lookup(&lookup, windows);
+                let config = if windows {
+                    home.join("AppData").join("Roaming")
+                } else {
+                    home.join(".config")
+                };
+                assert_eq!(
+                    environment_roots(&dirs, &lookup, windows),
+                    HarnessRoots {
+                        config_root: config,
+                        codex_config: home.join(".codex").join("config.toml"),
+                    }
+                );
+            }
+        }
+        {
+            let linux = harness_roots(
+                Path::new("/home/test"),
+                Some(PathBuf::from("/mnt/config")),
+                Some(PathBuf::from("/ignored/appdata")),
+                Some(PathBuf::from("/workbench/codex")),
+                false,
+            );
+            assert_eq!(
+                linux,
+                HarnessRoots {
+                    config_root: PathBuf::from("/mnt/config"),
+                    codex_config: PathBuf::from("/workbench/codex/config.toml"),
+                }
+            );
+
+            let windows = harness_roots(
+                Path::new("C:/Users/test"),
+                Some(PathBuf::from("C:/ignored/xdg")),
+                Some(PathBuf::from("D:/Profiles/Roaming")),
+                None,
+                true,
+            );
+            assert_eq!(
+                windows,
+                HarnessRoots {
+                    config_root: PathBuf::from("D:/Profiles/Roaming"),
+                    codex_config: PathBuf::from("C:/Users/test/.codex/config.toml"),
+                }
+            );
+        }
+        {
+            let directory = temporary("locations-private");
+            let context = context(&directory);
+            let registry = HarnessRegistry::with_context(context.clone());
+            let located = directory.join("portable/kilo.jsonc");
+            fs::create_dir_all(located.parent().unwrap()).unwrap();
+            fs::write(&located, "{}\n").unwrap();
+            registry.locate("kilo-code", &located).unwrap();
+            assert_owner_only(&context.locations);
+            registry.locate("kilo-code", &located).unwrap();
+            assert_owner_only(&context.locations);
+            assert_eq!(
+                names_in(context.locations.parent().unwrap()),
+                [super::layout::HARNESS_LOCATIONS_NAME]
+            );
+        }
+        {
+            let directory = temporary("kilo-current-config");
+            let context = context(&directory);
+            let current = context.config_root.join("kilo").join("kilo.jsonc");
+            fs::create_dir_all(current.parent().unwrap()).unwrap();
+            fs::write(&current, "{}\n").unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+            let kilo = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "kilo-code")
+                .unwrap();
+            assert_eq!(kilo.config_path, current.to_string_lossy());
+
+            let located = directory.join("portable/kilo.jsonc");
+            fs::create_dir_all(located.parent().unwrap()).unwrap();
+            fs::write(&located, "{}\n").unwrap();
+            let result = registry.locate("kilo-code", &located).unwrap();
+            assert_eq!(result.summary.config_path, located.to_string_lossy());
+        }
+        {
+            for row in ROSTER.iter().filter(|row| !row.candidates.is_empty()) {
+                let directory = temporary(&format!("candidates-{}", row.id));
+                let context = context(&directory);
+                let default = (row.path)(&context);
+                let file_on = |context: &HarnessContext| {
+                    row.copies_on(context, &Packages::none())[0].file.clone()
+                };
+                assert_eq!(file_on(&context), default, "{}", row.id);
+                fs::create_dir_all(default.parent().unwrap()).unwrap();
+                // Each candidate, written after every later one, wins over all of them.
+                for (index, name) in row.candidates.iter().enumerate().rev() {
+                    fs::write(default.with_file_name(name), "{}\n").unwrap();
+                    assert_eq!(
+                        file_on(&context),
+                        default.with_file_name(row.candidates[index]),
+                        "{}",
+                        row.id
+                    );
+                }
+                let definition = definition(&context, row.id).unwrap();
+                for name in row.candidates {
+                    assert!(
+                        definition.accepts_config_path(&directory.join(name)),
+                        "{name}"
+                    );
+                }
+                assert!(!definition.accepts_config_path(&directory.join("settings.json")));
+            }
+        }
+        {
+            for named in [false, true] {
+                let directory = temporary(&format!("claude-config-dir-{named}"));
+                let own = directory.join("claude-profile");
+                let context = HarnessContext {
+                    claude_config_dir: named.then(|| own.clone()),
+                    ..context(&directory)
+                };
+                let (read, unread) = if named {
+                    (own.join(".claude.json"), context.home.join(".claude.json"))
+                } else {
+                    (context.home.join(".claude.json"), own.join(".claude.json"))
+                };
+                fs::create_dir_all(read.parent().unwrap()).unwrap();
+                fs::write(&read, "{\"theme\": \"dark\"}\n").unwrap();
+                let registry = HarnessRegistry::with_context(context);
+
+                let installed = registry
+                    .apply("claude-code", HarnessAction::Install)
+                    .unwrap();
+                assert!(installed.changed, "{named}");
+                assert!(has_entry(&read), "{named}");
+                assert!(fs::read_to_string(&read).unwrap().contains("dark"));
+                let found = registry
+                    .summaries()
+                    .into_iter()
+                    .find(|summary| summary.id == "claude-code")
+                    .unwrap();
+                assert_eq!(found.state, HarnessState::Installed, "{named}");
+                assert!(found.can_uninstall, "{named}");
+
+                let removed = registry
+                    .apply("claude-code", HarnessAction::Uninstall)
+                    .unwrap();
+                assert!(removed.changed, "{named}");
+                assert!(!has_entry(&read), "{named}");
+                assert!(!unread.exists(), "{named}");
+            }
+        }
+        {
+            use std::ffi::OsString;
+
+            use super::user_dirs::USER_PROFILE_VARIABLE;
+            use super::{claude_config_dir, user_path};
+
+            let lookup =
+                |name: &str| (name == USER_PROFILE_VARIABLE).then(|| r"C:\Users\a".to_owned());
+            let stored = |text: &str, expandable| {
+                Some(user_path::PathValue {
+                    text: text.to_owned(),
+                    expandable,
+                })
+            };
+
+            assert_eq!(
+                claude_config_dir(
+                    Some(OsString::from(r"D:\process")),
+                    stored(r"D:\person", false),
+                    &lookup
+                ),
+                Some(PathBuf::from(r"D:\process"))
+            );
+            for unset in [None, Some(OsString::new())] {
+                assert_eq!(
+                    claude_config_dir(
+                        unset.clone(),
+                        stored(r"%USERPROFILE%\claude", true),
+                        &lookup
+                    ),
+                    Some(PathBuf::from(r"C:\Users\a\claude"))
+                );
+                assert_eq!(
+                    claude_config_dir(
+                        unset.clone(),
+                        stored(r"%USERPROFILE%\claude", false),
+                        &lookup
+                    ),
+                    Some(PathBuf::from(r"%USERPROFILE%\claude"))
+                );
+                assert_eq!(
+                    claude_config_dir(unset.clone(), stored("", true), &lookup),
+                    None
+                );
+                assert_eq!(claude_config_dir(unset, None, &lookup), None);
+            }
+        }
+        {
+            let directory = temporary("crush-variable");
+            let named = directory.join("elsewhere/crush.json");
+            let context = HarnessContext {
+                crush_config: Some(named.clone()),
+                ..context(&directory)
+            };
+            assert_eq!(definition(&context, "crush").unwrap().path, named);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let directory = temporary("located-executable");
+            let context = context(&directory);
+            let executable = directory.join("odd-place/custom-qwen");
+            fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            fs::write(&executable, b"test").unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+            let located = registry.locate("qwen-code", &executable).unwrap();
+            assert_eq!(located.summary.state, HarnessState::Available);
+            let rediscovered = HarnessRegistry::with_context(context);
+            let qwen = rediscovered
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "qwen-code")
+                .unwrap();
+            assert_eq!(qwen.state, HarnessState::Available);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let directory = temporary("stale-located-executable");
+            let context = context(&directory);
+            let executable = directory.join("portable/qwen");
+            fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            fs::write(&executable, b"test").unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+            HarnessRegistry::with_context(context.clone())
+                .locate("qwen-code", &executable)
+                .unwrap();
+            fs::remove_file(executable).unwrap();
+
+            let summary = HarnessRegistry::with_context(context)
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "qwen-code")
+                .unwrap();
+            assert_eq!(summary.state, HarnessState::NotDetected);
+            assert!(summary
+                .detail
+                .contains("previously located path is missing"));
+        }
+        {
+            let directory = temporary("located-config-validation");
+            let context = context(&directory);
+            let registry = HarnessRegistry::with_context(context);
+            let wrong_name = directory.join("portable/not-qwen.json");
+            fs::create_dir_all(wrong_name.parent().unwrap()).unwrap();
+            fs::write(&wrong_name, "{}\n").unwrap();
+            assert!(matches!(
+                registry.locate("qwen-code", &wrong_name),
+                Err(HarnessError::LocatedPathInvalid(_))
+            ));
+
+            let malformed = directory.join("portable/settings.json");
+            fs::write(&malformed, "[]\n").unwrap();
+            assert!(matches!(
+                registry.locate("qwen-code", &malformed),
+                Err(HarnessError::Malformed(_))
+            ));
+        }
+    }
+
+    /// Protects the ADR-0197 container amendments and defects 4fac15a7 and 236485f4: a Store app's own
+    /// copy of its settings is the file its view shows and is written once from inside its container,
+    /// another app's container leaves it, and an agent absent from its plain path is never found in
+    /// another app's copy.
+    #[test]
+    fn inside_a_store_apps_own_container_its_copy_is_written_once_and_another_container_leaves_it()
+    {
+        {
+            let directory = temporary("own-container");
+            let (context, desktop) = inside_container(&directory, "Claude");
+            let registry = HarnessRegistry::with_context(context);
+
+            let claude = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "claude-desktop")
+                .unwrap();
+            assert!(!claude.private_view);
+            assert!(
+                registry
+                    .apply("claude-desktop", HarnessAction::Install)
+                    .unwrap()
+                    .changed
+            );
+            let value: Value =
+                serde_json::from_str(&fs::read_to_string(&desktop).unwrap()).unwrap();
+            assert!(value["mcpServers"].get("ghostlight").is_some());
+        }
+        {
+            // As on leo-desktop-02 on 2026-10-20: Visual Studio Code had never been started, so its
+            // plain settings folder did not exist, and an install had written Ghostlight's entry into
+            // the Codex app's private copy of that folder, which Visual Studio Code never reads.
+            let directory = temporary("store-other-only");
+            let context = windows_context(&directory);
+            let plain = context.config_root.join("Code/User/mcp.json");
+            // Spelled as the look spells it: the settings folder as the row names it, then the file.
+            let leftover = packaged::private_root(
+                context.local_app_data.as_deref().unwrap(),
+                "OpenAI.Codex_2p2nqsd0c76g0",
+                packaged::DataRoot::Roaming,
+            )
+            .join("Code/User")
+            .join("mcp.json");
+            fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+            fs::write(
+            &leftover,
+            format!(
+                "{{\"servers\":{{\"ghostlight\":{{\"type\":\"stdio\",\"command\":{},\"args\":[\"mcp\"]}}}}}}",
+                serde_json::to_string(&context.edge.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+            let editor = || {
+                registry
+                    .summaries()
+                    .into_iter()
+                    .find(|summary| summary.id == "vscode")
+                    .unwrap()
+            };
+
+            let summary = editor();
+            assert_eq!(PathBuf::from(&summary.config_path), plain);
+            assert_eq!(
+                summary.state,
+                HarnessState::NotDetected,
+                "another app's copy is no evidence of the agent: {}",
+                summary.detail
+            );
+            assert_eq!(summary.owned_copies, [leftover.to_string_lossy()]);
+
+            let removed = registry.apply("vscode", HarnessAction::Uninstall).unwrap();
+            assert!(removed.changed, "{}", removed.message);
+            let left = fs::read_to_string(&leftover).unwrap();
+            assert!(!left.contains(SERVER_NAME), "{left}");
+            assert!(
+                !plain.exists(),
+                "nothing is written where the agent is absent"
+            );
+            assert!(editor().owned_copies.is_empty());
+        }
+        {
+            let directory = temporary("store-own-container");
+            let mut context = windows_context(&directory);
+            let local = context.local_app_data.clone().unwrap();
+            context.private_view = Some(PrivateView {
+                container: AppContainer {
+                    app: "Claude".into(),
+                },
+                roots: vec![context.config_root.clone(), local.clone()],
+            });
+            let private = store_folder(&context).join("claude_desktop_config.json");
+            fs::write(&private, PERSON_SETTINGS).unwrap();
+            // The container's merged view shows the same file at the plain path.
+            let view = plain_desktop(&context);
+            fs::create_dir_all(view.parent().unwrap()).unwrap();
+            fs::write(&view, PERSON_SETTINGS).unwrap();
+            let registry = HarnessRegistry::with_context(context.clone());
+
+            let summary = desktop_summary(&registry);
+            assert!(
+                summary.other_copy.is_none(),
+                "the view's plain path is the same file, not another copy"
+            );
+            // Inside the container a write to the plain path lands in the package's private copy of
+            // `%APPDATA%`, the same mapping the container probe confirms for `%LOCALAPPDATA%`: the
+            // plain path the view shows and the copy found here are one file.
+            let rest = plain_desktop(&context)
+                .strip_prefix(&context.config_root)
+                .unwrap()
+                .to_path_buf();
+            let redirected =
+                packaged::private_root(&local, STORE_FAMILY, packaged::DataRoot::Roaming)
+                    .join(rest);
+            assert_eq!(PathBuf::from(&summary.config_path), redirected);
+            assert_eq!(redirected, private);
+            assert!(!summary.private_view);
+            assert!(summary.can_install);
+            assert!(
+                registry
+                    .apply("claude-desktop", HarnessAction::Install)
+                    .unwrap()
+                    .changed
+            );
+            assert!(has_entry(&private));
+            assert_eq!(fs::read_to_string(&view).unwrap(), PERSON_SETTINGS);
+
+            // Inside another app's container the same copy is that app's private view, and is left.
+            context.private_view = Some(PrivateView {
+                container: AppContainer {
+                    app: "OpenAI.Codex".into(),
+                },
+                roots: vec![context.config_root.clone(), local],
+            });
+            let other = HarnessRegistry::with_context(context);
+            let summary = desktop_summary(&other);
+            assert!(summary.private_view && !summary.can_uninstall);
+            assert!(matches!(
+                other.apply("claude-desktop", HarnessAction::Uninstall),
+                Err(HarnessError::PrivateView(_))
+            ));
+            assert!(has_entry(&private));
+        }
+    }
+
+    /// Protects arch-1 slice I5: an entry that starts Ghostlight's own npm package through npx, in JSON
+    /// or Codex TOML, is the launcher whatever version it pins; it is never current, install and
+    /// uninstall leave it, and only Fix replaces it.
+    #[test]
+    fn the_npm_launcher_entry_is_never_current_and_only_fix_replaces_it() {
+        {
+            let directory = temporary("launcher-unpinned");
+            let context = context(&directory);
+            for entry in [
+                json!({"command": "npx", "args": ["-y", "ghostlight"]}),
+                json!({"command": "npx", "args": ["--yes", "ghostlight@latest", "mcp"]}),
+                json!({"command": "cmd", "args": ["/c", "npx", "-y", "ghostlight"]}),
+                json!({"command": "npx -y ghostlight"}),
+            ] {
+                let (registry, path) = cline_with_entry(&context, &entry);
+                let before = fs::read(&path).unwrap();
+                let summary = cline_summary(&registry);
+                assert_eq!(summary.state, HarnessState::NeedsAttention, "{entry}");
+                assert_eq!(
+                    summary.attention,
+                    Some(Attention::Launcher(LauncherPin::Unpinned)),
+                    "{entry}"
+                );
+                assert!(
+                    summary
+                        .detail
+                        .contains("npm chooses the version at each launch"),
+                    "{}",
+                    summary.detail
+                );
+                assert!(!summary.detail.contains("foreign"), "{}", summary.detail);
+                let evidence = summary.evidence.clone().expect("the launcher is named");
+                assert!(evidence.contains("npm launcher"), "{evidence}");
+                assert!(!evidence.contains("another program"), "{evidence}");
+                assert!(summary.can_fix && !summary.can_install && !summary.can_uninstall);
+                assert!(matches!(
+                    registry.apply("cline-cli", HarnessAction::Install),
+                    Err(HarnessError::LauncherEntry)
+                ));
+                assert_eq!(fs::read(&path).unwrap(), before);
+            }
+        }
+        {
+            let directory = temporary("launcher-pinned-1x");
+            let context = context(&directory);
+            let (registry, path) = cline_with_entry(
+                &context,
+                &json!({"command": "npx", "args": ["-y", "ghostlight@1.3.5"]}),
+            );
+            let before = fs::read(&path).unwrap();
+            let summary = cline_summary(&registry);
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(
+                summary.attention,
+                Some(Attention::Launcher(LauncherPin::Earlier))
+            );
+            assert!(
+                summary.detail.contains("pinned to ghostlight@1.3.5")
+                    && summary.detail.contains("before 2.0"),
+                "{}",
+                summary.detail
+            );
+            assert!(summary
+                .evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.contains("`npx ghostlight@1.3.5`")));
+            for action in [HarnessAction::Install, HarnessAction::Uninstall] {
+                assert!(matches!(
+                    registry.apply("cline-cli", action),
+                    Err(HarnessError::LauncherEntry)
+                ));
+            }
+            assert_eq!(fs::read(&path).unwrap(), before);
+
+            let fixed = registry.apply("cline-cli", HarnessAction::Fix).unwrap();
+            assert!(fixed.changed);
+            assert_eq!(fixed.summary.state, HarnessState::Installed);
+            assert!(
+                fixed.message.contains("instead of the npm launcher"),
+                "{}",
+                fixed.message
+            );
+        }
+        {
+            let directory = temporary("launcher-pinned-2x");
+            let context = context(&directory);
+            let (registry, _) = cline_with_entry(
+                &context,
+                &json!({"command": "npx", "args": ["-y", "ghostlight@2.0.0"]}),
+            );
+            let summary = cline_summary(&registry);
+            assert_eq!(summary.state, HarnessState::NeedsAttention);
+            assert_eq!(
+                summary.attention,
+                Some(Attention::Launcher(LauncherPin::Pinned))
+            );
+            assert!(
+                summary.detail.contains("cannot say it is current"),
+                "{}",
+                summary.detail
+            );
+        }
+        {
+            let launcher =
+                |command: &str, args: &[&str]| NpmLauncher::from_entry(command, Some(args));
+            for (command, args) in [
+                ("npx", &["-y", "ghostlight", "install"][..]),
+                ("npx", &["-y", "@scope/server-x"][..]),
+                ("npx", &["-y", "ghostlight-other"][..]),
+                ("npx", &["-y", "ghostlight@https://example.test/x.tgz"][..]),
+                ("npx", &["--registry", "r", "ghostlight"][..]),
+                ("cmd", &["/k", "npx", "ghostlight"][..]),
+                ("node", &["ghostlight"][..]),
+                ("npx", &[][..]),
+            ] {
+                assert_eq!(launcher(command, args), None, "{command} {args:?}");
+            }
+            assert_eq!(
+                launcher("npx.cmd", &["-y", "ghostlight@^1.2"]),
+                Some(NpmLauncher {
+                    pin: LauncherPin::Earlier,
+                    package: "ghostlight@^1.2".into(),
+                })
+            );
+            for (spec, pin) in [
+                (None, LauncherPin::Unpinned),
+                (Some(""), LauncherPin::Unpinned),
+                (Some("latest"), LauncherPin::Unpinned),
+                (Some("next"), LauncherPin::Unpinned),
+                (Some("1.3.5"), LauncherPin::Earlier),
+                (Some("~1"), LauncherPin::Earlier),
+                (Some("0.9.0"), LauncherPin::Earlier),
+                (Some("2.0.0"), LauncherPin::Pinned),
+                (Some("2.0.0-rc.1"), LauncherPin::Pinned),
+                (Some("^2"), LauncherPin::Pinned),
+            ] {
+                assert_eq!(LauncherPin::of(spec), pin, "{spec:?}");
+            }
+        }
+        {
+            let directory = temporary("launcher-codex");
+            let context = context(&directory);
+            let source =
+            "[mcp_servers.ghostlight]\ncommand = \"npx\"\nargs = [\"-y\", \"ghostlight@1.3.5\"]\n";
+            assert!(matches!(
+                inspect_toml(source, &context).unwrap(),
+                RegistrationState::Launcher(NpmLauncher {
+                    pin: LauncherPin::Earlier,
+                    ..
+                })
+            ));
+            let path = directory.join("config.toml");
+            fs::write(&path, source).unwrap();
+            assert!(matches!(
+                Format::Codex.edit(&context, &path, RegistrationEdit::Install),
+                Err(HarnessError::LauncherEntry)
+            ));
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        }
+    }
+
+    /// Protects the agent catalog contract and defect d4bdaf9c: every agent is known once by its id,
+    /// name and aliases on every host it runs on, a product id two agents share names only its own
+    /// agent, reserved entries are no row, the apps an agent runs inside and every icon family are
+    /// catalog agents, and coexisting hosts of one client carry distinct labels.
+    #[test]
+    fn the_agent_catalog_names_each_agent_once_and_its_references_resolve() {
+        {
+            let directory = temporary("agent-names-roster");
+            let rows = definitions(&context(&directory));
+            for row in &rows {
+                assert_eq!(named(row.id).as_deref(), Some(row.name), "{}", row.id);
+                assert_eq!(named(row.name).as_deref(), Some(row.name), "{}", row.id);
+            }
+            for row in ROSTER {
+                for alias in row.aliases {
+                    assert_eq!(named(alias).as_deref(), Some(row.name), "{alias}");
+                    let others = ROSTER.iter().filter(|other| other.name != row.name);
+                    for other in others {
+                        assert!(!other.is_called(alias), "{alias} also calls {}", other.id);
+                    }
+                }
+            }
+        }
+        {
+            let devin = ROSTER.iter().find(|row| row.id == "devin").unwrap();
+            assert_eq!(devin.product_id, "windsurf");
+            assert_eq!(named("windsurf").as_deref(), Some("Windsurf"));
+            assert_eq!(named("devin").as_deref(), Some("Devin"));
+            assert_eq!(named("Devin").as_deref(), Some("Devin"));
+        }
+        {
+            for row in ROSTER {
+                for other in ROSTER {
+                    assert_eq!(
+                        row.agent_id == other.agent_id,
+                        row.name == other.name,
+                        "{} and {}",
+                        row.id,
+                        other.id
+                    );
+                    if row.agent_id == other.agent_id {
+                        assert_eq!(row.monogram, other.monogram, "{}", row.agent_id);
+                    }
+                }
+            }
+            let cline: Vec<&str> = ROSTER
+                .iter()
+                .filter(|row| row.agent_id == "cline")
+                .map(|row| row.id)
+                .collect();
+            assert_eq!(
+                cline,
+                [
+                    "cline-cli",
+                    "cline-vscode",
+                    "cline-cursor",
+                    "cline-windsurf"
+                ]
+            );
+        }
+        {
+            for row in ROSTER {
+                for host in row.runs_inside {
+                    assert!(super::catalog_agent(host).is_some(), "{}: {host}", row.id);
+                    assert_ne!(*host, row.agent_id, "{}", row.id);
+                }
+            }
+            assert!(super::runs_inside("claude-code", "claude-desktop"));
+            for editor in ["vscode", "cursor", "windsurf"] {
+                assert!(super::runs_inside("cline", editor), "{editor}");
+            }
+            assert!(!super::runs_inside("cline", "claude-desktop"));
+            assert!(!super::runs_inside("claude-desktop", "claude-code"));
+            assert!(!super::runs_inside("not-an-agent", "claude-desktop"));
+        }
+        {
+            use crate::agent::{COMMAND_LINE_ID, EARLIER_ID, UNKNOWN_ID, UNKNOWN_NAME_SEPARATOR};
+            use crate::language::provenance::{COMMAND_LINE_AGENT, EARLIER_SESSION, UNKNOWN_AGENT};
+
+            for row in ROSTER {
+                for id in [row.id, row.agent_id] {
+                    assert!(
+                        ![COMMAND_LINE_ID, UNKNOWN_ID, EARLIER_ID].contains(&id),
+                        "{id}"
+                    );
+                    assert!(!id.contains(UNKNOWN_NAME_SEPARATOR), "{id}");
+                }
+                for reserved in [
+                    COMMAND_LINE_ID,
+                    UNKNOWN_ID,
+                    COMMAND_LINE_AGENT,
+                    UNKNOWN_AGENT,
+                    EARLIER_ID,
+                    EARLIER_SESSION,
+                ] {
+                    assert!(!row.is_called(reserved), "{} is called {reserved}", row.id);
+                }
+            }
+        }
+        {
+            let directory = temporary("host-labels");
+            let summaries = HarnessRegistry::with_context(context(&directory))
+                .refresh()
+                .unwrap();
+            let label_of = |id: &str| {
+                summaries
+                    .iter()
+                    .find(|summary| summary.id == id)
+                    .unwrap()
+                    .label
+                    .clone()
+            };
+            assert_eq!(label_of("cline-cursor"), "Cline (Cursor)");
+            assert_eq!(label_of("cline-cli"), "Cline (CLI)");
+            assert_eq!(label_of("claude-desktop"), "Claude Desktop");
+            assert_eq!(label_of("windsurf"), "Windsurf");
+            assert_eq!(label_of("devin"), "Devin");
+            let mut labels: Vec<_> = summaries.iter().map(|summary| &summary.label).collect();
+            let total = labels.len();
+            labels.sort();
+            labels.dedup();
+            assert_eq!(labels.len(), total);
+        }
+        {
+            let catalog = super::icon_catalog();
+            let ids: Vec<&str> = catalog.iter().map(|agent| agent.agent_id).collect();
+            let mut expected: Vec<&str> = Vec::new();
+            for row in ROSTER {
+                if !expected.contains(&row.agent_id) {
+                    expected.push(row.agent_id);
+                }
+            }
+            assert_eq!(ids, expected, "one entry per agent, in roster order");
+            for agent in &catalog {
+                if let Some(family) = agent.family {
+                    assert_ne!(family, agent.agent_id, "{}", agent.agent_id);
+                    let stand_in = catalog
+                        .iter()
+                        .find(|other| other.agent_id == family)
+                        .unwrap_or_else(|| panic!("{} names no catalog agent", agent.agent_id));
+                    assert!(
+                        !stand_in.sources.is_empty(),
+                        "{family} stands for {} but has no sources",
+                        agent.agent_id
+                    );
+                }
+            }
+            let family_of = |id: &str| catalog.iter().find(|agent| agent.agent_id == id).unwrap();
+            assert_eq!(family_of("claude-code").family, Some("claude-desktop"));
+            assert!(family_of("claude-code").sources.is_empty());
+            assert!(!family_of("codex").sources.is_empty());
+            assert!(family_of("cline").sources.is_empty());
+        }
+    }
+}

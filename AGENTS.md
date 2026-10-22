@@ -199,7 +199,7 @@ Before committing, run the checks for what you changed. CI runs the full set on 
 - The service's app-icon tiles change on purpose: regenerate the preview's fixture icons in
   `tests/fixtures/workbench/` with
   `GHOSTLIGHT_TILE_FIXTURES_UPDATE=1 cargo test -p ghostlight-service agent::image`; look at them.
-- The agent catalog (`install::ROSTER`) changes: regenerate the agent list in
+- The agent catalog (`install::harness::ROSTER`) changes: regenerate the agent list in
   `docs/guides/installation.md` with
   `GHOSTLIGHT_AGENT_LIST_UPDATE=1 cargo test -p ghostlight-service agent_list`.
 - Changed runtime JavaScript that no test runs: `node --check` on it.

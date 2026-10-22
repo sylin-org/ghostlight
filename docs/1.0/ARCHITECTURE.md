@@ -827,7 +827,7 @@ parseable foreign entry under Ghostlight's own key. The writer re-checks that st
 same surrounding document, and uses the same backup and atomic replacement seam. Fix is never an
 automatic or aggregate action. The UI exposes no generic filesystem or process operation.
 
-An agent wears its app's own icon when one is installed. The catalog (`install::ROSTER`) names,
+An agent wears its app's own icon when one is installed. The catalog (`install::harness::ROSTER`) names,
 per host, where that icon may be found: a Windows program (on `PATH`, through the program a
 launcher script starts, or below a known folder), a Store package, or Linux desktop entries, and
 the agent whose icon stands for one that has none (Claude Code wears Claude Desktop's). One
