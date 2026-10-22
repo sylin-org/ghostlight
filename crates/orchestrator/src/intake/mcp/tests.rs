@@ -331,7 +331,7 @@ fn a_token_another_build_wrote_continues_an_initialized_session() {
     );
     serves(&mut session, "a revision this engine does not serve");
 
-    // What the service resumes for a token it cannot read (service/mod.rs).
+    // What the service resumes for a token it cannot read (service/mcp_stream.rs).
     let too_long = format!("{RESUME_TOKEN_PREFIX}{}", "A".repeat(70_000));
     for unreadable in ["nope", "rs1.***", "rs1.W10", too_long.as_str()] {
         assert!(ResumeState::decode(unreadable).is_err(), "{unreadable:.20}");

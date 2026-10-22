@@ -29,9 +29,10 @@ use crate::intake::mcp::Seating;
 use crate::intake::session::IntakeChannel;
 use crate::language::provenance::claimed_agent;
 use crate::provenance::{Observation, SourceProcess};
+use crate::sync::lock;
 
 use super::lifetime::Drain;
-use super::{lock, McpWire};
+use super::mcp_stream::McpWire;
 
 /// One agent's running app: the process Ghostlight saw start a connection, when that process is
 /// the installed app of the agent the connection's client claims to be.

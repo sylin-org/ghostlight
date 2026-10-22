@@ -15,24 +15,40 @@
 //! begins each release every act waiting on the streams they touch, and the waiting act answers
 //! that the presentation is unavailable. A waiting act is not work in flight, so it never extends
 //! the quit's grace.
+//!
+//! [`serve_desktop`] serves one shell on an accepted `desktop` stream, and [`TrayRelay`] carries
+//! the tray the workbench describes to the attached shell on a thread of its own.
 
 use std::collections::HashMap;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::{self, JoinHandle, Thread};
 use std::time::Duration;
 
-use ghostlight_relay::protocol::GoodbyeReason;
+use anyhow::Result;
+use ghostlight_relay::endpoint::Connection;
+use ghostlight_relay::protocol::{GoodbyeReason, QuitReason, Role};
 
+use super::browser_events::reveal_once;
+use super::connections::ServiceContext;
+use super::hint;
+use super::lifetime::QUIT_GRACE;
 use super::presence::{Presence, Shown};
-use crate::browser::transport::SocketWriter;
-use crate::intake::desktop::{ActOutcome, DesktopFrame, NativeAct, TrayModel};
+use crate::browser::transport::{SocketReader, SocketWriter};
+use crate::intake::desktop::{
+    ActOutcome, DesktopFrame, NativeAct, ShellView, TrayItemId, TrayModel, UnavailableReason,
+};
+use crate::intake::listener;
+use crate::language::intake::OpeningRefusal;
 use crate::language::workbench as words;
+use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::sync::lock;
 use crate::workbench::{
-    PageAddress, WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
-    WorkbenchPresentationPort,
+    PageAddress, RuntimeSource, WorkbenchNativeActs, WorkbenchNotification,
+    WorkbenchPresentationError, WorkbenchPresentationPort, WorkbenchTrayPort,
 };
 
 /// How long a link or a folder may take to open before the act counts as failed. A file dialog
@@ -501,6 +517,181 @@ impl WorkbenchNativeActs for ShellRoute {
                 }
             }
             Target::Nowhere => Err(WorkbenchPresentationError::Unavailable),
+        }
+    }
+}
+
+/// Serve one shell of this build on an accepted `desktop` stream.
+///
+/// The service has one desktop place. A shell that finds it taken is told `already_open` instead of
+/// the workbench and the stream ends. The shell that holds the place is asked to show its window,
+/// unless the newcomer said it shows only the tray: that is presence's own launch, made while the
+/// shell it would have replaced was coming back, and nothing is there to show.
+/// Otherwise the shell is handed the workbench address and its secret and the tray to draw. It is
+/// then attached, so the window, notices and native acts of the workbench go to it, a quit says
+/// goodbye to it, and presence knows a shell is there. If a request to show the window was waiting
+/// for a shell, the shell is asked to show it. What the shell sends is a click on a tray entry, the
+/// result of each act, that it cannot show a window, and that the person closed the window; the
+/// first close that stays is explained once. The shell opens its own window, so an `open` click
+/// only tells presence that a person has it open; a frame kind this build does not know is
+/// skipped. A frame that does not decode ends the stream, and the shell is detached.
+pub(super) fn serve_desktop(
+    connection: Connection,
+    context: &Arc<ServiceContext>,
+    view: Option<ShellView>,
+) -> Result<()> {
+    let Some(server) = context.workbench_server.get() else {
+        listener::refuse(&connection, OpeningRefusal::Unsupported);
+        return Ok(());
+    };
+    let Some(_place) = context.desktops.acquire(1) else {
+        listener::refuse(&connection, OpeningRefusal::Capacity);
+        return Ok(());
+    };
+    listener::accept(&connection, &context.accepted(Role::Desktop))?;
+    let mut reader =
+        SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&context.stop));
+    let writer = Arc::new(SocketWriter::new(connection)?);
+    let claim = match context.quit.shells().claim() {
+        Ok(claim) => claim,
+        Err(occupied) => {
+            if view != Some(ShellView::Tray) && occupied.show() {
+                context.presence.person_acted();
+                context.presence.window_shown();
+            }
+            writer.native(&DesktopFrame::AlreadyOpen)?;
+            return Ok(());
+        }
+    };
+    let tray = context.workbench.tray_model();
+    writer.native(&DesktopFrame::workbench(
+        server.address().url(),
+        server.bearer(),
+        tray.clone(),
+    ))?;
+    let attached = claim.attach(writer, tray);
+    let _present = ShellPresent::begin(&context.presence);
+    // Whether a reveal for the tray's Open is in flight: clicks that arrive meanwhile join it.
+    let revealing = Arc::new(AtomicBool::new(false));
+    if let Some(wanted) = context.presence.attached(view) {
+        attached.show(wanted.address);
+    }
+    // A change between the tray handed over and the shell being attached would have gone nowhere.
+    attached.draw_tray(context.workbench.tray_model());
+    while let Some(frame) = reader.native::<DesktopFrame>(None)? {
+        let item = match frame {
+            DesktopFrame::Tray { item } => item,
+            DesktopFrame::ActResult { id, outcome } => {
+                attached.answer(id, outcome);
+                continue;
+            }
+            DesktopFrame::Unavailable { reason } => {
+                context.presence.unavailable(reason.window_reason());
+                attached.window_fails(reason == UnavailableReason::WindowFailed);
+                continue;
+            }
+            DesktopFrame::Closed { stays } => {
+                context.presence.closed(stays);
+                if stays {
+                    explain_close(context, &attached);
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        match item {
+            TrayItemId::Hold | TrayItemId::Resume => {
+                if let Some(intent) = item.intent(context.workbench.runtime_state()) {
+                    context
+                        .workbench
+                        .apply_runtime_control(intent, RuntimeSource::Tray);
+                }
+            }
+            TrayItemId::Quit => context.quit.begin(QuitReason::Quit, QUIT_GRACE),
+            TrayItemId::Open => {
+                context.presence.person_acted();
+                context.presence.window_shown();
+                attached.window_fails(false);
+                // The shell shows its own window, where it last was. While setup is incomplete
+                // the person is brought back to it, as a window opened fresh would be.
+                if let Some(address) = context.workbench.show_address() {
+                    reveal_once(&context.workbench, Some(address), &revealing);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Tells presence that a shell is gone when it is dropped, however the stream ended.
+struct ShellPresent<'a>(&'a Presence);
+
+impl<'a> ShellPresent<'a> {
+    fn begin(presence: &'a Presence) -> Self {
+        Self(presence)
+    }
+}
+
+impl Drop for ShellPresent<'_> {
+    fn drop(&mut self) {
+        self.0.detached();
+    }
+}
+
+/// Say, once per home, that closing the window left Ghostlight running and where its icon is.
+fn explain_close(context: &ServiceContext, shell: &Attached) {
+    match hint::first_close(&context.layout.tray_hint()) {
+        Ok(true) => shell.notice(TRAY_HINT_TITLE, TRAY_HINT_BODY),
+        Ok(false) => {}
+        Err(error) => context.diagnostics.sink().emit(
+            ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+            ghostlight_bridge::diagnostics::Level::Warn,
+            None,
+            &format!("the tray hint marker could not be written: {error}"),
+        ),
+    }
+}
+
+/// Carries the tray the workbench describes to the attached shell on a thread of its own, so a
+/// refresh of the live parts never waits on a stream.
+pub(super) struct TrayRelay {
+    latest: Mutex<Option<TrayModel>>,
+    thread: OnceLock<Thread>,
+}
+
+impl TrayRelay {
+    /// Start the thread that writes each tray the workbench describes to the attached shell, until
+    /// `stop` is set. The thread is unparked by whoever sets `stop`.
+    pub(super) fn spawn(
+        shells: Arc<Shells>,
+        stop: Arc<AtomicBool>,
+    ) -> io::Result<(Arc<Self>, JoinHandle<()>)> {
+        let relay = Arc::new(Self {
+            latest: Mutex::new(None),
+            thread: OnceLock::new(),
+        });
+        let carrying = Arc::clone(&relay);
+        let handle = thread::Builder::new()
+            .name("ghostlight-tray".into())
+            .spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    let model = lock(&carrying.latest).take();
+                    match model {
+                        Some(model) => shells.send_tray(model),
+                        None => thread::park(),
+                    }
+                }
+            })?;
+        let _ = relay.thread.set(handle.thread().clone());
+        Ok((relay, handle))
+    }
+}
+
+impl WorkbenchTrayPort for TrayRelay {
+    fn tray_changed(&self, model: TrayModel) {
+        *lock(&self.latest) = Some(model);
+        if let Some(thread) = self.thread.get() {
+            thread.unpark();
         }
     }
 }
