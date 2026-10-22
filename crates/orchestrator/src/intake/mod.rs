@@ -1,7 +1,8 @@
 //! Intake: how callers' requests enter the service.
 //!
 //! MCP is served inside the service (ADR-0197 Decision 17). Every peer reaches it through the one
-//! relay listener in [`listener`]. An edge forwards each client line unchanged over relay
+//! relay endpoint: the service's accept loop hands each connection to [`listener`], which judges
+//! its opening and writes the accept, refuse and control replies. An edge forwards each client line unchanged over relay
 //! protocol 4, and [`mcp::McpSession`] turns those lines into the session vocabulary the service
 //! queue consumes, then renders the service's answers back into MCP. The engine owns no
 //! transport: whoever holds the stream feeds it lines and writes what it returns. A shell of the

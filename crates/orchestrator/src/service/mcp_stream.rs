@@ -33,6 +33,7 @@ use super::admission::{Refused, SessionQueue};
 use super::connections::ServiceContext;
 use super::release::reap_finished_sessions;
 
+/// What a queued call is counted to hold beyond its input, its id and its tool's name.
 const QUEUED_METADATA_BYTES: usize = 512;
 
 /// Serve one MCP client session on an accepted `mcp` stream.

@@ -47,7 +47,7 @@ In order. "After" names what a slice waits for.
 | SERV-6 | refactor(intake): the service's vocabulary is read where the CLI reads it | - | SERV-6, both halves in one slice | moved to test-01 (LEDGER-core-language.md), 2026-10-20 |
 | SERV-12 | refactor(diagnostics): one typed record | - | SERV-12; optional fields, relay's writer pinned by a round-trip test | moved to test-01 (LEDGER-core-language.md), 2026-10-21 |
 | SERV-11 | refactor(service): one name per meaning on the service side | SERV-3 | SERV-11's service half | landed (this commit); the `cli/` names and its "authority" docs are install's half |
-| SERV-14 | docs(service): the module docs map the crate | SERV-11 | SERV-14 | todo |
+| SERV-14 | docs(service): the module docs map the crate | SERV-11 | SERV-14 | landed (this commit); cross-lane `cli/mod.rs` and `cli/session.rs`, docs and one named constant |
 | BROW-1 | refactor(browser): protocol 4's frames and hello validators move into protocol 4 | C3c | BROW-1 as corrected; the registry stays in `browser/`; cross-lane `browser/adapter/` | todo |
 | BROW-5 | refactor(browser): the `Work` alias goes | - | BROW-5 | landed (this commit) |
 | BROW-8 | refactor(browser): the port's literals are named | - | BROW-8's port half; `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` as a check, not a tie | landed (this commit) |

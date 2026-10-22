@@ -1,8 +1,8 @@
 //! The persistent service: its lifetime, its one relay listener and the sessions it serves.
 //!
 //! [`ServiceHost`] holds the service lock, prepares the executor and the browser port, and binds
-//! the relay protocol 4 endpoint (ADR-0199 Decisions 5 and 9). The workbench's loopback server starts first, on one port per user, and carries no relay
-//! peer. Every connection then opens with one relay opening: an `mcp` stream is one MCP client
+//! the relay endpoint (ADR-0199 Decisions 5 and 9). The workbench's loopback server starts first,
+//! on one port per user, and carries no relay peer. Every connection then opens with one relay opening: an `mcp` stream is one MCP client
 //! session served by [`crate::intake::mcp::McpSession`], a `browser` stream is one adapter
 //! connection, a `control` stream answers one operation, and a `desktop` stream hands the shell of
 //! the same build the workbench address and its secret (ADR-0199 Decision 7).
@@ -22,6 +22,13 @@
 //! without waiting for work in flight (ADR-0199 Decision 13). The last way out is the idle exit:
 //! after [`idle::IDLE_EXIT`] with no stream of any role open the service forgets every tab and
 //! leaves with no goodbye and no latch (ADR-0199 Decision 12).
+//!
+//! The start, its gate and housekeeping, and the policy refresher are here. `connections` holds
+//! the accept loop, the dispatch of each judged connection by its role and the `control` answers;
+//! `mcp_stream` serves one MCP session; [`shell`] serves the shell on its `desktop` stream; `quit`
+//! ends the service on request; `release` cleans up released tabs; `browser_events` applies what a
+//! browser reports. `admission`, `toolset`, [`idle`], [`lifetime`], [`latch`], [`lock`],
+//! [`presence`] and [`hint`] hold the rules they share.
 
 mod admission;
 mod browser_events;
@@ -310,7 +317,7 @@ impl ServiceHost {
     /// Prepare the service in the Ghostlight home `home` for a start on `terms`, in `world`, under
     /// its lifetime lock, without binding the endpoint. `publish_ready` binds it.
     ///
-    /// The start is admitted first ([`admit`]) and opens no state before it is. When `world` names
+    /// The start is admitted first (`admit`) and opens no state before it is. When `world` names
     /// where the installed agents' icons are, the service then shows their own icons: it
     /// publishes the icon cache in the home's state directory, which every agent's symbol reads,
     /// and looks for the icons in the background.

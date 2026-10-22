@@ -11,11 +11,18 @@ use crate::work::{InvocationId, PreparedInvocation};
 
 /// The most ordinary calls one session holds at once, the running one included.
 const SESSION_WORK: usize = 32;
+/// The most independent controls one session holds at once, the running one included.
 const SESSION_CONTROLS: usize = 8;
+/// The most bytes one lane of a session holds queued and running at once.
 const SESSION_BYTES: usize = 16 * 1024 * 1024;
+/// The most bytes the ordinary calls of every session hold at once.
 const SERVICE_BYTES: usize = 64 * 1024 * 1024;
+/// The most bytes the controls of every session hold at once, reserved apart from the ordinary
+/// calls' so that a burst of work never takes the controls' room.
 const CONTROL_BYTES: usize = 8 * 1024 * 1024;
+/// The most connections whose opening is not judged yet.
 pub(super) const HANDSHAKES: usize = 16;
+/// The most `mcp` streams served at once.
 pub(super) const SESSIONS: usize = 64;
 /// The most `desktop` streams at once: one shell and one being turned away or handed over.
 pub(super) const DESKTOPS: usize = 2;

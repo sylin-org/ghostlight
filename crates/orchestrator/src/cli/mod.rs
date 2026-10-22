@@ -1,9 +1,18 @@
-//! The command-line intake: one local edge for scripts and programs.
+//! The command line of the `ghostlight-service` executable: every typed command, from its
+//! arguments to its exit.
 //!
-//! The command line is an MCP client of the service (ADR-0105 Decision 1, ADR-0197 Decision 17).
-//! It owns argument parsing, rendering, and exit codes, and makes no product decision: every call
-//! crosses the same relay listener, MCP session, executor, governance facade, and completion path
-//! a model's call does.
+//! [`start`](mod@start) performs the entry rule before any command runs, [`parse`](mod@parse)
+//! turns the arguments into a launch mode, and [`dispatch`] runs it. `open`, `serve`, `call` and
+//! `policy` are in [`desktop`]; `install`, `uninstall` and the native host in [`setup`];
+//! `deployment install` in [`deployment`]; `doctor` in [`doctor`], which reads the machine through
+//! [`machine`]; `status` in [`status`]; and `diagnostics` in [`diagnostics`]. [`session_end`] is
+//! the session listener of every process that is not the service.
+//!
+//! `call` is the command-line intake: one local edge for scripts and programs. It is an MCP client
+//! of the service through [`client`] (ADR-0105 Decision 1, ADR-0197 Decision 17), and [`session`]
+//! says who owns its session (ADR-0106). This module parses a call, renders its result and picks
+//! its exit code, and makes no product decision: every call crosses the same relay listener, MCP
+//! session, executor, governance facade, and completion path a model's call does.
 
 pub mod caller;
 pub mod client;

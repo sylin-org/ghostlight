@@ -19,6 +19,10 @@ use sysinfo::{get_current_pid, Pid, ProcessRefreshKind, ProcessesToUpdate, Syste
 /// it is a different `cmd.exe` on every invocation.
 pub const SESSION_VARIABLE: &str = "GHOSTLIGHT_SESSION";
 
+/// The most characters of a declared key or a caller's process name a marker carries, so neither
+/// brings an unbounded string into the workspace registry.
+const MARKER_TEXT_LIMIT: usize = 120;
+
 /// Describe what owns this command's session.
 ///
 /// An explicit key wins when one is set. Otherwise the caller is the nearest ancestor whose program
@@ -41,7 +45,7 @@ fn declared() -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(trimmed.chars().take(120).collect())
+    Some(trimmed.chars().take(MARKER_TEXT_LIMIT).collect())
 }
 
 /// How many ancestors the caller walk reads before it stops.
@@ -230,7 +234,7 @@ fn caller() -> Option<SessionMarker> {
     Some(SessionMarker::Process {
         pid: found.pid,
         started_at: found.started_at,
-        name: found.name.chars().take(120).collect(),
+        name: found.name.chars().take(MARKER_TEXT_LIMIT).collect(),
     })
 }
 
@@ -240,8 +244,8 @@ mod tests {
 
     use super::{
         caller, caller_in, is_ghostlight, marker, nearest_foreign_ancestor, reported_name,
-        Ancestor, EDGE_EXECUTABLE_NAME, MAX_ANCESTORS_READ, SERVICE_EXECUTABLE_NAME,
-        SESSION_VARIABLE,
+        Ancestor, EDGE_EXECUTABLE_NAME, MARKER_TEXT_LIMIT, MAX_ANCESTORS_READ,
+        SERVICE_EXECUTABLE_NAME, SESSION_VARIABLE,
     };
     use crate::intake::session::SessionMarker;
 
@@ -494,7 +498,7 @@ mod tests {
             let Some(SessionMarker::Declared { key }) = marker() else {
                 panic!("an explicit key must win over the parent process");
             };
-            assert_eq!(key.len(), 120);
+            assert_eq!(key.len(), MARKER_TEXT_LIMIT);
             std::env::set_var(SESSION_VARIABLE, "   ");
             assert!(
                 !matches!(marker(), Some(SessionMarker::Declared { .. })),
