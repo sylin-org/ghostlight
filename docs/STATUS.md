@@ -250,6 +250,12 @@ Now:
   cut inside an emoji (a long tab title, a script's result) dropped the browser connection for
   every session; the extension now sends text well formed, and the service skips a frame it cannot
   decode.
+- The 2.0.1 candidate is release run 39715160480 on 8e185d67 (2026-10-22), every job green. Test
+  machines upgraded and passed: Bluefin (588ddd95), Alpine (48ef55fd, 657495a3; the 2.0.0 extension's
+  dialog stall needs a browser restart, now in the notes) and leo-desktop-02 (3ff45599, 55cb0756, with
+  the Store-build Claude Code name fixed in 8e185d67). CachyOS was offline after a power loss. The
+  extension zip to submit is the one the freeze record names (run 39669867246); no packaged file has
+  changed since. Next, the owner's: the store resubmission, the release, then `main`.
 - The second sweep closed on 2026-10-21, with every arch-1 row landed but three the owner deferred
   past 2.0.1 to save tokens: S-D9 (a client line over 8 MiB is answered), A-D2 and A-D3 (page-asset
   role and settle fixes). All three landed later the same day after all. The lanes split the
