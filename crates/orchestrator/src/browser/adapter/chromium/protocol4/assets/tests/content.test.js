@@ -376,6 +376,8 @@ test("native controls get their HTML-AAM roles", async () => {
   nativeControl(harness, body, "Quantity", "input", { type: "number" });
   nativeControl(harness, body, "Query", "input", { type: "search" });
   nativeControl(harness, body, "Email", "input", { type: "email" });
+  // A-D2: an image input is a button, as fill already treats it.
+  nativeControl(harness, body, "Go", "input", { type: "image" });
   nativeControl(harness, body, "Notes", "textarea");
   nativeControl(harness, body, "Country", "select");
   const multiple = nativeControl(harness, body, "Tags", "select");
@@ -387,7 +389,7 @@ test("native controls get their HTML-AAM roles", async () => {
   const roles = Object.fromEntries((await harness.targets()).map((target) => [target.name, target.role]));
 
   for (const [name, role] of Object.entries({
-    Volume: "slider", Quantity: "spinbutton", Query: "searchbox", Email: "textbox", Notes: "textbox",
+    Volume: "slider", Quantity: "spinbutton", Query: "searchbox", Email: "textbox", Go: "button", Notes: "textbox",
     Country: "combobox", Tags: "listbox", Rows: "listbox", "Single row": "combobox"
   })) {
     assert.equal(roles[name], role, name);

@@ -158,7 +158,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
 | D52 | fix(adapter): Decision 5.2's receipt codes reach the refusal as a typed cause | SERV-7 | the coordinator's placement: `BrowserError::Primitive { detail, cause }` with `language::outcome::PrimitiveCause`; core-work's routing_refusal half is D52(c) in its ledger | landed (696fa557) |
 | D52(c) | fix(work): a refusal names its typed cause, and a capture over its budget says so | D52 | test-03 handed core-work's D52(c) to this lane on 2026-10-20; cross-lane in `work/mod.rs` | landed (this commit) |
 | A-D1 | fix(assets): a page text cut never splits a character and counts characters as the service does | - | the coordinator's page-asset classification, 2026-10-21 (Notes, second sweep) | landed (this commit) |
-| A-D2 | fix(assets): an image input reads as a button, as fill already treats it | - | the same classification (Notes, second sweep) | todo |
+| A-D2 | fix(assets): an image input reads as a button, as fill already treats it | - | the same classification (Notes, second sweep) | landed (this commit) |
 | A-D3 | fix(assets): a visual-settle wait on a target that is gone refuses it as stale | - | the same classification, lower confidence: confirm first (Notes, second sweep) | todo |
 | A-D4 | fix(adapter): a read, a listing or a tree across documents never asks for more than one relay frame carries | P-D6 | the coordinator, from test-02's gap-3 analysis, 2026-10-21 | landed (this commit) |
 
@@ -369,3 +369,7 @@ with its skeptic's corrections. BROW-10, BROW-4, BROW-7, BROW-6, BROW-14, BROW-8
   element through `heldElement`, which returns nothing for a gone or unknown handle, and
   `settleVisual(undefined)` then measures the whole document. The wait reports the page's settle
   instead of refusing `stale_locator`. Confirm it with a row before fixing.
+- A-D2 as landed: `INPUT_ROLES` maps `image` to `button`, so `<input type=image>` reads as the
+  button HTML-AAM and the fill path already call it, and a selector for role `button` finds it.
+  The proof is a row in the kept "native controls get their HTML-AAM roles" test, which read
+  `textbox` before the fix. `assets.sha256` regenerates; no packaged extension file changes.

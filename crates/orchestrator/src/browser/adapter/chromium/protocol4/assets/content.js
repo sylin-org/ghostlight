@@ -187,7 +187,8 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // The role an input type has by HTML-AAM. Any type not listed reads as a textbox.
   const INPUT_ROLES = new Map([
     ["checkbox", "checkbox"], ["radio", "radio"], ["button", "button"], ["submit", "button"],
-    ["reset", "button"], ["range", "slider"], ["number", "spinbutton"], ["search", "searchbox"]
+    ["reset", "button"], ["image", "button"], ["range", "slider"], ["number", "spinbutton"],
+    ["search", "searchbox"]
   ]);
   const GROUP_ROLES = new Set(["radiogroup", "group"]);
   // What makes an ancestor the row a control sits in. A group is a row only when the
