@@ -96,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of silently dropped.
 - `ghostlight call` from an agent joins one session named for that agent's app, instead of a new
   session per call.
+- Claude Code run from the Microsoft Store build of Claude Desktop is named Claude Code, not Claude
+  Desktop, in its tab group and history: the caller walk now knows that build's Claude Code folder.
 - Closing a tab handle this service no longer holds says so, instead of saying the tab is gone, and
   a session whose browser left for good moves to the browser the agent names.
 - The Ghostlight window always finds room among the workbench's connections, however many idle

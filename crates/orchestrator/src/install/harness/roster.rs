@@ -160,12 +160,21 @@ pub(super) const CLAUDE_DESKTOP_APP_PLACES: &[AppPlace] = &[
 /// The Claude desktop app downloads Claude Code into
 /// `%APPDATA%\Claude\claude-code\<version>\<build>\claude.exe`, which lies in no folder of the
 /// desktop app's own, so without this entry the caller walk passed it and stopped at the desktop
-/// app's `claude.exe` (ADR-0106, amendment of 2026-10-21).
-pub(super) const AGENT_APP_FOLDERS: &[(&str, KnownFolder, &str)] = &[(
-    "claude-code",
-    KnownFolder::RoamingAppData,
-    "Claude/claude-code",
-)];
+/// app's `claude.exe` (ADR-0106, amendment of 2026-10-21). The desktop app from the Microsoft Store
+/// keeps it in `%LOCALAPPDATA%\Claude-Data\claude_pzs8sxrjxfjjc\claude-code`, its package family's
+/// data folder, found on leo-desktop-02 by the 2.0.1 candidate check.
+pub(super) const AGENT_APP_FOLDERS: &[(&str, KnownFolder, &str)] = &[
+    (
+        "claude-code",
+        KnownFolder::RoamingAppData,
+        "Claude/claude-code",
+    ),
+    (
+        "claude-code",
+        KnownFolder::LocalAppData,
+        "Claude-Data/claude_pzs8sxrjxfjjc/claude-code",
+    ),
+];
 
 /// Where Cursor's icon may be found: its per-user install, the launcher on `PATH`, and its Linux
 /// desktop entry.
