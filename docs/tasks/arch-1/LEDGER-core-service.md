@@ -51,7 +51,7 @@ In order. "After" names what a slice waits for.
 | BROW-1 | refactor(browser): protocol 4's frames and hello validators move into protocol 4 | C3c | BROW-1 as corrected; the registry stays in `browser/`; cross-lane `browser/adapter/` | landed (this commit) |
 | BROW-5 | refactor(browser): the `Work` alias goes | - | BROW-5 | landed (this commit) |
 | BROW-8 | refactor(browser): the port's literals are named | - | BROW-8's port half; `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` as a check, not a tie | landed (this commit) |
-| BROW-11 | docs(browser): the port's docs match the code | BROW-1 | BROW-11's port half | todo |
+| BROW-11 | docs(browser): the port's docs match the code | BROW-1 | BROW-11's port half | landed (this commit) |
 | BROW-12 | refactor(browser): one SHA-256 helper | - | BROW-12's hash part | landed with the adapter's BROW-12a (52753883); nothing of it is left in this lane's files, and governance's own hex writers are policy's |
 | BROW-13 | refactor(browser): the display-session module says what it is | - | BROW-13 as corrected: the `session.rs` rename and the golden path | landed (this commit) |
 
@@ -206,3 +206,9 @@ A kill-on-close job would need the relay to break away; none has been seen.
   `mod.rs` goes from 1,989 to 1,663 lines. Tests inside `browser/` still read private fields where
   they set up a race (`connection/tests.rs`, `contract_tests/controls.rs`), as Rust lets a child
   module do. 382 service tests pass unchanged in count.
+- BROW-11 as landed (the port half): `browser/mod.rs`'s one-line doc now maps the file as BROW-1
+  left it: the port contract, the relay-backed port with its registry, liveness, attention,
+  launch guard and last-browser record, and the line to the adapter, which owns the wire and
+  registers through `admit`. ARCHITECTURE's closed `Family` sentence was already corrected (it
+  says no enum names the families), and the `wire.rs` list and the `FILL_RETAINED_*` names were the
+  adapter's BROW-11a, so nothing else was left here.

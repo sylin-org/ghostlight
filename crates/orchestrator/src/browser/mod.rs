@@ -1,4 +1,18 @@
-//! The physical browser port and authenticated relay-backed adapter implementation.
+//! The browser port: the one way the service reaches a browser (ARCHITECTURE, "Dispatch physical
+//! effects only through the browser port").
+//!
+//! It holds the port contract (the [`BrowserPort`] trait, [`BrowserDispatch`], [`BrowserSummary`],
+//! [`Availability`], [`BrowserError`] and the routing in [`choose_browser`]) and its relay-backed
+//! implementation, [`RelayBrowserPort`]: the registry of every connected browser by its identity
+//! (ADR-0114), each connection's liveness and heartbeat, the attention order, the browser starts
+//! the launch guard records, and the last-browser record recovery reads. Browsers are plural; one
+//! person often runs several at once.
+//!
+//! The wire is not here. A browser family's adapter (`adapter/`, today Chromium's protocol 4)
+//! validates a hello, writes every frame, and registers each connection it accepts through
+//! `RelayBrowserPort::admit`, which hands back the `Registration` its reader reports through.
+//! `recovery` starts a browser when none answers, `graphical_session` finds the display a started
+//! browser needs, and `transport` is the framed socket both sides use.
 
 pub mod adapter;
 pub mod graphical_session;
