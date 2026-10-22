@@ -27,7 +27,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | S8 | fix(window): a window that cannot be built says so | none | ux-2 closes | - | landed (this commit) |
 | S6 | fix(setup): setup starts browsers the way recovery does, and marks the right host in use | none | C3c, C13 | test-01; A-04, A-07, G3-04 | landed (this commit) |
 | S3 | refactor(workbench): every part comes from one gather | none | P5, I6, C2 | test-01; SURF-2 | landed (this commit) |
-| S4b | refactor(workbench): the Policy page's words come from governance | none | P7, P8 | - | todo |
+| S4b | refactor(workbench): the Policy page's words come from governance | none | P7, P8 | test-01 | landed (this commit) |
 | S5 | refactor(workbench): the window's words come from language/ and are pinned | none | C18, C12b | - | todo |
 | S7 | test(desktop): the shell decodes and re-encodes every desktop golden | none | ux-2 closes | - | landed (this commit) |
 | S9 | fix(workbench): the window offers Remove whenever the service does | none | I4 | the window half of G3-02; see Notes | landed (this commit) |

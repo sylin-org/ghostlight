@@ -53,10 +53,6 @@ pub const TOO_MANY: &str = "Too many requests from this view. Try again in a mom
 /// The rules on disk changed after the draft was made.
 pub const STALE_POLICY: &str = "Your rules changed in another window; your draft is kept.";
 
-/// What the page says once a person's rules are applied. The page names its document "Your
-/// rules", so the sentence names neither the document nor its version again.
-pub const RULES_APPLIED: &str = "Your rules are applied.";
-
 /// A client's setup changed after the view was drawn.
 pub const STALE_HARNESS: &str = "This client changed since this view was drawn. Look again.";
 

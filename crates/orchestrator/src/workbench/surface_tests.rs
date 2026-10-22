@@ -15,6 +15,9 @@ const PAGE_WORDS: &str = include_str!("../../ui/lib/words.js");
 /// The page's transport, which names the snapshot parts it asks for.
 const PAGE_TRANSPORT: &str = include_str!("../../ui/lib/transport.js");
 
+/// The Policy page's view, which composes the settings a draft authors.
+const PAGE_POLICY_VIEW: &str = include_str!("../../ui/lib/policy-view.js");
+
 /// The spring curve the workbench and the page assets move on, written without spaces.
 const SPRING: &str = "cubic-bezier(.22,1,.36,1)";
 
@@ -70,6 +73,23 @@ fn page_list<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
         .collect()
 }
 
+/// Every `key: "..."` value written between `opening` and the next `closing` in `source`, in
+/// order, with the quotes taken off.
+fn page_keys<'a>(source: &'a str, opening: &str, closing: &str) -> Vec<&'a str> {
+    const KEY: &str = "key: \"";
+    let start = source.find(opening).expect("the page has the block") + opening.len();
+    let mut block = &source[start..];
+    block = &block[..block.find(closing).expect("the block ends")];
+    let mut keys = Vec::new();
+    while let Some(at) = block.find(KEY) {
+        block = &block[at + KEY.len()..];
+        let end = block.find('"').expect("the key ends");
+        keys.push(&block[..end]);
+        block = &block[end..];
+    }
+    keys
+}
+
 /// The value of the page's string constant `name` in `source`, with the quotes taken off.
 fn page_constant<'a>(source: &'a str, name: &str) -> &'a str {
     let opening = format!("const {name} = \"");
@@ -99,7 +119,10 @@ fn wire(value: impl serde::Serialize) -> String {
 /// copy); every `SNAPSHOT_PARTS` token is a part the server knows, and an unknown token is not.
 /// Both ways, the page's `PHASE`, `RUNTIME` and `CONTEXT` hold exactly the service's operation
 /// phases, runtime states and window contexts, and its setup part, Chrome destination and connect
-/// act are the service's tokens (arch-1 SURF-6). A new value fails to compile here until it is
+/// act are the service's tokens (arch-1 SURF-6). Every setting key the Policy page writes into a
+/// draft (its `SETTING_GROUPS`, its `SACRED_KEY` and the literals in `policy-view.js` `settingEntries`) is one
+/// governance registers in `PolicySetting` (ADR-0203 S4b,
+/// `every_setting_the_page_writes_is_registered`). A new value fails to compile here until it is
 /// named.
 #[test]
 fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
@@ -109,6 +132,7 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
         WorkbenchDestination, WorkbenchRuntimeIntent,
     };
     use crate::browser::adapter::RuntimeControlState;
+    use crate::governance::manifest::PolicySetting;
     use crate::governance::{Capability, Decision, GovernanceFacade};
     use crate::install::{HarnessAction, HarnessState};
     use crate::language::history::OutcomeClass;
@@ -438,6 +462,23 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
         .ok(),
         Some(HarnessAction::Install)
     );
+
+    // Every setting the page writes is registered: a key governance does not know would make the
+    // page's own draft one the validator refuses.
+    let mut written = page_keys(PAGE_WORDS, "const SETTING_GROUPS = [", "\n  ];");
+    written.extend(page_keys(
+        PAGE_POLICY_VIEW,
+        "function settingEntries(",
+        "return entries;",
+    ));
+    written.push(page_constant(PAGE_WORDS, "SACRED_KEY"));
+    assert!(written.contains(&PolicySetting::NeverTouch.key()));
+    for key in written {
+        assert!(
+            PolicySetting::from_key(key).is_some(),
+            "the Policy page writes {key}, which governance does not register"
+        );
+    }
 
     // The parts the page asks a snapshot for.
     for token in page_list(PAGE_TRANSPORT, "SNAPSHOT_PARTS") {

@@ -1082,25 +1082,7 @@ impl WorkbenchFacade {
         }
         refused.sort_by_key(|entry| std::cmp::Reverse(entry.count));
         let refused_total: usize = refused.iter().map(|entry| entry.count).sum();
-        // Every sentence is about the draft, in the conditional, so the count never reads as a
-        // claim that recorded work was refused.
-        let summary = if candidate.rules == 0 {
-            "These rules allow nothing yet, because there are none. Add at least one rule; \
-             until then this policy would refuse everything."
-                .to_owned()
-        } else if considered == 0 {
-            "There is no recorded work on this machine to check these rules against yet.".to_owned()
-        } else if refused_total == 0 {
-            format!(
-                "If these rules had been applied, nothing in the last {considered} recorded \
-                 actions would have been refused."
-            )
-        } else {
-            format!(
-                "If these rules had been applied, {refused_total} of the last {considered} \
-                 recorded actions would have been refused."
-            )
-        };
+        let summary = crate::language::policy::preview(candidate.rules, considered, refused_total);
         refused.truncate(PREVIEW_DETAIL_LIMIT);
         // An empty draft refuses everything by definition. Listing what it would refuse turns one
         // explainable sentence into a wall of alarming detail about work that was never at risk.
@@ -1134,7 +1116,7 @@ impl WorkbenchFacade {
     ) -> Result<WorkbenchIntentResult, AuthoringError> {
         self.governance.apply_user_policy(document)?;
         self.live.policy_changed();
-        Ok(self.policy_result(words::RULES_APPLIED.to_owned()))
+        Ok(self.policy_result(crate::language::policy::RULES_APPLIED.to_owned()))
     }
 
     /// Remove the user policy only if the rules on disk still have the tag the caller read.
@@ -1150,7 +1132,7 @@ impl WorkbenchFacade {
     fn remove_policy_unguarded(&self) -> Result<WorkbenchIntentResult, AuthoringError> {
         self.governance.remove_user_policy()?;
         self.live.policy_changed();
-        Ok(self.policy_result("Your rules are removed.".to_owned()))
+        Ok(self.policy_result(crate::language::policy::RULES_REMOVED.to_owned()))
     }
 
     fn require_policy_tag(&self, expected_etag: &str) -> Result<(), PolicyWriteError> {

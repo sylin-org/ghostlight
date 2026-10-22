@@ -2,9 +2,10 @@
 //!
 //! Governance decides; this module says it. The compiled view's headline and capability lines, its
 //! ceilings and layer titles, why this window may not change the person's own policy, the class of
-//! a signed organization source, and what `ghostlight policy` prints are all authored here, so the
-//! window renders sentences rather than inventing them from booleans and the command line and the
-//! window never say one fact two ways (ADR-0203 Decision 8).
+//! a signed organization source, what the Policy page's preview says of a draft, and what
+//! `ghostlight policy` prints are all authored here, so the window renders sentences rather than
+//! inventing them from booleans and the command line and the window never say one fact two ways
+//! (ADR-0203 Decision 8).
 //!
 //! The channel switches have their own module, [`super::channel_switch`].
 
@@ -34,6 +35,22 @@ pub const AVAILABLE: &str = "Available on ordinary websites.";
 
 /// A capability nothing narrows at all.
 pub const AVAILABLE_UNNARROWED: &str = "Available on ordinary websites. Nothing narrows it.";
+
+/// What the Policy page says once a person's rules are removed.
+pub const RULES_REMOVED: &str = "Your rules are removed.";
+
+/// What the page says once a person's rules are applied. The page names its document "Your
+/// rules", so the sentence names neither the document nor its version again.
+pub const RULES_APPLIED: &str = "Your rules are applied.";
+
+/// What the Policy page's preview says of a draft with no rules: it would refuse everything.
+const PREVIEW_NO_RULES: &str =
+    "These rules allow nothing yet, because there are none. Add at least one \
+     rule; until then this policy would refuse everything.";
+
+/// What the Policy page's preview says while this machine has recorded no work to replay.
+const PREVIEW_NO_HISTORY: &str =
+    "There is no recorded work on this machine to check these rules against yet.";
 
 /// The first ceiling, in every situation including all-open.
 const NOT_HTTP_CEILING: &str = "Anything that is not an ordinary http or https address.";
@@ -65,6 +82,30 @@ pub const fn capability_wording(capability: Capability) -> (&'static str, &'stat
             "Enter information into forms and upload files.",
         ),
         Capability::Execute => ("Run page code", "Run JavaScript inside a page."),
+    }
+}
+
+/// What the Policy page's preview says a draft of `rules` rules would have done to the last
+/// `considered` recorded actions, `refused` of which it would have refused.
+///
+/// Every sentence is about the draft, in the conditional, so the count never reads as a claim that
+/// recorded work was refused (ADR-0122 Decision 7).
+#[must_use]
+pub fn preview(rules: usize, considered: usize, refused: usize) -> String {
+    if rules == 0 {
+        PREVIEW_NO_RULES.to_owned()
+    } else if considered == 0 {
+        PREVIEW_NO_HISTORY.to_owned()
+    } else if refused == 0 {
+        format!(
+            "If these rules had been applied, nothing in the last {considered} recorded actions \
+             would have been refused."
+        )
+    } else {
+        format!(
+            "If these rules had been applied, {refused} of the last {considered} recorded \
+             actions would have been refused."
+        )
     }
 }
 

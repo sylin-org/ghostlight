@@ -26,6 +26,7 @@ use crate::diagnostics::DiagnosticsReport;
 use crate::governance::effective::{
     EffectiveAuthority, LayerKind, OrganizationIdentity, PolicyChip,
 };
+use crate::governance::manifest::PolicySetting;
 use crate::governance::{offers, ManagedPolicyPassport};
 use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::audit_health::AuditHealth;
@@ -40,9 +41,6 @@ pub const USER_HOME_VARIABLE: &str = "USERPROFILE";
 /// The environment variable that names the user's home directory.
 #[cfg(not(windows))]
 pub const USER_HOME_VARIABLE: &str = "HOME";
-
-/// The setting key of the person's list of sites agents must never touch.
-pub const SACRED_DOMAINS_KEY: &str = "content.security.sacred_domains";
 
 /// What a passport repeats about the organization: its name, its explanation and its contacts.
 ///
@@ -877,7 +875,7 @@ impl Projection {
                 layer["document"] = Value::Null;
             }
             each(layer, "settings", |setting| {
-                if setting["key"] != SACRED_DOMAINS_KEY {
+                if setting["key"] != PolicySetting::NeverTouch.key() {
                     return;
                 }
                 let hosts = setting["value"]
