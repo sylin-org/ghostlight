@@ -2,14 +2,14 @@
 //! arguments to its exit.
 //!
 //! [`start`](mod@start) performs the entry rule before any command runs, [`parse`](mod@parse)
-//! turns the arguments into a launch mode, and [`dispatch`] runs it. `open`, `serve`, `call` and
-//! `policy` are in [`desktop`]; `install`, `uninstall` and the native host in [`setup`];
-//! `deployment install` in [`deployment`]; `doctor` in [`doctor`], which reads the machine through
-//! [`machine`]; `status` in [`status`]; and `diagnostics` in [`diagnostics`]. [`session_end`] is
-//! the session listener of every process that is not the service.
+//! turns the arguments into a launch mode, and [`dispatch`] runs it. `open`, `call` and `policy`
+//! are in [`open`]; `serve` in [`serve`]; `install`, `uninstall` and the native host in
+//! [`setup`]; `deployment install` in [`deployment`]; `doctor` in [`doctor`], which reads the
+//! machine through [`machine`]; `status` in [`status`]; and `diagnostics` in [`diagnostics`].
+//! [`sign_out`] is the session listener of every process that is not the service.
 //!
 //! `call` is the command-line intake: one local edge for scripts and programs. It is an MCP client
-//! of the service through [`client`] (ADR-0105 Decision 1, ADR-0197 Decision 17), and [`session`]
+//! of the service through [`client`] (ADR-0105 Decision 1, ADR-0197 Decision 17), and [`caller`]
 //! says who owns its session (ADR-0106). This module parses a call, renders its result and picks
 //! its exit code, and makes no product decision: every call crosses the same relay listener, MCP
 //! session, executor, governance facade, and completion path a model's call does.
