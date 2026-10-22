@@ -12,8 +12,7 @@ c51204ca, I-D2 278a9c4c, I-D3 b9e76161, I-lock 6664028e, INST-1 959d0d00, INST-4
 SERV-6c moved to test-01 (15b38451). Nothing is parked as a patch; the working tree is clean.
 
 The second sweep closed on 2026-10-21: every row below is landed (INST-5 to INST-14, INST-2, INST-3,
-SERV-13, SERV-11c, EXT-2). Left for a later slice: the split of `install/harness/mod.rs` into
-several files (INST-2). SERV-13 and
+SERV-13, SERV-11c, EXT-2). Nothing is left for a later slice. SERV-13 and
 SERV-11c touch `cli/setup.rs`, `cli/mod.rs` and `cli/parse.rs`: other lanes held them today
 (LANG-12b, SERV-6, S-D4, all landed), so ask before starting there.
 
@@ -446,7 +445,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | INST-14 | refactor(install): one program-file helper, one manifest name, and files and paths modules | - | INST-14 as corrected | landed (this commit) |
 | INST-10 | refactor(install): `InstallOutcome` | - | INST-10 | landed (this commit) |
 | INST-11 | refactor(install): one process-stopping engine with both failure rules | - | INST-11 as corrected; the image match stays per caller | landed (this commit) |
-| INST-2 | refactor(install): the harness feature moves to `install/harness/` | INST-14 | INST-2 as corrected; `install::writer_golden` and `install::agent_list` keep their paths | landed (98939d50); the harness moved whole, its split into context, roster, JSON, Codex, launcher and locations files is left for a later slice |
+| INST-2 | refactor(install): the harness feature moves to `install/harness/` | INST-14 | INST-2 as corrected; `install::writer_golden` and `install::agent_list` keep their paths | landed (98939d50, the move; this commit, the split into context, roster, inspect, launcher, json, codex, acts and locations) |
 | INST-3 | refactor(install): one glossary for identifiers | INST-2 | INST-3 as corrected; machine words stay | landed (this commit) |
 | SERV-6c | refactor(cli): the CLI reads the service's vocabulary as types | - | SERV-6's CLI half | moved: test-01 took SERV-6 whole (15b38451) |
 | SERV-13 | refactor(cli): install and uninstall run as two flows that collect, then print | - | SERV-13 as corrected; the printed order stays | landed (1228186a, a Direction and collected lines; this commit, the install and uninstall step lists) |
