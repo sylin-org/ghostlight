@@ -50,12 +50,13 @@ use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME, TEST
 use ghostlight_relay::private;
 use ghostlight_relay::protocol::{Control, QuitReason, StartReason};
 use serde::Serialize;
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use sysinfo::Pid;
 use thiserror::Error;
 
 use super::layout::{retired_connector_names, Layout, DESKTOP_EXECUTABLE_NAME};
 use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan, Move};
 use super::paths::{canonical_path, same_path};
+use super::processes;
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
 use super::record::{self, Channel, InstallRecord, PayloadRefused, Standing};
 use super::swap;
@@ -170,7 +171,7 @@ pub trait ProcessControl {
     /// The instance of the service of `layout`'s home that answers a control status, when one
     /// does.
     fn instance(&self, layout: &Layout) -> Option<String>;
-    /// Ask the service of `layout`'s home to quit for replacement and wait up to 10 s for its
+    /// Ask the service of `layout`'s home to quit for replacement and wait up to [`QUIT_WAIT`] for its
     /// service lock to be free. Returns whether no service of that home runs afterwards.
     fn quit(&self, layout: &Layout) -> bool;
     /// Stop every process running one of `images` and wait for it to exit.
@@ -186,7 +187,7 @@ pub trait ProcessControl {
     /// Start `bin/ghostlight-service serve --reason update` in `layout`'s home, detached, without waiting
     /// for it.
     fn start_serve(&self, layout: &Layout) -> io::Result<()>;
-    /// Wait up to 30 s for the service of `layout`'s home to answer an accepted control status
+    /// Wait up to [`READY_WAIT`] for the service of `layout`'s home to answer an accepted control status
     /// whose instance is not `previous`, and stop waiting early once no service runs.
     fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> Readiness;
 }
@@ -256,11 +257,11 @@ impl ProcessControl for SystemProcessControl {
     }
 
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()> {
-        migration::stop_legacy_images(&other_than_running_installer(images))
+        processes::stop_images(&other_than_running_installer(images))
     }
 
     fn is_running(&self, images: &[PathBuf]) -> bool {
-        migration::any_running_from(&other_than_running_installer(images))
+        processes::any_running_from(&other_than_running_installer(images))
     }
 
     fn strays(&self, layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess> {
@@ -290,7 +291,7 @@ impl ProcessControl for SystemProcessControl {
                 return Readiness::Answered;
             }
             let waited = started.elapsed();
-            if waited >= STOPPED_GRACE && !migration::any_running_from(&image) {
+            if waited >= STOPPED_GRACE && !processes::any_running_from(&image) {
                 return Readiness::Stopped;
             }
             if waited >= READY_WAIT {
@@ -361,12 +362,7 @@ fn running_image(reported: &Path) -> PathBuf {
 /// retired development directory or from a 1.x version directory. The process table is read once.
 #[must_use]
 pub fn stray_processes(layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess> {
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        stray_refresh().with_exe(UpdateKind::Always),
-    );
+    let system = processes::process_table();
     let own_pid = std::process::id();
     let mut strays: Vec<StrayProcess> = system
         .processes()
@@ -383,11 +379,6 @@ pub fn stray_processes(layout: &Layout, service_pid: Option<u32>) -> Vec<StrayPr
         .collect();
     strays.sort_by_key(|stray| stray.pid);
     strays
-}
-
-/// What to read of each process when looking for strays or checking that one is gone.
-fn stray_refresh() -> ProcessRefreshKind {
-    ProcessRefreshKind::nothing().without_tasks()
 }
 
 /// Whether the process running `image` is a leftover of an older installation.
@@ -500,49 +491,26 @@ pub fn stop_strays(strays: &[StrayProcess]) -> Vec<StrayProcess> {
         .iter()
         .map(|stray| Pid::from_u32(stray.pid))
         .collect();
-    let mut system = System::new();
-    let refresh = |system: &mut System| {
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&pids),
-            true,
-            stray_refresh().with_exe(UpdateKind::Always),
-        );
-    };
-    let runs = |system: &System, stray: &StrayProcess| {
-        system
-            .process(Pid::from_u32(stray.pid))
-            .is_some_and(|process| {
-                process.status() != sysinfo::ProcessStatus::Zombie
-                    && process
-                        .exe()
-                        .is_some_and(|exe| same_path(&running_image(exe), &stray.image))
+    // A pid that now runs another program is not the stray any more: it is left alone.
+    let stopped = processes::stop_and_wait(&pids, STRAY_STOP_WAIT, |process| {
+        let pid = process.pid().as_u32();
+        others.iter().any(|stray| {
+            stray.pid == pid
+                && process
+                    .exe()
+                    .is_some_and(|exe| same_path(&running_image(exe), &stray.image))
+        })
+    });
+    stuck.extend(
+        others
+            .into_iter()
+            .filter(|stray| {
+                let pid = Pid::from_u32(stray.pid);
+                stopped.refused.contains(&pid) || stopped.running.contains(&pid)
             })
-    };
-    refresh(&mut system);
-    for stray in &others {
-        if runs(&system, stray) {
-            if let Some(process) = system.process(Pid::from_u32(stray.pid)) {
-                process.kill();
-            }
-        }
-    }
-    let deadline = Instant::now() + STRAY_STOP_WAIT;
-    loop {
-        refresh(&mut system);
-        let running: Vec<&StrayProcess> = others
-            .iter()
-            .copied()
-            .filter(|stray| runs(&system, stray))
-            .collect();
-        if running.is_empty() {
-            return stuck;
-        }
-        if Instant::now() >= deadline {
-            stuck.extend(running.into_iter().cloned());
-            return stuck;
-        }
-        std::thread::sleep(POLL);
-    }
+            .cloned(),
+    );
+    stuck
 }
 
 /// One executable placed by a rename-swap.

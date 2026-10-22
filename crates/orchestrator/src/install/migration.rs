@@ -52,12 +52,10 @@ use std::env;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, Instant};
 
 use ghostlight_relay::home::EDGE_EXECUTABLE_NAME;
 use ghostlight_relay::private;
 use serde::{Deserialize, Serialize};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
 use super::container::Residence;
@@ -71,9 +69,6 @@ use super::{HarnessRegistry, HarnessState};
 
 /// Largest installation record the migration reads.
 const LEGACY_RECORD_LIMIT: u64 = 64 * 1024;
-
-/// How long a stopped process may take to exit.
-const STOP_WAIT: Duration = Duration::from_secs(10);
 
 /// File name of the 1.x installation record, beside the runtime file in the home.
 pub(super) const LEGACY_RECORD_NAME: &str = "ghostlight-runtime.installation.json";
@@ -1511,129 +1506,6 @@ fn find_registrations(old_directories: &[PathBuf]) -> Vec<Registration> {
     found
 }
 
-/// Stop every process running one of `images`, and wait for them to exit.
-///
-/// This is the bounded fallback for services that predate `quit`, and the way the break
-/// migration quiesces the old installation: an old connector must not start an old service while
-/// the files move. It refuses to stop the running installer.
-pub fn stop_legacy_images(images: &[PathBuf]) -> anyhow::Result<()> {
-    if images.is_empty() {
-        return Ok(());
-    }
-    let mut system = process_table();
-    let mut stopped = Vec::new();
-    for pid in running_from(&system, images) {
-        anyhow::ensure!(
-            pid.as_u32() != std::process::id(),
-            "Cannot replace the running installer"
-        );
-        let killed = system.process(pid).is_some_and(|process| process.kill());
-        let gone = !killed && !still_running(&mut system, pid);
-        match stop_outcome(killed, gone) {
-            StopOutcome::Stopping => stopped.push(pid),
-            StopOutcome::AlreadyGone => {}
-            StopOutcome::Failed => anyhow::bail!("Could not stop Ghostlight process {pid}"),
-        }
-    }
-    let deadline = Instant::now() + STOP_WAIT;
-    while !stopped.is_empty() {
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&stopped),
-            true,
-            ProcessRefreshKind::nothing().without_tasks(),
-        );
-        stopped.retain(|pid| {
-            system
-                .process(*pid)
-                .is_some_and(|process| process.status() != sysinfo::ProcessStatus::Zombie)
-        });
-        anyhow::ensure!(
-            stopped.is_empty() || Instant::now() < deadline,
-            "Ghostlight processes did not finish their replacement"
-        );
-        if !stopped.is_empty() {
-            std::thread::sleep(Duration::from_millis(25));
-        }
-    }
-    Ok(())
-}
-
-/// What a stop attempt on one process came to.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StopOutcome {
-    /// The kill was delivered; wait for the process to exit.
-    Stopping,
-    /// The kill failed because the process had already exited, which is what stopping wants.
-    AlreadyGone,
-    /// The kill failed and the process is still running.
-    Failed,
-}
-
-/// Classify one stop attempt. A process can exit on its own between the process snapshot and
-/// the kill (a connector the browser is cycling does), and that must not fail the install.
-fn stop_outcome(killed: bool, gone: bool) -> StopOutcome {
-    if killed {
-        StopOutcome::Stopping
-    } else if gone {
-        StopOutcome::AlreadyGone
-    } else {
-        StopOutcome::Failed
-    }
-}
-
-/// Whether `pid` still runs: present in a fresh look and not a zombie.
-fn still_running(system: &mut System, pid: Pid) -> bool {
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
-        true,
-        ProcessRefreshKind::nothing().without_tasks(),
-    );
-    system
-        .process(pid)
-        .is_some_and(|process| process.status() != sysinfo::ProcessStatus::Zombie)
-}
-
-/// Whether any process other than the running installer is running one of `images`.
-#[must_use]
-pub fn any_running_from(images: &[PathBuf]) -> bool {
-    !images.is_empty()
-        && running_from(&process_table(), images)
-            .iter()
-            .any(|pid| pid.as_u32() != std::process::id())
-}
-
-/// The processes of this machine, with their executable paths.
-fn process_table() -> System {
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing()
-            .without_tasks()
-            .with_exe(UpdateKind::Always),
-    );
-    system
-}
-
-/// The processes of `system` whose executable is one of `images`.
-fn running_from(system: &System, images: &[PathBuf]) -> Vec<Pid> {
-    let images: Vec<PathBuf> = images
-        .iter()
-        .filter_map(|image| fs::canonicalize(image).ok())
-        .collect();
-    system
-        .processes()
-        .values()
-        .filter(|process| {
-            process
-                .exe()
-                .and_then(|path| fs::canonicalize(path).ok())
-                .is_some_and(|executable| images.contains(&executable))
-        })
-        .map(sysinfo::Process::pid)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -2164,6 +2036,7 @@ mod tests {
             assert_private();
         }
         {
+            use crate::install::processes::{stop_outcome, StopOutcome};
             assert_eq!(stop_outcome(true, false), StopOutcome::Stopping);
             assert_eq!(stop_outcome(false, true), StopOutcome::AlreadyGone);
             assert_eq!(stop_outcome(false, false), StopOutcome::Failed);

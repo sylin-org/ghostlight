@@ -18,6 +18,7 @@ pub mod migration;
 pub mod native_host;
 mod packaged;
 pub mod paths;
+pub mod processes;
 pub mod reconcile;
 pub mod record;
 pub mod setup_state;
