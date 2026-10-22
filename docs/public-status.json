@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "release": "2.0.0",
-  "platformSummary": "Windows (x64) and Linux (x86_64 with glibc) are supported. Release 2.0.0 was tested before publication on Windows, CachyOS and Bluefin, and its release workflow installs it from the release bundle on Ubuntu 22.04 and 24.04. Its public install was proven on Windows on 2026-10-19. Alpine and other musl systems are not supported yet; they come in 2.0.1.",
+  "release": "2.0.1",
+  "platformSummary": "Windows (x64) and Linux (x86_64, with glibc or musl) are supported. Release 2.0.1 was tested before publication on Windows, Bluefin and Alpine, and its release workflow installs it from the release bundle on Ubuntu and Alpine. Its public install was proven on Alpine on 2026-10-22.",
   "extensionSummary": "The Chrome Web Store serves Chrome adapter v2.0.1. Compatibility is recorded in compatibility.json. Install the extension from the public listing.",
   "chromeStore": {
     "itemId": "lejccfmoeogmhemakeknjjdhkfkgncdl",

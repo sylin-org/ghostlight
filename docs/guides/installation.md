@@ -44,9 +44,8 @@ and what to do next.
    executables instead. With WinGet, run `ghostlight install` once through the WinGet alias: it
    installs into `~/.ghostlight/bin` and registers browsers and clients. After `winget upgrade`,
    running `ghostlight install` again (or any launch through the alias) carries the newer version
-   into `~/.ghostlight/bin`. An older copy never replaces a newer one. WinGet carries 2.0 once its
-   2.0.0 manifest is accepted into winget-pkgs; until then it installs a 1.x release, so use the
-   one-line installer.
+   into `~/.ghostlight/bin`. An older copy never replaces a newer one. WinGet serves 2.0.0 until its
+   2.0.1 manifest is accepted into winget-pkgs; the one-line installer serves 2.0.1.
 2. Add Ghostlight in Browser from the step the window shows. It lists the browsers installed on
    your computer. Add opens the Chrome Web Store listing in that browser (Edge installs the
    extension from the same listing). If a browser already holds the extension but is closed, the
