@@ -11,8 +11,9 @@ locally (workspace clippy, ghostlight-service 2398 passed). Landed, all pushed t
 c51204ca, I-D2 278a9c4c, I-D3 b9e76161, I-lock 6664028e, INST-1 959d0d00, INST-4 09ee4bff.
 SERV-6c moved to test-01 (15b38451). Nothing is parked as a patch; the working tree is clean.
 
-INST-5 landed on 2026-10-21 (`HarnessContext` and `HarnessRoots` hold one `config_root`). Next: the
-table's order below. SERV-13 and
+The second sweep closed on 2026-10-21: every row below is landed (INST-5 to INST-14, INST-2, INST-3,
+SERV-13, SERV-11c, EXT-2). Left for a later slice: the split of `install/harness/mod.rs` into
+several files (INST-2) and two step lists for install and uninstall (SERV-13). SERV-13 and
 SERV-11c touch `cli/setup.rs`, `cli/mod.rs` and `cli/parse.rs`: other lanes held them today
 (LANG-12b, SERV-6, S-D4, all landed), so ask before starting there.
 
