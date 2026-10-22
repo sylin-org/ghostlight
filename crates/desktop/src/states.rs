@@ -14,7 +14,7 @@
 //!
 //! Everything here is pure and unit tested.
 
-use crate::webview::GROUND;
+use crate::palette::{self, ACCENT, DANGER, GROUND, INK, INK_2};
 
 /// What the Starting screen says.
 pub const STARTING_WORDS: &str = "Starting Ghostlight...";
@@ -47,7 +47,8 @@ const BLANK_ADDRESS: &str = "about:blank";
 /// The start of the address a document loaded from a string has on Windows.
 const DOCUMENT_ADDRESS_PREFIX: &str = "data:text/html";
 
-/// The document, with `{ground}`, `{class}`, `{words}` and `{buttons}` to fill in.
+/// The document, with the palette (`{ground}`, `{ink}`, `{ink_2}`, `{accent}`, `{danger}`) and
+/// `{class}`, `{words}` and `{buttons}` to fill in.
 const DOCUMENT: &str = r#"<!doctype html>
 <html lang="en">
 <head>
@@ -56,7 +57,7 @@ const DOCUMENT: &str = r#"<!doctype html>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <title>Ghostlight</title>
 <style>
-:root { color-scheme: dark; --bg: {ground}; --ink: #f4f4f5; --ink-2: #c9c9d1; --a: #5eead4; --danger: #f87171; }
+:root { color-scheme: dark; --bg: {ground}; --ink: {ink}; --ink-2: {ink_2}; --a: {accent}; --danger: {danger}; }
 html, body { height: 100%; margin: 0; }
 body {
   display: grid; place-items: center;
@@ -208,16 +209,14 @@ pub fn document(screen: StateScreen) -> String {
         })
         .collect();
     DOCUMENT
-        .replace("{ground}", &ground_color())
+        .replace("{ground}", &palette::hex(GROUND))
+        .replace("{ink}", &palette::hex(INK))
+        .replace("{ink_2}", &palette::hex(INK_2))
+        .replace("{accent}", &palette::hex(ACCENT))
+        .replace("{danger}", &palette::hex(DANGER))
         .replace("{class}", screen.class())
         .replace("{words}", &escape(screen.words()))
         .replace("{buttons}", &buttons)
-}
-
-/// The window ground as a CSS colour.
-fn ground_color() -> String {
-    let (red, green, blue, _) = GROUND;
-    format!("#{red:02x}{green:02x}{blue:02x}")
 }
 
 /// `text` safe to put in the document as text or as a quoted attribute.

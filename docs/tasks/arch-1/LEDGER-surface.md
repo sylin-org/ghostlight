@@ -136,7 +136,7 @@ C3c), then the rows below.
 | SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | landed (this commit) |
 | SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | landed (this commit) |
 | SURF-9 | refactor(workbench): `workbench/mod.rs` splits on its seams | S3 | SURF-9; no `kit.css` rename | todo |
-| SURF-11 | refactor(window): the palette has tokens, and the desktop one module | - | SURF-11; colour values stay | todo |
+| SURF-11 | refactor(window): the palette has tokens, and the desktop one module | - | SURF-11; colour values stay | landed (this commit) |
 - U-D4, found by tests-1's pilot cut of `service/mod.rs` on 2026-10-21: the service test
   `the_browser_toolbar_pauses_through_the_workbench_and_says_so` required a second
   `RuntimeChanged` event for a repeated Hold, which its own comment calls a change of nothing a
@@ -224,3 +224,15 @@ C3c), then the rows below.
 - SURF-14 as landed: the shell's `View` is `ShellView` and its `MAX_TOOLTIP_LEN` is
   `MAX_TOOLTIP_LENGTH`, the service's names, so a search for one side finds the other. No wire
   word changes and no golden moves; the two copies stay, as V-10 decided.
+- SURF-11 as landed: `styles.css` names the held, danger and ok channels (`--held-rgb`,
+  `--danger-rgb`, `--ok-rgb`, used as `--argb` is), the refusal's ink and ground
+  (`--danger-ink`, `--danger-ground`, the skeptic's `#241419` included) and the raised surface
+  (`--raised`); every raw use goes through them, and `#fca5a5` reads `--danger-soft`. Every value
+  is the same, so the look is unchanged. The kept palette test now also requires each channel
+  token to be its colour's channels. The desktop crate has one `palette` module (ground, ink,
+  ink-2, accent, held, danger); the tray's dot colours, the webview's ground and the state
+  screens' CSS, which wrote ink, accent and danger as hex, read it. The tray's stylesheet pin
+  moves there as `every_colour_is_a_token_of_the_windows_stylesheet`, now covering ink and ink-2
+  too, so the desktop crate counts 20 tests. `--amber`, `--held` and `--cap-write` stay three
+  names for three meanings. The headless history journey passed on test-02 against the host's
+  Chromium 155 (`GHOSTLIGHT_TEST_HEADLESS=1`).

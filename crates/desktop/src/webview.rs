@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use wry::{NewWindowResponse, WebViewBuilder};
 
+use crate::palette;
 use crate::states::{self, Navigation, StateButton, StateScreen};
 
 /// The name of the global the page reads its access from.
@@ -27,8 +28,13 @@ const STATE_DIRECTORY_NAME: &str = "state";
 /// The directory under the state directory that holds the window's web storage.
 const PROFILE_DIRECTORY_NAME: &str = "desktop-webview";
 
-/// The window ground colour, the night ground `#0f0e12`, so a window never flashes white.
-pub const GROUND: (u8, u8, u8, u8) = (15, 14, 18, 255);
+/// The window ground colour, the night ground, opaque, so a window never flashes white.
+const GROUND: (u8, u8, u8, u8) = (
+    palette::GROUND[0],
+    palette::GROUND[1],
+    palette::GROUND[2],
+    u8::MAX,
+);
 
 /// Whether the webview may navigate to `url`: only the origin itself or a path under it.
 ///

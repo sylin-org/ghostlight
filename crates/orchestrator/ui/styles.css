@@ -60,6 +60,16 @@
   /* A permitted action that failed: its word and duration, softer than a refusal's full red. */
   --danger-soft: #fca5a5;
   --ok: #4ade80;
+  /* The same three as channels, for washes and edges: rgba(var(--held-rgb), .3), as --argb is used. */
+  --held-rgb: 251, 191, 36;
+  --danger-rgb: 248, 113, 113;
+  --ok-rgb: 74, 222, 128;
+  /* A refusal's text and ground in the error toast and the danger button. */
+  --danger-ink: #fecaca;
+  --danger-ground: #241419;
+
+  /* The one raised surface: the palette, the toast and the dialog sit on it over the ground. */
+  --raised: #17161b;
 
   --mono: 'Cascadia Code', 'JetBrains Mono', ui-monospace, Consolas, monospace;
   --sans: 'Segoe UI', system-ui, Arial, sans-serif;
@@ -143,10 +153,10 @@ body.runtime-working .lamp-halo {
 }
 body.runtime-working .lamp-core { background: rgb(var(--argb)); box-shadow: 0 0 16px rgba(var(--argb), .85); }
 @keyframes halo-breathe { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.1); } }
-body.runtime-held .lamp-halo { opacity: .9; background: radial-gradient(circle, rgba(251, 191, 36, .32), transparent 66%); }
-body.runtime-held .lamp-core { background: #fbbf24; box-shadow: 0 0 12px rgba(251, 191, 36, .55); }
-body.runtime-attention .lamp-halo { opacity: 1; background: radial-gradient(circle, rgba(248, 113, 113, .38), transparent 66%); }
-body.runtime-attention .lamp-core { background: #f87171; box-shadow: 0 0 12px rgba(248, 113, 113, .6); }
+body.runtime-held .lamp-halo { opacity: .9; background: radial-gradient(circle, rgba(var(--held-rgb), .32), transparent 66%); }
+body.runtime-held .lamp-core { background: var(--held); box-shadow: 0 0 12px rgba(var(--held-rgb), .55); }
+body.runtime-attention .lamp-halo { opacity: 1; background: radial-gradient(circle, rgba(var(--danger-rgb), .38), transparent 66%); }
+body.runtime-attention .lamp-core { background: var(--danger); box-shadow: 0 0 12px rgba(var(--danger-rgb), .6); }
 body.runtime-offline .lamp-core { border-color: var(--ink-4); background: transparent; box-shadow: none; }
 
 .state { display: flex; min-width: 0; align-items: baseline; gap: 12px; overflow: hidden; }
@@ -202,8 +212,8 @@ body.runtime-offline .state-word { color: var(--ink-4); }
 }
 .wheel:hover:not(:disabled), .ghost-button:hover:not(:disabled) { border-color: rgba(255, 255, 255, .4); color: var(--ink); background: rgba(255, 255, 255, .035); }
 .wheel svg { width: 12px; height: 12px; fill: currentColor; }
-.danger-button { border-color: rgba(248, 113, 113, .3); color: #fecaca; }
-.danger-button:hover { border-color: rgba(248, 113, 113, .55); background: rgba(248, 113, 113, .08); }
+.danger-button { border-color: rgba(var(--danger-rgb), .3); color: var(--danger-ink); }
+.danger-button:hover { border-color: rgba(var(--danger-rgb), .55); background: rgba(var(--danger-rgb), .08); }
 /* A primary wears the accent only while it can be pressed; until then it is a ghost, such as Apply
    before there is a draft. */
 .primary-button:not(:disabled) { border-color: rgba(var(--argb), .45); background: rgba(var(--argb), .1); color: var(--a); }
@@ -363,7 +373,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 }
 .hero.live::after { opacity: 1; }
 .hero.blocked::before, .hero.failed::before { background: var(--danger); }
-.hero.blocked::after, .hero.failed::after { opacity: 1; background: radial-gradient(680px 160px at 6% 50%, rgba(248, 113, 113, .1), transparent 70%); }
+.hero.blocked::after, .hero.failed::after { opacity: 1; background: radial-gradient(680px 160px at 6% 50%, rgba(var(--danger-rgb), .1), transparent 70%); }
 
 .cap-read { --cap: var(--cap-read); --cap-ink: var(--ink-3); }
 .cap-action { --cap: var(--cap-action); --cap-ink: var(--cap-action); }
@@ -464,7 +474,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 /* ------------------------------ medallions ------------------------------ */
 .med { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid var(--line-2); border-radius: 12px; background: rgba(13, 12, 16, .6); }
 .hero.live .med { border-color: rgba(var(--argb), .42); box-shadow: 0 0 22px -6px rgba(var(--argb), .5); }
-.hero.blocked .med { border-color: rgba(248, 113, 113, .42); }
+.hero.blocked .med { border-color: rgba(var(--danger-rgb), .42); }
 .med svg { width: 26px; height: 26px; fill: none; stroke: var(--ink-3); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: stroke .5s var(--calm); }
 .hero.live .med svg { stroke: var(--a); }
 .hero.blocked .med svg { stroke: var(--danger); }
@@ -619,7 +629,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 }
 .agent-use.live { border-color: rgba(var(--argb), .2); background: rgba(var(--argb), .045); }
 .agent-use .link-button { margin-left: auto; }
-.agent-evidence { margin: 14px 0 0; padding: 10px 14px; border-left: 2px solid var(--amber); border-radius: 0 8px 8px 0; background: rgba(251, 191, 36, .05); }
+.agent-evidence { margin: 14px 0 0; padding: 10px 14px; border-left: 2px solid var(--amber); border-radius: 0 8px 8px 0; background: rgba(var(--held-rgb), .05); }
 .agent-evidence .kicker { color: var(--amber); }
 .agent-evidence p { margin: 7px 0 0; color: var(--ink-2); font: 400 12.5px/1.5 var(--sans); overflow-wrap: anywhere; }
 /* A program or path the service names in its sentence. */
@@ -635,7 +645,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .agent-steps li::before {
   counter-increment: step; content: counter(step);
   display: grid; width: 22px; height: 22px; place-items: center;
-  border: 1px solid rgba(251, 191, 36, .4); border-radius: 50%; color: var(--amber); font: 500 11.5px/1 var(--mono);
+  border: 1px solid rgba(var(--held-rgb), .4); border-radius: 50%; color: var(--amber); font: 500 11.5px/1 var(--mono);
 }
 .agent-step-what { color: var(--ink-2); font-size: 12.5px; }
 .agent-step-what small { display: block; color: var(--ink-4); font-size: 11.5px; }
@@ -671,7 +681,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 }
 .agent-quiet p { margin: 0; color: var(--ink-4); font-size: 11.5px; }
 .agent-remove { padding: 0; color: var(--ink-4); font-size: 12px; text-decoration: underline; text-decoration-color: rgba(255, 255, 255, .18); text-underline-offset: 3px; }
-.agent-remove:hover:not(:disabled) { color: #fca5a5; text-decoration-color: rgba(248, 113, 113, .55); }
+.agent-remove:hover:not(:disabled) { color: var(--danger-soft); text-decoration-color: rgba(var(--danger-rgb), .55); }
 .agent-remove:disabled { opacity: .4; }
 
 @container (max-width: 560px) {
@@ -721,7 +731,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 
 /* ---------------------------- command palette --------------------------- */
 .palette-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; padding: 14vh 20px 20px; background: rgba(9, 8, 11, .66); justify-items: center; align-items: start; backdrop-filter: blur(4px); animation: fade-in var(--beat-glance) ease-out both; }
-.palette-box { width: min(620px, 100%); overflow: hidden; border: 1px solid var(--line-2); border-radius: 12px; background: #17161b; box-shadow: 0 28px 80px rgba(0, 0, 0, .55); }
+.palette-box { width: min(620px, 100%); overflow: hidden; border: 1px solid var(--line-2); border-radius: 12px; background: var(--raised); box-shadow: 0 28px 80px rgba(0, 0, 0, .55); }
 .palette-input { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 0 14px; height: 46px; border-bottom: 1px solid var(--line); }
 .palette-input svg { width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 1.8; }
 .palette-input input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 13px; }
@@ -745,14 +755,14 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 /* The alert and the toast share one column in the corner, so a later notice never covers an
    earlier one. */
 .notices { position: fixed; right: 18px; bottom: 18px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(420px, calc(100vw - 36px)); }
-.toast { padding: 11px 14px; border: 1px solid var(--line-2); border-radius: 8px; color: var(--ink-2); background: #17161b; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12px; animation: toast-in var(--beat-arrive) var(--spring) both; }
-.toast.error { display: flex; align-items: baseline; gap: 14px; border-color: rgba(248, 113, 113, .45); color: #fecaca; background: #241419; }
-.toast.error .link-button { flex: none; color: #fecaca; }
+.toast { padding: 11px 14px; border: 1px solid var(--line-2); border-radius: 8px; color: var(--ink-2); background: var(--raised); box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12px; animation: toast-in var(--beat-arrive) var(--spring) both; }
+.toast.error { display: flex; align-items: baseline; gap: 14px; border-color: rgba(var(--danger-rgb), .45); color: var(--danger-ink); background: var(--danger-ground); }
+.toast.error .link-button { flex: none; color: var(--danger-ink); }
 
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; padding: 20px; background: rgba(9, 8, 11, .72); place-items: center; backdrop-filter: blur(4px); animation: fade-in var(--beat-glance) ease-out both; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-.confirm-dialog { width: min(420px, calc(100vw - 40px)); padding: 22px; border: 1px solid var(--line-2); border-radius: 12px; background: #17161b; box-shadow: 0 24px 80px rgba(0, 0, 0, .55); }
+.confirm-dialog { width: min(420px, calc(100vw - 40px)); padding: 22px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--raised); box-shadow: 0 24px 80px rgba(0, 0, 0, .55); }
 .confirm-dialog h2 { margin: 8px 0 6px; color: var(--ink); font-size: 17px; font-weight: 300; letter-spacing: -.02em; }
 .confirm-dialog p { margin: 0; color: var(--ink-4); font-size: 12.5px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
@@ -952,12 +962,12 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .cap-state { flex: none; }
 .cap-covers { margin: 7px 0 0; color: var(--ink-4); font-size: 11.5px; }
 .cap-detail { margin: 8px 0 0; color: var(--ink-3); font-size: 12px; }
-.cap-ok { border-color: rgba(74, 222, 128, .18); }
+.cap-ok { border-color: rgba(var(--ok-rgb), .18); }
 .cap-ok .cap-state { color: var(--ok); }
 .cap-some .cap-state { color: var(--amber); }
-.cap-most { border-color: rgba(74, 222, 128, .12); }
+.cap-most { border-color: rgba(var(--ok-rgb), .12); }
 .cap-most .cap-state { color: var(--ink-3); }
-.cap-no { background: rgba(248, 113, 113, .03); border-color: rgba(248, 113, 113, .16); }
+.cap-no { background: rgba(var(--danger-rgb), .03); border-color: rgba(var(--danger-rgb), .16); }
 .cap-no .cap-state { color: var(--danger); }
 
 .ceilings { margin: 0; padding: 0 0 0 16px; color: var(--ink-4); font-size: 12px; }

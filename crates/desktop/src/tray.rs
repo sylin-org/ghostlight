@@ -38,6 +38,7 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::link::TrayItemId;
+use crate::palette;
 
 /// The most items a tray model may hold.
 pub const MAX_ITEMS: usize = 16;
@@ -52,17 +53,17 @@ pub const MAX_LABEL_LEN: usize = 64;
 pub const MAX_TOOLTIP_LENGTH: usize = 127;
 
 /// The colour of the dot for a working service, the band's accent `--a`.
-pub const WORKING_COLOUR: [u8; 3] = [0x5e, 0xea, 0xd4];
+pub const WORKING_COLOUR: [u8; 3] = palette::ACCENT;
 
 /// The colour of the dot for a paused service, the band's `--held`.
-pub const PAUSED_COLOUR: [u8; 3] = [0xfb, 0xbf, 0x24];
+pub const PAUSED_COLOUR: [u8; 3] = palette::HELD;
 
 /// The colour of the dot for a service that needs attention, the band's `--danger`.
-pub const ATTENTION_COLOUR: [u8; 3] = [0xf8, 0x71, 0x71];
+pub const ATTENTION_COLOUR: [u8; 3] = palette::DANGER;
 
 /// The window's night ground `--bg`: the ground of a dark taskbar, so the ring around the dot
 /// there, and the colour of the soft outline under the mascot on a light taskbar.
-pub const NIGHT_COLOUR: [u8; 3] = [0x0f, 0x0e, 0x12];
+pub const NIGHT_COLOUR: [u8; 3] = palette::GROUND;
 
 /// The ground of a light Windows taskbar, so the ring around the dot there.
 pub const LIGHT_GROUND: [u8; 3] = [0xf3, 0xf3, 0xf3];
@@ -710,7 +711,6 @@ mod tests {
         the_dot_sits_in_the_lower_right_in_the_colour_of_the_state();
         the_dark_taskbar_shows_the_product_icon_bytes();
         a_dot_on_a_light_taskbar_lies_over_the_mascot();
-        the_dot_colours_are_the_tokens_of_the_windows_stylesheet();
         a_light_taskbar_shows_the_mascot_in_one_piece();
         a_soft_night_outline_parts_the_light_mascot_from_the_taskbar();
         the_light_mascot_keeps_its_face_at_16_pixels();
@@ -894,25 +894,6 @@ mod tests {
                     "{state:?} on {taskbar:?}: the ghost is kept away from the dot"
                 );
             }
-        }
-    }
-
-    fn the_dot_colours_are_the_tokens_of_the_windows_stylesheet() {
-        let styles = include_str!("../../orchestrator/ui/styles.css");
-        for (token, colour) in [
-            ("--a", WORKING_COLOUR),
-            ("--held", PAUSED_COLOUR),
-            ("--danger", ATTENTION_COLOUR),
-            ("--bg", NIGHT_COLOUR),
-        ] {
-            let declared = format!(
-                "{token}: #{:02x}{:02x}{:02x};",
-                colour[0], colour[1], colour[2]
-            );
-            assert!(
-                styles.contains(&declared),
-                "{declared} is not in the stylesheet"
-            );
         }
     }
 }

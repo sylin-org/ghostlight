@@ -37,6 +37,7 @@ pub mod app;
 pub mod link;
 pub mod machine;
 pub mod native;
+pub mod palette;
 #[cfg(test)]
 mod scratch;
 pub mod session;

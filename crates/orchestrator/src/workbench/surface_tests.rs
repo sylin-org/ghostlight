@@ -37,6 +37,39 @@ fn the_workbench_wears_the_original_icon_palette_and_spring_curve() {
             "the workbench dropped the published palette value {value}"
         );
     }
+    // Each colour's channels, which washes and edges read as rgba(var(--x-rgb), alpha), are the
+    // channels of the colour itself (arch-1 SURF-11).
+    let declared = |token: &str| -> &str {
+        let opening = format!("  {token}: ");
+        let start = styles
+            .find(&opening)
+            .expect("the stylesheet declares the token")
+            + opening.len();
+        styles[start..]
+            .split(';')
+            .next()
+            .expect("the declaration ends")
+    };
+    for (colour, channels) in [
+        ("--a", "--argb"),
+        ("--held", "--held-rgb"),
+        ("--danger", "--danger-rgb"),
+        ("--ok", "--ok-rgb"),
+    ] {
+        let hex = declared(colour).trim_start_matches('#');
+        let parsed: Vec<String> = (0..3)
+            .map(|at| {
+                u8::from_str_radix(&hex[at * 2..at * 2 + 2], 16)
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            declared(channels),
+            parsed.join(", "),
+            "{channels} is not {colour}"
+        );
+    }
     let renderer = include_str!("../browser/adapter/chromium/protocol4/assets/presentation.js");
     for (name, text) in [("the workbench", styles), ("the page assets", renderer)] {
         assert!(
