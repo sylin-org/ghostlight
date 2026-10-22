@@ -14,6 +14,9 @@
   const { FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, PHASE, RUNTIME } = globalThis.GhostlightWords;
   const { entryFromOperation, entryFromRecord, entryTime, isRunning, isPending, isUnsettled } = globalThis.GhostlightEntries;
 
+  /** How long after the latch expires it wakes the band, so the working word is out when it repaints. */
+  const LATCH_GRACE_MS = 60;
+
   /**
    * Everything the store can announce.
    *
@@ -80,7 +83,7 @@
     function touch() {
       state.interactionAt = now();
       clearTimer(state.latchTimer);
-      state.latchTimer = setTimer(() => emit(CHANGE.Band), WORKING_LATCH_MS + 60);
+      state.latchTimer = setTimer(() => emit(CHANGE.Band), WORKING_LATCH_MS + LATCH_GRACE_MS);
     }
 
     function seed(snapshot) {

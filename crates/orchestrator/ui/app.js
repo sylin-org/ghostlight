@@ -28,13 +28,25 @@
  */
 
 const {
-  FEED_LIMIT, SEARCH_ADDRESSES, POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, COPIED_SETUP, COPIED_COMMAND,
+  SEARCH_ADDRESSES, POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, COPIED_SETUP, COPIED_COMMAND,
   WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONNECTION_ID_COPIED, SETTINGS, DEFAULT_VIEW,
   SETUP_ADDRESS, SETUP, AGENTS, parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
 
 /** How long an act waits for the change it caused to reach this page, before it asks again. */
 const SEQ_WAIT_MS = 2000;
+
+/** How long the search waits after the last key before it asks. */
+const SEARCH_DEBOUNCE_MS = 140;
+
+/** How often the running card's elapsed time moves. */
+const ELAPSED_TICK_MS = 100;
+
+/** How often the ages of settled work move. */
+const AGES_TICK_MS = 15_000;
+
+/** The most changes kept while the first snapshot is on its way. Past it the replay meets a gap and rebuilds. */
+const EARLY_CHANGES = 200;
 
 const { ACT, CONTEXT, SETUP_PART, GET_CHROME, CONNECT_ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
 const { RESULT } = globalThis.GhostlightStore;
@@ -280,7 +292,7 @@ function caughtUp() {
 
 function receiveChange(event) {
   if (!store.snapshot()) {
-    if (early.length < FEED_LIMIT) early.push(event);
+    if (early.length < EARLY_CHANGES) early.push(event);
     return;
   }
   // A gap means this cache can no longer be trusted. Rebuild rather than guess.
@@ -696,19 +708,23 @@ async function openDestination(destination) {
 
 /* ------------------------------ the setup view -------------------------- */
 
-/*
- * The setup part last given: undefined before the first read, null when the service leaves it out
- * (a watcher is shown the ordinary workbench), otherwise the part. `setupShown` is whether the view
- * is on screen, `setupSkipped` whether this window was sent away from it, and `setupRequested`
- * whether the address asked for it before the first read.
- */
-let setupPart;
-let setupShown = false;
-let setupSkipped = false;
-let setupRequested = false;
-let setupRescanned = false;
-let setupComplete = false;
-let setupTurn = 0;
+/** Where this window's setup flow stands. */
+const setup = {
+  /** The setup part last given: undefined before the first read, null when the service leaves it out (a watcher is shown the ordinary workbench), otherwise the part. */
+  part: undefined,
+  /** Whether the setup view is on screen. */
+  shown: false,
+  /** Whether this window was sent away from it, for the life of the window. */
+  skipped: false,
+  /** Whether the address asked for it before the first read. */
+  requested: false,
+  /** Whether the agents were looked for again as the view opened, which happens once. */
+  rescanned: false,
+  /** Whether setup is complete, after which nothing is asked. */
+  complete: false,
+  /** The number of the latest read, so an older answer is dropped. */
+  turn: 0
+};
 
 /** Whether the person has turned motion off, in the system or in Settings. */
 function motionIsReduced() {
@@ -718,7 +734,7 @@ function motionIsReduced() {
 
 /** Read the setup part, and take what the service says. Nothing is asked once setup is complete. */
 async function refreshSetup() {
-  if (!transport.available || !showsData() || setupComplete) return;
+  if (!transport.available || !showsData() || setup.complete) return;
   try {
     await takeSetup(() => transport.setupPart());
   } catch (error) {
@@ -729,43 +745,43 @@ async function refreshSetup() {
 
 /** Take the setup part `read` brings, unless a later read has been asked for since. */
 async function takeSetup(read) {
-  const turn = ++setupTurn;
+  const turn = ++setup.turn;
   const part = await read();
-  if (turn === setupTurn) attempt("drawing setup", () => receiveSetup(part));
+  if (turn === setup.turn) attempt("drawing setup", () => receiveSetup(part));
 }
 
 /** Decide, from a new setup part, whether the window shows setup, keeps showing it, or stops. */
 function receiveSetup(part) {
-  const first = setupPart === undefined;
-  setupPart = part ?? null;
-  setupComplete = setupComplete || part?.stage === STAGE.retired || part?.stage === STAGE.done;
-  if (first && setupRequested) {
-    setupRequested = false;
+  const first = setup.part === undefined;
+  setup.part = part ?? null;
+  setup.complete = setup.complete || part?.stage === STAGE.retired || part?.stage === STAGE.done;
+  if (first && setup.requested) {
+    setup.requested = false;
     showSetup();
     return;
   }
-  const show = globalThis.GhostlightSetupView.visible(setupPart, { skipped: setupSkipped, shown: setupShown });
-  if (show && setupShown) setupScreen.update(setupPart);
+  const show = globalThis.GhostlightSetupView.visible(setup.part, { skipped: setup.skipped, shown: setup.shown });
+  if (show && setup.shown) setupScreen.update(setup.part);
   else if (show) openSetup();
-  else if (setupShown) closeSetup();
+  else if (setup.shown) closeSetup();
 }
 
 /** Put the setup view on screen in place of the tabs. */
 function openSetup() {
-  setupShown = true;
+  setup.shown = true;
   document.getElementById("app-shell").hidden = true;
-  setupScreen.open(setupPart);
+  setupScreen.open(setup.part);
   view.writeAddress(SETUP_ADDRESS);
   // The agent rows are as fresh as the last look; look once more as the view opens.
-  if (!setupRescanned && allowed(ACT.rescan)) {
-    setupRescanned = true;
+  if (!setup.rescanned && allowed(ACT.rescan)) {
+    setup.rescanned = true;
     rescan().catch(sayFailure);
   }
 }
 
 /** Take the setup view off the screen and give the tabs back. */
 function closeSetup() {
-  setupShown = false;
+  setup.shown = false;
   setupScreen.close();
   document.getElementById("app-shell").hidden = false;
 }
@@ -776,13 +792,13 @@ function closeSetup() {
  * opens at its default place and the address says so.
  */
 function showSetup() {
-  if (setupPart === undefined) {
-    setupRequested = true;
+  if (setup.part === undefined) {
+    setup.requested = true;
     return;
   }
-  setupSkipped = false;
-  if (globalThis.GhostlightSetupView.visible(setupPart, { skipped: false, shown: setupShown })) {
-    if (!setupShown) openSetup();
+  setup.skipped = false;
+  if (globalThis.GhostlightSetupView.visible(setup.part, { skipped: false, shown: setup.shown })) {
+    if (!setup.shown) openSetup();
     return;
   }
   go(DEFAULT_VIEW);
@@ -841,8 +857,8 @@ function go(name, section) {
     return;
   }
   // Going anywhere else is a skip, for the life of this window.
-  setupSkipped = true;
-  if (setupShown) closeSetup();
+  setup.skipped = true;
+  if (setup.shown) closeSetup();
   view.navigate(name, section);
   if (name === "policy" && showsData() && !view.draftIsDirty()) {
     outdated.delete("policy");
@@ -867,7 +883,7 @@ function openAddress(hash, loading) {
 
 /** Open the search palette, while the window shows data and setup is not standing in for it. */
 function openSearch() {
-  if (showsData() && !setupShown) view.openPalette();
+  if (showsData() && !setup.shown) view.openPalette();
 }
 
 /**
@@ -880,54 +896,56 @@ function wire() {
   const el = view.el;
   let searchTimer = null;
 
-  document.addEventListener("click", (event) => {
-    const confirmation = event.target.closest("[data-confirm]");
-    if (confirmation && view.answerConfirmation(confirmation.dataset.confirm === "accept")) return;
-    const tab = event.target.closest("[data-view]");
-    if (tab) go(tab.dataset.view);
-    const entry = event.target.closest("[data-settings-section]");
-    if (entry) go("settings", entry.dataset.settingsSection);
-    const ruleAction = event.target.closest("[data-rule-action]");
-    if (ruleAction && !ruleAction.disabled) {
-      view.ruleAction(Number(ruleAction.dataset.rule), ruleAction.dataset.ruleAction);
-      return;
-    }
+  /*
+   * What a click does, by the nearest control it landed in. Every row that matches runs, in this
+   * order, until one answers STOP: a confirmation that was answered, and a rule action, which
+   * must not also toggle the rule it sits in.
+   */
+  const STOP = true;
+  const CLICKS = [
+    ["[data-confirm]", (node) => (view.answerConfirmation(node.dataset.confirm === "accept") ? STOP : undefined)],
+    ["[data-view]", (node) => { go(node.dataset.view); }],
+    ["[data-settings-section]", (node) => { go("settings", node.dataset.settingsSection); }],
+    ["[data-rule-action]", (node) => {
+      if (node.disabled) return undefined;
+      view.ruleAction(Number(node.dataset.rule), node.dataset.ruleAction);
+      return STOP;
+    }],
     // Opening a rule is the whole interaction for one nobody may change, and the way in for one
-    // they may. An action inside an open rule is handled above and must not close it again.
-    const toggle = event.target.closest("[data-rule-toggle]");
-    if (toggle) view.toggleRule(toggle.dataset.ruleToggle);
+    // they may.
+    ["[data-rule-toggle]", (node) => { view.toggleRule(node.dataset.ruleToggle); }],
     // The wheel is the band's own control; Settings wires the buttons it holds.
-    const wheel = event.target.closest("#wheel");
-    if (wheel && !wheel.disabled) applyIntent(wheel.dataset.intent);
-    const harness = event.target.closest("[data-harness-operation]");
-    if (harness) handleHarnessAction(harness);
-    const recheck = event.target.closest("[data-agents-recheck]");
-    if (recheck) recheckFrom(recheck);
-    const retry = event.target.closest("[data-retry]");
-    if (retry) RETRY[retry.dataset.retry]?.();
-    const carryOn = event.target.closest("[data-continue]");
-    if (carryOn) continueInWindow(carryOn.dataset.address || undefined);
-    const destination = event.target.closest("[data-destination]");
-    if (destination) openDestination(destination.dataset.destination);
-    const connectionId = event.target.closest("[data-copy-connection]");
-    if (connectionId) copyConnectionId(connectionId.dataset.copyConnection);
+    ["#wheel", (node) => { if (!node.disabled) applyIntent(node.dataset.intent); }],
+    ["[data-harness-operation]", (node) => { handleHarnessAction(node); }],
+    ["[data-agents-recheck]", (node) => { recheckFrom(node); }],
+    ["[data-retry]", (node) => { RETRY[node.dataset.retry]?.(); }],
+    ["[data-continue]", (node) => { continueInWindow(node.dataset.address || undefined); }],
+    ["[data-destination]", (node) => { openDestination(node.dataset.destination); }],
+    ["[data-copy-connection]", (node) => { copyConnectionId(node.dataset.copyConnection); }],
     // A hit goes where what it found is shown, and an action At a glance lists opens there.
-    const hit = event.target.closest("[data-search-view]");
-    if (hit) {
-      const where = parseAddress(SEARCH_ADDRESSES[hit.dataset.searchView]) ?? parseAddress(DEFAULT_VIEW);
+    ["[data-search-view]", (node) => {
+      const where = parseAddress(SEARCH_ADDRESSES[node.dataset.searchView]) ?? parseAddress(DEFAULT_VIEW);
       go(where.view, where.section ?? undefined);
       view.closePalette();
-      view.showAction(hit.dataset.searchId);
+      view.showAction(node.dataset.searchId);
+    }],
+    // A click on the palette's backdrop, not inside its box, closes it.
+    ["#palette", (node, event) => { if (event.target === node) view.closePalette(); }],
+    ["[data-open-search]", () => { openSearch(); }]
+  ];
+
+  document.addEventListener("click", (event) => {
+    for (const [selector, run] of CLICKS) {
+      const node = event.target.closest(selector);
+      if (node && run(node, event) === STOP) return;
     }
-    if (event.target === el.palette) view.closePalette();
-    if (event.target.closest("[data-open-search]")) openSearch();
   });
 
   window.addEventListener("hashchange", () => openAddress(window.location.hash, false));
 
   el["palette-query"].addEventListener("input", () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => search(view.paletteQuery()), 140);
+    searchTimer = setTimeout(() => search(view.paletteQuery()), SEARCH_DEBOUNCE_MS);
   });
 
   document.addEventListener("keydown", (event) => {
@@ -1006,10 +1024,10 @@ function wire() {
 
   setInterval(() => {
     if (!document.hidden) view.tickElapsed(store.feed());
-  }, 100);
+  }, ELAPSED_TICK_MS);
   setInterval(() => {
     if (!document.hidden) view.tickAges(store.feed());
-  }, 15000);
+  }, AGES_TICK_MS);
 }
 
 /* ------------------------------- the stream ----------------------------- */

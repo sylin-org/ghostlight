@@ -132,7 +132,7 @@ C3c), then the rows below.
 | SURF-8 | refactor(workbench): what a watcher may do is said once | - | SURF-8 | todo |
 | SURF-10 | refactor(workbench): the small repeats go | - | SURF-10 | todo |
 | SURF-12 | refactor(workbench): watching, everywhere | - | SURF-12; the route path changes with the preview server | todo |
-| SURF-13 | refactor(window): the setup flow is one object and the click handler a table | - | SURF-13 | todo |
+| SURF-13 | refactor(window): the setup flow is one object and the click handler a table | - | SURF-13 | landed (this commit) |
 | SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | landed (this commit) |
 | SURF-7 | refactor(window): the policy editor and the agents pane leave `view.js` | SURF-6 | SURF-7 as corrected | landed (this commit) |
 | SURF-9 | refactor(workbench): `workbench/mod.rs` splits on its seams | S3 | SURF-9; no `kit.css` rename | todo |
@@ -236,3 +236,12 @@ C3c), then the rows below.
   too, so the desktop crate counts 20 tests. `--amber`, `--held` and `--cap-write` stay three
   names for three meanings. The headless history journey passed on test-02 against the host's
   Chromium 155 (`GHOSTLIGHT_TEST_HEADLESS=1`).
+- SURF-13 as landed: `app.js`'s seven setup `let`s are one `setup` object with a line per field.
+  The click listener's 14 lookups are one `CLICKS` table, in today's order. It is not
+  first-match: today every matching branch runs, and only an answered confirmation and an
+  enabled rule action stop the rest. The table keeps exactly that, with those two rows returning
+  `STOP` and every other row in a block body, so no return value can stop the walk by accident.
+  The palette backdrop row matches `#palette` and acts only on a click on the backdrop itself, as
+  before. Named: `SEARCH_DEBOUNCE_MS` (140), `ELAPSED_TICK_MS` (100), `AGES_TICK_MS` (15 s),
+  the early-change bound `EARLY_CHANGES` (200, which was `FEED_LIMIT`), and the store's
+  `LATCH_GRACE_MS` (60). Page tests 226, the page journey and the headless history journey pass.
