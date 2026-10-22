@@ -1,8 +1,8 @@
 //! The physical browser port and authenticated relay-backed adapter implementation.
 
 pub mod adapter;
+pub mod graphical_session;
 pub mod recovery;
-pub mod session;
 pub mod transport;
 
 use std::collections::HashMap;

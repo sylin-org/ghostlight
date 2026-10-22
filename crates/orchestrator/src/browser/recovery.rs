@@ -381,7 +381,7 @@ pub(crate) fn start_browser(
     executable: &Path,
     arguments: &[&std::ffi::OsStr],
 ) -> std::io::Result<Option<u32>> {
-    let Some(environment) = crate::browser::session::graphical_session_environment()
+    let Some(environment) = crate::browser::graphical_session::graphical_session_environment()
         .map_err(|error| std::io::Error::other(error.to_string()))?
     else {
         return Ok(None);

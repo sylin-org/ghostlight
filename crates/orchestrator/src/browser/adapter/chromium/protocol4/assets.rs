@@ -81,8 +81,10 @@ mod tests {
     };
 
     /// The pinned asset id both test suites compare against.
-    const PINNED_ID: &str =
-        include_str!("../../../../../../../tests/golden/protocol4/assets.sha256");
+    const PINNED_ID: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/golden/protocol4/assets.sha256"
+    ));
 
     /// The service ships the page source whose hash the page-asset tests pin, with every include
     /// expanded and LF line endings, so a checkout's line-ending conversion cannot change the id

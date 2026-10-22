@@ -53,7 +53,7 @@ In order. "After" names what a slice waits for.
 | BROW-8 | refactor(browser): the port's literals are named | - | BROW-8's port half; `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` as a check, not a tie | todo |
 | BROW-11 | docs(browser): the port's docs match the code | BROW-1 | BROW-11's port half | todo |
 | BROW-12 | refactor(browser): one SHA-256 helper | - | BROW-12's hash part | landed with the adapter's BROW-12a (52753883); nothing of it is left in this lane's files, and governance's own hex writers are policy's |
-| BROW-13 | refactor(browser): the display-session module says what it is | - | BROW-13 as corrected: the `session.rs` rename and the golden path | todo |
+| BROW-13 | refactor(browser): the display-session module says what it is | - | BROW-13 as corrected: the `session.rs` rename and the golden path | landed (this commit) |
 
 ## Notes
 
@@ -171,3 +171,9 @@ A kill-on-close job would need the relay to break away; none has been seen.
   as the executor and the rest of the crate do. Per the skeptic, `wire.rs`'s `as physical` import
   stays: renaming it would leave the layer's `Physical*` types, so the layer would still have two
   names.
+- BROW-13 as landed: `browser/session.rs`, the graphical-session discovery, is
+  `browser/graphical_session.rs`, so it no longer shares a name with MCP sessions or the relay's
+  `os::session` that `recovery.rs` imports beside it; its one caller says
+  `crate::browser::graphical_session`. `protocol4/assets.rs` reads its pinned asset id through
+  `concat!(env!("CARGO_MANIFEST_DIR"), ...)` in place of seven `../`, as `golden.rs` builds its
+  fixture path. As the ledger's correction says, `work.rs` and `documents.rs` stay where they are.
