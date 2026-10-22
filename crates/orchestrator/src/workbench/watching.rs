@@ -12,6 +12,8 @@ use std::sync::Mutex;
 
 use ghostlight_relay::private;
 
+use crate::sync::lock;
+
 /// The state of "Others can watch", shared by the server and the facade.
 #[derive(Debug)]
 pub struct Watching {
@@ -51,10 +53,7 @@ impl Watching {
     /// watching once the marker could be lost. On removes the marker and then flips. A failed
     /// write leaves both as they were.
     pub fn set(&self, on: bool) -> io::Result<bool> {
-        let _changing = self
-            .changing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _changing = lock(&self.changing);
         if self.is_on() == on {
             return Ok(false);
         }

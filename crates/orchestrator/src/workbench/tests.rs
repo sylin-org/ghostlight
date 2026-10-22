@@ -28,12 +28,6 @@ const RECEIVED_AT_MS: u64 = 1;
 /// The browser the recorded work here ran in, as a browser reports its name.
 const CHROME: &str = "Google Chrome";
 
-/// The id of the Status check that reads the rules in force.
-const AUTHORITY_CHECK: &str = "authority";
-
-/// The id of the Status check that reads the browser.
-const BROWSER_CHECK: &str = "browser";
-
 #[derive(Default)]
 struct Events(Mutex<Vec<WorkbenchEvent>>);
 
@@ -227,12 +221,12 @@ fn facade_over(governance: GovernanceFacade, browser: Arc<ControlledBrowser>) ->
 }
 
 /// The Status check `id` of `look`.
-fn check(look: &super::Look<'_>, id: &str) -> super::DiagnosticItem {
+fn check(look: &super::Look<'_>, id: super::DiagnosticId) -> super::DiagnosticItem {
     look.diagnostics()
         .iter()
         .find(|item| item.id == id)
         .cloned()
-        .unwrap_or_else(|| panic!("the Status page always carries the {id} check"))
+        .unwrap_or_else(|| panic!("the Status page always carries the {id:?} check"))
 }
 
 fn temporary_policy(name: &str) -> Scratch {
@@ -818,7 +812,7 @@ fn startup_policy(posture: &str) -> Scratch {
 /// browser, and the Status browser check (7a5065d3 j-07); a connected browser leaves no such line.
 #[test]
 fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
-    use super::DiagnosticSeverity;
+    use super::{DiagnosticId, DiagnosticSeverity};
     use crate::browser::recovery::RecoveryCandidate;
     use crate::governance::effective::Situation;
     use crate::install::browser_package::BrowserPackage;
@@ -839,7 +833,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
     struct Said {
         readiness: Readiness,
         detail: String,
-        check: &'static str,
+        check: DiagnosticId,
         severity: Option<DiagnosticSeverity>,
         check_detail: Option<String>,
         no_browser: Option<Option<String>>,
@@ -889,7 +883,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::PolicyInvalid,
                 detail: Readiness::PolicyInvalid.detail().to_owned(),
-                check: AUTHORITY_CHECK,
+                check: DiagnosticId::Authority,
                 severity: Some(DiagnosticSeverity::Failing),
                 check_detail: None,
                 no_browser: None,
@@ -902,7 +896,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::Ready,
                 detail: ready.clone(),
-                check: AUTHORITY_CHECK,
+                check: DiagnosticId::Authority,
                 severity: Some(DiagnosticSeverity::Passing),
                 check_detail: None,
                 no_browser: None,
@@ -918,7 +912,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::Ready,
                 detail: ready.clone(),
-                check: AUTHORITY_CHECK,
+                check: DiagnosticId::Authority,
                 severity: Some(DiagnosticSeverity::Warning),
                 check_detail: None,
                 no_browser: None,
@@ -935,7 +929,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::Ready,
                 detail: mcp_off.ready_line().unwrap().to_owned(),
-                check: AUTHORITY_CHECK,
+                check: DiagnosticId::Authority,
                 severity: None,
                 check_detail: Some(words::status_rules_in_force(true, false, mcp_off)),
                 no_browser: None,
@@ -954,7 +948,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::TurnedOff,
                 detail: both_off.said().unwrap(),
-                check: AUTHORITY_CHECK,
+                check: DiagnosticId::Authority,
                 severity: None,
                 check_detail: Some(words::status_rules_in_force(true, false, both_off)),
                 no_browser: None,
@@ -967,7 +961,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::Ready,
                 detail: starts_when_asked(CHROME),
-                check: BROWSER_CHECK,
+                check: DiagnosticId::Browser,
                 severity: Some(DiagnosticSeverity::Passing),
                 check_detail: Some(starts_when_asked(CHROME)),
                 no_browser: Some(Some(words::no_browser(Some(CHROME)))),
@@ -980,7 +974,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::NotConnected,
                 detail: not_connected.clone(),
-                check: BROWSER_CHECK,
+                check: DiagnosticId::Browser,
                 severity: Some(DiagnosticSeverity::Warning),
                 check_detail: Some(words::STATUS_BROWSER_WAITING.into()),
                 no_browser: Some(Some(words::NO_BROWSER.into())),
@@ -993,7 +987,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::NotConnected,
                 detail: not_connected,
-                check: BROWSER_CHECK,
+                check: DiagnosticId::Browser,
                 severity: None,
                 check_detail: None,
                 no_browser: Some(Some(words::NO_BROWSER.into())),
@@ -1006,7 +1000,7 @@ fn the_band_and_the_status_checks_read_one_answer_for_each_situation() {
             Said {
                 readiness: Readiness::Ready,
                 detail: ready,
-                check: BROWSER_CHECK,
+                check: DiagnosticId::Browser,
                 severity: None,
                 check_detail: None,
                 no_browser: Some(None),
@@ -1868,10 +1862,13 @@ fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
     let look = facade.look();
     let browser = &look.connections().browsers[0];
     assert_eq!(find(&browser.family, SearchKind::Browser).id, browser.id);
+    // A search hit names a Status check by the id the snapshot carries for it.
+    let rules = check(&look, super::DiagnosticId::Authority);
     assert_eq!(
-        find(words::STATUS_RULES_LABEL, SearchKind::Diagnostic).id,
-        AUTHORITY_CHECK
+        serde_json::to_value(rules.id).unwrap(),
+        find(words::STATUS_RULES_LABEL, SearchKind::Diagnostic).id
     );
+    assert_eq!(rules.id.as_str(), "authority");
     let row = &look.harnesses()[0];
     let installation = find(&row.label, SearchKind::Installation);
     assert_eq!(

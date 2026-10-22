@@ -22,7 +22,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use ghostlight_relay::os;
@@ -43,6 +43,7 @@ use crate::language::setup::{
     AgentFact, AgentState, BrowserFact, BrowserForm, Platform, ProfileFact, SetupAction,
     SetupFacts, SetupView, STORE_LISTING_URL,
 };
+use crate::sync::lock;
 use crate::work::result::Status;
 
 /// The id given to a connected browser that is none of the supported families.
@@ -493,12 +494,6 @@ pub(super) fn agent_name(
         .map(|harness| harness.name.clone())
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 /// A computer the setup part is read from in tests: what it holds is set by the test, and it
 /// counts how often the report and the scan were read.
 #[cfg(test)]
@@ -506,7 +501,7 @@ pub(super) mod test_support {
     use std::io;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Mutex, PoisonError};
+    use std::sync::Mutex;
 
     use super::{
         BrowserIdentity, BrowserInstanceSummary, BrowserProfiles, NativeHostReport, SessionSummary,
@@ -517,6 +512,7 @@ pub(super) mod test_support {
     use crate::install::{HarnessState, HarnessSummary};
     use crate::intake::session::IntakeChannel;
     use crate::provenance::ConnectionDetails;
+    use crate::sync::lock;
 
     /// A fake computer. Every browser family of the browser table is known; none is installed
     /// until the test says.
@@ -542,20 +538,17 @@ pub(super) mod test_support {
     impl Computer {
         /// Make the browser with `id` found on this computer.
         pub fn install(&self, id: &'static str) {
-            self.found
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(id);
+            lock(&self.found).push(id);
         }
 
         /// Say what the profile scan finds from now on.
         pub fn find_profiles(&self, profiles: Vec<BrowserProfiles>) {
-            *self.profiles.lock().unwrap_or_else(PoisonError::into_inner) = profiles;
+            *lock(&self.profiles) = profiles;
         }
 
         /// Say that this computer's view is an app container's private one.
         pub fn run_inside_an_app_container(&self) {
-            *self.report.lock().unwrap_or_else(PoisonError::into_inner) = Some(NativeHostReport {
+            *lock(&self.report) = Some(NativeHostReport {
                 connector: PathBuf::new(),
                 browsers: Vec::new(),
                 private_view: Some(AppContainer {
@@ -581,20 +574,14 @@ pub(super) mod test_support {
 
         /// Every start the computer was asked for, in order. It started nothing.
         pub fn started(&self) -> Vec<Started> {
-            self.started
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone()
+            lock(&self.started).clone()
         }
     }
 
     impl SetupMachine for Computer {
         fn native_hosts(&self) -> Option<NativeHostReport> {
             self.reads.fetch_add(1, Ordering::SeqCst);
-            self.report
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone()
+            lock(&self.report).clone()
         }
 
         fn browsers(&self) -> Vec<BrowserIdentity> {
@@ -602,19 +589,14 @@ pub(super) mod test_support {
         }
 
         fn browser_executable(&self, browser_id: &str) -> Option<PathBuf> {
-            self.found
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+            lock(&self.found)
                 .contains(&browser_id)
                 .then(|| Self::executable_of(browser_id))
         }
 
         fn extension_profiles(&self) -> Vec<BrowserProfiles> {
             self.reads.fetch_add(1, Ordering::SeqCst);
-            self.profiles
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone()
+            lock(&self.profiles).clone()
         }
 
         fn session_ending(&self) -> bool {
@@ -622,7 +604,7 @@ pub(super) mod test_support {
         }
 
         fn start(&self, program: &Path, arguments: &[String]) -> io::Result<Option<u32>> {
-            let mut started = self.started.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut started = lock(&self.started);
             started.push(Started {
                 program: program.to_owned(),
                 arguments: arguments.to_vec(),

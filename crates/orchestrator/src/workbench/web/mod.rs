@@ -30,6 +30,7 @@ use ghostlight_relay::endpoint::fnv1a32;
 use zeroize::Zeroizing;
 
 use super::{Watching, WebFacts, WorkbenchEventSink, WorkbenchFacade};
+use crate::sync::lock;
 
 /// The lowest port a home's default can be.
 const PORT_BASE: u16 = 41_000;
@@ -263,11 +264,7 @@ impl WorkbenchServer {
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
         self.shared.events.close();
-        let thread = self
-            .thread
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        let thread = lock(&self.thread).take();
         if let Some(thread) = thread {
             // One connection to ourselves wakes the accept that waits.
             let _ = TcpStream::connect((Ipv4Addr::LOCALHOST, self.address.port));

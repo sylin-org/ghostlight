@@ -320,6 +320,10 @@ pub const BROWSER_CAPTIONS_LABEL: &str = "Action captions";
 pub const BROWSER_CAPTIONS_WORD: &str =
     "A caption at the bottom of the page names each action. They start off.";
 
+/// Why the window could not show, open or ask something: there is no window program to carry it
+/// out, or it went away before it answered.
+pub const PRESENTATION_UNAVAILABLE: &str = "native presentation is unavailable";
+
 /// What the page says once Quit has been accepted, until the service ends.
 pub const QUITTING: &str = "Ghostlight is quitting.";
 

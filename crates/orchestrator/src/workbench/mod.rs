@@ -48,6 +48,7 @@ use crate::install::{
 use crate::language::outcome::Observed;
 use crate::language::readiness;
 use crate::language::workbench::{self as words, ConnectionCounts};
+use crate::sync::lock;
 use crate::workspace::WorkspaceStore;
 
 const HISTORY_LIMIT: usize = 500;
@@ -963,7 +964,7 @@ impl WorkbenchFacade {
             if hits.finds(&[&diagnostic.label, &diagnostic.detail]) {
                 hits.push(SearchHit::new(
                     SearchKind::Diagnostic,
-                    &diagnostic.id,
+                    diagnostic.id.as_str(),
                     &diagnostic.label,
                     diagnostic.detail.clone(),
                     PageAddress::Status,
@@ -1489,7 +1490,7 @@ pub enum WorkbenchPresentationError {
     #[error("{0}")]
     ActFailed(String),
     /// There is no window program to carry the request out, or it went away before it answered.
-    #[error("native presentation is unavailable")]
+    #[error("{}", words::PRESENTATION_UNAVAILABLE)]
     Unavailable,
 }
 
@@ -1497,7 +1498,7 @@ pub enum WorkbenchPresentationError {
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum WorkbenchError {
     /// No native presentation adapter is currently attached.
-    #[error("native presentation is unavailable")]
+    #[error("{}", words::PRESENTATION_UNAVAILABLE)]
     PresentationUnavailable,
     /// Native presentation rejected the request.
     #[error(transparent)]
@@ -1843,7 +1844,7 @@ impl From<AuditRecord> for HistoryItem {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct DiagnosticItem {
     /// Stable diagnostic identity.
-    pub id: String,
+    pub id: DiagnosticId,
     /// Fixed label.
     pub label: String,
     /// Current severity.
@@ -1853,25 +1854,58 @@ pub struct DiagnosticItem {
 }
 
 impl DiagnosticItem {
-    fn passing(id: &str, label: &str, detail: &str) -> Self {
+    fn passing(id: DiagnosticId, label: &str, detail: &str) -> Self {
         Self::new(id, label, DiagnosticSeverity::Passing, detail)
     }
 
-    fn warning(id: &str, label: &str, detail: &str) -> Self {
+    fn warning(id: DiagnosticId, label: &str, detail: &str) -> Self {
         Self::new(id, label, DiagnosticSeverity::Warning, detail)
     }
 
-    fn failing(id: &str, label: &str, detail: &str) -> Self {
+    fn failing(id: DiagnosticId, label: &str, detail: &str) -> Self {
         Self::new(id, label, DiagnosticSeverity::Failing, detail)
     }
 
-    fn new(id: &str, label: &str, severity: DiagnosticSeverity, detail: &str) -> Self {
+    fn new(id: DiagnosticId, label: &str, severity: DiagnosticSeverity, detail: &str) -> Self {
         Self {
-            id: id.into(),
+            id,
             label: label.into(),
             severity,
             detail: detail.into(),
         }
+    }
+}
+
+/// The Status page's checks, by the id the page and a search hit carry. [`Self::as_str`] is the
+/// one spelling of each, so the snapshot and a search hit name a check the same way.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiagnosticId {
+    /// The service itself.
+    Service,
+    /// The browser connection, or how a browser starts when asked.
+    Browser,
+    /// The rules in force.
+    Authority,
+    /// The history's saving.
+    Audit,
+}
+
+impl DiagnosticId {
+    /// The id as it crosses to the page.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Browser => "browser",
+            Self::Authority => "authority",
+            Self::Audit => "audit",
+        }
+    }
+}
+
+impl Serialize for DiagnosticId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -2180,25 +2214,12 @@ fn holds_folded(field: &str, needle: &[u8]) -> bool {
         .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
-fn push_bounded(history: &mut VecDeque<HistoryItem>, item: HistoryItem) {
-    if history.len() == HISTORY_LIMIT {
-        history.pop_front();
-    }
-    history.push_back(item);
-}
-
 fn unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| {
             u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
         })
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(test)]

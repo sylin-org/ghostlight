@@ -130,7 +130,7 @@ C3c), then the rows below.
 | SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | todo |
 | SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | landed (this commit) |
 | SURF-8 | refactor(workbench): what a watcher may do is said once | - | SURF-8; test-01 | landed (this commit) |
-| SURF-10 | refactor(workbench): the small repeats go | - | SURF-10 | todo |
+| SURF-10 | refactor(workbench): the small repeats go | - | SURF-10; test-01 | landed (this commit) |
 | SURF-12 | refactor(workbench): watching, everywhere | - | SURF-12; the route path changes with the preview server | todo |
 | SURF-13 | refactor(window): the setup flow is one object and the click handler a table | - | SURF-13 | landed (this commit) |
 | SURF-14 | refactor(desktop): the contract's names match the service's | S7 | SURF-14 | landed (this commit) |

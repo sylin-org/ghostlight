@@ -1,11 +1,12 @@
 //! Bounded history groups reconstructed from safe receipts, with explicit missing evidence.
 
-use super::{push_bounded, AuditRecord, HistoryItem, VecDeque};
+use super::{AuditRecord, HistoryItem, VecDeque, HISTORY_LIMIT};
 use crate::governance::CapabilitySet;
 use crate::language::composition;
 use crate::language::composition::COMPOSITION_STEP_LIMIT;
 use crate::language::history::{CompositionKind, OutcomeClass};
 use crate::language::outcome::Observed;
+use crate::work::result::{Effect, Status};
 use serde::Serialize;
 
 /// What history can establish about one planned step.
@@ -73,9 +74,9 @@ pub(super) fn merge_stored(
             parent.tool = step.parent.tool().into();
             parent.capability = CapabilitySet::EMPTY.label();
             parent.requirements = CapabilitySet::EMPTY;
-            parent.status = "unknown".into();
+            parent.status = Status::Unknown.stored_name();
             parent.outcome = OutcomeClass::Unknown;
-            parent.effect = "unknown".into();
+            parent.effect = Effect::Unknown.stored_name();
             parent.allowed = true;
             parent.reason.clear();
             parent.policy_tier = None;
@@ -189,6 +190,14 @@ pub(super) fn operations(items: &[HistoryItem]) -> Vec<&HistoryItem> {
             }
         })
         .collect()
+}
+
+/// Keep `item` as the newest of `history`, evicting the oldest once [`HISTORY_LIMIT`] are held.
+fn push_bounded(history: &mut VecDeque<HistoryItem>, item: HistoryItem) {
+    if history.len() == HISTORY_LIMIT {
+        history.pop_front();
+    }
+    history.push_back(item);
 }
 
 #[cfg(test)]

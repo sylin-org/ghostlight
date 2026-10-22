@@ -5,8 +5,10 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+use crate::sync::lock;
 
 /// Searches a watcher may make per second.
 const SEARCHES_PER_SECOND: usize = 5;
@@ -106,12 +108,6 @@ impl Default for Limits {
             rescan: Mutex::new(None),
         }
     }
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Limits {

@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
+use std::sync::{Arc, Mutex, OnceLock, TryLockError};
 
 use super::parts::{
     self, ActivityPart, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, OrganizationView,
@@ -38,9 +38,9 @@ use super::parts::{
 };
 use super::setup::{self, SetupInputs, SetupMachine, ThisComputer};
 use super::{
-    BrowserInstanceSummary, DiagnosticItem, OperationPhase, OperationSummary, ReadinessSummary,
-    RuntimeSource, ServiceSummary, SessionSummary, WebFacts, WorkbenchChange, WorkbenchError,
-    WorkbenchProjection, WorkbenchTrayPort,
+    BrowserInstanceSummary, DiagnosticId, DiagnosticItem, OperationPhase, OperationSummary,
+    ReadinessSummary, RuntimeSource, ServiceSummary, SessionSummary, WebFacts, WorkbenchChange,
+    WorkbenchError, WorkbenchProjection, WorkbenchTrayPort,
 };
 use crate::browser::adapter::RuntimeControlState;
 use crate::browser::recovery::BrowserRecovery;
@@ -57,6 +57,7 @@ use crate::language::readiness;
 use crate::language::setup::{SetupAction, SetupView};
 use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::provenance::ConnectionDetails;
+use crate::sync::lock;
 use crate::workspace::WorkspaceStore;
 
 /// What one look at the service says, gathered once so every part built from it agrees.
@@ -121,7 +122,7 @@ impl Gathered {
     /// the history.
     pub fn checks(&self) -> Vec<DiagnosticItem> {
         let mut checks = vec![DiagnosticItem::passing(
-            "service",
+            DiagnosticId::Service,
             words::STATUS_SERVICE_LABEL,
             words::STATUS_SERVICE_RUNNING,
         )];
@@ -132,19 +133,19 @@ impl Gathered {
                 .map(|browser| browser.family.as_str())
                 .collect();
             DiagnosticItem::passing(
-                "browser",
+                DiagnosticId::Browser,
                 words::STATUS_BROWSER_LABEL,
                 &words::status_browser_connected(&names),
             )
         } else if let Some(browser) = &self.starts {
             DiagnosticItem::passing(
-                "browser",
+                DiagnosticId::Browser,
                 words::STATUS_BROWSER_LABEL,
                 &readiness::starts_when_asked(browser),
             )
         } else {
             DiagnosticItem::warning(
-                "browser",
+                DiagnosticId::Browser,
                 words::STATUS_BROWSER_LABEL,
                 words::STATUS_BROWSER_WAITING,
             )
@@ -154,19 +155,19 @@ impl Gathered {
         let authority = &self.authority;
         checks.push(if !authority.authority_valid {
             DiagnosticItem::failing(
-                "authority",
+                DiagnosticId::Authority,
                 words::STATUS_RULES_LABEL,
                 words::STATUS_RULES_INVALID,
             )
         } else if !authority.local_policy_valid {
             DiagnosticItem::warning(
-                "authority",
+                DiagnosticId::Authority,
                 words::STATUS_RULES_LABEL,
                 words::STATUS_RULES_EDIT_INVALID,
             )
         } else {
             DiagnosticItem::passing(
-                "authority",
+                DiagnosticId::Authority,
                 words::STATUS_RULES_LABEL,
                 &words::status_rules_in_force(
                     authority.local_policy_active,
@@ -177,9 +178,9 @@ impl Gathered {
         });
         let detail = self.audit_health.detail(self.audit_required);
         checks.push(if self.audit_health.quiet() {
-            DiagnosticItem::passing("audit", words::STATUS_HISTORY_LABEL, &detail)
+            DiagnosticItem::passing(DiagnosticId::Audit, words::STATUS_HISTORY_LABEL, &detail)
         } else {
-            DiagnosticItem::warning("audit", words::STATUS_HISTORY_LABEL, &detail)
+            DiagnosticItem::warning(DiagnosticId::Audit, words::STATUS_HISTORY_LABEL, &detail)
         });
         checks
     }
@@ -363,12 +364,6 @@ pub(super) struct Live {
     remembered: Mutex<Remembered>,
     tray: Mutex<Option<Arc<dyn WorkbenchTrayPort>>>,
     starts: Mutex<BrowserStarts>,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Live {

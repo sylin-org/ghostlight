@@ -12,13 +12,14 @@
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::json;
 
 use super::http::{EventWriter, Incoming, Response};
 use crate::language::workbench as words;
+use crate::sync::lock;
 use crate::workbench::context::WebContext;
 use crate::workbench::parts::{Audience, Projection};
 use crate::workbench::{Watching, WorkbenchEvent, WorkbenchEventSink};
@@ -84,12 +85,6 @@ pub struct EventHub {
     watching: Arc<Watching>,
     subscribers: Mutex<Vec<Subscriber>>,
     next_id: AtomicU64,
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl EventHub {
