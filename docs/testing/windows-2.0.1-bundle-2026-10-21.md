@@ -92,3 +92,22 @@ The other tab-strip checks hold: Chrome has one Ghostlight extension, and no old
 - Logs on that machine: `C:\Users\leo\ghostlight-doctor-before-2.0.1-1021.log`,
   `ghostlight-install-2.0.1-1021.log`, `ghostlight-doctor-2.0.1-1021.log`,
   `ghostlight-status-2.0.1-1021.log` and `ghostlight-query-end-session-2.0.1-1021.log`.
+
+## Addendum: the naming fix, candidate 8e185d67
+
+The finding above was fixed in `8e185d67`, which adds the Store build's `Claude-Data` folder to
+`AGENT_APP_FOLDERS`. Its candidate, release run 39715160480 (every job green), was checked the same
+day:
+
+| Step | Result |
+| --- | --- |
+| The bundle | Downloaded with the owner's approval to `C:\Users\leo\Downloads\release-candidate-2.0.1-8e185d67`. `check-release-candidate.ps1`: `Release candidate verified: version 2.0.1, source 8e185d67dceb98257afa85e69b046ee7937898cb, 19 artifacts.` |
+| The upgrade | get.ps1 at `8e185d67` with `GHOSTLIGHT_FROM`, over the `064d5e17` candidate: `Checksums verified.`, `Ghostlight 2.0.1 is installed.`, the four agents, exit 0. |
+| The images | `ghostlight-service.exe` (`9b01dcf5...`) and `ghostlight-desktop.exe` (`abfcf310...`) equal the bundle. The edge stayed the `064d5e17` one (`8f0531dd...`): same version and relay revision, kept by design. `install.json`: 2.0.1, relay 5, channel release. |
+| Status | `Ghostlight is running; 3 agents and 1 browser connected.` |
+| The call | `ghostlight call browser_navigate` the desk, new tab, from the Claude Code session's shell: `Opened sylin.org.` |
+| The tab strip | The new tab is in the group `U+1F47B Claude Code`. The two desk tabs of the earlier session are ungrouped now: its service ended at the upgrade and released them. |
+
+The session of this Claude Code, which runs from
+`%LOCALAPPDATA%\Claude-Data\claude_pzs8sxrjxfjjc\claude-code\2.1.304\...`, is now named Claude Code.
+Log: `C:\Users\leo\ghostlight-install-2.0.1-8e185d67.log`.
