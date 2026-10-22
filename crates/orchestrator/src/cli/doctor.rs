@@ -23,7 +23,7 @@ use crate::install::record::{Channel, InstallRecord};
 use crate::install::version_directories;
 use crate::language::agent_icon;
 use crate::language::deployment as deployment_words;
-use crate::language::workbench as words;
+use crate::language::workbench as workbench_words;
 
 /// How many of the first [`DoctorObservation`] binaries every command needs: the service and the
 /// edge.
@@ -148,7 +148,10 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         deployment_words::doctor_heading(env!("CARGO_PKG_VERSION"))
     );
     println!("{}", deployment_words::home_line(&observation.home));
-    println!("{}", words::endpoint_line(&observation.runtime.endpoint));
+    println!(
+        "{}",
+        workbench_words::endpoint_line(&observation.runtime.endpoint)
+    );
     println!(
         "{}",
         deployment_words::installed_line(observation.installed.as_ref())
@@ -158,7 +161,7 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         .as_ref()
         .is_some_and(|record| record.channel == Channel::Development)
     {
-        println!("{}", words::DEVELOPMENT_CHANNEL_LINE);
+        println!("{}", workbench_words::DEVELOPMENT_CHANNEL_LINE);
     }
     if let Some(line) = observation.missing_development_executable() {
         println!("{line}");
@@ -230,12 +233,15 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     }
     render_runtime_status(&observation.runtime, false, observation.sibling_set_ready);
     for stray in &observation.strays {
-        println!("{}", words::stray_line(&stray.image.display().to_string()));
+        println!(
+            "{}",
+            workbench_words::stray_line(&stray.image.display().to_string())
+        );
     }
     for directory in &observation.version_directories {
         println!(
             "{}",
-            words::version_directory_line(&directory.display().to_string())
+            workbench_words::version_directory_line(&directory.display().to_string())
         );
     }
     let report = &observation.diagnostics;

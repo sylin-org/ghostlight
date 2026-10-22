@@ -5,16 +5,17 @@
 //! crosses the same relay listener, MCP session, executor, governance facade, and completion path
 //! a model's call does.
 
+pub mod caller;
 pub mod client;
 pub mod deployment;
-pub mod desktop;
 pub mod diagnostics;
 pub mod doctor;
 pub mod machine;
+pub mod open;
 pub mod parse;
-pub mod session;
-pub mod session_end;
+pub mod serve;
 pub mod setup;
+pub mod sign_out;
 pub mod start;
 pub mod status;
 
@@ -61,7 +62,7 @@ pub enum Command {
     Call {
         /// Exact catalog tool name.
         tool: String,
-        /// Opaque JSON input, validated by the orchestrator.
+        /// Opaque JSON input, validated by the service.
         input: String,
         /// How to render the result.
         rendering: Rendering,
@@ -132,7 +133,7 @@ pub fn parse(arguments: &[String]) -> Result<Command> {
 
 /// Run one command against the local service and return the process exit code.
 pub fn run(command: Command, out: &mut impl Write) -> i32 {
-    let mut client = match McpClient::connect(session::marker()) {
+    let mut client = match McpClient::connect(caller::marker()) {
         Ok(client) => client,
         Err(error) => return report_transport(&error),
     };
@@ -291,14 +292,14 @@ fn report_transport(error: &ClientError) -> i32 {
 pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
     match mode {
         parse::LaunchMode::DeploymentInstall(request) => deployment::run(&request),
-        parse::LaunchMode::Desktop | parse::LaunchMode::Open => desktop::open_desktop(),
-        parse::LaunchMode::Serve(start) => desktop::serve(start),
+        parse::LaunchMode::Desktop | parse::LaunchMode::Open => open::open_desktop(),
+        parse::LaunchMode::Serve(start) => serve::serve(start),
         parse::LaunchMode::Relay => anyhow::bail!(
             "mcp and a browser extension origin are run by the Ghostlight edge, not this program"
         ),
-        parse::LaunchMode::Call => desktop::run_call(),
+        parse::LaunchMode::Call => open::run_call(),
         parse::LaunchMode::Diagnostics(command) => diagnostics::run(&command),
-        parse::LaunchMode::Policy(command) => desktop::run_policy(&command),
+        parse::LaunchMode::Policy(command) => open::run_policy(&command),
         parse::LaunchMode::NativeHost(command) => setup::run_native_host(command),
         parse::LaunchMode::Install(options) => {
             setup::run_setup(setup::Direction::Install, &options)

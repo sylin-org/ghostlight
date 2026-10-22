@@ -8,7 +8,7 @@
 //! its own package first (ADR-0197 Decisions 10 and 13, ADR-0199 Decision 2 and the development
 //! channel amendment).
 
-use ghostlight_service::cli::session_end::listen_unless_serving;
+use ghostlight_service::cli::sign_out::listen_unless_serving;
 use ghostlight_service::cli::start::{start, ProcessLauncher, Start};
 use ghostlight_service::install::layout::Layout;
 

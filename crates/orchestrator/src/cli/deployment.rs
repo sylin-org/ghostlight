@@ -13,7 +13,7 @@ use crate::install::reconcile::ReconcileReport;
 use crate::install::version_directories;
 use crate::language::deployment::{self as words, Placed};
 use crate::language::environment;
-use crate::language::workbench as stray_words;
+use crate::language::workbench as workbench_words;
 
 /// Where a line of the report goes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -96,7 +96,7 @@ fn report(outcome: &InstallOutcome, layout: &Layout) -> Vec<Line> {
     lines.extend(service_line(outcome, layout));
     lines.extend(deletion_lines(outcome, layout));
     lines.extend(outcome.strays_left.iter().map(|stray| {
-        Line::problem(stray_words::stray_not_stopped_line(
+        Line::problem(workbench_words::stray_not_stopped_line(
             &stray.image.display().to_string(),
         ))
     }));

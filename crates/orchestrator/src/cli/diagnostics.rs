@@ -2,7 +2,7 @@
 //! diagnostics log, plus the two person-facing actuations (ADR-0145).
 //!
 //! Everything here reads local files or actuates the marker; nothing demand-starts the
-//! authority, following the doctor rule.
+//! service, following the doctor rule.
 
 use anyhow::bail;
 use ghostlight_bridge::diagnostics::{

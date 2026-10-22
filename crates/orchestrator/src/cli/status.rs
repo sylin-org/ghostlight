@@ -8,7 +8,7 @@ use ghostlight_relay::endpoint::Endpoint;
 use crate::install::layout::Layout;
 use crate::install::record::{Channel, InstallRecord};
 use crate::intake::listener::control::Status;
-use crate::language::workbench::{self as words, WindowReason};
+use crate::language::workbench::{self as workbench_words, WindowReason};
 
 /// What the local service looks like right now.
 #[derive(Clone, Debug)]
@@ -73,14 +73,14 @@ pub fn runtime_document(observation: &RuntimeObservation) -> serde_json::Value {
 #[must_use]
 pub fn runtime_lines(observation: &RuntimeObservation, idle_is_ready: bool) -> Vec<String> {
     let Some(status) = &observation.status else {
-        return vec![words::service_not_running_line(idle_is_ready)];
+        return vec![workbench_words::service_not_running_line(idle_is_ready)];
     };
     let mut lines = vec![match status.connections {
-        Some(_) => words::service_line(status.connections),
-        None => words::SERVICE_UP.to_owned(),
+        Some(_) => workbench_words::service_line(status.connections),
+        None => workbench_words::SERVICE_UP.to_owned(),
     }];
     if let Some(workbench) = &status.workbench {
-        lines.push(words::workbench_line(
+        lines.push(workbench_words::workbench_line(
             &workbench.url,
             workbench.watching,
             workbench.usual_port,
@@ -111,7 +111,7 @@ pub fn run_status(json: bool) -> anyhow::Result<()> {
             .ok()
             .and_then(|layout| InstallRecord::read(&layout.install_record()).ok().flatten());
         if installed.is_some_and(|record| record.channel == Channel::Development) {
-            println!("{}", words::DEVELOPMENT_CHANNEL_LINE);
+            println!("{}", workbench_words::DEVELOPMENT_CHANNEL_LINE);
         }
     }
     render_runtime_status(&observe_runtime()?, json, false);

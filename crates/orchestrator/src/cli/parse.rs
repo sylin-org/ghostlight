@@ -480,7 +480,7 @@ More: docs/guides/scripting.md",
         failed = EXIT_FAILED,
         cancelled = EXIT_CANCELLED,
         unknown = EXIT_UNKNOWN,
-        session = crate::cli::session::SESSION_VARIABLE,
+        session = crate::cli::caller::SESSION_VARIABLE,
     )
 }
 

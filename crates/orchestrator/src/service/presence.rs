@@ -422,7 +422,7 @@ impl System {
 
 /// Whether a window this process starts could be seen: on Windows when it runs on the interactive
 /// desktop, on Linux when its session names a display. The service asks it of itself through
-/// presence, and `ghostlight open` of the person's own session (`cli::desktop`).
+/// presence, and `ghostlight open` of the person's own session (`cli::open`).
 ///
 /// # Errors
 ///
@@ -452,7 +452,7 @@ pub fn display_here() -> Result<(), WindowReason> {
 /// Start the shell of the installation `layout` names, detached, in the calling process's
 /// session: with `tray` it shows only the icon, without it it opens its own window. The service
 /// starts it through presence, and `ghostlight open` starts it when the service reaches no
-/// display (`cli::desktop`).
+/// display (`cli::open`).
 ///
 /// # Errors
 ///

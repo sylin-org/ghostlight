@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use ghostlight_relay::protocol::{Control, QuitReason};
 
-use crate::cli::desktop::{self, Detached};
+use crate::cli::open::{self, Detached};
 use crate::cli::parse::{NativeHostCommand, SetupOptions};
 use crate::install::container::{AppContainer, Residence};
 use crate::install::deployment::{stop_found_strays, StrayStop, SystemProcessControl};
@@ -43,7 +43,7 @@ use crate::language::setup::{
     self as setup_words, BrowserFact, InstallAgent, InstallFacts, RunningAfterUninstall,
     UninstallFacts,
 };
-use crate::language::workbench as stray_words;
+use crate::language::workbench as workbench_words;
 use crate::service::lifetime::{END_LIMIT, QUIT_GRACE};
 use crate::service::lock::ServiceLock;
 
@@ -763,7 +763,7 @@ fn remove_version_directories(layout: &Layout, said: &mut Said) {
 fn stray_not_stopped_lines(stop: &StrayStop) -> Vec<String> {
     stop.stuck
         .iter()
-        .map(|stray| stray_words::stray_not_stopped_line(&stray.image.display().to_string()))
+        .map(|stray| workbench_words::stray_not_stopped_line(&stray.image.display().to_string()))
         .collect()
 }
 
@@ -881,7 +881,7 @@ fn should_show_window(
 /// setup view. A start that fails counts as not shown; the direction.installs() goes on and its exit code
 /// stays.
 fn show_window() -> bool {
-    desktop::open_with(&Detached).is_ok()
+    open::open_with(&Detached).is_ok()
 }
 
 /// The facts the direction.installs() summary is worded from, put together from what the run collected and
