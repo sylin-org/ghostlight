@@ -126,7 +126,7 @@ C3c), then the rows below.
 | U-D4 | fix(workbench): a runtime control that changes nothing a screen shows publishes nothing | - | found by tests-1's service pilot, 2026-10-21 (Notes, second sweep); check first; test-01 | landed (this commit) |
 | U-D5 | fix(workbench): a window with the bearer always finds room among the workbench's connections | - | found by test-01's tests-1 classification, 2026-10-21 (Notes, second sweep); test-01 took it first in `workbench/` | landed (9db6e896) |
 | U-D6 | fix(workbench): a refused HEAD request carries no body | - | the same classification; test-01 | landed (dc1c4fbf) |
-| SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1 | todo |
+| SURF-1 | refactor(workbench): search names pages by `PageAddress` | - | SURF-1; test-01 | landed (this commit) |
 | SURF-4 | refactor(window): the glyph map is keyed by the activity token | S5 | SURF-4; a deliberate visible change on some waiting rows | todo |
 | SURF-6 | refactor(window): the JS copies of the service's vocabularies are complete | - | SURF-6 | landed (this commit) |
 | SURF-8 | refactor(workbench): what a watcher may do is said once | - | SURF-8 | todo |

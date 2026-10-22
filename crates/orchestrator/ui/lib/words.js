@@ -350,11 +350,10 @@
   const DEFAULT_SECTION = "screen";
 
   /**
-   * Every address a tab, a rail entry or a typed hash can name, and no other.
+   * Every address a tab, a rail entry, a typed hash or a search hit can name, and no other.
    *
-   * Search destinations are not addresses: they are the service's words for what a hit is about,
-   * and SEARCH_ADDRESSES turns them into one. The setup view is the one address that is not a
-   * destination.
+   * The service's PageAddress (workbench `address.rs`) is the same list, and a search hit's `view`
+   * is one of them. The setup view is the one address that is not a destination.
    */
   const ADDRESSES = Object.freeze([
     "monitor", "integrations", "status", "policy", "settings", "settings/screen", "settings/sharing",
@@ -400,22 +399,6 @@
    * word latches, and every new action pushes the deadline back.
    */
   const WORKING_LATCH_MS = 10_000;
-
-  /**
-   * Where a search hit opens, keyed by the service's destination words (workbench
-   * SearchDestination): the address of the page, and of the Settings section, that shows what the
-   * hit found. Bare Settings keeps the section the person left it on.
-   */
-  const SEARCH_ADDRESSES = Object.freeze({
-    home: "monitor",
-    activity: "monitor",
-    history: "monitor",
-    checkup: "status",
-    configuration: "policy",
-    settings: "settings",
-    browser_work: "settings/browser-work",
-    install: "integrations"
-  });
 
   /** What each kind of search hit is, on the chip at its left, keyed by the service's words. */
   const HIT_KIND = Object.freeze({
@@ -1222,7 +1205,7 @@
     ]]
   ];
 
-  return Object.freeze({ FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, VIEWS, SEARCH_ADDRESSES, HIT_KIND, SEARCH_FOUND_NOTHING, searchAll,
+  return Object.freeze({ FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, VIEWS, HIT_KIND, SEARCH_FOUND_NOTHING, searchAll,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME, OUTCOME_WORD, PHASE, PHASE_WORD, RUNTIME, CHEVRON, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, POLICY_IN_WINDOW, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,

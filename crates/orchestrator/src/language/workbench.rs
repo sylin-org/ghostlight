@@ -578,11 +578,10 @@ pub fn never_touch_count(count: usize) -> String {
 }
 
 /// A page of the window as the search palette offers it: the tab's own name, and what a person
-/// finds there.
+/// finds there. The workbench's search pairs each with the page's address, which is also the
+/// hit's identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SearchPage {
-    /// The page's opaque search identity.
-    pub id: &'static str,
     /// The page's name, as its tab says it.
     pub title: &'static str,
     /// What the page shows, in a person's words.
@@ -591,35 +590,30 @@ pub struct SearchPage {
 
 /// At a glance, as the palette offers it.
 pub const SEARCH_GLANCE: SearchPage = SearchPage {
-    id: "monitor",
     title: "At a glance",
     detail: "Whether Ghostlight is ready, what is running, and what just happened",
 };
 
 /// Integrations, as the palette offers it.
 pub const SEARCH_INTEGRATIONS: SearchPage = SearchPage {
-    id: "integrations",
     title: "Integrations",
     detail: "The agents on this computer and whether they are connected",
 };
 
 /// Status, as the palette offers it.
 pub const SEARCH_STATUS: SearchPage = SearchPage {
-    id: "status",
     title: "Status",
     detail: "Whether Ghostlight, the browser, the rules and history are working",
 };
 
 /// Policy, as the palette offers it.
 pub const SEARCH_POLICY: SearchPage = SearchPage {
-    id: "policy",
     title: "Policy",
     detail: "The rules for what agents may do, and on which sites",
 };
 
 /// Settings, as the palette offers it.
 pub const SEARCH_SETTINGS: SearchPage = SearchPage {
-    id: "settings",
     title: "Settings",
     detail: "This screen, sharing, browser work, notifications and diagnostics",
 };

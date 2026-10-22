@@ -28,7 +28,7 @@
  */
 
 const {
-  SEARCH_ADDRESSES, POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, COPIED_SETUP, COPIED_COMMAND,
+  POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, COPIED_SETUP, COPIED_COMMAND,
   WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONNECTION_ID_COPIED, SETTINGS, DEFAULT_VIEW,
   SETUP_ADDRESS, SETUP, AGENTS, parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
@@ -924,7 +924,7 @@ function wire() {
     ["[data-copy-connection]", (node) => { copyConnectionId(node.dataset.copyConnection); }],
     // A hit goes where what it found is shown, and an action At a glance lists opens there.
     ["[data-search-view]", (node) => {
-      const where = parseAddress(SEARCH_ADDRESSES[node.dataset.searchView]) ?? parseAddress(DEFAULT_VIEW);
+      const where = parseAddress(node.dataset.searchView) ?? parseAddress(DEFAULT_VIEW);
       go(where.view, where.section ?? undefined);
       view.closePalette();
       view.showAction(node.dataset.searchId);

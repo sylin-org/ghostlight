@@ -1497,7 +1497,7 @@ const afterTab = where(controlling);
 // Settings, wherever Settings was left.
 controlling.clickOn("[data-settings-section]", { dataset: { settingsSection: "screen" } });
 controlling.clickOn("[data-view]", { dataset: { view: "about" } });
-controlling.clickOn("[data-search-view]", { dataset: { searchView: "browser_work", searchId: "runtime-control" } });
+controlling.clickOn("[data-search-view]", { dataset: { searchView: "settings/browser-work", searchId: "runtime-control" } });
 const afterBrowserWorkHit = where(controlling);
 
 // The rules: the tag the page read is the tag a write quotes, and a stale refusal keeps the draft.

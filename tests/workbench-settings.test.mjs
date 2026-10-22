@@ -472,13 +472,6 @@ test("the closed list of addresses names every destination, every section and th
   assert.deepEqual([...Words.ADDRESSES], [...derived, Words.SETUP_ADDRESS]);
   assert.deepEqual(Words.parseAddress("setup"), { view: "setup", section: null });
   assert.equal(new Set(Words.ADDRESSES).size, Words.ADDRESSES.length);
-  // A search destination is the service's word for a hit, never an address.
-  // Each opens an address: the page, and the section of Settings, that shows what the hit found.
-  for (const [destination, address] of Object.entries(Words.SEARCH_ADDRESSES)) {
-    if (!Object.keys(Words.VIEWS).includes(destination)) assert.equal(Words.parseAddress(destination), null, destination);
-    assert.notEqual(Words.parseAddress(address), null, address);
-  }
-  assert.deepEqual(Words.parseAddress(Words.SEARCH_ADDRESSES.browser_work), { view: "settings", section: "browser-work" });
 });
 
 test("an address reads with or without its hash, and anything else is not one", () => {
@@ -2991,8 +2984,8 @@ test("a search hit says what it found in words: its kind, its second line with t
   const shown = drawing();
   shown.view.searchResults([
     { kind: "history", id: "read-1", title: "navigate: Opened sylin.org.", detail: "Claude Code, Google Chrome",
-      timestamp_ms: Date.now() - 4 * 60_000, outcome: "refused", view: "history" },
-    { kind: "installation", id: "codex", title: "Codex", detail: "Connected", timestamp_ms: null, view: "install" }
+      timestamp_ms: Date.now() - 4 * 60_000, outcome: "refused", view: "monitor" },
+    { kind: "installation", id: "codex", title: "Codex", detail: "Connected", timestamp_ms: null, view: "integrations" }
   ]);
   const hits = drawn(shown.el("palette-results").innerHTML);
   assert.deepEqual(hits.wearing("hit-kind").map((node) => node.textContent), ["Action", "Agent"]);

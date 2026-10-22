@@ -876,16 +876,16 @@ impl WorkbenchFacade {
         let gathered = look.gathered();
         let mut hits = Hits::new(&query);
         for (page, view) in [
-            (&words::SEARCH_GLANCE, SearchDestination::Activity),
-            (&words::SEARCH_INTEGRATIONS, SearchDestination::Install),
-            (&words::SEARCH_STATUS, SearchDestination::Checkup),
-            (&words::SEARCH_POLICY, SearchDestination::Configuration),
-            (&words::SEARCH_SETTINGS, SearchDestination::Settings),
+            (&words::SEARCH_GLANCE, PageAddress::Monitor),
+            (&words::SEARCH_INTEGRATIONS, PageAddress::Integrations),
+            (&words::SEARCH_STATUS, PageAddress::Status),
+            (&words::SEARCH_POLICY, PageAddress::Policy),
+            (&words::SEARCH_SETTINGS, PageAddress::Settings),
         ] {
             if hits.finds(&[page.title, page.detail]) {
                 hits.push(SearchHit::new(
                     SearchKind::Destination,
-                    page.id,
+                    view.as_str(),
                     page.title,
                     page.detail.to_owned(),
                     view,
@@ -900,7 +900,7 @@ impl WorkbenchFacade {
                     &operation.invocation,
                     &words::tool_words(&operation.tool),
                     words::search_operation_detail(&operation.agent.name, phase),
-                    SearchDestination::Activity,
+                    PageAddress::Monitor,
                 ));
             }
         }
@@ -917,7 +917,7 @@ impl WorkbenchFacade {
                     &session.id,
                     &session.agent.name,
                     line,
-                    SearchDestination::Activity,
+                    PageAddress::Monitor,
                 ));
             }
         }
@@ -929,7 +929,7 @@ impl WorkbenchFacade {
                     &browser.id,
                     &browser.family,
                     detail,
-                    SearchDestination::Activity,
+                    PageAddress::Monitor,
                 ));
             }
         }
@@ -945,7 +945,7 @@ impl WorkbenchFacade {
                     &harness.id,
                     &harness.label,
                     word.to_owned(),
-                    SearchDestination::Install,
+                    PageAddress::Integrations,
                 ));
             }
         }
@@ -956,7 +956,7 @@ impl WorkbenchFacade {
                 RUNTIME_SETTING_ID,
                 words::CONTROLS_RUNTIME_LABEL,
                 runtime.to_owned(),
-                SearchDestination::BrowserWork,
+                PageAddress::SettingsBrowserWork,
             ));
         }
         for diagnostic in &gathered.checks() {
@@ -966,7 +966,7 @@ impl WorkbenchFacade {
                     &diagnostic.id,
                     &diagnostic.label,
                     diagnostic.detail.clone(),
-                    SearchDestination::Checkup,
+                    PageAddress::Status,
                 ));
             }
         }
@@ -991,7 +991,7 @@ impl WorkbenchFacade {
                         &item.invocation,
                         &words::search_action_title(&item.tool, &item.summary),
                         words::search_action_detail(&item.agent.name, browser),
-                        SearchDestination::History,
+                        PageAddress::Monitor,
                     )
                 });
             }
@@ -2079,18 +2079,12 @@ pub struct SearchHit {
     /// ([`words::search_outcome`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<crate::language::history::OutcomeClass>,
-    /// Workbench destination that owns this result.
-    pub view: SearchDestination,
+    /// The page, and the section of Settings, that shows what the hit found.
+    pub view: PageAddress,
 }
 
 impl SearchHit {
-    fn new(
-        kind: SearchKind,
-        id: &str,
-        title: &str,
-        detail: String,
-        view: SearchDestination,
-    ) -> Self {
+    fn new(kind: SearchKind, id: &str, title: &str, detail: String, view: PageAddress) -> Self {
         Self {
             kind,
             id: id.to_owned(),
@@ -2123,28 +2117,6 @@ pub enum SearchKind {
     Configuration,
     /// Supported development-harness registration.
     Installation,
-}
-
-/// Closed workbench destinations used by global search.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SearchDestination {
-    /// At-a-glance home.
-    Home,
-    /// Sessions, operations, and browser instances.
-    Activity,
-    /// Completed work.
-    History,
-    /// Local diagnostics.
-    Checkup,
-    /// The rules that apply here, on the Policy page.
-    Configuration,
-    /// Settings, as the person last left it.
-    Settings,
-    /// The browser-work section of Settings, which shows the runtime control.
-    BrowserWork,
-    /// Supported harness registrations.
-    Install,
 }
 
 /// The search identity of the browser-work setting.

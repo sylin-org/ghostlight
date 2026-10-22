@@ -1785,7 +1785,7 @@ fn a_history_of(records: &[AuditRecord]) -> WorkbenchFacade {
 /// credential refusal is Needs you, not Kept (2301b163 n-d-04, 3f27d340 V-05, 233e7569).
 #[test]
 fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
-    use super::{SearchDestination, SearchKind};
+    use super::{PageAddress, SearchKind};
     use crate::language::audit::AuditRefusal;
     use crate::language::history::OutcomeClass;
     use crate::language::workbench as words;
@@ -1826,15 +1826,19 @@ fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
             .unwrap_or_else(|| panic!("{query:?} finds a {kind:?}"))
     };
 
-    for page in [
-        words::SEARCH_GLANCE,
-        words::SEARCH_INTEGRATIONS,
-        words::SEARCH_STATUS,
-        words::SEARCH_POLICY,
-        words::SEARCH_SETTINGS,
+    // A page is found by its tab's name and opens at its own address, which names it.
+    for (page, address) in [
+        (words::SEARCH_GLANCE, PageAddress::Monitor),
+        (words::SEARCH_INTEGRATIONS, PageAddress::Integrations),
+        (words::SEARCH_STATUS, PageAddress::Status),
+        (words::SEARCH_POLICY, PageAddress::Policy),
+        (words::SEARCH_SETTINGS, PageAddress::Settings),
     ] {
         let hit = find(page.title, SearchKind::Destination);
-        assert_eq!((hit.id.as_str(), hit.title.as_str()), (page.id, page.title));
+        assert_eq!(
+            (hit.id.as_str(), hit.title.as_str(), hit.view),
+            (address.as_str(), page.title, address)
+        );
     }
     let session = find("some agent", SearchKind::Session);
     assert_eq!(session.detail, words::session_line(0, None, true, false));
@@ -1872,7 +1876,7 @@ fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
     let installation = find(&row.label, SearchKind::Installation);
     assert_eq!(
         (installation.id.as_str(), installation.view),
-        (row.id.as_str(), SearchDestination::Install)
+        (row.id.as_str(), PageAddress::Integrations)
     );
     let setting = find("browser work", SearchKind::Configuration);
     assert_eq!(setting.title, words::CONTROLS_RUNTIME_LABEL);
@@ -1881,8 +1885,11 @@ fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
         crate::language::control::state_word(crate::browser::adapter::RuntimeControlState::Active)
     );
     // The window opens the section that shows the setting, not Settings as it was left.
-    assert_eq!(setting.view, SearchDestination::BrowserWork);
-    assert_eq!(serde_json::to_value(setting.view).unwrap(), "browser_work");
+    assert_eq!(setting.view, PageAddress::SettingsBrowserWork);
+    assert_eq!(
+        serde_json::to_value(setting.view).unwrap(),
+        "settings/browser-work"
+    );
 
     let history = a_history_of(&[
         a_navigation_to("invocation_1", "example.com", 1_000),
@@ -1893,6 +1900,11 @@ fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
     let hit = &hits[0];
     assert_eq!(hit.kind, SearchKind::History);
     assert_eq!(hit.id, "invocation_2");
+    assert_eq!(
+        hit.view,
+        PageAddress::Monitor,
+        "At a glance lists the action"
+    );
     assert_eq!(
         hit.title,
         words::search_action_title("browser_navigate", "Opened sylin.org.")
