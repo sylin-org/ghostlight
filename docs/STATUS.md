@@ -250,6 +250,10 @@ Now:
   cut inside an emoji (a long tab title, a script's result) dropped the browser connection for
   every session; the extension now sends text well formed, and the service skips a frame it cannot
   decode.
+- The 2.0.1 extension (`aaa234b1...`, from candidate run 39669867246) was submitted to the Chrome Web
+  Store on 2026-10-22 through `scripts/publish-extension.ps1`, at the owner's go: uploaded, then
+  submitted for review as DEFAULT_PUBLISH, so it goes public when Google approves it. State:
+  PENDING_REVIEW; the store still serves 2.0.0. The release and `main` follow it.
 - The 2.0.1 candidate is release run 39715160480 on 8e185d67 (2026-10-22), every job green. Test
   machines upgraded and passed: Bluefin (588ddd95), Alpine (48ef55fd, 657495a3; the 2.0.0 extension's
   dialog stall needs a browser restart, now in the notes) and leo-desktop-02 (3ff45599, 55cb0756, with
