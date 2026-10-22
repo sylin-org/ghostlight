@@ -4283,7 +4283,7 @@ mod tests {
             let selected = crate::cli::setup::select_harnesses(
                 &registry.summaries(),
                 &crate::cli::parse::SetupOptions::default(),
-                false,
+                crate::cli::setup::Direction::Uninstall,
             )
             .unwrap();
             assert!(selected
@@ -4337,7 +4337,7 @@ mod tests {
             let selected = crate::cli::setup::select_harnesses(
                 &registry.summaries(),
                 &crate::cli::parse::SetupOptions::default(),
-                false,
+                crate::cli::setup::Direction::Uninstall,
             )
             .unwrap();
             assert!(selected.iter().any(|summary| summary.id == "claude-code"));

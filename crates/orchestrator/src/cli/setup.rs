@@ -4,10 +4,10 @@
 //! messaging host with Chromium browsers, updating MCP client configurations,
 //! and handling uninstallation.
 //!
-//! A real install says what the person needs and nothing about its mechanism: it prints the
+//! A real direction.installs() says what the person needs and nothing about its mechanism: it prints the
 //! summary [`crate::language::setup::install_lines`] composes, plus the lines that need a person
 //! (errors, registrations that need attention, what an app container kept private). The detail of
-//! what changed prints only with `--dry-run`. While setup is incomplete the install also shows the
+//! what changed prints only with `--dry-run`. While setup is incomplete the direction.installs() also shows the
 //! Ghostlight window, so the next step is in front of the person (ADR-0200 Decisions 10 to 12).
 //!
 //! A real uninstall reads the same way: it prints [`crate::language::setup::uninstall_lines`],
@@ -15,7 +15,7 @@
 //! `--dry-run` it lists what it would remove instead, the `Path` entry among it.
 //!
 //! Inside a Windows app container the registry and `AppData` writes reach only that app, so an
-//! install there leaves those registrations unwritten, says which, and names the one command that
+//! direction.installs() there leaves those registrations unwritten, says which, and names the one command that
 //! finishes them from a regular terminal (see `crate::install::container`).
 
 use std::path::PathBuf;
@@ -47,22 +47,22 @@ use crate::language::workbench as stray_words;
 use crate::service::lifetime::{END_LIMIT, QUIT_GRACE};
 use crate::service::lock::ServiceLock;
 
-/// Registrations an install left unwritten because the app container it ran in keeps them private.
+/// Registrations an direction.installs() left unwritten because the app container it ran in keeps them private.
 #[derive(Default)]
 struct KeptPrivate {
     container: Option<AppContainer>,
     registrations: Vec<String>,
 }
 
-/// What a real install or uninstall learned that its closing summary needs.
+/// What a real direction.installs() or uninstall learned that its closing summary needs.
 #[derive(Default)]
 struct Collected {
     /// Whether the user `Path` was written, so a terminal that is already open lacks it.
     path_written: bool,
-    /// The `ghostlight` command's full path, when its directory is not on the `PATH` the install
+    /// The `ghostlight` command's full path, when its directory is not on the `PATH` the direction.installs()
     /// ran with.
     command_off_path: Option<PathBuf>,
-    /// The agents on this computer as the install left them.
+    /// The agents on this computer as the direction.installs() left them.
     agents: Vec<InstallAgent>,
     /// The command an agent starts to run Ghostlight's MCP server.
     mcp_command: String,
@@ -74,27 +74,102 @@ struct Collected {
     command_removed: bool,
 }
 
+/// Which way a setup run goes: `install` or `uninstall`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Direction {
+    /// `ghostlight install` and `doctor --fix`.
+    Install,
+    /// `ghostlight uninstall`.
+    Uninstall,
+}
+
+impl Direction {
+    /// Whether the run installs.
+    const fn installs(self) -> bool {
+        matches!(self, Self::Install)
+    }
+}
+
+/// Where a line a setup run says goes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum To {
+    /// Standard output: what the run did or would do.
+    Output,
+    /// Standard error: something a person must look at.
+    Problem,
+}
+
+/// What a setup run says, in the order it says it. The steps collect their lines here and
+/// [`run_setup`] prints them when the run ends, however it ends, so a step that fails after
+/// earlier lines leaves them before its error. Before a wait the person would otherwise sit
+/// through in silence, the run prints what it has so far ([`Said::flush`]).
+#[derive(Debug, Default)]
+struct Said(Vec<(To, String)>);
+
+impl Said {
+    /// Say `text` on standard output.
+    fn line(&mut self, text: impl Into<String>) {
+        self.0.push((To::Output, text.into()));
+    }
+
+    /// Say each of `lines` on standard output.
+    fn lines(&mut self, lines: impl IntoIterator<Item = String>) {
+        for line in lines {
+            self.line(line);
+        }
+    }
+
+    /// Say `text` on standard error.
+    fn problem(&mut self, text: impl Into<String>) {
+        self.0.push((To::Problem, text.into()));
+    }
+
+    /// Print what was said so far, in order, and keep collecting.
+    fn flush(&mut self) {
+        for (to, text) in self.0.drain(..) {
+            match to {
+                To::Output => println!("{text}"),
+                To::Problem => eprintln!("{text}"),
+            }
+        }
+    }
+}
+
 /// Run installation or uninstallation across detected browsers and MCP clients.
 ///
-/// An install that wrote its registrations also removes the 1.x version directories from `bin`,
+/// An direction.installs() that wrote its registrations also removes the 1.x version directories from `bin`,
 /// with the programs running from them already stopped. A whole uninstall ends the running
 /// Ghostlight, and a real uninstall then prints its summary.
-pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
-    let collected = run_setup_steps(install, options)?;
+pub fn run_setup(direction: Direction, options: &SetupOptions) -> anyhow::Result<()> {
+    let mut said = Said::default();
+    let result = run_setup_in(direction, options, &mut said);
+    said.flush();
+    result
+}
+
+/// [`run_setup`], saying what it does into `said`.
+fn run_setup_in(
+    direction: Direction,
+    options: &SetupOptions,
+    said: &mut Said,
+) -> anyhow::Result<()> {
+    let collected = run_setup_steps(direction, options, said)?;
     let layout = Layout::current()?;
-    if install {
+    if direction.installs() {
         if !options.dry_run {
-            remove_version_directories(&layout);
+            remove_version_directories(&layout, said);
         }
         return Ok(());
     }
     let whole = stops_running(options);
     if options.dry_run {
         if whole && !ServiceLock::is_free(&layout.service_lock()) {
-            println!("{}", deployment_words::RUNNING_WOULD_STOP);
+            said.line(deployment_words::RUNNING_WOULD_STOP);
         }
         return Ok(());
     }
+    // The quit may take a while: what the steps said is in front of the person first.
+    said.flush();
     let running = if whole {
         stop_running_for_uninstall(&layout)
     } else if ServiceLock::is_free(&layout.service_lock()) {
@@ -110,9 +185,7 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         running,
         home: layout.home().display().to_string(),
     };
-    for line in setup_words::uninstall_lines(&facts) {
-        println!("{line}");
-    }
+    said.lines(setup_words::uninstall_lines(&facts));
     Ok(())
 }
 
@@ -165,15 +238,19 @@ fn stop_running_for_uninstall(layout: &Layout) -> RunningAfterUninstall {
 }
 
 /// The registration steps of [`run_setup`], returning what the closing summary needs.
-fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Collected> {
+fn run_setup_steps(
+    direction: Direction,
+    options: &SetupOptions,
+    said: &mut Said,
+) -> anyhow::Result<Collected> {
     use crate::install::command_path::{CommandPath, CommandPathState, PATH_ENTRY_REGISTRATION};
     use crate::install::desktop_entry::{DesktopIntegration, DesktopIntegrationState};
     use crate::install::native_host::NativeHostRegistry;
     use crate::install::user_assets::{UserAssetState, UserAssets};
 
     ghostlight_relay::home::home()?;
-    // A real install says only what the summary says, and what needs a person.
-    let real_install = install && !options.dry_run;
+    // A real direction.installs() says only what the summary says, and what needs a person.
+    let real_install = direction.installs() && !options.dry_run;
     let native_hosts = NativeHostRegistry::discover();
     let mut kept_private = KeptPrivate::default();
     let mut collected = Collected::default();
@@ -184,30 +261,27 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
     // Every browser and client the person named is checked before anything stops, changes or
     // prints, so a mistyped id is refused at no cost. Both looks only read.
     let initial_browser_report = native_hosts.check()?;
-    let install_browser_ids = if install {
+    let install_browser_ids = if direction.installs() {
         select_install_browsers(&initial_browser_report, options)?
     } else {
         None
     };
     if !options.harness_ids.is_empty() && !options.no_clients {
         let harnesses = harnesses.get_or_insert_with(HarnessRegistry::discover);
-        select_harnesses(&harnesses.summaries(), options, install)?;
+        select_harnesses(&harnesses.summaries(), options, direction)?;
     }
     if real_install {
-        stop_older_installation_programs()?;
+        stop_older_installation_programs(said)?;
     }
     if options.dry_run {
-        println!(
-            "Ghostlight {} dry run -- no machine state will change.",
-            if install { "install" } else { "uninstall" }
-        );
-        print_native_host_report(&initial_browser_report);
-        if !install {
+        said.line(deployment_words::dry_run_started(direction.installs()));
+        said.lines(native_host_report_lines(&initial_browser_report));
+        if !direction.installs() {
             for name in would_remove_browsers(&initial_browser_report, &options.browser_ids) {
-                println!("{}", deployment_words::browser_would_remove(&name));
+                said.line(deployment_words::browser_would_remove(&name));
             }
         }
-    } else if install {
+    } else if direction.installs() {
         let result = match &install_browser_ids {
             None => native_hosts.install()?,
             Some(browser_ids) => native_hosts.install_selected(browser_ids)?,
@@ -225,13 +299,11 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
                     || not_checkable(&result.report, browser))
                 && (browser.package.native_messaging_usable() || options.all_browsers)
         });
-        for line in browser_attention_lines(
+        said.lines(browser_attention_lines(
             &result.report,
             install_browser_ids.as_deref(),
             install_usable,
-        ) {
-            println!("{line}");
-        }
+        ));
     } else {
         let result = if options.browser_ids.is_empty() {
             native_hosts.uninstall()?
@@ -241,7 +313,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
         collected.removed_browsers = removed_browsers(&initial_browser_report, &result.report);
         for browser in &result.report.browsers {
             if browser.state == NativeHostState::NeedsAttention {
-                println!("{}", deployment_words::browser_line(browser));
+                said.line(deployment_words::browser_line(browser));
             }
         }
     }
@@ -249,22 +321,22 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
     let command_path = CommandPath::discover();
     if options.dry_run {
         match command_path.removable()? {
-            Some(entry) if !install => {
-                println!("{}", deployment_words::command_entry_would_remove(&entry));
+            Some(entry) if !direction.installs() => {
+                said.line(deployment_words::command_entry_would_remove(&entry));
             }
-            _ => print_command_path_report(&command_path.check()?),
+            _ => said.line(deployment_words::command_line(&command_path.check()?)),
         }
     } else {
-        let result = if install {
+        let result = if direction.installs() {
             command_path.install()?
         } else {
             command_path.uninstall()?
         };
         let state = result.report.state;
         if state == CommandPathState::NeedsAttention {
-            print_command_path_report(&result.report);
+            said.line(deployment_words::command_line(&result.report));
         }
-        if install && state == CommandPathState::PrivateView {
+        if direction.installs() && state == CommandPathState::PrivateView {
             if kept_private.container.is_none() {
                 kept_private.container = Residence::detect().container().cloned();
             }
@@ -274,72 +346,91 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
         }
         collected.path_written = result.needs_new_terminal;
         collected.command_off_path = result.off_path.clone();
-        collected.command_removed = !install && result.changed;
+        collected.command_removed = !direction.installs() && result.changed;
     }
 
     let user_assets = UserAssets::discover();
     if !options.dry_run {
-        let result = if install {
+        let result = if direction.installs() {
             user_assets.install()?
         } else {
             user_assets.uninstall()?
         };
         let state = result.report.state;
         if state == UserAssetState::NeedsAttention {
-            println!(
-                "{}",
-                deployment_words::documentation_line(state, &result.report.detail)
-            );
+            said.line(deployment_words::documentation_line(
+                state,
+                &result.report.detail,
+            ));
         }
     }
 
     let desktop = DesktopIntegration::discover();
     if options.dry_run {
-        print_desktop_integration_report(&desktop.check()?);
+        said.lines(desktop_integration_lines(&desktop.check()?));
     } else {
-        let result = if install {
+        let result = if direction.installs() {
             desktop.install()?
         } else {
             desktop.uninstall()?
         };
         if result.report.state == DesktopIntegrationState::NeedsAttention {
-            print_desktop_integration_report(&result.report);
+            said.lines(desktop_integration_lines(&result.report));
         }
     }
 
-    if install {
-        reconcile_windows_entries(options, &mut kept_private)?;
+    if direction.installs() {
+        reconcile_windows_entries(options, &mut kept_private, said)?;
     } else {
-        remove_windows_entries(options)?;
+        remove_windows_entries(options, said)?;
     }
 
     if real_install && !install_usable {
-        return conclude(install, options, install_usable, &kept_private, &collected)
-            .map(|()| collected);
+        return conclude(
+            direction,
+            options,
+            install_usable,
+            &kept_private,
+            &collected,
+            said,
+        )
+        .map(|()| collected);
     }
 
     if options.no_clients && !real_install {
         if options.dry_run {
-            println!("MCP client configuration was left unchanged.");
+            said.line(deployment_words::CLIENTS_LEFT_UNCHANGED);
         }
-        return conclude(install, options, install_usable, &kept_private, &collected)
-            .map(|()| collected);
+        return conclude(
+            direction,
+            options,
+            install_usable,
+            &kept_private,
+            &collected,
+            said,
+        )
+        .map(|()| collected);
     }
 
     let harnesses = harnesses.unwrap_or_else(HarnessRegistry::discover);
     let failures = run_client_steps(
         &harnesses,
-        install,
+        direction,
         options,
         &mut kept_private,
         &mut collected,
+        said,
     )?;
-    conclude(install, options, install_usable, &kept_private, &collected)?;
+    conclude(
+        direction,
+        options,
+        install_usable,
+        &kept_private,
+        &collected,
+        said,
+    )?;
     if !failures.is_empty() {
-        anyhow::bail!(
-            "Ghostlight could not update {} MCP client integration(s)",
-            failures.len()
-        );
+        anyhow::bail!("{}", deployment_words::clients_not_updated(failures.len()));
     }
     Ok(collected)
 }
@@ -349,16 +440,17 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
 /// again. With `--dry-run` each step says what it would do instead.
 fn run_client_steps(
     harnesses: &HarnessRegistry,
-    install: bool,
+    direction: Direction,
     options: &SetupOptions,
     kept_private: &mut KeptPrivate,
     collected: &mut Collected,
+    said: &mut Said,
 ) -> anyhow::Result<Vec<String>> {
-    let real_install = install && !options.dry_run;
+    let real_install = direction.installs() && !options.dry_run;
     if real_install && !options.no_clients {
         harnesses.remove_stray_temporaries();
     }
-    // A real install reads the roster even with `--no-clients`, so the summary can name the
+    // A real direction.installs() reads the roster even with `--no-clients`, so the summary can name the
     // agents that are here.
     let summaries = harnesses.summaries();
     collected.mcp_command = summaries
@@ -372,25 +464,25 @@ fn run_client_steps(
             .iter()
             .filter(|summary| summary.state == HarnessState::NeedsAttention)
             .inspect(|summary| {
-                eprintln!(
-                    "MCP client needs attention: {} -- {}",
-                    summary.label, summary.detail
-                );
+                said.problem(deployment_words::client_needs_attention(
+                    &summary.label,
+                    &summary.detail,
+                ));
             })
             .count()
     };
     let selected = if options.no_clients {
         Vec::new()
     } else {
-        select_harnesses(&summaries, options, install)?
+        select_harnesses(&summaries, options, direction)?
     };
     if selected.is_empty() {
         if options.dry_run {
-            if attention_count == 0 {
-                println!("No MCP client configuration needs to change.");
+            said.line(if attention_count == 0 {
+                deployment_words::NO_CLIENT_CHANGE
             } else {
-                println!("No MCP client configuration can be changed automatically.");
-            }
+                deployment_words::NO_CLIENT_CHANGEABLE
+            });
         }
         collected.agents = install_agents(&summaries, &[]);
         return Ok(Vec::new());
@@ -399,7 +491,7 @@ fn run_client_steps(
     let mut applied = Vec::new();
     let container = Residence::detect().container().cloned();
     for summary in selected {
-        let action = match client_step(&summary, install, options.dry_run, container.as_ref()) {
+        let action = match client_step(&summary, direction, options.dry_run, container.as_ref()) {
             ClientStep::Apply(action) => action,
             ClientStep::LeavePrivate => {
                 if kept_private.container.is_none() {
@@ -407,23 +499,26 @@ fn run_client_steps(
                 }
                 kept_private
                     .registrations
-                    .push(format!("{} MCP client", summary.label));
+                    .push(deployment_words::mcp_client_name(&summary.label));
                 continue;
             }
             ClientStep::Say(line) => {
-                println!("{line}");
+                said.line(line);
                 continue;
             }
         };
         match harnesses.apply(&summary.id, action) {
             Ok(result) => {
-                if !install && result.changed {
+                if !direction.installs() && result.changed {
                     collected.removed_agents.push(result.summary.label.clone());
                 }
                 applied.push(result);
             }
             Err(error) => {
-                eprintln!("{}: {error}", summary.label);
+                said.problem(deployment_words::client_change_failed(
+                    &summary.label,
+                    &error,
+                ));
                 failures.push(summary.label);
             }
         }
@@ -465,7 +560,7 @@ fn removed_browsers(before: &NativeHostReport, after: &NativeHostReport) -> Vec<
         .collect()
 }
 
-/// The agents on this computer as an install left them: each one detected or just configured,
+/// The agents on this computer as an direction.installs() left them: each one detected or just configured,
 /// whether it now has Ghostlight's entry, and whether this run wrote or changed that entry.
 fn install_agents(
     summaries: &[HarnessSummary],
@@ -489,8 +584,8 @@ fn install_agents(
 
 /// The lines about browsers that a person has to read after a real install: a registration that
 /// needs attention or belongs to another installation, and, when no browser ended up usable, every
-/// browser the install chose, so the reason is in front of them. Inside an app container the
-/// report is that app's own view: a registration the install could not judge there is named as
+/// browser the direction.installs() chose, so the reason is in front of them. Inside an app container the
+/// report is that app's own view: a registration the direction.installs() could not judge there is named as
 /// one that cannot be checked from here, and the closing lines name what it kept private.
 fn browser_attention_lines(
     report: &NativeHostReport,
@@ -523,32 +618,29 @@ fn browser_attention_lines(
 /// `--dry-run`, say each one that would change. Inside an app container they would
 /// land in that app's private view, so each out-of-date one is added to `kept_private` instead.
 ///
-/// The version is the installed one from `bin/install.json`, or the running service's when no
-/// record exists. A failure is reported and does not stop the rest of the install, as in a deploy.
+/// The version is the installed one from `bin/direction.installs().json`, or the running service's when no
+/// record exists. A failure is reported and does not stop the rest of the direction.installs(), as in a deploy.
 fn reconcile_windows_entries(
     options: &SetupOptions,
     kept_private: &mut KeptPrivate,
+    said: &mut Said,
 ) -> anyhow::Result<()> {
     let layout = Layout::current()?;
     let version = installed_version(&layout);
     let registrations = Registrations::discover();
     if options.dry_run {
         match registrations.pending_windows_entries(&layout, &version) {
-            Ok(pending) => {
-                for line in pending_entry_lines(&pending, &layout) {
-                    println!("{line}");
-                }
-            }
-            Err(error) => eprintln!(
-                "{}",
-                deployment_words::registration_failed(&windows_entries_failure(&error))
-            ),
+            Ok(pending) => said.lines(pending_entry_lines(&pending, &layout)),
+            Err(error) => said.problem(deployment_words::registration_failed(
+                &windows_entries_failure(&error),
+            )),
         }
         return Ok(());
     }
     carry_windows_report(
         registrations.reconcile_windows_entries(&layout, &version),
         kept_private,
+        said,
     );
     Ok(())
 }
@@ -576,9 +668,9 @@ fn pending_entry_lines(pending: &PendingWindowsEntries, layout: &Layout) -> Vec<
 /// Say what failed in a reconcile of the Windows entries, and carry the registrations it left to
 /// an app container into `kept_private` for the closing lines. What it wrote is mechanism and is
 /// not said.
-fn carry_windows_report(report: ReconcileReport, kept_private: &mut KeptPrivate) {
+fn carry_windows_report(report: ReconcileReport, kept_private: &mut KeptPrivate, said: &mut Said) {
     for failure in &report.failures {
-        eprintln!("{}", deployment_words::registration_failed(failure));
+        said.problem(deployment_words::registration_failed(failure));
     }
     if !report.kept_private.is_empty() {
         if kept_private.container.is_none() {
@@ -595,7 +687,7 @@ fn carry_windows_report(report: ReconcileReport, kept_private: &mut KeptPrivate)
 /// Inside an app container a real `uninstall` has already been refused by the browser connection
 /// step, which comes first. A `--dry-run` uninstall does reach this, and prints nothing for the
 /// Windows entries because no removal is planned inside a container.
-fn remove_windows_entries(options: &SetupOptions) -> anyhow::Result<()> {
+fn remove_windows_entries(options: &SetupOptions, said: &mut Said) -> anyhow::Result<()> {
     let layout = Layout::current()?;
     let registrations = Registrations::discover();
     let removal = if options.dry_run {
@@ -603,11 +695,9 @@ fn remove_windows_entries(options: &SetupOptions) -> anyhow::Result<()> {
     } else {
         registrations.remove_windows_entries(&layout)
     };
-    for line in removal_lines(&removal, options.dry_run) {
-        println!("{line}");
-    }
+    said.lines(removal_lines(&removal, options.dry_run));
     for failure in &removal.failures {
-        eprintln!("{}", deployment_words::removal_failed(failure));
+        said.problem(deployment_words::removal_failed(failure));
     }
     Ok(())
 }
@@ -628,7 +718,7 @@ fn removal_lines(removal: &WindowsRemoval, dry_run: bool) -> Vec<String> {
         .collect()
 }
 
-/// The version the Windows entries record: the installed service's, from the install record, or
+/// The version the Windows entries record: the installed service's, from the direction.installs() record, or
 /// this running service's when `bin` holds no record.
 fn installed_version(layout: &Layout) -> String {
     InstallRecord::read(&layout.install_record())
@@ -640,35 +730,32 @@ fn installed_version(layout: &Layout) -> String {
         )
 }
 
-/// Stop what an older Ghostlight installation left running, so one install leaves nothing behind
+/// Stop what an older Ghostlight installation left running, so one direction.installs() leaves nothing behind
 /// that `doctor` would name. The service that answers is spared unless it runs from the retired
-/// development directory or from a 1.x version directory, which an install removes, so that one
+/// development directory or from a 1.x version directory, which an direction.installs() removes, so that one
 /// is stopped too. A program that will not stop is said so, because the person has to close it,
-/// and does not fail the install.
-fn stop_older_installation_programs() -> anyhow::Result<()> {
+/// and does not fail the direction.installs().
+fn stop_older_installation_programs(said: &mut Said) -> anyhow::Result<()> {
     let layout = Layout::current()?;
     let service_pid = crate::cli::client::status_at(layout.home())
         .ok()
         .map(|status| status.pid);
     let stop = stop_found_strays(&SystemProcessControl, &layout, service_pid);
-    for line in stray_not_stopped_lines(&stop) {
-        println!("{line}");
-    }
+    said.lines(stray_not_stopped_lines(&stop));
     Ok(())
 }
 
 /// Archive the audit log of each 1.x version directory in `layout`'s `bin` and remove the
 /// directory. A directory that cannot be removed is said so and does not fail the install: the
 /// next one tries again.
-fn remove_version_directories(layout: &Layout) {
+fn remove_version_directories(layout: &Layout, said: &mut Said) {
     let directories = version_directories::find(layout);
     let archives = version_directories::archives(layout, &directories);
     let retired = version_directories::retire(&directories, &archives);
     for directory in &retired.kept {
-        eprintln!(
-            "{}",
-            deployment_words::kept_entry(&directory.display().to_string())
-        );
+        said.problem(deployment_words::kept_entry(
+            &directory.display().to_string(),
+        ));
     }
 }
 
@@ -680,39 +767,40 @@ fn stray_not_stopped_lines(stop: &StrayStop) -> Vec<String> {
         .collect()
 }
 
-/// How the report names the browsers whose registry value an install left unwritten.
+/// How the report names the browsers whose registry value an direction.installs() left unwritten.
 fn private_browser_registrations(browsers: &[String]) -> Vec<String> {
     browsers
         .iter()
-        .map(|name| format!("{name} browser connection"))
+        .map(|name| deployment_words::browser_connection_name(name))
         .collect()
 }
 
 /// Finish the setup: when registrations were left unwritten because an app container keeps them
-/// private, name them and the command that finishes them; otherwise present the install summary.
+/// private, name them and the command that finishes them; otherwise present the direction.installs() summary.
 fn conclude(
-    install: bool,
+    direction: Direction,
     options: &SetupOptions,
     install_usable: bool,
     kept_private: &KeptPrivate,
     collected: &Collected,
+    said: &mut Said,
 ) -> anyhow::Result<()> {
     let container = match &kept_private.container {
         Some(container)
-            if install && !options.dry_run && !kept_private.registrations.is_empty() =>
+            if direction.installs()
+                && !options.dry_run
+                && !kept_private.registrations.is_empty() =>
         {
             container
         }
-        _ => return finish_setup(install, options, install_usable, collected),
+        _ => return finish_setup(direction, options, install_usable, collected, said),
     };
-    println!();
-    for line in deployment_words::kept_private_lines(
+    said.line("");
+    said.lines(deployment_words::kept_private_lines(
         container,
         &kept_private.registrations,
         &Layout::current()?,
-    ) {
-        println!("{line}");
-    }
+    ));
     Ok(())
 }
 
@@ -773,7 +861,7 @@ pub(crate) fn select_install_browsers(
     anyhow::bail!("{}", sandboxed.join(" "))
 }
 
-/// Whether an install shows the Ghostlight window: not for a dry run, not when the person said
+/// Whether an direction.installs() shows the Ghostlight window: not for a dry run, not when the person said
 /// `--no-open`, not in an automated run (`CI` is set), only when a browser registration is
 /// usable, not inside an app container (the window would be that app's), and only while setup is
 /// incomplete.
@@ -790,13 +878,13 @@ fn should_show_window(
 
 /// Show the Ghostlight window the way `ghostlight open` does: start the service when none
 /// answers, then ask it to show. While setup is incomplete the service opens the window at the
-/// setup view. A start that fails counts as not shown; the install goes on and its exit code
+/// setup view. A start that fails counts as not shown; the direction.installs() goes on and its exit code
 /// stays.
 fn show_window() -> bool {
     desktop::open_with(&Detached).is_ok()
 }
 
-/// The facts the install summary is worded from, put together from what the run collected and
+/// The facts the direction.installs() summary is worded from, put together from what the run collected and
 /// what the computer shows now. `scan_browsers` reads the browsers and their profiles. It runs
 /// only while setup is incomplete: a complete setup's summary names no browser step, and
 /// docs/trust/data-flows.md says the profiles are read only then.
@@ -827,21 +915,24 @@ fn install_facts(
 
 /// Finish an install: show the window while setup is incomplete, then print the summary.
 fn finish_setup(
-    install: bool,
+    direction: Direction,
     options: &SetupOptions,
     install_usable: bool,
     collected: &Collected,
+    said: &mut Said,
 ) -> anyhow::Result<()> {
-    if !install || options.dry_run {
+    if !direction.installs() || options.dry_run {
         return Ok(());
     }
     if !install_usable {
-        anyhow::bail!("Ghostlight could not establish a usable browser registration");
+        anyhow::bail!("{}", deployment_words::NO_USABLE_BROWSER);
     }
     let layout = Layout::current()?;
     let setup_complete = setup_state::is_complete(&layout.setup_record());
     let automated = std::env::var_os("CI").is_some();
     let in_container = Residence::detect().container().is_some();
+    // Opening the window may take a while: what the steps said is in front of the person first.
+    said.flush();
     let window_shown = should_show_window(
         options.dry_run,
         options.no_open,
@@ -858,9 +949,7 @@ fn finish_setup(
         setup_complete,
         window_shown,
     );
-    for line in setup_words::install_lines(&facts) {
-        println!("{line}");
-    }
+    said.lines(setup_words::install_lines(&facts));
     Ok(())
 }
 
@@ -869,7 +958,7 @@ fn finish_setup(
 enum ClientStep {
     /// Change the client's configuration.
     Apply(HarnessAction),
-    /// Leave the entry an install would write to the closing lines, which name the command that
+    /// Leave the entry an direction.installs() would write to the closing lines, which name the command that
     /// finishes it from a regular terminal.
     LeavePrivate,
     /// Change nothing and print this line.
@@ -877,30 +966,30 @@ enum ClientStep {
 }
 
 /// Decide what a run does with `summary`. Inside `container`, a client whose configuration it
-/// keeps private is never changed: a real install leaves it to the closing lines, and a dry run or
+/// keeps private is never changed: a real direction.installs() leaves it to the closing lines, and a dry run or
 /// a removal says that its entry is left and which command run elsewhere changes it. A dry run
 /// says what the real run would change, read from the same inspection the real run acts on: a
 /// removal names each other copy of the client's settings Uninstall would clean.
 fn client_step(
     summary: &HarnessSummary,
-    install: bool,
+    direction: Direction,
     dry_run: bool,
     container: Option<&AppContainer>,
 ) -> ClientStep {
     if summary.private_view {
-        if install && !dry_run {
+        if direction.installs() && !dry_run {
             return ClientStep::LeavePrivate;
         }
         if let Some(container) = container {
             return ClientStep::Say(deployment_words::client_left_private(
                 &summary.label,
                 &container.app,
-                install,
+                direction.installs(),
             ));
         }
     }
     if dry_run {
-        return ClientStep::Say(if install {
+        return ClientStep::Say(if direction.installs() {
             deployment_words::client_would_install(&summary.label, summary.state, summary.attention)
         } else {
             deployment_words::client_would_remove(
@@ -911,7 +1000,7 @@ fn client_step(
             )
         });
     }
-    ClientStep::Apply(if install {
+    ClientStep::Apply(if direction.installs() {
         HarnessAction::Install
     } else {
         HarnessAction::Uninstall
@@ -932,7 +1021,7 @@ fn client_step(
 pub fn select_harnesses(
     summaries: &[HarnessSummary],
     options: &SetupOptions,
-    install: bool,
+    direction: Direction,
 ) -> anyhow::Result<Vec<HarnessSummary>> {
     if !options.harness_ids.is_empty() {
         let mut selected: Vec<HarnessSummary> = Vec::new();
@@ -973,24 +1062,24 @@ pub fn select_harnesses(
     Ok(summaries
         .iter()
         .filter(|summary| {
-            if install {
-                (summary.can_install || left_private(summary, install))
+            if direction.installs() {
+                (summary.can_install || left_private(summary, direction))
                     && (options.all_clients || summary.state != HarnessState::NotDetected)
             } else {
-                summary.can_uninstall || left_private(summary, install)
+                summary.can_uninstall || left_private(summary, direction)
             }
         })
         .cloned()
         .collect())
 }
 
-/// Whether an install would write `summary`'s entry, or a removal would remove it, but the run
+/// Whether an direction.installs() would write `summary`'s entry, or a removal would remove it, but the run
 /// leaves it to a regular terminal, because the app container this process runs in keeps the
 /// client's configuration private.
-fn left_private(summary: &crate::install::HarnessSummary, install: bool) -> bool {
+fn left_private(summary: &crate::install::HarnessSummary, direction: Direction) -> bool {
     summary.private_view
         && !summary.copy_only
-        && if install {
+        && if direction.installs() {
             summary.state.takes_install()
         } else {
             summary.has_entry_to_remove()
@@ -1005,7 +1094,7 @@ pub(crate) fn print_native_host_report(report: &NativeHostReport) {
 }
 
 /// The lines of the native host registration report: the program browsers start, then one line
-/// per browser. `doctor`, the install's dry run and `ghostlight native-host` all print these, so
+/// per browser. `doctor`, the direction.installs()'s dry run and `ghostlight native-host` all print these, so
 /// each state reads with one word wherever it is printed.
 pub(crate) fn native_host_report_lines(report: &NativeHostReport) -> Vec<String> {
     std::iter::once(deployment_words::program_line(&report.connector))
@@ -1026,7 +1115,7 @@ pub(crate) fn browser_report_lines(report: &NativeHostReport) -> Vec<String> {
         .collect()
 }
 
-/// Whether an install inside an app container left `browser` unjudged: the value in that app's
+/// Whether an direction.installs() inside an app container left `browser` unjudged: the value in that app's
 /// own view of the registry is not one Ghostlight can read as its own, which says nothing about
 /// the value the browser reads, so the row is neither a failure nor a registration kept private.
 fn not_checkable(report: &NativeHostReport, browser: &BrowserRegistration) -> bool {
@@ -1036,6 +1125,17 @@ fn not_checkable(report: &NativeHostReport, browser: &BrowserRegistration) -> bo
 /// Print the command path link status report to stdout.
 pub(crate) fn print_command_path_report(report: &crate::install::command_path::CommandPathReport) {
     println!("{}", deployment_words::command_line(report));
+}
+
+/// The desktop applications entry report's line, when the platform has an XDG application entry.
+pub(crate) fn desktop_integration_lines(
+    report: &crate::install::desktop_entry::DesktopIntegrationReport,
+) -> Vec<String> {
+    report
+        .desktop_entry
+        .iter()
+        .map(|entry| deployment_words::applications_line(report, entry))
+        .collect()
 }
 
 /// Print the desktop applications entry report to stdout.
@@ -1099,7 +1199,7 @@ mod tests {
 
     use super::{
         client_step, private_browser_registrations, select_harnesses, select_install_browsers,
-        stray_not_stopped_lines, ClientStep, Collected,
+        stray_not_stopped_lines, ClientStep, Collected, Direction, Said,
     };
     use crate::install::{HarnessAction, HarnessActionResult, HarnessState, HarnessSummary};
     use crate::language::setup::{BrowserFact, BrowserForm, InstallAgent};
@@ -1299,7 +1399,7 @@ mod tests {
             .unwrap();
             fs::write(bin.join("v1.3.7"), "a file").unwrap();
 
-            remove_version_directories(&layout);
+            remove_version_directories(&layout, &mut Said::default());
 
             assert!(!bin.join("v1.3.5").exists());
             assert!(!bin.join("v1.3.6").exists());
@@ -1311,7 +1411,7 @@ mod tests {
 "
             );
 
-            remove_version_directories(&layout);
+            remove_version_directories(&layout, &mut Said::default());
             assert!(bin.join("vnext").is_dir());
         }
         {
@@ -1423,10 +1523,18 @@ mod tests {
                     all_clients,
                     ..SetupOptions::default()
                 };
-                Ok(select_harnesses(summaries, &options, install)?
-                    .into_iter()
-                    .map(|summary| summary.id)
-                    .collect())
+                Ok(select_harnesses(
+                    summaries,
+                    &options,
+                    if install {
+                        Direction::Install
+                    } else {
+                        Direction::Uninstall
+                    },
+                )?
+                .into_iter()
+                .map(|summary| summary.id)
+                .collect())
             };
             // An agent id selects only the hosts of it that are found, so naming Cline writes no
             // file into an editor the person does not have.
@@ -1509,7 +1617,12 @@ mod tests {
             use crate::install::Attention;
 
             let plain = r"C:\Users\Pat\AppData\Roaming\Claude\claude_desktop_config.json";
-            let said = |summary: &HarnessSummary| match client_step(summary, false, true, None) {
+            let said = |summary: &HarnessSummary| match client_step(
+                summary,
+                Direction::Uninstall,
+                true,
+                None,
+            ) {
                 ClientStep::Say(line) => line,
                 other => panic!("a dry run changes nothing: {other:?}"),
             };
@@ -1583,7 +1696,7 @@ mod tests {
             };
             let mut kept = KeptPrivate::default();
             kept.registrations.push("PATH entry".to_owned());
-            carry_windows_report(ReconcileReport::default(), &mut kept);
+            carry_windows_report(ReconcileReport::default(), &mut kept, &mut Said::default());
             assert_eq!(kept.registrations, ["PATH entry"]);
             assert_eq!(kept.container, None);
 
@@ -1597,6 +1710,7 @@ mod tests {
                     ..ReconcileReport::default()
                 },
                 &mut kept,
+                &mut Said::default(),
             );
             assert_eq!(
                 kept.registrations,
@@ -1614,6 +1728,7 @@ mod tests {
                     ..ReconcileReport::default()
                 },
                 &mut kept,
+                &mut Said::default(),
             );
             assert_eq!(
                 kept.container.map(|container| container.app),
@@ -1674,7 +1789,7 @@ mod tests {
             };
             let options = SetupOptions::default();
             assert_eq!(
-                ids(select_harnesses(&summaries, &options, true).unwrap()),
+                ids(select_harnesses(&summaries, &options, Direction::Install).unwrap()),
                 ["cursor", "claude-desktop", "zed"]
             );
             let every = SetupOptions {
@@ -1682,13 +1797,13 @@ mod tests {
                 ..SetupOptions::default()
             };
             assert_eq!(
-                ids(select_harnesses(&summaries, &every, true).unwrap()),
+                ids(select_harnesses(&summaries, &every, Direction::Install).unwrap()),
                 ["cursor", "claude-desktop", "zed", "vscode"]
             );
             // A removal selects each private client that holds Ghostlight's entry, current or not, so
             // it can say so.
             assert_eq!(
-                ids(select_harnesses(&summaries, &options, false).unwrap()),
+                ids(select_harnesses(&summaries, &options, Direction::Uninstall).unwrap()),
                 ["zed", "windsurf"]
             );
         }
@@ -1702,7 +1817,8 @@ mod tests {
                 ..harness("claude-desktop", "Claude Desktop", HarnessState::Installed)
             };
             for dry_run in [false, true] {
-                let ClientStep::Say(line) = client_step(&desktop, false, dry_run, Some(&container))
+                let ClientStep::Say(line) =
+                    client_step(&desktop, Direction::Uninstall, dry_run, Some(&container))
                 else {
                     panic!("a removal inside a container must not remove a private entry");
                 };
@@ -1712,10 +1828,12 @@ mod tests {
                 assert!(line.contains("Ghostlight's uninstall"), "{line}");
             }
             assert_eq!(
-                client_step(&desktop, true, false, Some(&container)),
+                client_step(&desktop, Direction::Install, false, Some(&container)),
                 ClientStep::LeavePrivate
             );
-            let ClientStep::Say(line) = client_step(&desktop, true, true, Some(&container)) else {
+            let ClientStep::Say(line) =
+                client_step(&desktop, Direction::Install, true, Some(&container))
+            else {
                 panic!("a dry run inside a container must say what it would leave");
             };
             assert!(
@@ -1724,11 +1842,11 @@ mod tests {
 
             let cursor = harness("cursor", "Cursor", HarnessState::Installed);
             assert_eq!(
-                client_step(&cursor, false, false, Some(&container)),
+                client_step(&cursor, Direction::Uninstall, false, Some(&container)),
                 ClientStep::Apply(HarnessAction::Uninstall)
             );
             assert_eq!(
-                client_step(&cursor, true, false, None),
+                client_step(&cursor, Direction::Install, false, None),
                 ClientStep::Apply(HarnessAction::Install)
             );
         }

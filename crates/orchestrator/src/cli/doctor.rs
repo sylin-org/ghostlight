@@ -250,7 +250,7 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     if fix {
         println!("{}", deployment_words::APPLYING_REPAIRS);
         run_setup(
-            true,
+            super::setup::Direction::Install,
             &SetupOptions {
                 no_open: true,
                 ..SetupOptions::default()

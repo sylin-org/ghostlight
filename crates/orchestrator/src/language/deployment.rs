@@ -1484,6 +1484,45 @@ pub fn mcp_client_name(label: &str) -> String {
     format!("{label} MCP client")
 }
 
+/// What a dry run of `ghostlight install`, or of `uninstall` when not `install`, says first.
+#[must_use]
+pub fn dry_run_started(install: bool) -> String {
+    format!(
+        "Ghostlight {} dry run -- no machine state will change.",
+        if install { "install" } else { "uninstall" }
+    )
+}
+
+/// What a dry run says when `--no-clients` leaves every MCP client alone.
+pub const CLIENTS_LEFT_UNCHANGED: &str = "MCP client configuration was left unchanged.";
+
+/// What a dry run says when no MCP client would change.
+pub const NO_CLIENT_CHANGE: &str = "No MCP client configuration needs to change.";
+
+/// What a dry run says when the clients that would change all need a person.
+pub const NO_CLIENT_CHANGEABLE: &str = "No MCP client configuration can be changed automatically.";
+
+/// The client `label` needs a person, for the reason `detail` says.
+#[must_use]
+pub fn client_needs_attention(label: &str, detail: &str) -> String {
+    format!("MCP client needs attention: {label} -- {detail}")
+}
+
+/// The change to the client `label` failed, for `error`.
+#[must_use]
+pub fn client_change_failed(label: &str, error: &dyn std::fmt::Display) -> String {
+    format!("{label}: {error}")
+}
+
+/// A run could not change `count` MCP clients.
+#[must_use]
+pub fn clients_not_updated(count: usize) -> String {
+    format!("Ghostlight could not update {count} MCP client integration(s)")
+}
+
+/// An install that ended with no browser able to start Ghostlight.
+pub const NO_USABLE_BROWSER: &str = "Ghostlight could not establish a usable browser registration";
+
 /// What a Check of the client `label` says.
 #[must_use]
 pub fn harness_checked(label: &str) -> String {

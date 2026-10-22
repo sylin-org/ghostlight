@@ -448,7 +448,7 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | INST-2 | refactor(install): the harness feature moves to `install/harness/` | INST-14 | INST-2 as corrected; `install::writer_golden` and `install::agent_list` keep their paths | landed (98939d50); the harness moved whole, its split into context, roster, JSON, Codex, launcher and locations files is left for a later slice |
 | INST-3 | refactor(install): one glossary for identifiers | INST-2 | INST-3 as corrected; machine words stay | landed (this commit) |
 | SERV-6c | refactor(cli): the CLI reads the service's vocabulary as types | - | SERV-6's CLI half | moved: test-01 took SERV-6 whole (15b38451) |
-| SERV-13 | refactor(cli): install and uninstall run as two flows that collect, then print | - | SERV-13 as corrected; the printed order stays | todo |
+| SERV-13 | refactor(cli): install and uninstall run as two flows that collect, then print | - | SERV-13 as corrected; the printed order stays | landed (this commit); one step list with a Direction, not two lists |
 | SERV-11c | refactor(cli): one name per meaning in `cli/` | SERV-13 | SERV-11's CLI half | todo |
 | EXT-2 | refactor(win-peer): the user's SID comes from relay | - | EXT-2 | todo |
 | I-lock | refactor(install): the crate `lock` helper here | SERV-7 | SERV-7's adoption | landed (this commit) |
