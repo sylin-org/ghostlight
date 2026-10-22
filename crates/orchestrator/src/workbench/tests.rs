@@ -295,7 +295,10 @@ fn surface_source() -> String {
 /// Protects desktop gate 2 and the executor's "the workbench shows waiting becoming running
 /// once" (ACCEPTANCE): work shows as waiting, held or running, only running work makes a session
 /// and the band read Working (7cf3b39e, 7312a096), and its audit record moves it from the live
-/// set into history with what it observed.
+/// set into history with what it observed. Its activity crosses as the closed code beside the
+/// label, and the code survives a reworded label: waiting work says it waits, yet still carries
+/// its own activity (ADR-0203 S5, `a_glyph_follows_its_activity_through_a_reworded_label`; the
+/// page keys its glyphs on the code in SURF-4).
 #[test]
 fn work_in_flight_is_shown_as_it_waits_runs_and_settles() {
     use super::OperationPhase;
@@ -323,6 +326,11 @@ fn work_in_flight_is_shown_as_it_waits_runs_and_settles() {
         operations[0].activity,
         crate::language::outcome::WAITING_FOR_WORK
     );
+    assert_eq!(operations[0].activity_code, PresentationActivity::Read);
+    assert_eq!(
+        serde_json::to_value(&operations[0]).unwrap()["activity_code"],
+        "read"
+    );
     assert!(notifications.0.lock().unwrap().is_empty());
 
     projection.react(&reading(&evidence, "invocation_held", workspace));
@@ -349,6 +357,18 @@ fn work_in_flight_is_shown_as_it_waits_runs_and_settles() {
     assert_eq!(shown.status().readiness.state, Readiness::Ready);
 
     projection.react(&reading(&evidence, "invocation_running", workspace));
+    let running = projection.operations();
+    let running = running
+        .iter()
+        .find(|operation| operation.invocation == "invocation_running")
+        .unwrap();
+    assert_eq!(
+        (running.activity.as_str(), running.activity_code),
+        (
+            crate::language::presentation::activity_label(PresentationActivity::Read),
+            PresentationActivity::Read
+        )
+    );
     let shown = facade.look();
     assert_eq!(shown.connections().sessions[0].running_operations, 1);
     assert_eq!(shown.status().readiness.state, Readiness::Working);
@@ -486,41 +506,66 @@ fn the_snapshot_and_the_stream_share_one_gapless_sequence() {
 
 /// Protects desktop gate 6: blocked work asks for at most one native notice per invocation, the
 /// notice names no invocation and no workspace, and a notice that fails changes nothing the
-/// projection holds.
+/// projection holds. The notice's words are chosen by the typed denial presentation, as the
+/// in-page notice's are, so a kept tab says a tab was kept and not that a guardrail blocked work
+/// (ADR-0203 Decision 5.6 and S5, `a_kept_tab_toast_says_a_tab_was_kept`).
 #[test]
 fn a_blocked_operation_asks_for_one_content_free_notice_and_a_failed_notice_changes_nothing() {
-    let blocked = DomainEvent::WorkBlocked {
-        invocation: "invocation_1".into(),
-        workspace: "workspace_1".into(),
-        physical_id: Some(7),
-        presentation: DenialPresentation::Guardrail,
-    };
     let evidence = client("test");
-    let run = |port: Arc<dyn WorkbenchPresentationPort>| {
-        let projection = WorkbenchProjection::default();
-        projection.attach_presentation(port);
-        projection.react(&reading(&evidence, "invocation_1", "workspace_1"));
-        projection.react(&blocked);
-        projection.react(&blocked);
-        projection.operations()
-    };
+    for (presentation, title, body) in [
+        (
+            DenialPresentation::Guardrail,
+            "Ghostlight blocked an action",
+            "A configured guardrail prevented browser work.",
+        ),
+        (
+            DenialPresentation::TabKeptOpenByPolicy,
+            "Ghostlight kept a tab open",
+            "Closing tabs is blocked by policy. You can close it yourself.",
+        ),
+        (
+            DenialPresentation::TabKeptOpenBySetting,
+            "Ghostlight kept a tab open",
+            "Your Preserve Ghostlight tabs setting is on. You can close it yourself.",
+        ),
+    ] {
+        let blocked = DomainEvent::WorkBlocked {
+            invocation: "invocation_1".into(),
+            workspace: "workspace_1".into(),
+            physical_id: Some(7),
+            presentation,
+        };
+        let run = |port: Arc<dyn WorkbenchPresentationPort>| {
+            let projection = WorkbenchProjection::default();
+            projection.attach_presentation(port);
+            projection.react(&reading(&evidence, "invocation_1", "workspace_1"));
+            projection.react(&blocked);
+            projection.react(&blocked);
+            projection.operations()
+        };
 
-    let notifications = Arc::new(Notifications::default());
-    let told = run(notifications.clone());
-    let notices = notifications.0.lock().unwrap();
-    assert_eq!(notices.len(), 1);
-    assert_eq!(notices[0].kind, NotificationKind::Blocked);
-    let encoded = serde_json::to_string(&notices[0]).unwrap();
-    for named in ["invocation_1", "workspace_1"] {
-        assert!(!encoded.contains(named), "the notice names {named}");
+        let notifications = Arc::new(Notifications::default());
+        let told = run(notifications.clone());
+        let notices = notifications.0.lock().unwrap();
+        assert_eq!(notices.len(), 1, "{presentation:?}");
+        assert_eq!(notices[0].kind, NotificationKind::Blocked);
+        assert_eq!(
+            (notices[0].title.as_str(), notices[0].body.as_str()),
+            (title, body),
+            "{presentation:?}"
+        );
+        let encoded = serde_json::to_string(&notices[0]).unwrap();
+        for named in ["invocation_1", "workspace_1"] {
+            assert!(!encoded.contains(named), "the notice names {named}");
+        }
+
+        let failed = run(Arc::new(Failing));
+        assert_eq!(
+            failed, told,
+            "a failed notice changed what the projection holds"
+        );
+        assert_eq!(failed[0].phase, super::OperationPhase::Blocked);
     }
-
-    let failed = run(Arc::new(Failing));
-    assert_eq!(
-        failed, told,
-        "a failed notice changed what the projection holds"
-    );
-    assert_eq!(failed[0].phase, super::OperationPhase::Blocked);
 }
 
 /// Protects ADR-0122 Decision 7 and Grouped history 4 ("policy previews count actual recorded
@@ -1831,7 +1876,10 @@ fn the_search_finds_each_kind_by_the_words_its_row_shows_and_never_by_an_id() {
     );
     let setting = find("browser work", SearchKind::Configuration);
     assert_eq!(setting.title, words::CONTROLS_RUNTIME_LABEL);
-    assert_eq!(setting.detail, words::CONTROLS_RUNTIME_ACTIVE);
+    assert_eq!(
+        setting.detail,
+        crate::language::control::state_word(crate::browser::adapter::RuntimeControlState::Active)
+    );
     // The window opens the section that shows the setting, not Settings as it was left.
     assert_eq!(setting.view, SearchDestination::BrowserWork);
     assert_eq!(serde_json::to_value(setting.view).unwrap(), "browser_work");

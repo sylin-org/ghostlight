@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::events::DenialPresentation;
 use crate::install::HarnessState;
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::history::OutcomeClass;
@@ -99,16 +100,15 @@ pub const TOO_MANY_SCREENS: &str = "Too many screens are watching. Close one and
 /// The tray entry that brings the Ghostlight window forward.
 pub const TRAY_OPEN: &str = "Open Ghostlight";
 
-/// The tray entry that pauses the agents' browser work: the words the band, Settings and the
-/// browser toolbar use.
-pub const TRAY_HOLD: &str = "Pause agents";
+/// The tray entry that pauses the agents' browser work: the runtime act's words
+/// ([`super::control::PAUSE`]), which the band, Settings and the browser toolbar use too.
+pub const TRAY_HOLD: &str = super::control::PAUSE;
 
-/// The tray entry that lets the agents' browser work continue.
-pub const TRAY_RESUME: &str = "Resume agents";
+/// The tray entry that lets the agents' browser work continue ([`super::control::RESUME`]).
+pub const TRAY_RESUME: &str = super::control::RESUME;
 
-/// The tray entry that starts a new session once one ended: the words the window and the browser
-/// toolbar use.
-pub const TRAY_START_SESSION: &str = "Start a new session";
+/// The tray entry that starts a new session once one ended ([`super::control::START_SESSION`]).
+pub const TRAY_START_SESSION: &str = super::control::START_SESSION;
 
 /// The tray entry that quits Ghostlight.
 pub const TRAY_QUIT: &str = "Quit Ghostlight";
@@ -232,10 +232,29 @@ pub const LINK_NOT_SECURE: &str = "Ghostlight opens only secure links.";
 pub const LOCATE_DIALOG_TITLE: &str = "Locate the harness application or settings file";
 
 /// The title of the notice that says Ghostlight blocked an action.
-pub const NOTICE_BLOCKED_TITLE: &str = "Ghostlight blocked an action";
+const NOTICE_BLOCKED_TITLE: &str = "Ghostlight blocked an action";
 
 /// The body of the notice that says Ghostlight blocked an action. It names no site and no action.
-pub const NOTICE_BLOCKED_BODY: &str = "A configured guardrail prevented browser work.";
+const NOTICE_BLOCKED_BODY: &str = "A configured guardrail prevented browser work.";
+
+/// The title of the notice that says Ghostlight kept a tab open that a call would have closed.
+const NOTICE_KEPT_TITLE: &str = "Ghostlight kept a tab open";
+
+/// The title and body of the notice a blocked browser job asks for, chosen by how the job was
+/// blocked, the typed `presentation` the in-page notice is chosen by too (ADR-0203 Decision 5.6).
+/// A kept tab says a tab was kept, with the in-page notice's reason
+/// ([`super::presentation::denial_lines`]), not that a guardrail blocked work. Neither names a
+/// site or an action.
+#[must_use]
+pub const fn blocked_notice(presentation: DenialPresentation) -> (&'static str, &'static str) {
+    match presentation {
+        DenialPresentation::Guardrail => (NOTICE_BLOCKED_TITLE, NOTICE_BLOCKED_BODY),
+        DenialPresentation::TabKeptOpenByPolicy | DenialPresentation::TabKeptOpenBySetting => (
+            NOTICE_KEPT_TITLE,
+            super::presentation::denial_lines(presentation).1,
+        ),
+    }
+}
 
 /// The title of the notice a person asks for to check that notices arrive.
 pub const NOTICE_CHECKUP_TITLE: &str = "Ghostlight checkup";
@@ -246,17 +265,9 @@ pub const NOTICE_CHECKUP_BODY: &str = "Notifications are ready.";
 /// Why a link, a folder or a file dialog did not happen on this computer.
 pub const NATIVE_ACT_FAILED: &str = "This computer would not do that.";
 
-/// The label of the Controls row for agents' browser work.
+/// The label of the Controls row for agents' browser work. Its state is worded by
+/// [`super::control::state_word`].
 pub const CONTROLS_RUNTIME_LABEL: &str = "Browser work";
-
-/// The state word of browser work that agents may ask for.
-pub const CONTROLS_RUNTIME_ACTIVE: &str = "Running";
-
-/// The state word of browser work that is paused.
-pub const CONTROLS_RUNTIME_HELD: &str = "Paused";
-
-/// The state word of browser work whose session has ended.
-pub const CONTROLS_RUNTIME_ENDED: &str = "Session ended";
 
 /// The label of the Controls row for "Others can watch".
 pub const CONTROLS_VIEWING_LABEL: &str = "Others can watch";
@@ -788,6 +799,8 @@ pub const fn harness_state_word(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser::adapter::RuntimeControlState;
+    use crate::language::control;
     use crate::language::setup::{COPY_SETUP_LABEL, STEP_NAMES, UPDATE_LABEL};
 
     /// The window's own vocabulary, which the search palette's words must say the same way.
@@ -796,7 +809,8 @@ mod tests {
     /// Where [`PAGE_WORDS`] lives, as a failure names it.
     const PAGE_WORDS_FILE: &str = "crates/orchestrator/ui/lib/words.js";
 
-    /// The browser toolbar's popup, which says the pause entries in the words of the tray.
+    /// The browser toolbar's popup, which says the pause entries and the runtime states in the
+    /// words of the tray.
     const TOOLBAR_WORDS: &str = "extension/lib/popup-view.js";
 
     /// The extension's own setup view, which shows the same three steps as the window.
@@ -806,6 +820,10 @@ mod tests {
     /// word the service says that the window or the browser also spells is spelled the same in
     /// both, so search finds a row by the words its card shows (desktop gate 3, n-d-04), the
     /// tray, the band and the toolbar say one word per act (ADR-0199 amendment of 2026-10-18),
+    /// and the window and the toolbar say the runtime words the tray says: its acts and, as its
+    /// tooltip's state word, the state Pause or End session left in force, all from
+    /// `language::control` (ADR-0203 S5,
+    /// `the_window_and_the_popup_say_the_runtime_words_the_tray_says`),
     /// the agent rows' Update and Copy setup acts read as the setup view names them (80c6f54a),
     /// and the setup page's steps are the service's three (INTENT: every surface that shows the
     /// install journey shows the same three steps).
@@ -856,10 +874,22 @@ mod tests {
             let word = harness_state_word(state, false, false);
             spelled.push((page, format!("{key}: \"{word}\"")));
         }
-        for words in [page, (TOOLBAR_WORDS, toolbar.as_str())] {
-            spelled.push((words, format!("pause: \"{TRAY_HOLD}\"")));
-            spelled.push((words, format!("resume: \"{TRAY_RESUME}\"")));
-            spelled.push((words, format!("startSession: \"{TRAY_START_SESSION}\"")));
+        let popup = (TOOLBAR_WORDS, toolbar.as_str());
+        for words in [page, popup] {
+            spelled.push((words, format!("pause: \"{}\"", control::PAUSE)));
+            spelled.push((words, format!("resume: \"{}\"", control::RESUME)));
+            spelled.push((
+                words,
+                format!("startSession: \"{}\"", control::START_SESSION),
+            ));
+        }
+        for (state, readiness) in [
+            (RuntimeControlState::Held, Readiness::Paused),
+            (RuntimeControlState::Ended, Readiness::SessionEnded),
+        ] {
+            let word = control::state_word(state);
+            spelled.push((popup, format!("title: \"{word}\"")));
+            assert_eq!(readiness.word(), word, "the tray's tooltip says {word}");
         }
         for ((file, text), entry) in spelled {
             assert!(text.contains(&entry), "{file} does not spell {entry}");

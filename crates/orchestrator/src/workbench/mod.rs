@@ -329,15 +329,22 @@ impl WorkbenchProjection {
                 DomainEvent::HoldEntered { invocation, .. } => {
                     (None, state.set_phase(invocation, OperationPhase::Held))
                 }
-                DomainEvent::WorkBlocked { invocation, .. } => {
+                DomainEvent::WorkBlocked {
+                    invocation,
+                    presentation,
+                    ..
+                } => {
                     let change = state.set_phase(invocation, OperationPhase::Blocked);
                     let notification = state
                         .notified
                         .insert((invocation.clone(), NotificationKind::Blocked))
-                        .then(|| WorkbenchNotification {
-                            kind: NotificationKind::Blocked,
-                            title: words::NOTICE_BLOCKED_TITLE.into(),
-                            body: words::NOTICE_BLOCKED_BODY.into(),
+                        .then(|| {
+                            let (title, body) = words::blocked_notice(*presentation);
+                            WorkbenchNotification {
+                                kind: NotificationKind::Blocked,
+                                title: title.into(),
+                                body: body.into(),
+                            }
                         });
                     (notification, change)
                 }
@@ -942,7 +949,7 @@ impl WorkbenchFacade {
                 ));
             }
         }
-        let runtime = runtime_state_word(gathered.runtime_state);
+        let runtime = crate::language::control::state_word(gathered.runtime_state);
         if hits.finds(&[words::CONTROLS_RUNTIME_LABEL, runtime]) {
             hits.push(SearchHit::new(
                 SearchKind::Configuration,
@@ -1601,8 +1608,14 @@ pub struct OperationSummary {
     pub workspace: String,
     /// Catalog tool name.
     pub tool: String,
-    /// Fixed presentation activity name.
+    /// What the work is doing, in the words the page caption shows for its activity
+    /// ([`crate::language::presentation::activity_label`]), or that it waits for earlier browser
+    /// work ([`crate::language::outcome::WAITING_FOR_WORK`]).
     pub activity: String,
+    /// The closed activity code, the key for what the window draws for the work. Unlike
+    /// [`Self::activity`] it stays the activity's own through a reworded label and while the
+    /// work waits, so a glyph keyed on it follows the activity.
+    pub activity_code: PresentationActivity,
     /// Compact label for the complete governed requirement set.
     pub capability: String,
     /// Local start time.
@@ -1625,8 +1638,9 @@ impl From<&OperationState> for OperationSummary {
             activity: if value.phase == OperationPhase::Waiting {
                 crate::language::outcome::WAITING_FOR_WORK.into()
             } else {
-                activity_label(value.activity).into()
+                crate::language::presentation::activity_label(value.activity).into()
             },
+            activity_code: value.activity,
             capability: value.capabilities.label(),
             started_at_ms: Some(value.started_at_ms),
             phase: value.phase,
@@ -1787,7 +1801,7 @@ impl From<AuditRecord> for HistoryItem {
         Self {
             storage: crate::language::audit_health::Storage::Saved,
             storage_detail: if value.unconfirmed_history_steps > 0 {
-                "Some step history could not be saved.".into()
+                crate::language::audit_health::CHILDREN_UNSAVED.into()
             } else {
                 String::new()
             },
@@ -2207,37 +2221,6 @@ fn unix_ms() -> u64 {
         .map_or(0, |duration| {
             u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
         })
-}
-
-fn activity_label(activity: PresentationActivity) -> &'static str {
-    match activity {
-        PresentationActivity::Quiet => "Ghostlight",
-        PresentationActivity::Navigate => "Navigating",
-        PresentationActivity::Click => "Clicking",
-        PresentationActivity::Hover => "Hovering",
-        PresentationActivity::Drag => "Dragging",
-        PresentationActivity::Type => "Typing",
-        PresentationActivity::Key => "Keyboard",
-        PresentationActivity::Scroll => "Scrolling",
-        PresentationActivity::Read => "Reading page",
-        PresentationActivity::Find => "Finding on page",
-        PresentationActivity::Screenshot => "Screenshot",
-        PresentationActivity::Zoom => "Zooming",
-        PresentationActivity::Fill => "Filling form",
-        PresentationActivity::Upload => "Uploading file",
-        PresentationActivity::Script => "Running JavaScript",
-        PresentationActivity::Wait => "Waiting",
-        PresentationActivity::Dialog => "Browser dialog",
-    }
-}
-
-/// The word Settings says for the browser-work state.
-const fn runtime_state_word(state: RuntimeControlState) -> &'static str {
-    match state {
-        RuntimeControlState::Active => words::CONTROLS_RUNTIME_ACTIVE,
-        RuntimeControlState::Held => words::CONTROLS_RUNTIME_HELD,
-        RuntimeControlState::Ended => words::CONTROLS_RUNTIME_ENDED,
-    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

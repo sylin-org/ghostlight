@@ -274,6 +274,7 @@ fn every_closed_name_the_page_and_the_service_exchange_is_one_both_know() {
         workspace: "workspace_1".into(),
         tool: "browser_read".into(),
         activity: "reading".into(),
+        activity_code: crate::browser::adapter::PresentationActivity::Read,
         capability: "read".into(),
         started_at_ms: Some(1),
         phase,

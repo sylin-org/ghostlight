@@ -497,11 +497,7 @@ impl ControlsPart {
             runtime: RuntimeControls {
                 label: words::CONTROLS_RUNTIME_LABEL,
                 state: facts.runtime_state,
-                word: match facts.runtime_state {
-                    RuntimeControlState::Active => words::CONTROLS_RUNTIME_ACTIVE,
-                    RuntimeControlState::Held => words::CONTROLS_RUNTIME_HELD,
-                    RuntimeControlState::Ended => words::CONTROLS_RUNTIME_ENDED,
-                },
+                word: crate::language::control::state_word(facts.runtime_state),
                 note: facts.runtime_note.map(str::to_owned),
                 offers: offers(facts.runtime_state),
                 acts: RuntimeActs {
