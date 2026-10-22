@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use super::parts::Audience;
-use super::WorkbenchDestination;
+use super::{WorkbenchDestination, WorkbenchRuntimeIntent};
 use crate::language::workbench as words;
 
 /// Who is asking, as far as access goes.
@@ -165,12 +165,25 @@ impl WebAct {
         }
     }
 
-    /// Whether a view that only watches may do this act.
+    /// Whether a view that only watches may do this act. The one place that says it: the context
+    /// document offers what this allows and the server's gate refuses what it does not (SURF-8).
     const fn open_to_watchers(self) -> bool {
         matches!(
             self,
             Self::Search | Self::CheckPolicy | Self::Rescan | Self::ContinueInWindow | Self::Hold
         )
+    }
+}
+
+/// The act a runtime intent is, so the runtime route asks the same question as every other.
+impl From<WorkbenchRuntimeIntent> for WebAct {
+    fn from(intent: WorkbenchRuntimeIntent) -> Self {
+        match intent {
+            WorkbenchRuntimeIntent::Hold => Self::Hold,
+            WorkbenchRuntimeIntent::Resume => Self::Resume,
+            WorkbenchRuntimeIntent::StartSession => Self::StartSession,
+            WorkbenchRuntimeIntent::EndSession => Self::EndSession,
+        }
     }
 }
 

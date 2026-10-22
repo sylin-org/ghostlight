@@ -21,7 +21,7 @@ use crate::agent::ICON_DIRECTORY;
 use crate::install::HarnessAction;
 use crate::language::setup::SetupAction;
 use crate::language::workbench as words;
-use crate::workbench::context::WebContext;
+use crate::workbench::context::{availability, WebAct, WebContext};
 use crate::workbench::parts::{Audience, Part, Projection};
 use crate::workbench::{
     validate_policy_document, validate_search_query, HarnessActError, PageAddress,
@@ -113,186 +113,160 @@ enum Api {
     Quit,
 }
 
-/// What a watcher may do on a route.
+/// What a route does, which decides whom it answers: a read answers every context that receives
+/// data, and an act answers a context exactly when [`availability`] says the act is available
+/// there, the same answer the context document gives the page.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WatchAccess {
-    /// The route answers a watcher.
-    Open,
-    /// The route answers the window only.
-    NeedsWindow,
+enum Does {
+    /// It reads what the context's audience is shown.
+    Read,
+    /// It does this act.
+    Act(WebAct),
+    /// It does the runtime intent its body names, which `runtime()` gates as that intent's act.
+    Intent,
 }
 
 struct Route {
     api: Api,
     method: Method,
     path: &'static str,
-    watch: WatchAccess,
+    does: Does,
     body_cap: usize,
 }
 
-const fn route(
-    api: Api,
-    method: Method,
-    path: &'static str,
-    watch: WatchAccess,
-    body_cap: usize,
-) -> Route {
+const fn route(api: Api, method: Method, path: &'static str, does: Does, body_cap: usize) -> Route {
     Route {
         api,
         method,
         path,
-        watch,
+        does,
         body_cap,
     }
 }
 
 /// The closed table. Anything not here is not served.
 static ROUTES: [Route; 21] = [
-    route(
-        Api::Context,
-        Method::Get,
-        "/api/context",
-        WatchAccess::Open,
-        0,
-    ),
-    route(
-        Api::Snapshot,
-        Method::Get,
-        "/api/snapshot",
-        WatchAccess::Open,
-        0,
-    ),
-    route(
-        Api::Events,
-        Method::Get,
-        "/api/events",
-        WatchAccess::Open,
-        0,
-    ),
-    route(
-        Api::Policy,
-        Method::Get,
-        "/api/policy",
-        WatchAccess::Open,
-        0,
-    ),
+    route(Api::Context, Method::Get, "/api/context", Does::Read, 0),
+    route(Api::Snapshot, Method::Get, "/api/snapshot", Does::Read, 0),
+    route(Api::Events, Method::Get, "/api/events", Does::Read, 0),
+    route(Api::Policy, Method::Get, "/api/policy", Does::Read, 0),
     route(
         Api::Search,
         Method::Post,
         "/api/search",
-        WatchAccess::Open,
+        Does::Act(WebAct::Search),
         SMALL_BODY,
     ),
     route(
         Api::PolicyPreview,
         Method::Post,
         "/api/policy/preview",
-        WatchAccess::Open,
+        Does::Act(WebAct::CheckPolicy),
         POLICY_BODY,
     ),
     route(
         Api::Rescan,
         Method::Post,
         "/api/integrations/rescan",
-        WatchAccess::Open,
+        Does::Act(WebAct::Rescan),
         SMALL_BODY,
     ),
     route(
         Api::Window,
         Method::Post,
         "/api/window",
-        WatchAccess::Open,
+        Does::Act(WebAct::ContinueInWindow),
         SMALL_BODY,
     ),
     route(
         Api::Runtime,
         Method::Post,
         "/api/runtime",
-        WatchAccess::Open,
+        Does::Intent,
         SMALL_BODY,
     ),
     route(
         Api::PutPolicy,
         Method::Put,
         "/api/policy/user",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::ApplyPolicy),
         POLICY_BODY,
     ),
     route(
         Api::DeletePolicy,
         Method::Delete,
         "/api/policy/user",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::RemovePolicy),
         SMALL_BODY,
     ),
     route(
         Api::SetDiagnostics,
         Method::Put,
         "/api/controls/diagnostics",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::SetDiagnostics),
         SMALL_BODY,
     ),
     route(
         Api::SetViewing,
         Method::Put,
         "/api/controls/viewing",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::SetWatching),
         SMALL_BODY,
     ),
     route(
         Api::SetupAll,
         Method::Post,
         "/api/integrations/setup-all",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::SetupAll),
         SMALL_BODY,
     ),
     route(
         Api::HarnessAct,
         Method::Post,
         "/api/integrations/act",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::HarnessAct),
         SMALL_BODY,
     ),
     route(
         Api::TestNotification,
         Method::Post,
         "/api/notifications/test",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::TestNotification),
         SMALL_BODY,
     ),
     route(
         Api::Open,
         Method::Post,
         "/api/open",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::Open),
         SMALL_BODY,
     ),
     route(
         Api::RevealDiagnostics,
         Method::Post,
         "/api/diagnostics/reveal",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::RevealDiagnostics),
         SMALL_BODY,
     ),
     route(
         Api::Locate,
         Method::Post,
         "/api/integrations/locate",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::Locate),
         SMALL_BODY,
     ),
     route(
         Api::SetupAct,
         Method::Post,
         "/api/setup/act",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::SetupAct),
         SMALL_BODY,
     ),
     route(
         Api::Quit,
         Method::Post,
         "/api/quit",
-        WatchAccess::NeedsWindow,
+        Does::Act(WebAct::Quit),
         SMALL_BODY,
     ),
 ];
@@ -368,6 +342,18 @@ fn needs_window() -> Response {
         words::CHANGE_IN_WINDOW,
     )
     .with_header(header::WWW_AUTHENTICATE, BEARER_SCHEME)
+}
+
+/// Refuse `act` where the context document says it is not available there: a watcher is told to
+/// use the window, and a tab while watching is off that watching is off.
+fn may(act: WebAct, context: WebContext) -> Result<(), Response> {
+    if availability(act, context).available {
+        Ok(())
+    } else if context == WebContext::Closed {
+        Err(watching_off())
+    } else {
+        Err(needs_window())
+    }
 }
 
 fn wrong_key() -> Response {
@@ -671,8 +657,10 @@ fn api(
     let audience = match context {
         WebContext::Control => Audience::Control,
         WebContext::Watch => {
-            if route.watch == WatchAccess::NeedsWindow {
-                return needs_window();
+            if let Does::Act(act) = route.does {
+                if let Err(response) = may(act, context) {
+                    return response;
+                }
             }
             Audience::Watch
         }
@@ -723,7 +711,7 @@ fn api(
         Api::PolicyPreview => preview(shared, &body),
         Api::Rescan => acted(shared, rescan(shared, &projection, watching, &body)),
         Api::Window => window(shared, &body),
-        Api::Runtime => acted(shared, runtime(shared, &body, watching)),
+        Api::Runtime => acted(shared, runtime(shared, &body, context)),
         Api::PutPolicy => acted(shared, put_policy(shared, head, &body)),
         Api::DeletePolicy => acted(shared, delete_policy(shared, head)),
         Api::SetDiagnostics => acted(shared, set_diagnostics(shared, &projection, &body)),
@@ -993,15 +981,16 @@ fn window(shared: &Shared, body: &[u8]) -> Response {
     }
 }
 
-fn runtime(shared: &Shared, body: &[u8], watching: bool) -> Response {
+fn runtime(shared: &Shared, body: &[u8], context: WebContext) -> Response {
     let arguments: RuntimeArguments = match decode(body) {
         Ok(arguments) => arguments,
         Err(response) => return response,
     };
+    if let Err(response) = may(arguments.intent.into(), context) {
+        return response;
+    }
+    let watching = context == WebContext::Watch;
     if watching {
-        if arguments.intent != WorkbenchRuntimeIntent::Hold {
-            return needs_window();
-        }
         if let Err(wait) = shared.limits.hold() {
             return too_many(wait);
         }
