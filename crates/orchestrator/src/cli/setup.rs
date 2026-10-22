@@ -33,7 +33,7 @@ use crate::install::reconcile::{
     windows_entries_failure, PendingWindowsEntries, ReconcileReport, Registrations, WindowsRemoval,
 };
 use crate::install::record::InstallRecord;
-use crate::install::{client_ids, setup_state, version_directories};
+use crate::install::{harness_ids, setup_state, version_directories};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessRegistry, HarnessState, HarnessSummary,
 };
@@ -137,7 +137,7 @@ const UNINSTALL_QUIT_POLL: Duration = Duration::from_millis(50);
 /// Whether an uninstall removes Ghostlight as a whole, and so ends the Ghostlight that runs. One
 /// that names browsers or clients, or leaves every client alone, removes only part of it.
 fn stops_running(options: &SetupOptions) -> bool {
-    options.browser_ids.is_empty() && options.client_ids.is_empty() && !options.no_clients
+    options.browser_ids.is_empty() && options.harness_ids.is_empty() && !options.no_clients
 }
 
 /// End the running Ghostlight after a whole uninstall: the service sends the `uninstall` goodbye,
@@ -189,7 +189,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
     } else {
         None
     };
-    if !options.client_ids.is_empty() && !options.no_clients {
+    if !options.harness_ids.is_empty() && !options.no_clients {
         let harnesses = harnesses.get_or_insert_with(HarnessRegistry::discover);
         select_harnesses(&harnesses.summaries(), options, install)?;
     }
@@ -934,19 +934,19 @@ pub fn select_harnesses(
     options: &SetupOptions,
     install: bool,
 ) -> anyhow::Result<Vec<HarnessSummary>> {
-    if !options.client_ids.is_empty() {
+    if !options.harness_ids.is_empty() {
         let mut selected: Vec<HarnessSummary> = Vec::new();
-        for id in &options.client_ids {
+        for id in &options.harness_ids {
             let named: Vec<&HarnessSummary> = summaries
                 .iter()
                 .filter(|summary| summary.named_by(id).is_some())
                 .collect();
             let Some(first) = named.first() else {
-                let valid = client_ids();
+                let valid = harness_ids();
                 anyhow::bail!(deployment_words::unknown_client(
                     id,
                     &valid.agents,
-                    &valid.hosts
+                    &valid.harnesses
                 ));
             };
             let chosen: Vec<&HarnessSummary> = named
@@ -1225,7 +1225,7 @@ mod tests {
                     ..SetupOptions::default()
                 },
                 SetupOptions {
-                    client_ids: vec!["zed".into()],
+                    harness_ids: vec!["zed".into()],
                     ..SetupOptions::default()
                 },
                 SetupOptions {
@@ -1419,7 +1419,7 @@ mod tests {
                           install: bool|
              -> anyhow::Result<Vec<String>> {
                 let options = SetupOptions {
-                    client_ids: values.iter().map(|value| (*value).into()).collect(),
+                    harness_ids: values.iter().map(|value| (*value).into()).collect(),
                     all_clients,
                     ..SetupOptions::default()
                 };
@@ -1478,7 +1478,7 @@ mod tests {
                 refusal.starts_with("unknown MCP client 'Cline (Cursor)'; expected an agent id ("),
                 "{refusal}"
             );
-            let valid = crate::install::client_ids();
+            let valid = crate::install::harness_ids();
             for id in valid.all() {
                 assert!(refusal.contains(id), "{refusal} does not list {id}");
             }

@@ -111,7 +111,7 @@ pub struct WindowsRemoval {
 pub struct Registrations {
     native_hosts: Option<NativeHostRegistry>,
     /// The client registry, once built; `None` where no client entry may be reconciled.
-    clients: Option<OnceLock<HarnessRegistry>>,
+    harnesses: Option<OnceLock<HarnessRegistry>>,
     platform_entries: bool,
     residence: Residence,
 }
@@ -127,7 +127,7 @@ impl Registrations {
         let test_home = env::var_os(TEST_HOME_VARIABLE).is_some();
         Self {
             native_hosts: native_hosts_allowed().then(NativeHostRegistry::discover),
-            clients: (!test_home).then(OnceLock::new),
+            harnesses: (!test_home).then(OnceLock::new),
             platform_entries: !test_home,
             residence: Residence::detect(),
         }
@@ -136,10 +136,10 @@ impl Registrations {
     /// Registrations over the given native hosts and clients, without platform entries, for
     /// tests that must not touch the machine.
     #[cfg(test)]
-    pub(crate) fn isolated(native_hosts: NativeHostRegistry, clients: HarnessRegistry) -> Self {
+    pub(crate) fn isolated(native_hosts: NativeHostRegistry, harnesses: HarnessRegistry) -> Self {
         Self {
             native_hosts: Some(native_hosts),
-            clients: Some(OnceLock::from(clients)),
+            harnesses: Some(OnceLock::from(harnesses)),
             platform_entries: false,
             residence: Residence::Regular,
         }
@@ -153,8 +153,8 @@ impl Registrations {
     }
 
     /// The client registry, built at its first use; none where no client entry may be reconciled.
-    fn clients(&self) -> Option<&HarnessRegistry> {
-        self.clients
+    fn harnesses(&self) -> Option<&HarnessRegistry> {
+        self.harnesses
             .as_ref()
             .map(|clients| clients.get_or_init(HarnessRegistry::discover))
     }
@@ -187,7 +187,7 @@ impl Registrations {
                     }),
             );
         }
-        if let Some(clients) = self.clients() {
+        if let Some(clients) = self.harnesses() {
             pending.extend(
                 clients
                     .summaries()
@@ -212,8 +212,8 @@ impl Registrations {
         if let Some(hosts) = &self.native_hosts {
             reconcile_native_hosts(hosts, &mut report);
         }
-        if let Some(clients) = self.clients() {
-            reconcile_clients(clients, &mut report);
+        if let Some(clients) = self.harnesses() {
+            reconcile_harnesses(clients, &mut report);
         }
         if self.platform_entries {
             reconcile_platform(layout, version, &self.residence, &mut report);
@@ -343,7 +343,7 @@ fn reconcile_native_hosts(hosts: &NativeHostRegistry, report: &mut ReconcileRepo
 /// Rewrite the owned client entries that start something else, and report the entries under
 /// Ghostlight's name that need a person: one Ghostlight does not own, or Ghostlight's npm
 /// launcher.
-fn reconcile_clients(clients: &HarnessRegistry, report: &mut ReconcileReport) {
+fn reconcile_harnesses(clients: &HarnessRegistry, report: &mut ReconcileReport) {
     let summaries = match clients.refresh() {
         Ok(summaries) => summaries,
         Err(error) => {

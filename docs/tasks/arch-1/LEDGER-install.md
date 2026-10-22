@@ -445,8 +445,8 @@ with its skeptic's corrections. RESUME HERE above says where the lane stands.
 | INST-14 | refactor(install): one program-file helper, one manifest name, and files and paths modules | - | INST-14 as corrected | landed (this commit) |
 | INST-10 | refactor(install): `InstallOutcome` | - | INST-10 | landed (this commit) |
 | INST-11 | refactor(install): one process-stopping engine with both failure rules | - | INST-11 as corrected; the image match stays per caller | landed (this commit) |
-| INST-2 | refactor(install): the harness feature moves to `install/harness/` | INST-14 | INST-2 as corrected; `install::writer_golden` and `install::agent_list` keep their paths | landed (this commit) |
-| INST-3 | refactor(install): one glossary for identifiers | INST-2 | INST-3 as corrected; machine words stay | todo |
+| INST-2 | refactor(install): the harness feature moves to `install/harness/` | INST-14 | INST-2 as corrected; `install::writer_golden` and `install::agent_list` keep their paths | landed (98939d50); the harness moved whole, its split into context, roster, JSON, Codex, launcher and locations files is left for a later slice |
+| INST-3 | refactor(install): one glossary for identifiers | INST-2 | INST-3 as corrected; machine words stay | landed (this commit) |
 | SERV-6c | refactor(cli): the CLI reads the service's vocabulary as types | - | SERV-6's CLI half | moved: test-01 took SERV-6 whole (15b38451) |
 | SERV-13 | refactor(cli): install and uninstall run as two flows that collect, then print | - | SERV-13 as corrected; the printed order stays | todo |
 | SERV-11c | refactor(cli): one name per meaning in `cli/` | SERV-13 | SERV-11's CLI half | todo |

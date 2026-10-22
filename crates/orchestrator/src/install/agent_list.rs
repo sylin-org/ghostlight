@@ -14,7 +14,7 @@ use toml_edit::{DocumentMut, Table};
 
 use super::user_dirs::{APP_DATA_VARIABLE, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE};
 use super::{
-    harness_roots, manual_json_setup, manual_setup, AgentRow, ConfigDialect, HarnessContext,
+    harness_roots, manual_json_setup, manual_setup, ConfigDialect, HarnessContext, HarnessRow,
     JsonDialect, Packages, CLAUDE_CONFIG_VARIABLE, CODEX_HOME_VARIABLE, CRUSH_CONFIG_VARIABLE,
     ROSTER, SERVER_NAME,
 };
@@ -154,7 +154,7 @@ impl Platform {
 
 /// Where the configuration of `row` lives on `platform`: the file a variable names when it is
 /// set, then the files the agent reads.
-fn location(row: &AgentRow, platform: Platform) -> String {
+fn location(row: &HarnessRow, platform: Platform) -> String {
     let unset = platform.context(false);
     let found = files(row, &unset, platform);
     let named = (row.path)(&platform.context(true));
@@ -171,7 +171,7 @@ fn location(row: &AgentRow, platform: Platform) -> String {
 
 /// The files `row` reads on the computer `context` describes, in the order it prefers them, and
 /// the one a new configuration is written to.
-fn files(row: &AgentRow, context: &HarnessContext, platform: Platform) -> String {
+fn files(row: &HarnessRow, context: &HarnessContext, platform: Platform) -> String {
     let default = (row.path)(context);
     if row.candidates.is_empty() {
         return format!("`{}`", platform.shown(&default));
@@ -195,7 +195,7 @@ fn files(row: &AgentRow, context: &HarnessContext, platform: Platform) -> String
 }
 
 /// The entry Ghostlight keeps for `row`, by the path to it in the file.
-fn entry(row: &'static AgentRow) -> String {
+fn entry(row: &'static HarnessRow) -> String {
     match row.dialect {
         ConfigDialect::Json(dialect) => format!("{} ({JSON})", json_key(dialect)),
         ConfigDialect::OpenCode => format!(
@@ -230,7 +230,7 @@ fn json_path(value: &Value) -> Option<Vec<String>> {
 }
 
 /// The path to Ghostlight's entry in the TOML document a person would paste for `row`.
-fn toml_key(row: &'static AgentRow) -> String {
+fn toml_key(row: &'static HarnessRow) -> String {
     let context = Platform::Linux.context(false);
     let document = manual_setup(&context, &row.on(&context, &Packages::none()))
         .expect("a TOML dialect has a setup document");
@@ -256,7 +256,7 @@ fn dotted(path: &[String]) -> String {
 }
 
 /// The agent's name, with its catalog id when no host of the roster has that id.
-fn agent(row: &AgentRow) -> String {
+fn agent(row: &HarnessRow) -> String {
     if ROSTER.iter().any(|other| other.id == row.agent_id) {
         row.name.to_owned()
     } else {

@@ -239,7 +239,7 @@ impl HarnessRegistry {
             .iter()
             .map(|summary| (summary.id.as_str(), summary.state))
             .collect();
-        let eligible: Vec<HarnessDefinition> = definitions(&self.inner.context)
+        let eligible: Vec<ResolvedHarness> = definitions(&self.inner.context)
             .into_iter()
             .filter(|definition| {
                 definition.is_writable_from(&self.inner.context)
@@ -389,7 +389,7 @@ fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessConte
 pub(super) fn definition(
     context: &HarnessContext,
     id: &str,
-) -> Result<HarnessDefinition, HarnessError> {
+) -> Result<ResolvedHarness, HarnessError> {
     definitions(context)
         .into_iter()
         .find(|definition| definition.id == id)
@@ -540,11 +540,11 @@ pub struct HarnessSummary {
 /// agent id given to `--client` to every host of the agent.
 pub const ALL_CLIENTS_OPTION: &str = "--all-clients";
 
-/// How a `--client` value names a host.
+/// How a `--client` value names a harness: by its own harness id, or by its agent's id.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClientName {
-    /// The value is the host's own harness id. It selects that host in any state.
-    Host,
+pub enum NamedBy {
+    /// The value is the harness's own id. It selects that harness in any state.
+    Harness,
     /// The value is the catalog id of the host's agent and not the host's own id. It selects the
     /// host when the host is detected, or in any state with [`ALL_CLIENTS_OPTION`], so naming an
     /// agent never writes into a host the person does not have.
@@ -564,11 +564,11 @@ impl HarnessSummary {
     /// How the `--client` value `id` names this host, ignoring case: by its harness id, by its
     /// agent's catalog id, or not at all. A harness id that is also its agent's id names the host.
     #[must_use]
-    pub fn named_by(&self, id: &str) -> Option<ClientName> {
+    pub fn named_by(&self, id: &str) -> Option<NamedBy> {
         if self.id.eq_ignore_ascii_case(id) {
-            Some(ClientName::Host)
+            Some(NamedBy::Harness)
         } else if self.agent.id.eq_ignore_ascii_case(id) {
-            Some(ClientName::Agent)
+            Some(NamedBy::Agent)
         } else {
             None
         }
@@ -579,8 +579,8 @@ impl HarnessSummary {
     #[must_use]
     pub fn is_selected_by(&self, id: &str, all_clients: bool) -> bool {
         match self.named_by(id) {
-            Some(ClientName::Host) => true,
-            Some(ClientName::Agent) => all_clients || self.state != HarnessState::NotDetected,
+            Some(NamedBy::Harness) => true,
+            Some(NamedBy::Agent) => all_clients || self.state != HarnessState::NotDetected,
             None => false,
         }
     }
@@ -589,19 +589,19 @@ impl HarnessSummary {
 /// Every value `ghostlight install --client` and `ghostlight uninstall --client` accept, in roster
 /// order, for the help text, the refusal of an unknown value and the shell completions.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClientIds {
-    /// Every agent's catalog id, once. Each selects the agent's detected hosts, or every host of
-    /// it with [`ALL_CLIENTS_OPTION`].
+pub struct HarnessIds {
+    /// Every agent's catalog id, once. Each selects the agent's detected harnesses, or every
+    /// harness of it with [`ALL_CLIENTS_OPTION`].
     pub agents: Vec<&'static str>,
-    /// The harness id of every host that no agent id names: the hosts of an agent that runs on
-    /// more than one. Each selects that one host.
-    pub hosts: Vec<&'static str>,
+    /// The id of every harness that no agent id names: the harnesses of an agent that has more
+    /// than one. Each selects that one harness.
+    pub harnesses: Vec<&'static str>,
 }
 
-impl ClientIds {
-    /// The agent ids, then the host ids.
+impl HarnessIds {
+    /// The agent ids, then the harness ids.
     pub fn all(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.agents.iter().chain(&self.hosts).copied()
+        self.agents.iter().chain(&self.harnesses).copied()
     }
 }
 
@@ -609,19 +609,19 @@ impl ClientIds {
 /// paths are stored under it), so every one of them stays a value even when its agent's id is
 /// also listed.
 #[must_use]
-pub fn client_ids() -> ClientIds {
+pub fn harness_ids() -> HarnessIds {
     let mut agents: Vec<&'static str> = Vec::new();
     for row in ROSTER {
         if !agents.contains(&row.agent_id) {
             agents.push(row.agent_id);
         }
     }
-    let hosts = ROSTER
+    let harnesses = ROSTER
         .iter()
         .map(|row| row.id)
         .filter(|id| !agents.contains(id))
         .collect();
-    ClientIds { agents, hosts }
+    HarnessIds { agents, harnesses }
 }
 
 /// Definite result of one explicit harness action.
@@ -702,7 +702,7 @@ impl HarnessContext {
     /// The app whose private view holds the configuration of `definition`, when this process
     /// writes there and the client is not that app itself: an app reads the very view it
     /// writes, so its own configuration is written like any other.
-    fn private_to(&self, definition: &HarnessDefinition) -> Option<&AppContainer> {
+    fn private_to(&self, definition: &ResolvedHarness) -> Option<&AppContainer> {
         let view = self.private_view.as_ref()?;
         if self.inside_own_app(definition.own_package) {
             return None;
@@ -866,8 +866,8 @@ pub(super) fn harness_roots(
 /// One roster row as it stands on one computer: the row, and what this look resolved for it.
 /// The row's fields read through it ([`std::ops::Deref`]).
 #[derive(Clone)]
-pub(super) struct HarnessDefinition {
-    pub(super) row: &'static AgentRow,
+pub(super) struct ResolvedHarness {
+    pub(super) row: &'static HarnessRow,
     /// The name a person reads: `name`, with the host added when several targets share the name.
     pub(super) label: String,
     pub(super) path: PathBuf,
@@ -879,15 +879,15 @@ pub(super) struct HarnessDefinition {
     pub(super) copies: Vec<SettingsCopy>,
 }
 
-impl std::ops::Deref for HarnessDefinition {
-    type Target = AgentRow;
+impl std::ops::Deref for ResolvedHarness {
+    type Target = HarnessRow;
 
-    fn deref(&self) -> &AgentRow {
+    fn deref(&self) -> &HarnessRow {
         self.row
     }
 }
 
-impl HarnessDefinition {
+impl ResolvedHarness {
     /// Whether an act may write this client's file from here: Ghostlight writes it, and it is not
     /// private to the app container this process runs in.
     fn is_writable_from(&self, context: &HarnessContext) -> bool {
@@ -1021,11 +1021,11 @@ pub(super) enum JsonDialect {
     ZCode,
 }
 
-/// One agent Ghostlight can set up, on one host: who the agent is, how the window shows it (its
-/// monogram, and where the app's own icon may be found), and where its MCP configuration lives on
-/// a computer. The roster is the one record of all of it, and the catalog of agents beside the
-/// command line and an unknown agent ([`crate::agent`]).
-pub(super) struct AgentRow {
+/// One harness: one agent Ghostlight can set up, on one host. It says who the agent is, how the
+/// window shows it (its monogram, and where the app's own icon may be found), and where its MCP
+/// configuration lives on a computer. The roster is the one record of all of it, and the catalog
+/// of agents beside the command line and an unknown agent ([`crate::agent`]).
+pub(super) struct HarnessRow {
     /// The harness id: one per host the agent runs on.
     pub(super) id: &'static str,
     /// The agent's catalog id: one per agent, shared by every host it runs on, and the id every
@@ -1183,13 +1183,13 @@ const ANTIGRAVITY_APP_PLACES: &[AppPlace] = &[
 ];
 
 /// Every agent Ghostlight can set up, one row per host.
-pub(super) const ROSTER: &[AgentRow] = &[
-    AgentRow {
+pub(super) const ROSTER: &[HarnessRow] = &[
+    HarnessRow {
         aliases: &["codex-mcp-client"],
         download_url: Some("https://developers.openai.com/codex/cli/"),
         executables: &["codex"],
         app_places: CODEX_APP_PLACES,
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "codex",
             "Codex",
             "User",
@@ -1198,12 +1198,12 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::CodexToml,
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://claude.com/product/claude-code"),
         executables: &["claude"],
         icon_family: Some("claude-desktop"),
         runs_inside: &["claude-desktop"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "claude-code",
             "Claude Code",
             "User",
@@ -1218,11 +1218,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         aliases: &["claude-ai"],
         own_package: Some(CLAUDE_DESKTOP_PACKAGE),
         app_places: CLAUDE_DESKTOP_APP_PLACES,
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "claude-desktop",
             "Claude Desktop",
             "User",
@@ -1235,12 +1235,12 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         aliases: &["cursor-vscode"],
         download_url: Some("https://cursor.com/downloads"),
         executables: &["cursor", "cursor-agent"],
         app_places: CURSOR_APP_PLACES,
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "cursor",
             "Cursor",
             "User",
@@ -1249,11 +1249,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://code.visualstudio.com/download"),
         executables: &["code"],
         app_places: VSCODE_APP_PLACES,
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "vscode",
             "Visual Studio Code",
             "User",
@@ -1262,11 +1262,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::Servers),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://windsurf.com/editor/download"),
         executables: &["windsurf"],
         app_places: WINDSURF_APP_PLACES,
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "windsurf",
             "Windsurf",
             "User",
@@ -1275,11 +1275,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         product_id: "windsurf",
         download_url: Some("https://windsurf.com/editor/download"),
         executables: &["devin", "devin-desktop", "surf"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "devin",
             "Devin",
             "Devin user",
@@ -1288,11 +1288,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://zed.dev/download"),
         executables: &["zed", "zeditor"],
         app_places: ZED_APP_PLACES,
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "zed",
             "Zed",
             "User",
@@ -1307,9 +1307,9 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::ContextServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         executables: &["zcode"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "zcode",
             "ZCode",
             "User",
@@ -1318,11 +1318,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::ZCode),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://opencode.ai/docs"),
         candidates: OPENCODE_FILES,
         executables: &["opencode", "opencode2"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "opencode",
             "OpenCode",
             "User",
@@ -1331,10 +1331,10 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::OpenCode,
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://github.com/charmbracelet/crush"),
         executables: &["crush"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "crush",
             "Crush",
             "User",
@@ -1348,10 +1348,10 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::Crush),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://github.com/github/copilot-cli"),
         executables: &["copilot"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "copilot-cli",
             "GitHub Copilot CLI",
             "CLI",
@@ -1360,12 +1360,12 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::Copilot),
         )
     },
-    AgentRow {
+    HarnessRow {
         agent_id: "cline",
         product_id: "cline",
         download_url: Some("https://docs.cline.bot/cline-cli/overview"),
         executables: &["cline"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "cline-cli",
             "Cline",
             "CLI",
@@ -1374,14 +1374,14 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         agent_id: "cline",
         product_id: "cline",
         download_url: Some(
             "https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev",
         ),
         runs_inside: &["vscode"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "cline-vscode",
             "Cline",
             "Visual Studio Code",
@@ -1390,12 +1390,12 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         agent_id: "cline",
         product_id: "cline",
         download_url: Some(CLINE_INSTALL_URL),
         runs_inside: &["cursor"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "cline-cursor",
             "Cline",
             "Cursor",
@@ -1404,12 +1404,12 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         agent_id: "cline",
         product_id: "cline",
         download_url: Some(CLINE_INSTALL_URL),
         runs_inside: &["windsurf"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "cline-windsurf",
             "Cline",
             "Windsurf",
@@ -1418,11 +1418,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://kiro.dev/downloads/"),
         executables: &["kiro", "kiro-cli"],
         app_places: KIRO_APP_PLACES,
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "kiro",
             "Kiro",
             "CLI and IDE",
@@ -1431,10 +1431,10 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://qwenlm.github.io/qwen-code-docs/en/users/installation/"),
         executables: &["qwen"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "qwen-code",
             "Qwen Code",
             "CLI",
@@ -1443,10 +1443,10 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://junie.jetbrains.com/docs/get-started-with-junie-cli.html"),
         executables: &["junie"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "junie",
             "Junie",
             "CLI and JetBrains",
@@ -1455,11 +1455,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::McpServers),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://kilo.ai/"),
         candidates: KILO_FILES,
         executables: &["kilo"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "kilo-code",
             "Kilo Code",
             "CLI",
@@ -1468,10 +1468,10 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Json(JsonDialect::OpenCodeV1),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://block.github.io/goose/docs/getting-started/installation/"),
         executables: &["goose"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "goose",
             "goose",
             "CLI and desktop",
@@ -1480,10 +1480,10 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Manual(ManualDialect::Goose),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://docs.continue.dev/cli/quickstart"),
         executables: &["cn"],
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "continue",
             "Continue",
             "CLI and IDE",
@@ -1492,11 +1492,11 @@ pub(super) const ROSTER: &[AgentRow] = &[
             ConfigDialect::Manual(ManualDialect::Continue),
         )
     },
-    AgentRow {
+    HarnessRow {
         download_url: Some("https://antigravity.google/download?platform=linux"),
         executables: &["agy"],
         app_places: ANTIGRAVITY_APP_PLACES,
-        ..AgentRow::new(
+        ..HarnessRow::new(
             "antigravity",
             "Antigravity",
             "CLI",
@@ -1507,7 +1507,7 @@ pub(super) const ROSTER: &[AgentRow] = &[
     },
 ];
 
-impl AgentRow {
+impl HarnessRow {
     /// The row of agent `id` on one host, named `name` there: the agent and its product share the
     /// id, and it has no aliases, candidates, programs, package, icons or host app. A row states
     /// what differs from this with struct update.
@@ -1597,12 +1597,12 @@ impl AgentRow {
         &'static self,
         context: &HarnessContext,
         packages: &Packages,
-    ) -> HarnessDefinition {
+    ) -> ResolvedHarness {
         let copies = self.copies_on(context, packages);
         let path = copies
             .first()
             .map_or_else(|| (self.path)(context), |copy| copy.file.clone());
-        HarnessDefinition {
+        ResolvedHarness {
             row: self,
             label: self.name.to_owned(),
             default_path: path.clone(),
@@ -1615,9 +1615,9 @@ impl AgentRow {
 }
 
 /// Every roster row as this look finds it: the Store packages are listed once for all of them.
-fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
+fn definitions(context: &HarnessContext) -> Vec<ResolvedHarness> {
     let packages = context.packages();
-    let mut rows: Vec<HarnessDefinition> = ROSTER
+    let mut rows: Vec<ResolvedHarness> = ROSTER
         .iter()
         .map(|row| row.on(context, &packages))
         .collect();
@@ -1665,7 +1665,7 @@ pub fn agent_called(reported: &str) -> Option<Agent> {
     ROSTER
         .iter()
         .find(|row| row.is_called(reported))
-        .map(AgentRow::agent)
+        .map(HarnessRow::agent)
 }
 
 /// The catalog agent whose catalog id is `agent_id`, as the window names and shows it; none for an
@@ -1675,26 +1675,26 @@ pub fn catalog_agent(agent_id: &str) -> Option<Agent> {
     ROSTER
         .iter()
         .find(|row| row.agent_id == agent_id)
-        .map(AgentRow::agent)
+        .map(HarnessRow::agent)
 }
 
 /// Whether the catalog knows that the agent `agent_id` runs inside the app of the agent `host_id`
-/// on one of its hosts ([`AgentRow::runs_inside`]). False for any id outside the catalog.
+/// on one of its hosts ([`HarnessRow::runs_inside`]). False for any id outside the catalog.
 #[must_use]
-pub fn runs_inside(agent_id: &str, host_id: &str) -> bool {
+pub fn runs_inside(agent_id: &str, app_id: &str) -> bool {
     ROSTER
         .iter()
         .filter(|row| row.agent_id == agent_id)
-        .any(|row| row.runs_inside.contains(&host_id))
+        .any(|row| row.runs_inside.contains(&app_id))
 }
 
 /// Whether the roster row `harness_id`, one host of an agent, is known to run inside the app of
-/// the agent `host_id` ([`AgentRow::runs_inside`]). False for any id outside the roster.
+/// the agent `host_id` ([`HarnessRow::runs_inside`]). False for any id outside the roster.
 #[must_use]
-pub fn host_runs_inside(harness_id: &str, host_id: &str) -> bool {
+pub fn host_runs_inside(harness_id: &str, app_id: &str) -> bool {
     ROSTER
         .iter()
-        .any(|row| row.id == harness_id && row.runs_inside.contains(&host_id))
+        .any(|row| row.id == harness_id && row.runs_inside.contains(&app_id))
 }
 
 /// The packaged monogram tile of the catalog agent `agent_id`; none for an id outside the catalog.
@@ -1777,7 +1777,7 @@ pub fn app_catalog() -> Vec<apps::AgentAppSources> {
         .collect()
 }
 
-fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
+fn inspect(context: &HarnessContext, definition: &ResolvedHarness) -> HarnessSummary {
     let detected = definition.path.exists()
         || product_config_parent_exists(context, &definition.path)
         || definition
@@ -2121,7 +2121,7 @@ fn unowned_entry_refusal(command: Option<&str>, args: Option<&[&str]>) -> Harnes
 /// The state of Ghostlight's entry in `definition`'s own configuration file.
 fn registration_state(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
 ) -> Result<RegistrationState, HarnessError> {
     registration_state_at(context, definition, &definition.path)
 }
@@ -2130,7 +2130,7 @@ fn registration_state(
 /// `definition`.
 fn registration_state_at(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
     path: &Path,
 ) -> Result<RegistrationState, HarnessError> {
     if !path.exists() {
@@ -2309,7 +2309,7 @@ fn forward_codex_desktop_environment(entry: &mut Item, linux: bool) -> Result<()
 
 fn apply_install(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
     if !context.edge.is_file() {
@@ -2340,7 +2340,7 @@ fn apply_install(
 /// unreadable text there does not stop their cleanup.
 fn apply_uninstall(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
     let others = owned_other_copies(context, definition);
@@ -2370,7 +2370,7 @@ fn apply_uninstall(
 /// what a dry run says and what Uninstall does come from this one reading.
 fn owned_other_copies<'a>(
     context: &HarnessContext,
-    definition: &'a HarnessDefinition,
+    definition: &'a ResolvedHarness,
 ) -> Vec<&'a Path> {
     definition
         .other_copies(context.windows)
@@ -2380,11 +2380,7 @@ fn owned_other_copies<'a>(
 
 /// Whether the file at `path`, read as the configuration of `definition`, holds an entry
 /// Ghostlight owns, current or not.
-fn holds_owned_entry(
-    context: &HarnessContext,
-    definition: &HarnessDefinition,
-    path: &Path,
-) -> bool {
+fn holds_owned_entry(context: &HarnessContext, definition: &ResolvedHarness, path: &Path) -> bool {
     registration_state_at(context, definition, path).is_ok_and(|state| state.is_owned())
 }
 
@@ -2392,7 +2388,7 @@ fn holds_owned_entry(
 /// `definition`. Whether the file changed.
 fn uninstall_at(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
     path: &Path,
 ) -> Result<bool, HarnessError> {
     edit_at(context, definition, path, RegistrationEdit::Uninstall)
@@ -2403,7 +2399,7 @@ fn uninstall_at(
 /// refused with its manual setup.
 fn edit_at(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
     path: &Path,
     intent: RegistrationEdit,
 ) -> Result<bool, HarnessError> {
@@ -2415,7 +2411,7 @@ fn edit_at(
 
 fn apply_fix(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
     if !context.edge.is_file() {
@@ -2442,7 +2438,7 @@ fn apply_fix(
 /// in.
 fn refuse_private(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
 ) -> Result<(), HarnessError> {
     match context.private_to(definition) {
         Some(container) => Err(HarnessError::PrivateView(container.app.clone())),
@@ -2802,7 +2798,7 @@ fn json_entry_args(entry: &Value, dialect: JsonDialect) -> Option<Vec<&str>> {
 }
 
 /// The sentence a person reads for a client whose file Ghostlight never edits.
-fn manual_setup_sentence(definition: &HarnessDefinition) -> String {
+fn manual_setup_sentence(definition: &ResolvedHarness) -> String {
     let file = definition
         .path
         .file_name()
@@ -2810,13 +2806,13 @@ fn manual_setup_sentence(definition: &HarnessDefinition) -> String {
     words::manual_setup(file.as_deref())
 }
 
-fn manual_refusal(definition: &HarnessDefinition) -> HarnessError {
+fn manual_refusal(definition: &ResolvedHarness) -> HarnessError {
     HarnessError::ManualSetup(manual_setup_sentence(definition))
 }
 
 pub(super) fn manual_setup(
     context: &HarnessContext,
-    definition: &HarnessDefinition,
+    definition: &ResolvedHarness,
 ) -> Result<String, HarnessError> {
     match definition
         .dialect

@@ -94,7 +94,7 @@ pub struct SetupOptions {
     /// Do not open the Ghostlight window.
     pub no_open: bool,
     /// Specific MCP client identifiers to configure.
-    pub client_ids: Vec<String>,
+    pub harness_ids: Vec<String>,
 }
 
 /// The command sent to the native host registration manager.
@@ -376,19 +376,19 @@ pub fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOption
                     .next()
                     .and_then(|value| value.to_str())
                     .ok_or_else(|| anyhow::anyhow!("--client needs a client id"))?;
-                options.client_ids.push(id.into());
+                options.harness_ids.push(id.into());
             }
             value if value.starts_with("--client=") => {
                 let id = &value["--client=".len()..];
                 if id.is_empty() {
                     anyhow::bail!("--client needs a client id");
                 }
-                options.client_ids.push(id.into());
+                options.harness_ids.push(id.into());
             }
             other => anyhow::bail!("unknown setup option {other}"),
         }
     }
-    if options.no_clients && (options.all_clients || !options.client_ids.is_empty()) {
+    if options.no_clients && (options.all_clients || !options.harness_ids.is_empty()) {
         anyhow::bail!("--no-clients cannot be combined with a client selection");
     }
     if options.all_browsers && !options.browser_ids.is_empty() {
@@ -413,11 +413,11 @@ const HELP_WIDTH: usize = 96;
 /// The help text's list of `--client` values, read from the agent catalog: the agent ids, each
 /// of which selects the agent's detected hosts, then the host ids, each of which selects one.
 fn client_id_lines() -> String {
-    let ids = crate::install::client_ids();
+    let ids = crate::install::harness_ids();
     format!(
         "Client ids (an agent id selects its detected hosts, or every host with {ALL_CLIENTS_OPTION}):\n{}\n{}",
         id_list("  Agents: ", &ids.agents),
-        id_list("  Hosts:  ", &ids.hosts)
+        id_list("  Hosts:  ", &ids.harnesses)
     )
 }
 
@@ -721,7 +721,7 @@ mod tests {
                     all_clients: false,
                     no_clients: false,
                     no_open: true,
-                    client_ids: vec!["codex".into()],
+                    harness_ids: vec!["codex".into()],
                 })
             );
             assert_eq!(
@@ -800,7 +800,7 @@ mod tests {
                 .join("../../packaging/linux/completions")
                 .canonicalize()
                 .expect("completion directory exists");
-            let expected = crate::install::client_ids()
+            let expected = crate::install::harness_ids()
                 .all()
                 .collect::<Vec<_>>()
                 .join(" ");
@@ -822,9 +822,11 @@ mod tests {
             let page = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../packaging/linux/man/ghostlight.1");
             let source = std::fs::read_to_string(page).expect("the manual page is readable");
-            let ids = crate::install::client_ids();
-            for (prefix, expected) in [("\nAgent ids: ", &ids.agents), ("\nHost ids: ", &ids.hosts)]
-            {
+            let ids = crate::install::harness_ids();
+            for (prefix, expected) in [
+                ("\nAgent ids: ", &ids.agents),
+                ("\nHost ids: ", &ids.harnesses),
+            ] {
                 assert_eq!(
                     declared("ghostlight.1", &source, prefix, "\n").replace(r"\-", "-"),
                     expected.join(", "),

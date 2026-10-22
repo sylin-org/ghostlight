@@ -25,9 +25,8 @@ use std::path::{Path, PathBuf};
 use super::container::AppContainer;
 use super::layout::{EDGE_COMMAND_NAME, HARNESS_LOCATIONS_NAME, RETIRED_MCP_CONNECTOR_NAME};
 use super::{
-    definition, harness_roots, program_file_name, AgentRow, ConfigDialect, HarnessAction,
-    HarnessContext, HarnessRegistry, HarnessState, HarnessSummary, JsonDialect, PrivateView,
-    ROSTER,
+    definition, harness_roots, program_file_name, ConfigDialect, HarnessAction, HarnessContext,
+    HarnessRegistry, HarnessRow, HarnessState, HarnessSummary, JsonDialect, PrivateView, ROSTER,
 };
 use crate::language::self_check::golden::{check_golden_with, repository_path};
 use crate::scratch::Scratch;
@@ -165,7 +164,7 @@ impl Computer {
     }
 
     /// The seeds recorded on this computer for the host `row`.
-    fn seeds(self, row: &AgentRow) -> Vec<Seed> {
+    fn seeds(self, row: &HarnessRow) -> Vec<Seed> {
         let mut all = Shape::of(row).seeds();
         match self {
             Self::InsideAnotherApp => all
@@ -198,7 +197,7 @@ enum Shape {
 }
 
 impl Shape {
-    fn of(row: &AgentRow) -> Self {
+    fn of(row: &HarnessRow) -> Self {
         match row.dialect {
             ConfigDialect::Json(dialect) => Self::Json(dialect),
             ConfigDialect::OpenCode => Self::OpenCode,
@@ -502,7 +501,7 @@ impl Run {
 
     /// The plain configuration file of the host `row` on this run's computer, where it is
     /// written when no Store package holds a copy.
-    fn plain(&self, row: &AgentRow) -> PathBuf {
+    fn plain(&self, row: &HarnessRow) -> PathBuf {
         definition(&self.context, row.id)
             .expect("every roster row has a definition")
             .default_path
@@ -519,7 +518,7 @@ impl Run {
     /// The file a seed writes besides its own, with its bytes: the plain file an earlier install
     /// left beside the Store edition's copy, the Store edition's other file in its own folder, or
     /// the copy another app's private view kept.
-    fn beside(&self, row: &AgentRow, seed: Seed) -> Option<(PathBuf, String)> {
+    fn beside(&self, row: &HarnessRow, seed: Seed) -> Option<(PathBuf, String)> {
         let current =
             || seed_bytes(self, Shape::of(row), Seed::Current).expect("the current seed is a file");
         match seed {
@@ -538,7 +537,7 @@ impl Run {
 
     /// Write `seed` for the host `row` and point Ghostlight at it when the seed is located. The
     /// seed's path and bytes, and the registry over the run.
-    fn seeded(&self, row: &AgentRow, seed: Seed) -> (PathBuf, Option<String>, HarnessRegistry) {
+    fn seeded(&self, row: &HarnessRow, seed: Seed) -> (PathBuf, Option<String>, HarnessRegistry) {
         let default = self.plain(row);
         let path = match seed {
             Seed::Located => {
@@ -998,7 +997,7 @@ fn write_act(
 }
 
 /// Everything the golden records for one host on one computer from one seed.
-fn write_seed(out: &mut String, row: &AgentRow, computer: Computer, seed: Seed) {
+fn write_seed(out: &mut String, row: &HarnessRow, computer: Computer, seed: Seed) {
     let _ = writeln!(out, "\n=== {} / {}", computer.heading(), seed.heading());
     let run = Run::new(computer);
     let (path, bytes, registry) = run.seeded(row, seed);
@@ -1066,7 +1065,7 @@ fn header(subject: &str) -> String {
 }
 
 /// The golden of one host: every computer, every seed, every act.
-fn host_golden(row: &AgentRow) -> String {
+fn host_golden(row: &HarnessRow) -> String {
     let mut out = header(row.id);
     for computer in COMPUTERS {
         let run = Run::new(computer);
@@ -1083,7 +1082,7 @@ fn host_golden(row: &AgentRow) -> String {
 
 /// The seed each host starts from when everything is set up at once: another server for most,
 /// and one host for each blocked or stale state.
-fn setup_seed(row: &AgentRow) -> Seed {
+fn setup_seed(row: &HarnessRow) -> Seed {
     match row.id {
         "claude-code" => Seed::Stale,
         "cursor" => Seed::Foreign,
@@ -1266,8 +1265,8 @@ mod native {
     }
 
     /// The first roster host of each way a file is written, with that way's name.
-    fn hosts() -> Vec<(String, &'static AgentRow)> {
-        let mut hosts: Vec<(String, &'static AgentRow)> = Vec::new();
+    fn hosts() -> Vec<(String, &'static HarnessRow)> {
+        let mut hosts: Vec<(String, &'static HarnessRow)> = Vec::new();
         for row in ROSTER {
             if let Some(way) = written_as(row.dialect) {
                 if hosts.iter().all(|(seen, _)| *seen != way) {

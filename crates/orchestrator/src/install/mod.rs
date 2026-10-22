@@ -47,8 +47,8 @@ pub use harness::*;
 
 #[cfg(test)]
 use harness::{
-    definition, harness_roots, manual_json_setup, manual_setup, AgentRow, ConfigDialect,
-    HarnessContext, JsonDialect, PrivateView, CLAUDE_CONFIG_VARIABLE, CODEX_HOME_VARIABLE,
+    definition, harness_roots, manual_json_setup, manual_setup, ConfigDialect, HarnessContext,
+    HarnessRow, JsonDialect, PrivateView, CLAUDE_CONFIG_VARIABLE, CODEX_HOME_VARIABLE,
     CRUSH_CONFIG_VARIABLE, ROSTER, SERVER_NAME,
 };
 #[cfg(test)]
