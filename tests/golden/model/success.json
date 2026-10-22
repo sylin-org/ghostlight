@@ -37,7 +37,7 @@
           {
             "attended": true,
             "browser": "browser_fake",
-            "name": null
+            "name": "Chromium"
           }
         ],
         "tabs": [

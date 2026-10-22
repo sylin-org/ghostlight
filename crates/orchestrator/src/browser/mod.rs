@@ -6,6 +6,7 @@ pub mod recovery;
 pub mod transport;
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -39,12 +40,16 @@ const AVAILABILITY_POLL: Duration = Duration::from_millis(40);
 const BROWSER_NAME_MAX_CHARS: usize = 40;
 // A protocol-4 extension names the most specific brand among the browser's user-agent brands and
 // leaves out the generic Chromium brand, so a browser that reports no name calls itself Chromium.
-const UNBRANDED_BROWSER_NAME: &str = "Chromium";
+pub(crate) const UNBRANDED_BROWSER_NAME: &str = "Chromium";
+/// The most browser connections the port holds at once; a new browser past it is refused.
 const MAX_BROWSER_CONNECTIONS: usize = 16;
+/// The longest browser identity or extension life an adapter may report, prefix included.
+const OPAQUE_ID_MAX_BYTES: usize = 80;
 // Every browser identity an adapter mints starts with this prefix.
 const BROWSER_ID_PREFIX: &str = "browser_";
 // Every extension life an adapter mints starts with this prefix.
 const LIFE_PREFIX: &str = "life_";
+/// How long a runtime-control frame may take to reach one browser, and a registration to answer.
 const CONTROL_DELIVERY_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// How long a call waits for a browser that is on its way back before it says what is true.
@@ -270,23 +275,17 @@ pub trait BrowserPort: Send + Sync {
         until: Instant,
         cancelled: &AtomicBool,
     ) -> Availability {
-        loop {
+        poll_until(until, cancelled, || {
             if self
                 .browsers()
                 .iter()
                 .any(|connected| connected.id == browser)
             {
-                return Availability::Available;
+                ControlFlow::Break(Availability::Available)
+            } else {
+                ControlFlow::Continue(Availability::Absent)
             }
-            if cancelled.load(Ordering::SeqCst) || Instant::now() >= until {
-                return Availability::Absent;
-            }
-            thread::sleep(
-                until
-                    .saturating_duration_since(Instant::now())
-                    .min(AVAILABILITY_POLL),
-            );
-        }
+        })
     }
 
     /// Wait like [`await_available`](Self::await_available), but stop as soon as `browser` is
@@ -320,21 +319,14 @@ pub trait BrowserPort: Send + Sync {
     /// The evidence is read again on every poll. Without it the wait ends at once, so a call
     /// that goes on to browser startup keeps that startup's budget.
     fn await_any(&self, until: Instant, cancelled: &AtomicBool) -> Vec<BrowserSummary> {
-        loop {
+        poll_until(until, cancelled, || {
             let connected = self.browsers();
-            if !connected.is_empty()
-                || cancelled.load(Ordering::SeqCst)
-                || Instant::now() >= until
-                || !self.browser_returning()
-            {
-                return connected;
+            if connected.is_empty() && self.browser_returning() {
+                ControlFlow::Continue(connected)
+            } else {
+                ControlFlow::Break(connected)
             }
-            thread::sleep(
-                until
-                    .saturating_duration_since(Instant::now())
-                    .min(AVAILABILITY_POLL),
-            );
-        }
+        })
     }
 
     /// Whether there is evidence, right now, that a browser is about to connect. That evidence
@@ -436,7 +428,7 @@ struct Connection {
     line: Line,
     adapter_version: String,
     browser_id: String,
-    browser_name: Option<String>,
+    browser_name: String,
     /// The extension life the connection's hello reported, if it reported one.
     life: Option<String>,
     liveness: Arc<Liveness>,
@@ -467,25 +459,13 @@ pub struct BrowserSummary {
     /// This doubles as the model-facing handle. It is already opaque and content-free, so a
     /// second mapping table would add a lookup without adding a guarantee.
     pub id: String,
-    /// Bounded product name, when the adapter reports one.
-    pub name: Option<String>,
+    /// The product name a person and the history know this browser by: the bounded name its
+    /// adapter reports, or Chromium ([`UNBRANDED_BROWSER_NAME`]) when it reports none.
+    pub name: String,
     /// Adapter version currently serving this browser.
     pub adapter_version: String,
     /// Whether this is the most recently attended connected browser.
     pub attended: bool,
-}
-
-/// The name a connected browser goes by when its adapter reports no product name: the browser
-/// family every adapter this service serves belongs to.
-const UNNAMED_BROWSER: &str = "Chromium";
-
-impl BrowserSummary {
-    /// The name a person and the history know this browser by: its reported product name, or
-    /// its family when it reports none.
-    #[must_use]
-    pub fn display_name(&self) -> String {
-        self.name.clone().unwrap_or_else(|| UNNAMED_BROWSER.into())
-    }
 }
 
 /// Every connected browser, and the reported order in which they were last attended.
@@ -1015,10 +995,7 @@ impl RelayBrowserPort {
     /// Refuses a new browser once the port holds its connection capacity.
     fn register(&self, connection: Connection, attended: bool) -> Result<(), BrowserError> {
         let browser_id = connection.browser_id.clone();
-        let installed = connection
-            .browser_name
-            .as_deref()
-            .and_then(browser_id_named);
+        let installed = browser_id_named(&connection.browser_name);
         let replaced = lock(&self.adapters)
             .connections
             .get(&browser_id)
@@ -1151,23 +1128,15 @@ impl RelayBrowserPort {
         until: Instant,
         cancelled: &AtomicBool,
     ) -> Availability {
-        loop {
+        poll_until(until, cancelled, || {
             let reachability =
                 lock(&self.adapters).reachability(browser, Instant::now(), self.heartbeat.timeout);
-            let availability = match reachability {
-                Reachability::Available => return Availability::Available,
-                Reachability::Absent => Availability::Absent,
-                Reachability::Silent => Availability::NotAnswering,
-            };
-            if cancelled.load(Ordering::SeqCst) || Instant::now() >= until {
-                return availability;
+            match reachability {
+                Reachability::Available => ControlFlow::Break(Availability::Available),
+                Reachability::Absent => ControlFlow::Continue(Availability::Absent),
+                Reachability::Silent => ControlFlow::Continue(Availability::NotAnswering),
             }
-            thread::sleep(
-                until
-                    .saturating_duration_since(Instant::now())
-                    .min(AVAILABILITY_POLL),
-            );
-        }
+        })
     }
 }
 
@@ -1408,9 +1377,9 @@ fn retire(previous: &Connection) {
 /// Validate the bounded product name an adapter reports for itself. A browser that reports none
 /// is Chromium ([`UNBRANDED_BROWSER_NAME`]), so its connection is named and remembered like any
 /// other browser's.
-fn validated_browser_name(name: Option<String>) -> Result<Option<String>, BrowserError> {
+pub(crate) fn validated_browser_name(name: Option<String>) -> Result<String, BrowserError> {
     let Some(name) = name else {
-        return Ok(Some(UNBRANDED_BROWSER_NAME.to_owned()));
+        return Ok(UNBRANDED_BROWSER_NAME.to_owned());
     };
     let acceptable = !name.trim().is_empty()
         && name.chars().count() <= BROWSER_NAME_MAX_CHARS
@@ -1418,13 +1387,37 @@ fn validated_browser_name(name: Option<String>) -> Result<Option<String>, Browse
     if !acceptable {
         return Err(BrowserError::Authentication);
     }
-    Ok(Some(name))
+    Ok(name)
+}
+
+/// Look with `look` until it is done, `until` passes or `cancelled` is set, sleeping at most
+/// [`AVAILABILITY_POLL`] between looks. `look` breaks with the answer, or continues with the one a
+/// wait that ends now gives.
+fn poll_until<T>(
+    until: Instant,
+    cancelled: &AtomicBool,
+    mut look: impl FnMut() -> ControlFlow<T, T>,
+) -> T {
+    loop {
+        let pending = match look() {
+            ControlFlow::Break(answer) => return answer,
+            ControlFlow::Continue(pending) => pending,
+        };
+        if cancelled.load(Ordering::SeqCst) || Instant::now() >= until {
+            return pending;
+        }
+        thread::sleep(
+            until
+                .saturating_duration_since(Instant::now())
+                .min(AVAILABILITY_POLL),
+        );
+    }
 }
 
 fn valid_opaque_id(value: &str, prefix: &str) -> bool {
     value.starts_with(prefix)
         && value.len() > prefix.len()
-        && value.len() <= 80
+        && value.len() <= OPAQUE_ID_MAX_BYTES
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
@@ -1686,7 +1679,7 @@ pub(crate) mod testing {
     pub fn summary(id: &str, attended: bool) -> BrowserSummary {
         BrowserSummary {
             id: id.into(),
-            name: None,
+            name: super::UNBRANDED_BROWSER_NAME.into(),
             adapter_version: "1.0.0".into(),
             attended,
         }

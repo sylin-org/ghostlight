@@ -422,7 +422,7 @@ fn a_connected_browser_is_remembered_for_the_next_service_by_its_name() {
     use crate::browser::adapter::chromium::protocol4::fake::{
         FakeExtension, Reply as FakeReply, Script,
     };
-    use crate::browser::{BrowserPort as _, BrowserSummary};
+    use crate::browser::BrowserPort as _;
     use crate::install::native_host::browser_id_named;
 
     let listing = || -> Script {
@@ -456,13 +456,7 @@ fn a_connected_browser_is_remembered_for_the_next_service_by_its_name() {
 
     // Plain Chromium's brands are all generic, so its extension reports no name: it is
     // Chromium, the family every adapter belongs to, remembered and read by that name.
-    let family = BrowserSummary {
-        id: String::new(),
-        name: None,
-        adapter_version: String::new(),
-        attended: false,
-    }
-    .display_name();
+    let family = crate::browser::validated_browser_name(None).expect("an unnamed browser is named");
     let mut hello = FakeExtension::hello("browser_plain");
     hello.as_object_mut().unwrap().remove("browser_name");
     let (service, extension) = pair().unwrap();
@@ -477,8 +471,7 @@ fn a_connected_browser_is_remembered_for_the_next_service_by_its_name() {
             .browser
             .browsers()
             .iter()
-            .any(|browser| browser.id == "browser_plain"
-                && browser.name.as_deref() == Some(family.as_str())),
+            .any(|browser| browser.id == "browser_plain" && browser.name == family),
         "the model reads a name, not null"
     );
     fake.close();

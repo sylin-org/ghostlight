@@ -109,7 +109,7 @@ fn each_record_holds_only_what_its_own_frame_reached() {
             .iter()
             .map(|record| (record.tool.as_str(), record.browser.clone()))
             .collect();
-        let fake = Some(summary(FAKE_BROWSER, true).display_name());
+        let fake = Some(summary(FAKE_BROWSER, true).name);
         assert_eq!(
             named,
             [
@@ -195,7 +195,7 @@ fn each_record_holds_only_what_its_own_frame_reached() {
         assert_eq!(listed.status, Status::Failed, "{failure:?}");
         assert_eq!(
             audit.0.lock().unwrap()[0].browser,
-            written.then(|| summary(FAKE_BROWSER, true).display_name()),
+            written.then(|| summary(FAKE_BROWSER, true).name),
             "{failure:?}"
         );
     }

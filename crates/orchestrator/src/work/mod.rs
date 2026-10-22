@@ -1226,7 +1226,7 @@ impl ApplicationExecutor {
             .browsers()
             .into_iter()
             .find(|summary| summary.id == browser)
-            .map(|summary| summary.display_name());
+            .map(|summary| summary.name);
         let tab = addressed_tab(&command);
         let written = AtomicBool::new(false);
         let asked = AtomicBool::new(false);

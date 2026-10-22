@@ -44,7 +44,7 @@ use super::{
 };
 use crate::browser::adapter::RuntimeControlState;
 use crate::browser::recovery::BrowserRecovery;
-use crate::browser::{BrowserPort, BrowserSummary};
+use crate::browser::BrowserPort;
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::effective::PolicyChip;
 use crate::governance::manifest::BrowserStartup;
@@ -458,7 +458,7 @@ impl Live {
                     browser_list
                         .iter()
                         .find(|b| b.id == id)
-                        .map(BrowserSummary::display_name)
+                        .map(|summary| summary.name.clone())
                 });
                 SessionSummary {
                     running_operations: operations
@@ -481,7 +481,7 @@ impl Live {
             .into_iter()
             .map(|browser| BrowserInstanceSummary {
                 tab_count: tabs_in.get(&browser.id).copied().unwrap_or_default(),
-                family: browser.display_name(),
+                family: browser.name,
                 id: browser.id,
                 adapter_version: Some(browser.adapter_version),
                 connected: true,

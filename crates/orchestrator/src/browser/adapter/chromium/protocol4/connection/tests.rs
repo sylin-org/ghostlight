@@ -121,9 +121,9 @@ fn the_service_answers_a_first_frame_by_whether_it_is_a_protocol_four_hello() {
         (
             browsers.len(),
             browsers[0].id.as_str(),
-            browsers[0].name.as_deref()
+            browsers[0].name.as_str()
         ),
-        (1, FOUR, Some("Chrome"))
+        (1, FOUR, "Chrome")
     );
     assert_eq!(*lifecycle.0.lock().unwrap(), [format!("attached {FOUR}")]);
 

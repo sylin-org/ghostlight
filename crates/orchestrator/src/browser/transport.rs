@@ -19,6 +19,10 @@ use crate::sync::lock;
 pub const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Total writer wait plus delivery budget, independent of the peer's incremental progress.
 pub const DELIVERY_TIMEOUT: Duration = Duration::from_secs(2);
+/// The longest one read waits while a stop may come, so a stop is seen within it.
+const STOP_POLL: Duration = Duration::from_millis(250);
+/// How long a writer waits before it tries the busy lock again.
+const WRITER_RETRY: Duration = Duration::from_millis(2);
 
 fn remaining(deadline: Instant) -> io::Result<Duration> {
     deadline
@@ -77,11 +81,7 @@ impl BufRead for SocketReader {
             }
             let timeout = self.deadline.map(remaining).transpose()?;
             let timeout = if self.stop.is_some() {
-                Some(
-                    timeout
-                        .unwrap_or(Duration::from_millis(250))
-                        .min(Duration::from_millis(250)),
-                )
+                Some(timeout.unwrap_or(STOP_POLL).min(STOP_POLL))
             } else {
                 timeout
             };
@@ -195,7 +195,7 @@ impl SocketWriter {
                         deadline,
                     })
                 }
-                Err(TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(2)),
+                Err(TryLockError::WouldBlock) => std::thread::sleep(WRITER_RETRY),
             }
         }
     }

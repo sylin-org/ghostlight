@@ -709,7 +709,6 @@ mod tests {
     use super::test_support::{connected, harness, session, session_from, Computer, Started};
     use super::*;
     use crate::browser::testing::FakeBrowser;
-    use crate::browser::BrowserSummary;
     use crate::governance::{CapabilitySet, Decision};
     use crate::install::browser_profiles::{ExtensionProfile, ProfileScan};
     use crate::language::history::{CompositionKind, StepReceipt};
@@ -905,20 +904,16 @@ mod tests {
         }
 
         // an_unnamed_adapter_reads_as_chromium_the_way_the_port_maps_it
-        let unnamed = BrowserSummary {
-            id: "browser_unnamed".into(),
-            name: None,
-            adapter_version: "1.0.0".into(),
-            attended: true,
-        };
-        let here = browsers_here(&computer, &[connected(&unnamed.display_name())]);
+        let unnamed =
+            crate::browser::validated_browser_name(None).expect("an unnamed browser is named");
+        let here = browsers_here(&computer, &[connected(&unnamed)]);
         assert_eq!(
             here.facts
                 .iter()
                 .filter(|fact| fact.connected)
                 .map(|fact| fact.id.as_str())
                 .collect::<Vec<_>>(),
-            [browser_id_named(&unnamed.display_name()).expect("a family")],
+            [browser_id_named(&unnamed).expect("a family")],
             "an unnamed adapter is the Chromium row and no other"
         );
         assert_eq!(fact(&here, "chromium").short, OTHER_BROWSER_SHORT);

@@ -50,7 +50,7 @@ In order. "After" names what a slice waits for.
 | SERV-14 | docs(service): the module docs map the crate | SERV-11 | SERV-14 | todo |
 | BROW-1 | refactor(browser): protocol 4's frames and hello validators move into protocol 4 | C3c | BROW-1 as corrected; the registry stays in `browser/`; cross-lane `browser/adapter/` | todo |
 | BROW-5 | refactor(browser): the `Work` alias goes | - | BROW-5 | landed (this commit) |
-| BROW-8 | refactor(browser): the port's literals are named | - | BROW-8's port half; `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` as a check, not a tie | todo |
+| BROW-8 | refactor(browser): the port's literals are named | - | BROW-8's port half; `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` as a check, not a tie | landed (this commit) |
 | BROW-11 | docs(browser): the port's docs match the code | BROW-1 | BROW-11's port half | todo |
 | BROW-12 | refactor(browser): one SHA-256 helper | - | BROW-12's hash part | landed with the adapter's BROW-12a (52753883); nothing of it is left in this lane's files, and governance's own hex writers are policy's |
 | BROW-13 | refactor(browser): the display-session module says what it is | - | BROW-13 as corrected: the `session.rs` rename and the golden path | landed (this commit) |
@@ -177,3 +177,15 @@ A kill-on-close job would need the relay to break away; none has been seen.
   `crate::browser::graphical_session`. `protocol4/assets.rs` reads its pinned asset id through
   `concat!(env!("CARGO_MANIFEST_DIR"), ...)` in place of seven `../`, as `golden.rs` builds its
   fixture path. As the ledger's correction says, `work.rs` and `documents.rs` stay where they are.
+- BROW-8 as landed (the port half): `recovery.rs`'s three 10 ms waits are `FLIGHT_POLL`;
+  `transport.rs`'s doubled 250 ms is `STOP_POLL` and its 2 ms spin `WRITER_RETRY`; the opaque-id
+  bound 80 is `OPAQUE_ID_MAX_BYTES`; `MAX_BROWSER_CONNECTIONS` and `CONTROL_DELIVERY_TIMEOUT`
+  have doc comments. The second "Chromium" (`UNNAMED_BROWSER`) and `display_name` go:
+  `validated_browser_name` always names the browser, so a connection's name and
+  `BrowserSummary.name` are a `String`, and its readers read it. Only the test fakes went
+  unnamed; they are now Chromium, so `tests/golden/model/success.json`'s fake browser reads
+  `"name": "Chromium"` for `null`, regenerated on purpose (production output is unchanged). The
+  three poll loops (the default `await_available`, `await_any`, `await_registered`) are one
+  `poll_until`, which looks, stops on an answer or on the deadline or a cancel, and sleeps at most
+  `AVAILABILITY_POLL`. `MAX_WORLD_CALLS >= DOCUMENT_LIMIT` was already a const assertion from the
+  adapter's BROW-8a, so nothing ties the frozen limit to the internal one.

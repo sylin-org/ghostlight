@@ -197,7 +197,7 @@ impl crate::browser::BrowserPort for ControlledBrowser {
         }
         vec![crate::browser::BrowserSummary {
             id: "browser-1".into(),
-            name: Some("Chrome".into()),
+            name: "Chrome".into(),
             adapter_version: "1.0.0".into(),
             attended: true,
         }]
@@ -1523,7 +1523,7 @@ impl crate::browser::BrowserPort for ComingAndGoing {
         }
         vec![crate::browser::BrowserSummary {
             id: "browser-1".into(),
-            name: Some(CHROME.into()),
+            name: CHROME.into(),
             adapter_version: "1.0.0".into(),
             attended: true,
         }]

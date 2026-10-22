@@ -49,6 +49,9 @@ use crate::install::native_host::{
 use crate::language::MAX_TIMEOUT_MS;
 use crate::sync::lock;
 
+/// How often a recovery flight looks again at what it waits for.
+const FLIGHT_POLL: Duration = Duration::from_millis(10);
+
 /// How long a browser start Ghostlight made holds the launch guard while no connection of that
 /// browser has arrived: the longest wait any call can give a handshake. A request inside it waits
 /// for that start instead of starting the browser again.
@@ -702,7 +705,7 @@ impl BrowserRecovery {
             }
             let wait = deadline
                 .saturating_duration_since(Instant::now())
-                .min(Duration::from_millis(10));
+                .min(FLIGHT_POLL);
             let (next, _) = flight
                 .changed
                 .wait_timeout(state, wait)
@@ -727,7 +730,7 @@ impl BrowserRecovery {
                     thread::sleep(
                         deadline
                             .saturating_duration_since(Instant::now())
-                            .min(Duration::from_millis(10)),
+                            .min(FLIGHT_POLL),
                     );
                     return Ok(FlightPhase::Launched { browser });
                 };
@@ -800,7 +803,7 @@ impl BrowserRecovery {
                     thread::sleep(
                         deadline
                             .saturating_duration_since(Instant::now())
-                            .min(Duration::from_millis(10)),
+                            .min(FLIGHT_POLL),
                     );
                     return Ok(FlightPhase::Launched { browser });
                 }
