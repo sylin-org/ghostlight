@@ -252,7 +252,8 @@ Now:
   decode.
 - 2.0.1 is published (2026-10-22): the GitHub release `v2.0.1` (Latest), npm `ghostlight@2.0.1`,
   the Chrome Web Store adapter 2.0.1 at 100%, the MCP Registry record and `main` at the release.
-  WinGet's manifest is microsoft/winget-pkgs#458539. The custody record is
+  WinGet's manifest is microsoft/winget-pkgs#458539, held by a Defender machine-learning false
+  positive (Wacatac.C!ml) that Microsoft is reviewing (WDSI d5b9b3cd). The custody record is
   [testing/release-2.0.1-2026-10-22.md](testing/release-2.0.1-2026-10-22.md); the public install
   is proven on Alpine and Windows, with Bluefin to follow when its session is back.
 - The 2.0.1 extension (`aaa234b1...`, from candidate run 39669867246) was submitted to the Chrome Web

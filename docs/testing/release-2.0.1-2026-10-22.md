@@ -34,6 +34,12 @@ on the owner's Windows machine) at the owner's direction ("do the full run!"). T
    [microsoft/winget-pkgs#458539](https://github.com/microsoft/winget-pkgs/pull/458539), with the
    three manifests `scripts/prepare-winget-manifest.ps1 -ValidateWinGet` generated from the
    bundle. Until it merges, WinGet serves 2.0.0.
+   Its Installation Validation failed on 2026-10-22 (Validation-Defender-Error): Defender's cloud
+   machine-learning verdict Trojan:Script/Wacatac.C!ml blocked the portable zip, while a local scan
+   with definitions 1.461.158.0 and cloud protection found nothing. On 2026-10-23 the zip was
+   submitted to Microsoft as an incorrect detection (WDSI submission
+   d5b9b3cd-7c4f-4b17-a9ed-60fb9b19a0a7, as hello@sylin.org), and the PR asks a moderator to re-run
+   validation once the determination clears.
 
 ## Public install
 
