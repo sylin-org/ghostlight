@@ -477,10 +477,11 @@ pub struct ScrollPage {
     pub tab: Option<String>,
     #[serde(default)]
     pub target: Option<String>,
+    /// The direction to scroll the page in; none lets the page choose (ADR-0205 Decision 3).
     #[serde(default)]
     pub direction: Option<ScrollDirection>,
     #[serde(default)]
-    pub amount: Option<ScrollAmount>,
+    pub amount: Option<ScrollDistance>,
     #[serde(default)]
     pub view: Option<String>,
     #[serde(default)]

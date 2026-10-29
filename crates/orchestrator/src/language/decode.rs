@@ -26,12 +26,48 @@ const RETIRED_TOOLS: &[(&str, &str)] = &[
 
 /// Decode and validate one catalog invocation.
 pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
+    decode_reading(name, input).map(|(operation, _)| operation)
+}
+
+/// Decode and validate one catalog invocation, with how its values were read (ADR-0205).
+pub fn decode_reading(name: &str, input: Value) -> Result<(Operation, Reading), LanguageError> {
     if let Some((_, refusal)) = RETIRED_TOOLS.iter().find(|(retired, _)| *retired == name) {
         return Err(LanguageError::Invalid((*refusal).into()));
     }
     let Some(tool) = Tool::named(name) else {
         return Err(LanguageError::UnknownTool(name.into()));
     };
+    let mut reading = Reading::default();
+    let input = values::read_call(tool, input, &mut reading)?;
+    let operation = decode_tool(tool, input)
+        .map_err(|error| with_suggestion(error, values::fields_of(tool)))?;
+    Ok((operation, reading))
+}
+
+/// Name the closest field a tool takes, and every field it takes, in the refusal of a field it
+/// does not (ADR-0205 Decision 6).
+fn with_suggestion(error: LanguageError, fields: &[String]) -> LanguageError {
+    let LanguageError::Invalid(message) = &error else {
+        return error;
+    };
+    let Some(unknown) = message
+        .strip_prefix(UNKNOWN_FIELD_PREFIX)
+        .and_then(|rest| rest.split_once('`'))
+        .filter(|(_, after)| after.is_empty())
+        .map(|(field, _)| field)
+    else {
+        return error;
+    };
+    let close = values::closest(unknown, fields)
+        .map(|field| format!(" Did you mean `{field}`?"))
+        .unwrap_or_default();
+    LanguageError::Invalid(format!(
+        "unknown field `{unknown}`.{close} This tool takes {}.",
+        fields.join(", ")
+    ))
+}
+
+fn decode_tool(tool: Tool, input: Value) -> Result<Operation, LanguageError> {
     match tool {
         Tool::Tabs => decode_tabs(input),
         Tool::Navigate => decode_navigate(input),
@@ -51,11 +87,6 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
                 validate_timeout(value.timeout_ms)?;
                 validate_optional_handle(value.target.as_deref(), HandleKind::Target)?;
-                if value.mode.is_some() && value.target.is_some() {
-                    return Err(LanguageError::Invalid(
-                        "mode cannot be combined with target".into(),
-                    ));
-                }
                 validate_within(value.max_chars, READ_CHARS, "max_chars")?;
                 Ok(())
             },
@@ -74,17 +105,9 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
             |value: &InspectPage| {
                 validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
                 validate_timeout(value.timeout_ms)?;
-                if value.scope == InspectScope::Document {
-                    validate_optional_handle(value.root.as_deref(), HandleKind::Target)?;
-                    if let Some(depth) = value.max_depth {
-                        validate_within(depth, DOCUMENT_DEPTH, "max_depth")?;
-                    }
-                } else {
-                    if value.root.is_some() || value.max_depth.is_some() {
-                        return Err(LanguageError::Invalid(
-                            "root and max_depth apply only to document scope".into(),
-                        ));
-                    }
+                validate_optional_handle(value.root.as_deref(), HandleKind::Target)?;
+                if let Some(depth) = value.max_depth {
+                    validate_within(depth, DOCUMENT_DEPTH, "max_depth")?;
                 }
                 validate_within(value.max_items, INSPECT_ITEMS, "max_items")?;
                 Ok(())
@@ -304,11 +327,6 @@ fn decode_tabs(input: Value) -> Result<Operation, LanguageError> {
             validate_choice(&value.action, &["list", "focus", "close"], "action")?;
             validate_timeout(value.timeout_ms)?;
             match value.action.as_str() {
-                "list" if value.tab.is_some() => {
-                    return Err(LanguageError::Invalid(
-                        "tab is not valid when action is list".into(),
-                    ))
-                }
                 "focus" | "close" => validate_handle(
                     value.tab.as_deref().ok_or_else(|| {
                         LanguageError::Invalid(
@@ -363,22 +381,8 @@ fn decode_navigate(input: Value) -> Result<Operation, LanguageError> {
                     "tab and new_tab cannot be combined".into(),
                 ));
             }
-            if value.beforeunload.is_some() {
-                if value.new_tab || value.browser.is_some() {
-                    return Err(LanguageError::Invalid(
-                        "beforeunload applies only to same-tab navigation".into(),
-                    ));
-                }
-                validate_choice(
-                    value.beforeunload.as_deref().expect("validated presence"),
-                    &["discard"],
-                    "beforeunload",
-                )?;
-            }
-            if value.browser.is_some() && !value.new_tab {
-                return Err(LanguageError::Invalid(
-                    "browser is only valid when new_tab is true".into(),
-                ));
+            if let Some(beforeunload) = value.beforeunload.as_deref() {
+                validate_choice(beforeunload, &["discard"], "beforeunload")?;
             }
             validate_timeout(value.timeout_ms)?;
             Ok(())
@@ -426,12 +430,6 @@ fn decode_history(input: Value) -> Result<Operation, LanguageError> {
                 "action",
             )?;
             validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
-            // false is the advertised default, which a client may send with any action.
-            if value.action != HISTORY_RELOAD && value.bypass_cache {
-                return Err(LanguageError::Invalid(
-                    "bypass_cache is only valid when action is reload".into(),
-                ));
-            }
             validate_timeout(value.timeout_ms)?;
             Ok(())
         },
@@ -468,11 +466,6 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
                         ))
                     })?;
                     validate_within(usize::from(percent), ZOOM_PERCENT, "percent")?;
-                    if value.width.is_some() || value.height.is_some() {
-                        return Err(LanguageError::Invalid(
-                            "width and height are only valid when action is resize".into(),
-                        ));
-                    }
                 }
                 "resize" => {
                     let width = value
@@ -483,11 +476,6 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
                         .ok_or_else(|| LanguageError::Invalid(RESIZE_NEEDS_SIZE.into()))?;
                     validate_within(width as usize, WINDOW_WIDTH, "width")?;
                     validate_within(height as usize, WINDOW_HEIGHT, "height")?;
-                    if value.percent.is_some() {
-                        return Err(LanguageError::Invalid(
-                            "percent is only valid when action is zoom".into(),
-                        ));
-                    }
                 }
                 _ => unreachable!("validated action"),
             }
@@ -511,15 +499,14 @@ fn decode_window(input: Value) -> Result<Operation, LanguageError> {
 }
 
 fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
-    let text_present = has_field(&input, "text");
     let value: HandleDialog = parse(
         input,
         &["action", "tab", "text", "timeout_ms"],
         |value: &HandleDialog| {
             validate_timeout(value.timeout_ms)?;
             validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
-            match value.action {
-                DialogAction::Respond => validate_text_allow_empty(
+            if value.action == DialogAction::Respond {
+                validate_text_allow_empty(
                     value.text.as_deref().ok_or_else(|| {
                         LanguageError::Invalid(
                             "action respond needs text: the prompt response, which may be empty"
@@ -528,13 +515,7 @@ fn decode_dialog(input: Value) -> Result<Operation, LanguageError> {
                     })?,
                     DIALOG_TEXT_CHARS,
                     "text",
-                )?,
-                _ if text_present => {
-                    return Err(LanguageError::Invalid(
-                        "text is only valid when action is respond".into(),
-                    ))
-                }
-                _ => {}
+                )?;
             }
             Ok(())
         },
@@ -550,35 +531,13 @@ fn decode_record(input: Value) -> Result<Operation, LanguageError> {
             validate_timeout(value.timeout_ms)?;
             validate_optional_handle(value.tab.as_deref(), HandleKind::Tab)?;
             validate_optional_handle(value.target.as_deref(), HandleKind::Target)?;
-            match value.action {
-                RecordAction::Start if value.target.is_some() => {
-                    return Err(LanguageError::Invalid(
-                        "start accepts tab but not target".into(),
-                    ))
-                }
-                RecordAction::Start => {}
-                RecordAction::Save if value.tab.is_some() => {
-                    return Err(LanguageError::Invalid(
-                        "tab is only valid when action is start".into(),
-                    ))
-                }
-                // One replay goes to one place. Asking for two is a mistake worth naming rather
-                // than a preference to resolve silently.
-                RecordAction::Save if value.target.is_some() && value.download => {
-                    return Err(LanguageError::Invalid(
-                        "save accepts target or download, not both".into(),
-                    ))
-                }
-                RecordAction::Save => {}
-                RecordAction::Status | RecordAction::Stop | RecordAction::Discard
-                    if value.tab.is_some() || value.target.is_some() || value.download =>
-                {
-                    return Err(LanguageError::Invalid(
-                        "tab is only valid for start; target and download are only valid for save"
-                            .into(),
-                    ))
-                }
-                RecordAction::Status | RecordAction::Stop | RecordAction::Discard => {}
+            // One replay goes to one place. Asking for two is a mistake worth naming rather than
+            // a preference to resolve silently. A field an action does not use was dropped as
+            // ignored before decoding (ADR-0205 Decision 4).
+            if value.action == RecordAction::Save && value.target.is_some() && value.download {
+                return Err(LanguageError::Invalid(
+                    "save accepts target or download, not both".into(),
+                ));
             }
             Ok(())
         },
@@ -651,10 +610,12 @@ fn ensure_fields(input: &Value, fields: &[&str]) -> Result<(), LanguageError> {
 /// The refusal of a field the tool's schema does not advertise, at the top level or inside a
 /// nested object the schema closes.
 fn unknown_field(key: &str) -> LanguageError {
-    LanguageError::Invalid(format!(
-        "unknown field `{key}`: check this tool's advertised fields"
-    ))
+    LanguageError::Invalid(format!("{UNKNOWN_FIELD_PREFIX}{key}`"))
 }
+
+/// How the refusal of an unknown field opens; [`with_suggestion`] completes it with the fields
+/// the tool takes.
+const UNKNOWN_FIELD_PREFIX: &str = "unknown field `";
 
 /// How serde's derive opens its refusal of a field a `deny_unknown_fields` struct does not name.
 const SERDE_UNKNOWN_FIELD: &str = "unknown field `";
@@ -667,7 +628,9 @@ fn invalid_input(error: &serde_json::Error) -> LanguageError {
         .strip_prefix(SERDE_UNKNOWN_FIELD)
         .and_then(|rest| rest.split_once('`'))
     {
-        Some((key, _)) => unknown_field(key),
+        Some((key, _)) => LanguageError::Invalid(format!(
+            "{UNKNOWN_FIELD_PREFIX}{key}` in an object inside this call; check that object's fields in the tool's schema"
+        )),
         None => LanguageError::Invalid(message),
     }
 }
@@ -1036,32 +999,9 @@ fn validate_scroll(value: &ScrollPage) -> Result<(), LanguageError> {
             ));
         }
         validate_handle(target, HandleKind::Target)?;
-        // A client that fills in the advertised defaults sends them beside a target; only another
-        // direction or amount asks for the page scroll a target excludes.
-        let page_scroll = value
-            .direction
-            .is_some_and(|direction| direction != SCROLL_DIRECTION_DEFAULT)
-            || value
-                .amount
-                .is_some_and(|amount| amount != SCROLL_AMOUNT_DEFAULT);
-        if page_scroll {
-            return Err(LanguageError::Invalid(
-                "target cannot be combined with direction or amount".into(),
-            ));
-        }
     } else if wheel {
         if let Some(direction) = value.direction {
             validate_choice(direction.as_str(), WHEEL_DIRECTIONS, "direction")?;
-        }
-        // Ticks set how far a wheel scrolls. The advertised amount default is what a
-        // defaults-filling client sends beside them; any other amount asks for a page scroll.
-        if let Some(amount) = value.amount {
-            if amount != SCROLL_AMOUNT_DEFAULT {
-                return Err(LanguageError::Invalid(
-                    "amount cannot be combined with a view point: ticks set how far a wheel scrolls"
-                        .into(),
-                ));
-            }
         }
         validate_handle(
             value
@@ -1346,11 +1286,6 @@ fn validate_extent(value: f64, field: &str) -> Result<(), LanguageError> {
 fn validate_press_key(value: &PressKey) -> Result<(), LanguageError> {
     if value.strokes.is_empty() {
         validate_key(&value.key)?;
-        if value.repeat != 1 {
-            return Err(LanguageError::Invalid(
-                "repeat applies to a stroke sequence".into(),
-            ));
-        }
     } else {
         if !value.key.is_empty() {
             return Err(LanguageError::Invalid(

@@ -1723,7 +1723,8 @@ fn every_tool_gets_deadline_advice_it_can_follow() {
             longest.next_steps,
             vec!["Repeat the call; if the page is very large, narrow it first (a target, a smaller max_chars, or a smaller inspect scope)."]
         );
-        assert!(crate::language::decode("browser_read", json!({"timeout_ms":30_001})).is_err());
+        // A longer timeout is brought to the longest rather than refused (ADR-0205 Decision 2).
+        assert!(crate::language::decode("browser_read", json!({"timeout_ms":30_001})).is_ok());
     }
 
     // calls at the longest timeout are not told to raise it.

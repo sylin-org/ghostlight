@@ -109,6 +109,8 @@ pub(crate) const FIELD_CHOICES: usize = 100;
 pub(crate) const KEY_STROKES: Range = Range { min: 1, max: 20 };
 /// How many times one key call may repeat its sequence.
 pub(crate) const KEY_REPEAT: Range = Range { min: 1, max: 100 };
+/// The longest key text a call may send: a character, a key name, a chord, or a short sequence.
+pub(crate) const KEY_TEXT_CHARS: usize = 200;
 /// How many times a key call plays its sequence when the call names no `repeat`.
 pub(crate) const DEFAULT_KEY_REPEAT: u16 = 1;
 

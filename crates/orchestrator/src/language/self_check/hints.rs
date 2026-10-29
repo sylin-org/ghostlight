@@ -477,6 +477,7 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
         WorkspaceReason::NoTab,
         WorkspaceReason::AmbiguousTab,
         WorkspaceReason::TabUnavailable,
+        WorkspaceReason::PageChanged,
         WorkspaceReason::StaleView,
         WorkspaceReason::HandleOnOtherTab(Some("tab_7k2nb5xe".into())),
         WorkspaceReason::HandleOnOtherTab(None),
@@ -530,6 +531,7 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
             WorkspaceReason::NoTab
             | WorkspaceReason::AmbiguousTab
             | WorkspaceReason::TabUnavailable
+            | WorkspaceReason::PageChanged
             | WorkspaceReason::StaleTarget { .. }
             | WorkspaceReason::StaleView
             | WorkspaceReason::HandleOnOtherTab(_)
@@ -720,6 +722,12 @@ fn outcome_samples() -> Vec<Outcome> {
         Outcome::PageScrolled {
             host: host(),
             direction: crate::language::ScrollDirection::Down,
+            moved: true,
+        },
+        Outcome::PageScrolled {
+            host: host(),
+            direction: crate::language::ScrollDirection::Down,
+            moved: false,
         },
         Outcome::TargetRevealed {
             host: host(),

@@ -431,6 +431,7 @@ fn fill_upload_and_scroll_name_their_targets_once_the_browser_has_acted() {
         x: 0.0,
         y: 400.0,
         subject: None,
+        page: None,
     }));
     let revealed = executor.execute(
         &workspace,
@@ -461,6 +462,7 @@ fn fill_upload_and_scroll_name_their_targets_once_the_browser_has_acted() {
         x: 0.0,
         y: 800.0,
         subject: None,
+        page: None,
     }));
     let scrolled = executor.execute(
         &workspace,

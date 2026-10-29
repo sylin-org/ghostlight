@@ -232,6 +232,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
             x: 0.0,
             y: 50.0,
             subject: None,
+            page: None,
         }],
     );
     add(

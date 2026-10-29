@@ -1081,6 +1081,36 @@ test("hover, focus and scroll prepare the exact element", async () => {
   assert.equal(harness.scrolls.length, 1);
 });
 
+// ADR-0205 Decisions 3 and 8, from a SharePoint page whose scroll said "Scrolled down" while
+// nothing moved: a page scroll reports what actually moved. A document that scrolls moves by
+// the asked distance; an application whose document does not scroll moves the container under
+// the middle of the viewport; with no direction it goes down; and nothing moving says so.
+test("a page scroll moves what actually scrolls and says how far", async () => {
+  const harness = contentHarness();
+  const context = harness.dom.context;
+  context.scrollBy = (delta) => { harness.scrolls.push(delta); context.scrollY += delta.top; };
+  harness.document.scrollingElement = { scrollHeight: 3000, scrollWidth: 1024 };
+  const moved = await harness.send({ kind: "scroll", direction: "down", amount: "600px" });
+  assert.deepEqual([moved.value.direction, moved.value.moved, moved.value.at_end], ["down", 600, false]);
+
+  // The document no longer scrolls; a container under the middle of the viewport does.
+  context.scrollBy = (delta) => harness.scrolls.push(delta);
+  const pane = harness.element("div");
+  Object.assign(pane, { scrollTop: 0, scrollLeft: 0, scrollHeight: 2000, clientHeight: 500, scrollWidth: 800, clientWidth: 800 });
+  pane.computedStyle = { overflowY: "auto", overflowX: "hidden" };
+  pane.scrollBy = (delta) => { pane.scrollTop = Math.min(pane.scrollHeight - pane.clientHeight, pane.scrollTop + delta.top); };
+  const inside = harness.element("span");
+  pane.append(inside);
+  harness.document.elementFromPoint = () => inside;
+  const contained = await harness.send({ kind: "scroll", amount: "50%" });
+  assert.deepEqual([contained.value.direction, contained.value.moved, contained.value.y], ["down", 250, 250]);
+  const ended = await harness.send({ kind: "scroll", amount: "end" });
+  assert.deepEqual([ended.value.moved, ended.value.at_end], [1250, true]);
+
+  const stuck = await harness.send({ kind: "scroll", direction: "down", amount: "medium" });
+  assert.deepEqual([stuck.value.moved, stuck.value.at_end], [0, true]);
+});
+
 test("attach_file reads the attachment and the file name from the message", async () => {
   const harness = contentHarness();
   const [target] = await harness.targets();

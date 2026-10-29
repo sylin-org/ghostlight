@@ -1390,6 +1390,114 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return hit;
   }
 
+  // A page scroll moves what actually scrolls: the document, or else the scrolling container
+  // under the middle of the viewport, innermost first, as a wheel there would. Each is tried in
+  // turn and the first that moves wins, so a document whose own scrolling is switched off (most
+  // web applications) still scrolls. The answer says which way and how far it moved, and whether
+  // that scroller is now at its end. With no direction it goes forward on the axis the page
+  // scrolls on and never turns back (ADR-0205 Decisions 3 and 8).
+  const SCROLL_STEPS = { small: 0.25, medium: 0.5, large: 0.75, page: 0.95 };
+  const SCROLL_TO_END = 1e9;
+  const SCROLL_SLACK = 1;
+  const SCROLL_AXIS = { up: "y", down: "y", left: "x", right: "x" };
+
+  function pageScroller() {
+    return document.scrollingElement || document.documentElement || null;
+  }
+
+  function scrollPosition(scroller, axis) {
+    if (scroller === null) return axis === "y" ? scrollY : scrollX;
+    return axis === "y" ? scroller.scrollTop : scroller.scrollLeft;
+  }
+
+  /** How far `scroller` (null for the document) can still move toward `direction`, in pixels. */
+  function scrollRoom(scroller, direction) {
+    const axis = SCROLL_AXIS[direction];
+    const box = scroller ?? pageScroller();
+    if (!box) return 0;
+    const size = scroller === null ? (axis === "y" ? innerHeight : innerWidth) : (axis === "y" ? box.clientHeight : box.clientWidth);
+    const extent = (axis === "y" ? box.scrollHeight : box.scrollWidth) - size;
+    const at = scrollPosition(scroller, axis);
+    const room = direction === "down" || direction === "right" ? extent - at : at;
+    return Number.isFinite(room) ? room : 0;
+  }
+
+  function scrollsOn(element, axis) {
+    const style = getComputedStyle(element);
+    const overflow = axis === "y" ? style.overflowY : style.overflowX;
+    const extent = axis === "y" ? element.scrollHeight - element.clientHeight : element.scrollWidth - element.clientWidth;
+    return /^(auto|scroll|overlay)$/.test(overflow ?? "") && extent > SCROLL_SLACK;
+  }
+
+  /** The containers under the middle of the viewport that scroll on `axis`, innermost first. */
+  function centerScrollers(axis) {
+    const found = [];
+    let node = deepestElementFromPoint(document, innerWidth / 2, innerHeight / 2);
+    while (node && node !== document && node !== document.documentElement && node !== document.body) {
+      if (node.tagName && scrollsOn(node, axis)) found.push(node);
+      node = composedParent(node);
+    }
+    return found;
+  }
+
+  function scrollDistance(amount, size) {
+    if (amount === "end") return SCROLL_TO_END;
+    if (Object.hasOwn(SCROLL_STEPS, amount)) return size * SCROLL_STEPS[amount];
+    const pixels = /^(\d+(?:\.\d+)?)px$/.exec(amount ?? "");
+    if (pixels) return Number(pixels[1]);
+    const percent = /^(\d+(?:\.\d+)?)%$/.exec(amount ?? "");
+    if (percent) return size * Number(percent[1]) / 100;
+    return size * SCROLL_STEPS.medium;
+  }
+
+  /** Scroll `scroller` (null for the document) toward `direction`; the pixels it moved. */
+  function scrollOne(scroller, direction, amount) {
+    const axis = SCROLL_AXIS[direction];
+    const size = scroller === null ? (axis === "y" ? innerHeight : innerWidth) : (axis === "y" ? scroller.clientHeight : scroller.clientWidth);
+    const signed = (direction === "up" || direction === "left" ? -1 : 1) * scrollDistance(amount, size);
+    const delta = axis === "y" ? { left: 0, top: signed } : { left: signed, top: 0 };
+    const before = scrollPosition(scroller, axis);
+    if (scroller === null) scrollBy({ ...delta, behavior: "instant" });
+    else scroller.scrollBy({ ...delta, behavior: "instant" });
+    return Math.abs(scrollPosition(scroller, axis) - before);
+  }
+
+  function scrollToward(direction, amount) {
+    const candidates = [null, ...centerScrollers(SCROLL_AXIS[direction])];
+    for (const scroller of candidates) {
+      if (scroller !== null && scrollRoom(scroller, direction) <= SCROLL_SLACK) continue;
+      const moved = scrollOne(scroller, direction, amount);
+      if (moved > 0) return { scroller, moved };
+    }
+    return null;
+  }
+
+  function scrolledAnswer(scroller, direction, moved) {
+    return {
+      x: scroller === null ? scrollX : scroller.scrollLeft,
+      y: scroller === null ? scrollY : scroller.scrollTop,
+      direction,
+      moved: Math.round(moved),
+      at_end: scrollRoom(scroller, direction) <= SCROLL_SLACK,
+      subject: null
+    };
+  }
+
+  function pageScroll(direction, amount) {
+    if (direction) {
+      const done = scrollToward(direction, amount);
+      return done ? scrolledAnswer(done.scroller, direction, done.moved) : { ...scrolledAnswer(null, direction, 0), at_end: true };
+    }
+    const down = scrollToward("down", amount);
+    if (down) return scrolledAnswer(down.scroller, "down", down.moved);
+    // Sideways only when nothing on the page scrolls up and down at all; a page at its bottom
+    // stays there.
+    const vertical = scrollRoom(null, "up") + scrollRoom(null, "down") > SCROLL_SLACK || centerScrollers("y").length > 0;
+    const right = vertical ? null : scrollToward("right", amount);
+    if (right) return scrolledAnswer(right.scroller, "right", right.moved);
+    return { ...scrolledAnswer(null, "down", 0), at_end: true };
+  }
+
   function subjectAtViewportPoint(x, y) {
     const hit = deepestElementFromPoint(document, x, y);
     if (!hit) return null;
@@ -2711,13 +2819,9 @@ ${line}` : line;
         const element = requireActionable(resolve(message.locator, ctx), "scroll");
         subject = actionSubject(element, ctx);
         element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-      } else {
-        const viewport = message.amount === "small" ? 0.25 : message.amount === "large" ? 0.75 : message.amount === "page" ? 0.95 : 0.5;
-        const horizontal = message.direction === "left" ? -innerWidth * viewport : message.direction === "right" ? innerWidth * viewport : 0;
-        const vertical = message.direction === "up" ? -innerHeight * viewport : message.direction === "down" ? innerHeight * viewport : 0;
-        scrollBy({ left: horizontal, top: vertical, behavior: "instant" });
+        return { x: scrollX, y: scrollY, subject };
       }
-      return { x: scrollX, y: scrollY, subject };
+      return pageScroll(message.direction, message.amount);
     }
     if (message.kind === "scroll_point") {
       const margin = 24;

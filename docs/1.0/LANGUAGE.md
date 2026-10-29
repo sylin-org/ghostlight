@@ -12,8 +12,7 @@ defaults stated here.
 A field that several branches share is advertised as one schema that admits every value any
 branch admits. Constants join one `enum`, length and numeric bounds widen, and each value of a
 discriminator such as `action` or `condition` keeps its own description. `anyOf` appears only
-inside a field whose alternatives are different JSON types. The only `oneOf`, a key name in
-`browser_press_key`, has alternatives no value can match twice. A strict JSON Schema validator therefore accepts every
+inside a field whose alternatives are different JSON types, and no field uses `oneOf`. A strict JSON Schema validator therefore accepts every
 ordinary call. Tests validate every example and a list of ordinary calls against the advertised
 schemas, decode them, and check that every next step naming a tool names only fields that tool
 advertises (ADR-0196).
@@ -32,6 +31,24 @@ The implementation owns bounds and defaults as named constants shared by schema 
 decoding. A field sent with its advertised default means the same as leaving it out, because some
 clients fill in every default before they send a call; a self-check sends every example and
 known-good call with its defaults filled in. See [ADR-0198](../adr/0198-agent-experience.md).
+
+The schema shows each field's canonical form; the decoder reads more (ADR-0205). Values read the
+way CSS reads a declaration: a duration as `2000`, `"2000ms"` or `"2s"`; a count or a length as a
+number, digits, `"125%"` or `"120px"`; a boolean as `true` or `"true"`; a closed word in any case,
+with `left` and `right` for the primary and secondary button; a key in any case or by its common
+name, a chord such as `"ctrl+a"` as the key with its modifiers, and a space-separated sequence as
+strokes; an address without a scheme with `https://`, or `http://` for loopback hosts. Field names
+are read in snake, camel or kebab case. A limit on what a call reads, and `timeout_ms`, are brought
+inside their bounds instead of refused. A value a call leaves out comes from the call or the page
+where one reading is sensible: an action word from its fields (`{}` lists tabs or reports a dialog),
+a wait's condition from what it waits on, a scroll's direction from the page. A field the chosen
+action does not use is ignored, and an unknown field on a tool that only observes is ignored too.
+The result names what Ghostlight left out in an `ignored` fact and what it used instead of what was
+sent in an `adjusted` fact, each only when it has content. Strict as before: authority (policy,
+Pause and Stop, and `user_authorized_credentials`, which takes only `true`), content (typed text,
+form values, scripts, paths), two readings with different effects, counts of actions beyond their
+bounds, an unknown field on a tool that acts (refused with the closest field and the tool's fields),
+and a value with no reading.
 
 `browser_flow` is the single composition tool for one to twenty ordinary tool calls. Step IDs
 are optional for short batches and available for explicit result references. Each child uses the
@@ -419,7 +436,7 @@ only to stale details within the running installation's own directory (ADR-0149 
 
 List, focus, or close controlled tabs. Actions are:
 
-- `list`: no `tab`; shortest call `{"action":"list"}`; capability `read`. A session that holds
+- `list`: no `tab`; shortest call `{}`, since `list` is the default; capability `read`. A session that holds
   tabs reads the list live from its browser on every call and names only its own tabs, so it
   needs that browser connected and refuses without it. It first confirms any tab remembered
   across a browser or service restart, and a tab the browser does not confirm is left out. A
@@ -489,9 +506,10 @@ Facts: `tab`, `action`, governed `url`, bounded `title`, and `document_generatio
 
 Set tab zoom or resize the containing browser window.
 
-- Zoom: `{"action":"zoom","percent":100}`. Requires `percent`; capability `read`.
-- Resize: `{"action":"resize","width":1280,"height":800}`. Requires `width` and `height`; no RAWX
-  capability.
+- Zoom: `{"percent":100}`. Requires `percent`; capability `read`.
+- Resize: `{"width":1280,"height":800}`. Requires `width` and `height`; no RAWX capability.
+
+The action may be left out: `percent` means zoom, and `width` and `height` mean resize.
 
 Resize affects every tab in the window and may rerender the page. Either action invalidates a
 current view handle when its bound geometry no longer matches. Facts include the selected tab,
@@ -645,15 +663,21 @@ followed its control through a re-render, and any governed committed landing.
 
 ### `browser_scroll`
 
-Scroll in a direction or reveal a semantic target. Shortest call: `{}`, which scrolls down by a
-medium amount.
+Scroll in a direction or reveal a semantic target. Shortest call: `{}`, which scrolls a medium
+amount forward on the axis the page scrolls on: down on an ordinary page.
 
 Rules: one of three branches: `target` to reveal; or a page scroll by `direction` and `amount`; or
-coordinate wheel input with `view`, `x`, `y`, and `ticks`, whose `direction` is `up` or `down`.
-Beside `target`, a `direction` or `amount` other than its default (`down`, `medium`) is refused.
-Capability: `read`.
+coordinate wheel input with `view`, `x`, and `y`, whose `direction` is `up` or `down`. `amount` is
+pixels (`600` or `"600px"`), a share of the view (`"50%"`), `small`, `medium`, `large`, `page`,
+`top`, `bottom`, or `end`; a negative distance goes the other way. A page scroll moves the
+document, or else the scrolling container under the middle of the viewport, and with no direction
+never turns back at the end. Beside `target`, `direction` and `amount` are ignored. At a view point
+an `amount` becomes `ticks` (about 100 pixels each, 4 when neither is given); `ticks` without a
+view is a page scroll of that many hundred pixels. Capability: `read`.
 
-Facts: `tab`, optional `target`, `scrolled`, and observed horizontal and vertical offsets.
+Facts: `tab`, optional `target`, `scrolled`, observed horizontal and vertical offsets, and for a
+page scroll the `direction` it went, the pixels it `moved`, and `at_end`. When nothing moved the
+effect is `none` and the summary says the page is at its end or does not scroll that way.
 
 ### `browser_hover`
 
@@ -843,9 +867,10 @@ Facts: `tab`, `target`, `typed`,
 Send one explicit keyboard action. Shortest call: `{"key":"Enter"}`.
 
 Rules: exactly one of `key` or `strokes`, whose items are one character or one named key from the
-closed list. Modifiers are held for every stroke, so a shortcut is a key with modifiers:
-`{"key":"a","modifiers":["Control"]}`, or `{"strokes":["a","c"],"modifiers":["Control"]}` to select
-all and copy. A modifier is never a stroke. Capabilities: `action`, plus `read` when `expect` is
+closed list. `repeat` repeats the key or the whole sequence. Modifiers are held for every stroke, so
+a shortcut is a key with modifiers: `{"key":"a","modifiers":["Control"]}` (or `{"key":"ctrl+a"}`),
+or `{"strokes":["a","c"],"modifiers":["Control"]}` to select all and copy. A modifier is never a
+stroke. Capabilities: `action`, plus `read` when `expect` is
 supplied.
 
 Facts: `tab`, `key`, `pressed`, and any governed committed landing.
@@ -891,13 +916,17 @@ Facts: `tab`, `dragged`, and any governed committed landing.
 
 ### `browser_wait`
 
-Wait for one explicit observable condition. Shortest call: `{"condition":"load_ready"}`.
+Wait for one observable condition. Shortest call: `{}`, which waits for `load_ready`.
 
-Rules: each condition has its own branch. `load_ready` accepts neither `value` nor `target`;
+Rules: each condition has its own branch. Left out, the condition is read from the call: nothing is
+`load_ready`, a duration (`2000`, `"2s"`) is `duration`, a `target` is `target_present`, a
+`selector` is `selector_present`, an `http://` or `https://` address is `url_contains`, and other
+text is `text_present`. An input the condition does not use is ignored. `load_ready` takes neither
+`value` nor `target`;
 `url_contains`, `text_present`, and `text_absent` require `value`; `target_present` and
 `target_absent` require `target`; `selector_present` requires a typed `selector` and polls the
-live page until a control matching it exists; `duration` requires a decimal string `value`
-of whole milliseconds (for example, `"1200"`) and waits executor-side, and a duration that cannot
+live page until a control matching it exists; `duration` requires a `value` in milliseconds or
+with its unit (`1200`, `"1200ms"`, `"1.2s"`, at most 10 seconds) and waits executor-side, and a duration that cannot
 end before the call's deadline is refused at once, before anything waits, as a deadline before
 dispatch with `repeat_safe: true`; `visual_settle` is met when
 the page, or an optional `target`, stops moving and repainting; `layout_stable` was the same
@@ -924,7 +953,8 @@ Inspect or resolve the current JavaScript dialog.
 - `{"action":"respond","text":"Ada"}` supplies non-secret prompt text, sent as given, empty
   included; capability `action`.
 
-`text` is required only for `respond` and is invalid for every other action. Facts: `tab`,
+`text` is required only for `respond` and is ignored for every other action; a call with no
+action reports `status`, and one with only `text` responds. Facts: `tab`,
 `dialog_type`, `present`, `accepted`, and `handled` as applicable. Status also reports the dialog's
 message, one line of at most 500 characters, in its summary. For a prompt the summary opens `A
 prompt dialog is currently visible` and, when the extension reports it (2.0.1 and newer), names

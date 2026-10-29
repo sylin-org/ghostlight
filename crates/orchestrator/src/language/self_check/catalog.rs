@@ -614,11 +614,10 @@ fn an_advertised_default_means_the_same_as_leaving_the_field_out() {
     );
     assert!(drifted.is_empty(), "defaults that drifted: {drifted:#?}");
 
+    // A page scroll with no direction lets the page choose (ADR-0205 Decision 3), so the
+    // catalog advertises no direction default.
     let scroll = advertised("browser_scroll");
-    assert_eq!(
-        scroll["properties"]["direction"]["default"],
-        crate::language::SCROLL_DIRECTION_DEFAULT.as_str()
-    );
+    assert!(scroll["properties"]["direction"].get("default").is_none());
     assert_eq!(
         scroll["properties"]["amount"]["default"],
         crate::language::SCROLL_AMOUNT_DEFAULT.as_str()
@@ -645,7 +644,7 @@ enum Says {
     /// Exactly this refusal.
     Exactly(String),
     /// A refusal that names this word.
-    Naming(&'static str),
+    Naming(String),
 }
 
 /// One invalid call: the tool, the call, the keyword the advertised schema reports for it, and
@@ -704,11 +703,10 @@ fn refused_number(tool: &str, pointer: &str, field: &str, value: u64) -> Says {
 }
 
 /// The refusal of a field the tool's schema does not advertise, at the top level or inside a
-/// nested object (L-D7: a nested unknown field reads as a top-level one does).
+/// nested object (L-D7: a nested unknown field is refused, never dropped). A top-level one also
+/// names the fields the tool takes (ADR-0205 Decision 6).
 fn unknown_field(field: &str) -> Says {
-    Says::Exactly(format!(
-        "invalid input: unknown field `{field}`: check this tool's advertised fields"
-    ))
+    Says::Naming(format!("unknown field `{field}`"))
 }
 
 /// Every invalid call the gate-2 refusal check sends.
@@ -752,12 +750,6 @@ fn invalid_calls() -> Vec<Invalid> {
             json!({"action":"stop","recording":"recording_1"}),
             Some("unknown field `recording`"),
             unknown_field("recording"),
-        ),
-        invalid(
-            "browser_read",
-            json!({"max_chars":8000,"max_char":1}),
-            Some("unknown field `max_char`"),
-            unknown_field("max_char"),
         ),
         // A closed word is refused with the words the catalog advertises for that field.
         invalid(
@@ -814,12 +806,6 @@ fn invalid_calls() -> Vec<Invalid> {
         ),
         invalid(
             "browser_click",
-            json!({"target":"target_1","button":"left"}),
-            Some("is not one of"),
-            refused_word("browser_click", "/properties/button", "button", "left"),
-        ),
-        invalid(
-            "browser_click",
             json!({"target":"target_1","modifiers":["Hyper"]}),
             Some("is not one of"),
             refused_word(
@@ -843,8 +829,14 @@ fn invalid_calls() -> Vec<Invalid> {
         invalid(
             "browser_scroll",
             json!({"amount":"huge"}),
+            None,
+            Says::Naming("amount must be".into()),
+        ),
+        invalid(
+            "browser_click",
+            json!({"target":"target_1","button":"back"}),
             Some("is not one of"),
-            refused_word("browser_scroll", "/properties/amount", "amount", "huge"),
+            refused_word("browser_click", "/properties/button", "button", "back"),
         ),
         invalid(
             "browser_dialog",
@@ -876,14 +868,13 @@ fn invalid_calls() -> Vec<Invalid> {
             Some("is not one of"),
             refused_word("browser_diagnose", "/properties/detail", "detail", "some"),
         ),
+        // A key is free text the decoder reads (ADR-0205); one that names no key is refused with
+        // the keys it takes.
         invalid(
             "browser_press_key",
             json!({"key":"PageLeft"}),
-            Some("matches no oneOf branch"),
-            Says::Exactly(format!(
-                "invalid input: key must be one character or a supported named key: {}",
-                advertised_words("browser_press_key", "/properties/key/oneOf/1").join(", ")
-            )),
+            None,
+            Says::Naming("a supported named key: Enter".into()),
         ),
         // LANGUAGE.md browser_wait (C17a): an unknown condition is refused with the curated list,
         // which has never named selector_present, a condition a wait names with its selector; a
@@ -906,7 +897,7 @@ fn invalid_calls() -> Vec<Invalid> {
             "browser_wait",
             json!({"condition":"layout_stable"}),
             Some("is not one of"),
-            Says::Naming(WaitCondition::VisualSettle.as_str()),
+            Says::Naming(WaitCondition::VisualSettle.as_str().into()),
         ),
         invalid(
             "browser_click",
@@ -925,7 +916,7 @@ fn invalid_calls() -> Vec<Invalid> {
             "browser_tabs",
             json!({"action":"close","tab":"nope"}),
             Some("does not match"),
-            Says::Naming(HandleKind::Tab.prefix()),
+            Says::Naming(HandleKind::Tab.prefix().into()),
         ),
         invalid(
             "browser_type_text",
@@ -942,31 +933,14 @@ fn invalid_calls() -> Vec<Invalid> {
         invalid(
             "browser_press_key",
             json!({"strokes":["Control","a"]}),
-            Some("matches no oneOf branch"),
+            None,
             Says::Refused,
         ),
         invalid(
             "browser_click",
             json!({"target":"view_1"}),
             Some("does not match"),
-            Says::Naming(HandleKind::Target.prefix()),
-        ),
-        invalid(
-            "browser_read",
-            json!({"timeout_ms":MIN_TIMEOUT_MS - 1}),
-            Some("breaks minimum"),
-            refused_number(
-                "browser_read",
-                "/properties/timeout_ms",
-                "timeout_ms",
-                MIN_TIMEOUT_MS - 1,
-            ),
-        ),
-        invalid(
-            "browser_click",
-            json!({"target":"target_1","click_count":"2"}),
-            Some("is not of type integer"),
-            Says::Refused,
+            Says::Naming(HandleKind::Target.prefix().into()),
         ),
         invalid(
             "browser_press_key",
@@ -1008,12 +982,6 @@ fn invalid_calls() -> Vec<Invalid> {
             "browser_press_key",
             json!({"strokes":vec!["a"; 21]}),
             Some("break maxItems"),
-            Says::Refused,
-        ),
-        invalid(
-            "browser_press_key",
-            json!({"key":"a","modifiers":["Shift","Shift"]}),
-            Some("not unique"),
             Says::Refused,
         ),
         invalid(
@@ -1067,12 +1035,6 @@ fn invalid_calls() -> Vec<Invalid> {
             Says::Refused,
         ),
         invalid(
-            "browser_click",
-            json!({"target":"target_1","expect":{"condition":"load_ready","value":"x"}}),
-            None,
-            Says::Refused,
-        ),
-        invalid(
             "browser_screenshot",
             json!({"target":"target_1","full_page":true}),
             None,
@@ -1110,32 +1072,8 @@ fn invalid_calls() -> Vec<Invalid> {
         ),
         invalid("browser_click", json!({"x":1,"y":1}), None, Says::Refused),
         invalid(
-            "browser_scroll",
-            json!({"target":"target_1","direction":"up"}),
-            None,
-            Says::Refused,
-        ),
-        invalid(
-            "browser_scroll",
-            json!({"target":"target_1","amount":"page"}),
-            None,
-            Says::Refused,
-        ),
-        invalid(
             "browser_upload",
             json!({"target":"target_1","paths":["relative.txt"]}),
-            None,
-            Says::Refused,
-        ),
-        invalid(
-            "browser_tabs",
-            json!({"action":"list","tab":"tab_1"}),
-            None,
-            Says::Refused,
-        ),
-        invalid(
-            "browser_history",
-            json!({"action":"back","bypass_cache":true}),
             None,
             Says::Refused,
         ),
@@ -1145,28 +1083,7 @@ fn invalid_calls() -> Vec<Invalid> {
             None,
             Says::Refused,
         ),
-        invalid(
-            "browser_dialog",
-            json!({"action":"accept","text":"yes"}),
-            None,
-            Says::Refused,
-        ),
-        invalid(
-            "browser_record",
-            json!({"action":"stop","target":"target_1"}),
-            None,
-            Says::Refused,
-        ),
     ];
-    for tool in catalog() {
-        let past = MAX_TIMEOUT_MS + 1;
-        calls.push(invalid(
-            &tool.name,
-            with(first_example(&tool.name), "timeout_ms", json!(past)),
-            Some("breaks maximum"),
-            refused_number(&tool.name, "/properties/timeout_ms", "timeout_ms", past),
-        ));
-    }
     for tool in expecting_tools() {
         let expect = json!({"condition":"text_present","value":"x".repeat(MAX_POSTCONDITION_VALUE_CHARS + 1)});
         calls.push(invalid(
@@ -1220,7 +1137,7 @@ fn an_invalid_call_is_refused_before_dispatch_by_both_sides_in_the_catalogs_word
         let expected = match &says {
             Says::Refused => true,
             Says::Exactly(refusal) => said == *refusal,
-            Says::Naming(word) => said.contains(word),
+            Says::Naming(word) => said.contains(word.as_str()),
         };
         if !expected {
             let wanted = match says {

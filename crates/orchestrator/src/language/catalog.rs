@@ -14,9 +14,9 @@ use super::bounds::{
     DEFAULT_KEY_REPEAT, DEFAULT_ON_ERROR, DEFAULT_READ_CHARS, DEFAULT_SCRIPT_RESULT_CHARS,
     DIAGNOSTIC_LIMIT, DIALOG_TEXT_CHARS, DOCUMENT_DEPTH, DURATION_MS, FIELD_CHOICES,
     FIELD_VALUE_CHARS, FILE_NAME_CHARS, FILL_FIELDS, FIND_RESULTS, FLOW_STEP_ID_CHARS,
-    HANDLE_CHARS, INLINE_FILE_LIMIT, INSPECT_ITEMS, KEY_REPEAT, KEY_STROKES, MEDIA_TYPE_CHARS,
-    READ_CHARS, SCRIPT_RESULT_CHARS, SEARCH_TEXT_CHARS, UPLOAD_PATHS, UPLOAD_PATH_CHARS, URL_MAX,
-    WHEEL_TICKS, WINDOW_HEIGHT, WINDOW_WIDTH, ZOOM_PERCENT,
+    HANDLE_CHARS, INLINE_FILE_LIMIT, INSPECT_ITEMS, KEY_REPEAT, KEY_STROKES, KEY_TEXT_CHARS,
+    MEDIA_TYPE_CHARS, READ_CHARS, SCRIPT_RESULT_CHARS, SEARCH_TEXT_CHARS, UPLOAD_PATHS,
+    UPLOAD_PATH_CHARS, URL_MAX, WHEEL_TICKS, WINDOW_HEIGHT, WINDOW_WIDTH, ZOOM_PERCENT,
 };
 use super::choices::{
     DiagnosticDetail, DiagnosticSource, DialogAction, FindScope, HistoryDirection, InspectScope,
@@ -27,7 +27,7 @@ use super::tool::Tool;
 use super::wait::{PageCondition, WaitCondition};
 use super::{
     DEFAULT_DOCUMENT_DEPTH, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS,
-    NAMED_KEYS, SCRIPT_MAX_CHARS, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT, SEMANTIC_ROLES,
+    NAMED_KEYS, SCRIPT_MAX_CHARS, SCROLL_AMOUNT_DEFAULT, SEMANTIC_ROLES,
 };
 use super::{HISTORY_RELOAD, WHEEL_DIRECTIONS};
 
@@ -274,8 +274,11 @@ fn tabs_schema() -> Value {
     union(
         vec![
             object(
-                vec![("action", constant("list", "List this session's tabs."))],
-                vec!["action"],
+                vec![(
+                    "action",
+                    constant("list", "List this session's tabs (the default)."),
+                )],
+                vec![],
             ),
             object(
                 vec![
@@ -389,7 +392,7 @@ fn window_schema() -> Value {
                     ("percent", within(ZOOM_PERCENT, None, "")),
                     ("tab", tab()),
                 ],
-                vec!["action", "percent"],
+                vec!["percent"],
             ),
             object(
                 vec![
@@ -401,7 +404,7 @@ fn window_schema() -> Value {
                     ("height", within(WINDOW_HEIGHT, None, "")),
                     ("tab", tab()),
                 ],
-                vec!["action", "width", "height"],
+                vec!["width", "height"],
             ),
         ],
         vec![
@@ -612,20 +615,9 @@ fn scroll_schema() -> Value {
                     ("tab", tab()),
                     (
                         "direction",
-                        enumeration(
-                            ScrollDirection::WORDS,
-                            Some(SCROLL_DIRECTION_DEFAULT.as_str()),
-                            SCROLL_DIRECTION,
-                        ),
+                        enumeration(ScrollDirection::WORDS, None, SCROLL_DIRECTION),
                     ),
-                    (
-                        "amount",
-                        enumeration(
-                            ScrollAmount::WORDS,
-                            Some(SCROLL_AMOUNT_DEFAULT.as_str()),
-                            "",
-                        ),
-                    ),
+                    ("amount", scroll_distance()),
                 ],
                 vec![],
             ),
@@ -634,30 +626,38 @@ fn scroll_schema() -> Value {
                     ("tab", tab()),
                     (
                         "direction",
-                        enumeration(
-                            WHEEL_DIRECTIONS,
-                            Some(SCROLL_DIRECTION_DEFAULT.as_str()),
-                            SCROLL_DIRECTION,
-                        ),
+                        enumeration(WHEEL_DIRECTIONS, None, SCROLL_DIRECTION),
                     ),
                     ("view", handle(HandleKind::View, VIEW_POINT)),
                     ("x", coordinate()),
                     ("y", coordinate()),
                     ("ticks", within(WHEEL_TICKS, None, "")),
                 ],
-                vec!["view", "x", "y", "ticks"],
+                vec!["view", "x", "y"],
             ),
         ],
         vec![
             json!({}),
-            json!({"direction":"down","amount":"page"}),
+            json!({"amount":600}),
             json!({"view":"view_...","x":120,"y":80,"direction":"down","ticks":3}),
         ],
     )
 }
 
 /// One direction description for page and wheel scrolling, so the merged field reads once.
-const SCROLL_DIRECTION: &str = "Wheel scrolling at a view point takes only up or down.";
+const SCROLL_DIRECTION: &str = "Omit to go forward. A wheel at a view point: up or down.";
+
+/// How far a page scroll goes, in any of the forms ADR-0205 reads.
+fn scroll_distance() -> Value {
+    json!({
+        "anyOf": [{"type":"integer"}, {"type":"string","minLength":1,"maxLength":16}],
+        "default": SCROLL_AMOUNT_DEFAULT.as_str(),
+        "description": format!(
+            "Pixels (600), \"50%\" of the view, {}, top, bottom or end; negative goes back.",
+            ScrollAmount::WORDS.join(", ")
+        )
+    })
+}
 
 fn hover_schema() -> Value {
     union(
@@ -765,32 +765,37 @@ fn key_schema() -> Value {
         ("tab", tab()),
         ("target", handle(HandleKind::Target, "")),
         modifiers,
+        (
+            "repeat",
+            within(
+                KEY_REPEAT,
+                Some(usize::from(DEFAULT_KEY_REPEAT)),
+                "Repeats the key or sequence.",
+            ),
+        ),
     ];
-    // Exclusive by construction: every named key is longer than one character.
-    let stroke_item = json!({"oneOf":[{"type":"string","minLength":1,"maxLength":1},{"type":"string","enum":NAMED_KEYS}]});
+    // Keys are read the way a person writes them (ADR-0205 Decision 2), so the schema takes any
+    // short string and the description names the keys.
+    let stroke_item = json!({"type":"string","minLength":1,"maxLength":KEY_TEXT_CHARS});
     union(
         vec![
             object(
-                with(shared.clone(), ("key", stroke_item.clone())),
+                with(
+                    shared.clone(),
+                    (
+                        "key",
+                        json!({"type":"string","minLength":1,"maxLength":KEY_TEXT_CHARS,"description":format!("A character, a named key ({}), a chord like ctrl+a, or keys separated by spaces.", NAMED_KEYS.join(", "))}),
+                    ),
+                ),
                 vec!["key"],
             ),
             object(
-                with_many(
+                with(
                     shared,
-                    vec![
-                        (
-                            "strokes",
-                            json!({"type":"array","minItems":KEY_STROKES.min,"maxItems":KEY_STROKES.max,"description":"Replaces key.","items":stroke_item}),
-                        ),
-                        (
-                            "repeat",
-                            within(
-                                KEY_REPEAT,
-                                Some(usize::from(DEFAULT_KEY_REPEAT)),
-                                "Repeats the whole sequence.",
-                            ),
-                        ),
-                    ],
+                    (
+                        "strokes",
+                        json!({"type":"array","minItems":KEY_STROKES.min,"maxItems":KEY_STROKES.max,"description":"Replaces key.","items":stroke_item}),
+                    ),
                 ),
                 vec!["strokes"],
             ),
@@ -798,7 +803,7 @@ fn key_schema() -> Value {
         vec![
             json!({"key":"Enter"}),
             json!({"key":"a","modifiers":["Control"]}),
-            json!({"strokes":["ArrowDown"],"repeat":5}),
+            json!({"key":"PageDown","repeat":2}),
         ],
     )
 }
@@ -837,14 +842,21 @@ fn drag_schema() -> Value {
 }
 
 fn wait_schema() -> Value {
-    union(
+    let mut schema = union(
         WaitCondition::ALL.into_iter().map(wait_branch).collect(),
-        vec![
-            json!({"condition":"load_ready"}),
-            json!({"condition":"text_present","value":"Ready"}),
-        ],
-    )
+        vec![json!({}), json!({"value":"Ready"}), json!({"value":"2s"})],
+    );
+    let condition = &mut schema["properties"]["condition"]["description"];
+    *condition = json!(format!(
+        "{WAIT_INFERRED} {}",
+        condition.as_str().unwrap_or_default()
+    ));
+    schema
 }
+
+/// How a wait that names no condition is read (ADR-0205 Decision 3).
+const WAIT_INFERRED: &str =
+    "Omit to infer: none is load_ready; a duration, target, selector, URL or text picks its own.";
 
 /// The one condition-specific input a wait branch takes besides its shared fields.
 #[derive(Clone, Copy)]
@@ -905,20 +917,23 @@ fn wait_branch(condition: WaitCondition) -> Value {
             json!({"type":"boolean","description":wait_settle_description()}),
         ),
     ];
-    let mut required = vec!["condition"];
+    let mut required = vec![];
     match input {
         None => {}
         Some(WaitInput::Text) => {
+            // A duration may be a number as well as text (ADR-0205 Decision 2).
             fields.push((
                 "value",
-                text(
-                    1,
-                    MAX_POSTCONDITION_VALUE_CHARS,
-                    &format!(
-                        "Text or URL fragment; page text, not field values. For duration, milliseconds from {} to {} as a string.",
-                        DURATION_MS.min, DURATION_MS.max
-                    ),
-                ),
+                json!({
+                    "anyOf": [
+                        {"type":"string","minLength":1,"maxLength":MAX_POSTCONDITION_VALUE_CHARS},
+                        {"type":"integer","minimum":0}
+                    ],
+                    "description": format!(
+                        "Text or URL fragment; page text, not field values. For duration, 2000 or \"2s\", at most {} ms.",
+                        DURATION_MS.max
+                    )
+                }),
             ));
             required.push("value");
         }
@@ -970,7 +985,12 @@ fn dialog_branch(action: &str, action_description: &str, text_required: bool) ->
         ("action", constant(action, action_description)),
         ("tab", tab()),
     ];
-    let mut required = vec!["action"];
+    // Status is the default, so a call may leave its action out (ADR-0205 Decision 3).
+    let mut required = if action == DialogAction::Status.as_str() {
+        vec![]
+    } else {
+        vec!["action"]
+    };
     if text_required {
         fields.push((
             "text",
@@ -1124,10 +1144,13 @@ fn record_schema() -> Value {
 }
 
 fn record_branch(action: &str, description: &str) -> Value {
-    object(
-        vec![("action", constant(action, description))],
-        vec!["action"],
-    )
+    // Status is the default, so a call may leave its action out (ADR-0205 Decision 3).
+    let required = if action == RecordAction::Status.as_str() {
+        vec![]
+    } else {
+        vec!["action"]
+    };
+    object(vec![("action", constant(action, description))], required)
 }
 
 /// Input schema for the policy explain operation: no arguments.

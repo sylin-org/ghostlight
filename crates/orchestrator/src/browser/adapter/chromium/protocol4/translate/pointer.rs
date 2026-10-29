@@ -20,10 +20,11 @@ use super::super::wire::{FrameRef, InputStep, Point};
 use super::super::world::{self, Message, OwnerBox, Prepared, ScrollOffset, Scrolled};
 use super::{input_for, route_and_admit, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{
-    BrowserOutcome, PhysicalActionSubject, PhysicalClick, PhysicalDrag, PhysicalScroll,
+    BrowserOutcome, PageMovement, PhysicalActionSubject, PhysicalClick, PhysicalDrag,
+    PhysicalScroll,
 };
 use crate::browser::BrowserError;
-use crate::language::{ScrollAmount, ScrollDirection};
+use crate::language::{ScrollDirection, ScrollDistance};
 
 /// How long the page may take to settle after a click, in milliseconds.
 pub(super) const CLICK_SETTLE_MS: u64 = 250;
@@ -188,7 +189,7 @@ pub fn scroll(
         world::scroll(
             local.as_deref(),
             request.direction.map(ScrollDirection::as_str),
-            request.amount.map(ScrollAmount::as_str),
+            request.amount.map(ScrollDistance::wire).as_deref(),
         ),
     )?];
     let nested = doc != top;
@@ -204,11 +205,21 @@ pub fn scroll(
     } else {
         (scrolled.x, scrolled.y)
     };
+    let page = match (&scrolled.direction, scrolled.moved) {
+        (Some(direction), Some(moved)) if request.locator.is_none() => Some(PageMovement {
+            direction: ScrollDirection::named(direction).map_err(BrowserError::Protocol)?,
+            // A pixel count the page measured and rounded; far inside u32.
+            moved: moved.max(0.0).round() as u32,
+            at_end: scrolled.at_end.unwrap_or(false),
+        }),
+        _ => None,
+    };
     Ok(BrowserOutcome::Scrolled {
         tab_id: request.tab_id,
         x,
         y,
         subject: scrolled.subject,
+        page,
     })
 }
 

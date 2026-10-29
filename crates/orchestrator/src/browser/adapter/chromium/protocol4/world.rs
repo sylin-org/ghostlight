@@ -1081,6 +1081,15 @@ pub struct Scrolled {
     /// The role and name of the target brought into view, when the scroll named one.
     #[serde(default)]
     pub subject: Option<PhysicalActionSubject>,
+    /// The direction a page scroll went, when the scroll named no target.
+    #[serde(default)]
+    pub direction: Option<String>,
+    /// How far a page scroll moved, in CSS pixels.
+    #[serde(default)]
+    pub moved: Option<f64>,
+    /// Whether what a page scroll moved is now at its end in that direction.
+    #[serde(default)]
+    pub at_end: Option<bool>,
 }
 
 /// A document's scroll offset.

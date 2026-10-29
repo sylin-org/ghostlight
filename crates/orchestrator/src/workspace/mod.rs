@@ -613,11 +613,13 @@ impl WorkspaceState {
     ///
     /// # Errors
     ///
-    /// [`WorkspaceError::StaleTab`] when the binding is gone or its page has navigated since.
+    /// [`WorkspaceError::StaleTab`] when the binding is gone, and
+    /// [`WorkspaceError::PageChanged`] when the tab is still open but its page committed a new
+    /// document since the call selected it.
     fn current(&self, tab: &SelectedTab) -> Result<&TabState, WorkspaceError> {
         let known = self.confirmed(&tab.handle)?;
         if known.generation != tab.generation {
-            return Err(WorkspaceError::StaleTab);
+            return Err(WorkspaceError::PageChanged);
         }
         Ok(known)
     }
@@ -2333,6 +2335,11 @@ pub enum WorkspaceError {
     /// Tab handle is closed or stale.
     #[error("tab handle is stale")]
     StaleTab,
+    /// The tab is open, but its page committed a new document while the call worked on it, so
+    /// what the call read or captured belongs to a page the tab no longer shows (ADR-0205
+    /// Decision 8).
+    #[error("the tab's page changed during the call")]
+    PageChanged,
     /// Tab belongs to another admitted workspace.
     #[error("tab is owned by another workspace")]
     NotOwnedTab,

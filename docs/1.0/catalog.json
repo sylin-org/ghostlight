@@ -15,7 +15,7 @@
       ],
       "properties": {
         "action": {
-          "description": "list: List this session's tabs. focus: Bring the tab to the front. close: Close the tab.",
+          "description": "list: List this session's tabs (the default). focus: Bring the tab to the front. close: Close the tab.",
           "enum": [
             "list",
             "focus",
@@ -36,9 +36,6 @@
           "type": "integer"
         }
       },
-      "required": [
-        "action"
-      ],
       "type": "object"
     },
     "annotations": {
@@ -230,9 +227,6 @@
           "type": "integer"
         }
       },
-      "required": [
-        "action"
-      ],
       "type": "object"
     },
     "annotations": {
@@ -678,8 +672,7 @@
       "examples": [
         {},
         {
-          "amount": "page",
-          "direction": "down"
+          "amount": 600
         },
         {
           "direction": "down",
@@ -691,18 +684,21 @@
       ],
       "properties": {
         "amount": {
-          "default": "medium",
-          "enum": [
-            "small",
-            "medium",
-            "large",
-            "page"
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            }
           ],
-          "type": "string"
+          "default": "medium",
+          "description": "Pixels (600), \"50%\" of the view, small, medium, large, page, top, bottom or end; negative goes back."
         },
         "direction": {
-          "default": "down",
-          "description": "Wheel scrolling at a view point takes only up or down.",
+          "description": "Omit to go forward. A wheel at a view point: up or down.",
           "enum": [
             "up",
             "down",
@@ -1136,10 +1132,8 @@
           ]
         },
         {
-          "repeat": 5,
-          "strokes": [
-            "ArrowDown"
-          ]
+          "key": "PageDown",
+          "repeat": 2
         }
       ],
       "properties": {
@@ -1169,32 +1163,10 @@
           "type": "object"
         },
         "key": {
-          "oneOf": [
-            {
-              "maxLength": 1,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "enum": [
-                "Enter",
-                "Tab",
-                "Escape",
-                "Backspace",
-                "Delete",
-                "ArrowUp",
-                "ArrowDown",
-                "ArrowLeft",
-                "ArrowRight",
-                "Home",
-                "End",
-                "PageUp",
-                "PageDown",
-                "Space"
-              ],
-              "type": "string"
-            }
-          ]
+          "description": "A character, a named key (Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, Space), a chord like ctrl+a, or keys separated by spaces.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
         },
         "modifiers": {
           "default": [],
@@ -1211,7 +1183,7 @@
         },
         "repeat": {
           "default": 1,
-          "description": "Repeats the whole sequence.",
+          "description": "Repeats the key or sequence.",
           "maximum": 100,
           "minimum": 1,
           "type": "integer"
@@ -1219,32 +1191,9 @@
         "strokes": {
           "description": "Replaces key.",
           "items": {
-            "oneOf": [
-              {
-                "maxLength": 1,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "enum": [
-                  "Enter",
-                  "Tab",
-                  "Escape",
-                  "Backspace",
-                  "Delete",
-                  "ArrowUp",
-                  "ArrowDown",
-                  "ArrowLeft",
-                  "ArrowRight",
-                  "Home",
-                  "End",
-                  "PageUp",
-                  "PageDown",
-                  "Space"
-                ],
-                "type": "string"
-              }
-            ]
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
           },
           "maxItems": 20,
           "minItems": 1,
@@ -1363,17 +1312,17 @@
     "inputSchema": {
       "additionalProperties": false,
       "examples": [
+        {},
         {
-          "condition": "load_ready"
+          "value": "Ready"
         },
         {
-          "condition": "text_present",
-          "value": "Ready"
+          "value": "2s"
         }
       ],
       "properties": {
         "condition": {
-          "description": "load_ready: Page finished loading. url_contains: URL contains value. text_present: value is in the visible text. text_absent: value is gone from the visible text. target_present: target exists. target_absent: target is gone. visual_settle: The page, or target, stopped moving and repainting. selector_present: selector matches a control. duration: Waits value milliseconds.",
+          "description": "Omit to infer: none is load_ready; a duration, target, selector, URL or text picks its own. load_ready: Page finished loading. url_contains: URL contains value. text_present: value is in the visible text. text_absent: value is gone from the visible text. target_present: target exists. target_absent: target is gone. visual_settle: The page, or target, stopped moving and repainting. selector_present: selector matches a control. duration: Waits value milliseconds.",
           "enum": [
             "load_ready",
             "url_contains",
@@ -1444,19 +1393,24 @@
           "type": "integer"
         },
         "value": {
-          "description": "Text or URL fragment; page text, not field values. For duration, milliseconds from 0 to 10000 as a string.",
-          "maxLength": 2000,
-          "minLength": 1,
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "description": "Text or URL fragment; page text, not field values. For duration, 2000 or \"2s\", at most 10000 ms."
         },
         "visual_settle": {
           "description": "Also settle the layout once the condition holds. Off by default for url_contains, text_present, text_absent, and target_absent; on for the rest.",
           "type": "boolean"
         }
       },
-      "required": [
-        "condition"
-      ],
       "type": "object"
     },
     "annotations": {
@@ -1511,9 +1465,6 @@
           "type": "integer"
         }
       },
-      "required": [
-        "action"
-      ],
       "type": "object"
     },
     "annotations": {
@@ -1865,9 +1816,6 @@
           "type": "integer"
         }
       },
-      "required": [
-        "action"
-      ],
       "type": "object"
     },
     "annotations": {

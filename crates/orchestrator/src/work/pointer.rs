@@ -6,7 +6,8 @@ use serde_json::json;
 use crate::governance::Capability;
 use crate::language::{
     outcome::{Outcome, TargetRole},
-    Click, Drag, Hover, ScrollPage, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT,
+    Click, Drag, Hover, ScrollDistance, ScrollPage, SCROLL_AMOUNT_DEFAULT,
+    SCROLL_DIRECTION_DEFAULT,
 };
 use crate::workspace::WorkspaceLease;
 
@@ -167,22 +168,14 @@ impl ApplicationExecutor {
                     BrowserCommand::Scroll(PhysicalScroll {
                         tab_id: selected.physical_id,
                         locator,
-                        direction: value
-                            .target
-                            .is_none()
-                            .then(|| {
-                                value
-                                    .direction
-                                    .unwrap_or(SCROLL_DIRECTION_DEFAULT)
-                            }),
-                        amount: value
-                            .target
-                            .is_none()
-                            .then(|| {
-                                value
-                                    .amount
-                                    .unwrap_or(SCROLL_AMOUNT_DEFAULT)
-                            }),
+                        // A page scroll with no direction lets the page go forward on the
+                        // axis it scrolls on (ADR-0205 Decision 3).
+                        direction: value.target.is_none().then_some(value.direction).flatten(),
+                        amount: value.target.is_none().then(|| {
+                            value
+                                .amount
+                                .unwrap_or(ScrollDistance::Step(SCROLL_AMOUNT_DEFAULT))
+                        }),
                     }),
                 ) {
                     Ok(BrowserOutcome::Scrolled {
@@ -190,20 +183,36 @@ impl ApplicationExecutor {
                         x,
                         y,
                         subject,
+                        page,
                     }) if tab_id == selected.physical_id => {
-                        if let Err(error) = lease.invalidate_views(&selected.handle) {
-                            return self.workspace_failure(context, error);
+                        // A page scroll says what moved; nothing moving changed nothing, and
+                        // a view taken before it still matches the page.
+                        let moved = page.is_none_or(|page| page.moved > 0);
+                        if moved {
+                            if let Err(error) = lease.invalidate_views(&selected.handle) {
+                                return self.workspace_failure(context, error);
+                            }
                         }
                         if let Some(locator) = &revealed {
                             self.indicate_target(context, tab_id, locator, None);
+                        }
+                        let direction = page.map_or_else(
+                            || value.direction.unwrap_or(SCROLL_DIRECTION_DEFAULT),
+                            |page| page.direction,
+                        );
+                        let mut facts = json!({"tab":selected.handle.as_str(),"target":value.target,"scrolled":moved,"x":x,"y":y});
+                        if let Some(page) = page {
+                            facts["direction"] = json!(page.direction.as_str());
+                            facts["moved"] = json!(page.moved);
+                            facts["at_end"] = json!(page.at_end);
                         }
                         self.succeeded(
                             context,
                             decision,
                             Some(tab_id),
-                            Effect::Applied,
+                            if moved { Effect::Applied } else { Effect::None },
                             readiness(selected.readiness),
-                            value.target.is_some(),
+                            value.target.is_some() || !moved,
                             if value.target.is_some() {
                                 Outcome::TargetRevealed {
                                     host: observed_host(&selected.url),
@@ -217,10 +226,11 @@ impl ApplicationExecutor {
                             } else {
                                 Outcome::PageScrolled {
                                     host: observed_host(&selected.url),
-                                    direction: value.direction.unwrap_or(SCROLL_DIRECTION_DEFAULT),
+                                    direction,
+                                    moved,
                                 }
                             },
-                            json!({"tab":selected.handle.as_str(),"target":value.target,"scrolled":true,"x":x,"y":y}),
+                            facts,
                         )
                     }
                     Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
@@ -289,6 +299,7 @@ impl ApplicationExecutor {
                 x,
                 y,
                 subject: _,
+                page: _,
             }) if tab_id == selected.physical_id => {
                 if let Err(error) = lease.invalidate_views(&selected.handle) {
                     return self.workspace_failure(context, error);
@@ -305,6 +316,7 @@ impl ApplicationExecutor {
                         direction: value
                             .direction
                             .expect("language fills a wheel scroll's direction"),
+                        moved: true,
                     },
                     json!({"tab":selected.handle.as_str(),"view":view.handle.as_str(),"wheel":true,"ticks":value.ticks,"scrolled":true,"x":x,"y":y}),
                 )

@@ -1,7 +1,8 @@
 //! Ghostlight's language: every word it accepts and every word it says.
 //!
 //! Model-facing: `catalog` advertises the tools, `operation` holds the typed call each decodes to,
-//! `decode` turns a call's JSON into one or refuses it, and `outcome` says what a call did, with
+//! `values` reads a call's values the way CSS reads a declaration, `decode` turns a call's JSON
+//! into one or refuses it, and `outcome` says what a call did, with
 //! `wait`, `choices`, `handle` and `bounds` holding the closed vocabularies and the limits they
 //! share. Person-facing: `setup`, `deployment`, `workbench`, `readiness`, `policy` and
 //! `environment` word the window, the installer, `doctor` and the policy surfaces. History and the
@@ -42,6 +43,7 @@ pub(crate) mod self_check;
 pub(crate) mod settlement;
 pub mod setup;
 pub mod tool;
+pub mod values;
 pub mod wait;
 pub mod workbench;
 
@@ -50,12 +52,13 @@ pub use choices::{
     DiagnosticDetail, DiagnosticSource, DialogAction, FindScope, HistoryDirection, InspectScope,
     OnError, PointerButton, RecordAction, ScrollAmount, ScrollDirection,
 };
-pub use decode::{base64_decoded_len, decode};
+pub use decode::{base64_decoded_len, decode, decode_reading};
 pub(crate) use decode::{decode_flow_step, SCROLL_AMOUNT_DEFAULT, SCROLL_DIRECTION_DEFAULT};
 use decode::{HISTORY_RELOAD, WHEEL_DIRECTIONS};
 pub use handle::HandleKind;
 pub use operation::*;
 pub use tool::Tool;
+pub use values::{Reading, ScrollDistance};
 pub use wait::{PageCondition, WaitCondition};
 
 use std::path::Path;
@@ -168,8 +171,7 @@ mod tests {
 
     use super::{
         base64_decoded_len, bounds::UPLOAD_AGGREGATE_BYTES, catalog, decode, decode_flow_step,
-        LanguageError, Operation, ScrollAmount, ScrollDirection, SCROLL_AMOUNT_DEFAULT,
-        SCROLL_DIRECTION_DEFAULT, WHEEL_DIRECTIONS,
+        LanguageError, Operation, ScrollDirection, SCROLL_DIRECTION_DEFAULT, WHEEL_DIRECTIONS,
     };
 
     /// What every refusal of a retired tool or argument tells a caller holding an old catalog
@@ -343,10 +345,10 @@ mod tests {
 
     /// Reproduces L-D1 (59c67621): a wheel scroll that leaves out its direction gets
     /// `SCROLL_DIRECTION_DEFAULT`, directly and inside a flow; it takes only `WHEEL_DIRECTIONS`,
-    /// and its refusal lists them; it accepts the advertised `SCROLL_AMOUNT_DEFAULT` a
-    /// defaults-filling client sends beside its ticks, and refuses every other amount.
+    /// and its refusal lists them. A distance asked of a wheel becomes its ticks (ADR-0205
+    /// Decision 2), and one that reads as no distance is refused.
     #[test]
-    fn a_wheel_scroll_takes_the_advertised_direction_and_checks_its_amount() {
+    fn a_wheel_scroll_takes_the_advertised_direction_and_reads_its_amount() {
         let wheel = json!({"view":"view_x","x":10,"y":20,"ticks":2});
         let direction_of = |operation: Operation| match operation {
             Operation::ScrollPage(scroll) => scroll.direction,
@@ -382,12 +384,17 @@ mod tests {
                 WHEEL_DIRECTIONS.join(", ")
             )))
         );
-        assert!(with("amount", SCROLL_AMOUNT_DEFAULT.as_str()).is_ok());
-        let other_amounts = ScrollAmount::WORDS
-            .iter()
-            .copied()
-            .filter(|amount| *amount != SCROLL_AMOUNT_DEFAULT.as_str());
-        for amount in other_amounts.chain(["huge", ""]) {
+        let mut by_distance = wheel.clone();
+        by_distance
+            .as_object_mut()
+            .expect("a call is an object")
+            .remove("ticks");
+        by_distance["amount"] = json!(500);
+        match decode("browser_scroll", by_distance).expect("a wheel distance decodes") {
+            Operation::ScrollPage(scroll) => assert_eq!(scroll.ticks, Some(5)),
+            other => panic!("a scroll decodes to {other:?}"),
+        }
+        for amount in ["huge", ""] {
             assert!(with("amount", amount).is_err(), "{amount}");
         }
     }

@@ -149,6 +149,8 @@ pub(crate) struct PreparedInvocation {
     /// maximum.
     deadline_adjustable: bool,
     decoded: Result<Operation, language::LanguageError>,
+    /// How the call's values were read, reported in its result (ADR-0205 Decision 5).
+    reading: language::Reading,
     stage: Mutex<InvocationStage>,
 }
 
@@ -188,7 +190,10 @@ impl PreparedInvocation {
     ) -> Self {
         let received = Instant::now();
         let received_at_ms = crate::audit::unix_ms();
-        let decoded = language::decode(tool, input);
+        let (decoded, reading) = match language::decode_reading(tool, input) {
+            Ok((operation, reading)) => (Ok(operation), reading),
+            Err(error) => (Err(error), language::Reading::default()),
+        };
         let timeout = decoded
             .as_ref()
             .map_or(language::DEFAULT_TIMEOUT_MS, Operation::timeout_ms)
@@ -205,6 +210,7 @@ impl PreparedInvocation {
             deadline: received + Duration::from_millis(timeout),
             deadline_adjustable,
             decoded,
+            reading,
             stage: Mutex::default(),
         }
     }
@@ -466,6 +472,7 @@ impl ApplicationExecutor {
         if let Some(lease) = lease.as_ref() {
             pending::report_forgotten(lease, &mut terminal);
         }
+        prepared.reading.report(&mut terminal.result.facts);
         self.finish(terminal, Completion::of(&context, tool, started))
     }
 
@@ -483,6 +490,26 @@ impl ApplicationExecutor {
                 return terminal;
             }
         }
+        let terminal = self.perform(context, lease, operation);
+        // An observation that met a page committing a new document read a page the tab no
+        // longer shows. It changed nothing, so it runs once more on the page the tab shows now,
+        // selected and authorized afresh, inside the same deadline (ADR-0205 Decision 8).
+        if observes_page(operation)
+            && terminal.result.facts["reason"] == WorkspaceReason::PageChanged.as_fact()
+            && Instant::now() < context.deadline
+        {
+            return self.perform(context, lease, operation);
+        }
+        terminal
+    }
+
+    /// Carry out one operation on its workspace, once.
+    fn perform(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        operation: &Operation,
+    ) -> Terminal {
         match operation {
             Operation::ListTabs(_) => self.list_tabs(context, lease),
             Operation::ActivateTab(value) => self.activate_tab(context, lease, &value.tab),
@@ -1684,6 +1711,18 @@ impl ResolvedLocation {
             Self::Target { tab, .. } | Self::Point { tab, .. } => tab.clone(),
         }
     }
+}
+
+/// Whether `operation` only observes the page, so running it again on a page that changed under
+/// it repeats nothing the page or the person could notice.
+const fn observes_page(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::ReadPage(_)
+            | Operation::InspectPage(_)
+            | Operation::Find(_)
+            | Operation::TakeScreenshot(_)
+    )
 }
 
 fn operation_requires_workspace_lease(operation: &Operation) -> bool {

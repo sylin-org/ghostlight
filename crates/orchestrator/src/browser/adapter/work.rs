@@ -12,7 +12,7 @@ use crate::language::area::LeftOut;
 use crate::language::field_echo::ChoiceMatch;
 use crate::language::{
     FindScope, HistoryDirection, InspectScope, PageCondition, PointerButton, ReadMode,
-    ScrollAmount, ScrollDirection,
+    ScrollDirection, ScrollDistance,
 };
 
 /// Browser-local readiness observed by the adapter.
@@ -901,10 +901,22 @@ pub struct PhysicalScroll {
     pub tab_id: u64,
     /// The target to reveal, when the scroll names one.
     pub locator: Option<String>,
-    /// The direction to scroll the page in, when it names no target.
+    /// The direction to scroll the page in, when it names no target. None lets the page go
+    /// forward on the axis it scrolls on (ADR-0205 Decision 3).
     pub direction: Option<ScrollDirection>,
     /// How far to scroll the page, when it names no target.
-    pub amount: Option<ScrollAmount>,
+    pub amount: Option<ScrollDistance>,
+}
+
+/// What a page scroll moved, as the page measured it (ADR-0205 Decision 8).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PageMovement {
+    /// The direction it went: the one asked for, or the one the page chose.
+    pub direction: ScrollDirection,
+    /// How far it moved, in CSS pixels; zero when nothing moved.
+    pub moved: u32,
+    /// Whether what scrolled is now at its end in that direction.
+    pub at_end: bool,
 }
 
 /// A page point on a view the model looked at.
@@ -1224,12 +1236,14 @@ pub enum BrowserOutcome {
         subject: Option<PhysicalActionSubject>,
         committed_urls: Vec<String>,
     },
-    /// Scroll or reveal receipt.
+    /// Scroll or reveal receipt. `page` is what a page scroll moved; a reveal and a wheel at a
+    /// point carry none.
     Scrolled {
         tab_id: u64,
         x: f64,
         y: f64,
         subject: Option<PhysicalActionSubject>,
+        page: Option<PageMovement>,
     },
     /// Zoom receipt.
     Zoomed { tab_id: u64, zoom: f64 },

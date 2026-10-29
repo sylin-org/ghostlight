@@ -550,10 +550,12 @@ pub enum Outcome {
         y: u32,
         subject: Option<ActionSubject>,
     },
-    /// A page was scrolled.
+    /// A page scroll ran. `moved` is false when nothing moved: the page was already at its end in
+    /// that direction, or does not scroll that way (ADR-0205 Decision 8).
     PageScrolled {
         host: Option<String>,
         direction: ScrollDirection,
+        moved: bool,
     },
     /// A semantic target was revealed.
     TargetRevealed {
@@ -823,9 +825,22 @@ impl Outcome {
             } => {
                 format!("Clicked at {x},{y} on {}.", on_page(host))
             }
-            Self::PageScrolled { host, direction } => {
+            Self::PageScrolled {
+                host,
+                direction,
+                moved: true,
+            } => {
                 format!("Scrolled {} on {}.", direction.as_str(), on_page(host))
             }
+            Self::PageScrolled {
+                host,
+                direction,
+                moved: false,
+            } => format!(
+                "Nothing moved: {} is already at its end going {}, or does not scroll that way.",
+                on_page(host),
+                direction.as_str()
+            ),
             Self::TargetRevealed { host, subject } => format!(
                 "Scrolled {} into view on {}.",
                 subject.noun_phrase(),
@@ -2348,6 +2363,9 @@ pub enum WorkspaceReason {
     /// The named tab handle names no open tab of this session: its tab closed, its binding was
     /// forgotten, or the session never issued it.
     TabUnavailable,
+    /// The tab is still open, but its page committed a new document while the call worked on it
+    /// (ADR-0205 Decision 8).
+    PageChanged,
     /// The target handle no longer names a control, for the reason given.
     StaleTarget {
         reason: StaleReason,
@@ -2384,6 +2402,10 @@ impl WorkspaceReason {
                 "More than one tab is open in this session, so the call must name one.".into()
             }
             Self::TabUnavailable => "That tab handle names no open tab in this session.".into(),
+            Self::PageChanged => {
+                "The tab's page changed to a new document while Ghostlight was working on it."
+                    .into()
+            }
             Self::StaleTarget { reason, help } => match (reason, help) {
                 (StaleReason::Removed, StaleHelp::Replacement { .. }) => {
                     "That target is no longer on the page. One control on the page has the same role, name and row."
@@ -2429,6 +2451,7 @@ impl WorkspaceReason {
             Self::NoTab => "no_tab",
             Self::AmbiguousTab => "ambiguous_tab",
             Self::TabUnavailable => "tab_unavailable",
+            Self::PageChanged => "page_changed",
             Self::StaleTarget { .. } => "stale_target",
             Self::StaleView => "stale_view",
             Self::HandleOnOtherTab(_) => "handle_on_other_tab",
@@ -2451,6 +2474,9 @@ impl WorkspaceReason {
             }
             Self::TabUnavailable => {
                 vec!["Call browser_tabs with action list to obtain current tab handles.".into()]
+            }
+            Self::PageChanged => {
+                vec!["Repeat the call; it works on the page the tab shows now.".into()]
             }
             Self::StaleTarget { reason, help } => vec![match (reason, help) {
                 (StaleReason::Removed, StaleHelp::Replacement { tool, target }) => {
@@ -2530,6 +2556,7 @@ pub fn workspace_refusal(error: WorkspaceError) -> Refusal {
         WorkspaceError::NoTab => WorkspaceReason::NoTab,
         WorkspaceError::AmbiguousTab => WorkspaceReason::AmbiguousTab,
         WorkspaceError::StaleTab => WorkspaceReason::TabUnavailable,
+        WorkspaceError::PageChanged => WorkspaceReason::PageChanged,
         WorkspaceError::StaleTarget { reason } => WorkspaceReason::StaleTarget {
             reason,
             help: StaleHelp::None,
@@ -2982,6 +3009,7 @@ mod tests {
             Outcome::PageScrolled {
                 host: host(),
                 direction: crate::language::ScrollDirection::Down,
+                moved: true,
             },
             Outcome::TargetRevealed {
                 host: host(),

@@ -260,6 +260,16 @@ Now:
   Store on 2026-10-22 through `scripts/publish-extension.ps1`, at the owner's go: uploaded, then
   submitted for review as DEFAULT_PUBLISH, so it goes public when Google approves it. State:
   PENDING_REVIEW; the store still serves 2.0.0. The release and `main` follow it.
+- Friendly usage, strict authority ([ADR-0205](adr/0205-friendly-usage-strict-authority.md),
+  2026-10-29, owner direction). A Sonnet 5.5 session failed 6 of 18 calls on SharePoint and
+  ServiceNow: three refusals of clear calls and three false answers. On `dev`: `language/values.rs`
+  reads values the way CSS does (numbers, units, keywords, omitted values from the call or the
+  page), ignores what does not apply and reports `ignored` and `adjusted` facts; the schema admits
+  the forms a validating client would otherwise block; a page that changes during a read is
+  `page_changed` and the read runs once more; a navigation with a reported commit lands as
+  `loading`; a page scroll moves what actually scrolls and reports `moved` and `at_end`. Deployed
+  on the owner's machine and checked live through the installed edge (the desk and reading demo
+  stages, a page whose document does not scroll). The extension is unchanged. Not pushed.
 - The 2.0.1 candidate is release run 39715160480 on 8e185d67 (2026-10-22), every job green. Test
   machines upgraded and passed: Bluefin (588ddd95), Alpine (48ef55fd, 657495a3; the 2.0.0 extension's
   dialog stall needs a browser restart, now in the notes) and leo-desktop-02 (3ff45599, 55cb0756, with

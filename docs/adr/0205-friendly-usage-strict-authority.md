@@ -105,13 +105,18 @@ conventions, as this session did.
 6. **A refusal carries its fix.** It names the accepted forms or values of the field it refused.
    An unknown field's refusal names the closest field the tool takes, when one is close, and lists
    the tool's fields.
-7. **The schema shows the canonical form; the decoder reads more.** A client that validates against
-   the schema sends canonical values and works as before. The schema advertises the other forms
-   only where a model needs to know them: the scroll distance, a key's `repeat`, and the wait's
-   value and optional condition. The scroll distance takes a number or a word through a
-   field-level `anyOf`, the form the admitted clients already accept for a fill value; nothing
-   composes at the root. Chords and key sequences stay out of the key schema, whose `oneOf` a
-   strict client checks, so only a lenient client sends them.
+7. **The schema admits the forms a model reaches for; the decoder reads the rest.** Some clients
+   check a call against the advertised schema before Ghostlight sees it (Claude Code refused
+   `browser_tabs {}` with "Input validation error" during this ADR's live check), so a friendly
+   form the schema forbids never arrives. The schema therefore leaves out `required` where a value
+   has a sensible default (`browser_tabs`, `browser_window`, `browser_dialog` and
+   `browser_record` may omit `action`; `browser_wait` may omit `condition`), takes a number or a
+   word for the scroll distance and a number or text for a wait's value through a field-level
+   `anyOf`, the form the admitted clients already accept for a fill value, and takes keys as free
+   text with the named keys in the description. Nothing composes at the root and no field uses
+   `oneOf`. Forms that are only spelling (a duration as `"2s"`, a count as `"3"`, a word's case,
+   camel-case field names) stay out of the schema; a lenient client sends them and the decoder
+   reads them.
 
 ### Truthful answers
 
@@ -163,4 +168,5 @@ conventions, as this session did.
 - Each false answer gets a test that reproduces it: a page committing during a capture, a ready
   timeout with a reported commit, and a scroll on a page whose document does not move.
 - The change is deployed through the dev loop and tried live on the owner's installation, on a page
-  that scrolls an inner container.
+  that scrolls an inner container, and with the familiar call shapes sent through the installed
+  edge.

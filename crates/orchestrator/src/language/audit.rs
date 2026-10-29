@@ -248,6 +248,7 @@ impl WorkspaceReason {
             Self::NoTab
             | Self::AmbiguousTab
             | Self::TabUnavailable
+            | Self::PageChanged
             | Self::StaleTarget { .. }
             | Self::StaleView
             | Self::FieldsOnSeveralTabs

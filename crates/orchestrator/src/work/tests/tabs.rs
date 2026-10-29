@@ -1922,3 +1922,100 @@ fn find_save(
         .unwrap()
         .to_owned()
 }
+
+/// Reproduces the 2026-10-29 false "no open tab" (ADR-0205 Decision 8): a page that commits a new
+/// document while a screenshot runs has not lost its tab. The capture runs once more on the page
+/// the tab shows now and succeeds; a page that keeps committing is refused as a changed page,
+/// never as a missing tab, and the tab stays listed.
+#[test]
+fn a_page_that_changes_during_a_capture_is_captured_again_not_lost() {
+    use crate::browser::{BrowserDispatch, BrowserPort, BrowserSummary};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    /// Commits a new document in tab 7 while each of its first `commits` captures runs, as a
+    /// sign-in redirect does.
+    struct Committing {
+        inner: Arc<FakeBrowser>,
+        workspaces: crate::workspace::WorkspaceStore,
+        commits: AtomicUsize,
+    }
+    impl BrowserPort for Committing {
+        fn call(
+            &self,
+            browser: &str,
+            command: BrowserCommand,
+            deadline: Instant,
+            cancelled: &AtomicBool,
+        ) -> Result<BrowserOutcome, BrowserError> {
+            let capture = matches!(command, BrowserCommand::Screenshot { .. });
+            let result = self.inner.call(browser, command, deadline, cancelled);
+            let commits = self.commits.load(Ordering::SeqCst);
+            if capture && commits > 0 {
+                self.commits.store(commits - 1, Ordering::SeqCst);
+                self.workspaces.note_browser_landing(
+                    FAKE_BROWSER,
+                    7,
+                    "https://example.com/signed-in",
+                );
+            }
+            result
+        }
+        fn call_guarded(
+            &self,
+            browser: &str,
+            command: BrowserCommand,
+            dispatch: BrowserDispatch<'_>,
+        ) -> Result<BrowserOutcome, BrowserError> {
+            (dispatch.admit)()?;
+            self.call(browser, command, dispatch.deadline, dispatch.cancelled)
+        }
+        fn browsers(&self) -> Vec<BrowserSummary> {
+            self.inner.browsers()
+        }
+    }
+
+    for (commits, captured) in [(1, true), (2, false)] {
+        let (mut executor, browser, workspaces, workspace, _) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://login.example.com/"),
+            committed_urls: vec!["https://login.example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://login.example.com/","new_tab":true}),
+            &CancellationToken::default(),
+        );
+        let handle = opened.facts["tab"].as_str().unwrap().to_owned();
+        executor.browser = Arc::new(Committing {
+            inner: browser.clone(),
+            workspaces: workspaces.clone(),
+            commits: AtomicUsize::new(commits),
+        });
+        browser.push(Ok(super::documents::captured_image()));
+        browser.push(Ok(super::documents::captured_image()));
+
+        let shot = executor.execute(
+            &workspace,
+            "browser_screenshot",
+            json!({"tab":handle}),
+            &CancellationToken::default(),
+        );
+
+        if captured {
+            assert_eq!(shot.status, Status::Succeeded, "{}", shot.summary);
+            assert!(shot.facts["view"].as_str().is_some());
+        } else {
+            assert_eq!(shot.status, Status::Failed);
+            assert_eq!(shot.facts["reason"], "page_changed", "{}", shot.summary);
+            assert!(!shot.summary.contains("no open tab"), "{}", shot.summary);
+            assert!(shot.repeat_safe);
+        }
+        assert_eq!(
+            workspaces.tab_bindings(workspace.as_str())[0].handle,
+            handle,
+            "the tab is still this session's"
+        );
+    }
+}

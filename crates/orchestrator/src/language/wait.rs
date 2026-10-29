@@ -106,7 +106,7 @@ impl WaitCondition {
     }
 
     /// The condition a call names, or the refusal that says which names exist.
-    fn named(name: &str) -> Result<Self, String> {
+    pub(super) fn named(name: &str) -> Result<Self, String> {
         if name == RETIRED_LAYOUT_STABLE {
             return Err(
                 "condition layout_stable was merged into visual_settle; use condition visual_settle"
