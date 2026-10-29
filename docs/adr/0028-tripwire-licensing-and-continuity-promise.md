@@ -359,3 +359,21 @@ licensing infrastructure and real offline issuers), both run 2026-07-10:
   leak; its licenses are loudly marked. Production trust rests solely on generation 1+.
 - GTM execution, document pack, and channel plan live in `docs/business/PLAN.md`; founder
   personal actions in `docs/business/FOUNDER-TODO.md`.
+
+## Amendment 2026-10-29: Decision 9 means automated update checks
+
+The owner clarified Decision 9's wording on 2026-10-29: "That was badly worded. 'No automated
+update ping' was the original meaning." The rule is unchanged in force. Read with the owner's
+definition of 2026-10-14 (docs/MEMORY.md, "Never phone home": phone home is communication outside
+the user's or the administrator's intent, not HTTP access as such), it says:
+
+- No Ghostlight binary, extension or module checks for updates on its own: not at start, not on a
+  schedule, not in the background, and not as a side effect of other work.
+- A check the person starts, such as a button they click, is their own action. It may ask the
+  release host directly (GitHub or npm), never a Ghostlight or Sylin server, and it carries no
+  identifier of the person, the machine or the installation.
+- Licensing, telemetry, analytics and any other vendor-serving traffic stay forbidden without
+  exception.
+
+The trust pages keep their current claims until such a check exists; the change that adds one
+updates them in the same commit.
