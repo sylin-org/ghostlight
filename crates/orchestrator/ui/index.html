@@ -400,8 +400,16 @@
             <p class="about-lede">A governed bridge between an AI agent and the browser you are already signed in to.
               It runs on this machine, under your eye, and stops where you tell it to.</p>
             <dl class="about-facts" id="about-facts"></dl>
-            <p class="about-note">Ghostlight never phones home. No telemetry, no activation check, no update ping.
-              Everything on this page was assembled on this device from work this device did.</p>
+            <p class="about-note">Ghostlight never phones home. No telemetry, no activation check, no automatic update check:
+              GitHub is asked only when you click Check for updates. Everything else on this page was assembled on
+              this device from work this device did.</p>
+            <div class="about-update" id="about-update">
+              <button class="ghost-button" type="button" id="check-update">Check for updates</button>
+              <p class="about-update-result" id="update-result" role="status" aria-live="polite" hidden></p>
+              <pre class="about-update-notes" id="update-notes" hidden></pre>
+              <p class="about-update-warning" id="update-warning" hidden></p>
+              <button class="primary-button" type="button" id="install-update" hidden></button>
+            </div>
             <div class="about-links" id="about-links"></div>
           </div>
         </div>

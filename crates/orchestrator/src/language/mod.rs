@@ -43,6 +43,7 @@ pub(crate) mod self_check;
 pub(crate) mod settlement;
 pub mod setup;
 pub mod tool;
+pub mod update;
 pub mod values;
 pub mod wait;
 pub mod workbench;

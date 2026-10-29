@@ -111,11 +111,15 @@ pub enum WebAct {
     SetupAct,
     /// End Ghostlight, as the tray's Quit does.
     Quit,
+    /// Ask GitHub for a newer release (ADR-0206).
+    CheckUpdate,
+    /// Install the newer release a check found (ADR-0206).
+    InstallUpdate,
 }
 
 impl WebAct {
     /// Every act, in the order the context document lists them.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 22] = [
         Self::Search,
         Self::CheckPolicy,
         Self::Rescan,
@@ -136,6 +140,8 @@ impl WebAct {
         Self::Locate,
         Self::SetupAct,
         Self::Quit,
+        Self::CheckUpdate,
+        Self::InstallUpdate,
     ];
 
     /// The key the page names this act by.
@@ -162,6 +168,8 @@ impl WebAct {
             Self::Locate => "locate",
             Self::SetupAct => "setup_act",
             Self::Quit => "quit",
+            Self::CheckUpdate => "check_update",
+            Self::InstallUpdate => "install_update",
         }
     }
 

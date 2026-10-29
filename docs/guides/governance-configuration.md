@@ -80,6 +80,7 @@ remain separate.
 | `audit.availability` | `keep_working` or `require_audit` | Defaults to continuing with visible history degradation. Require audit stops subsequent browser work during a known saving failure. Either layer can require it. |
 | `browser.startup` | `on_demand` or `manual` | Controls whether admitted work may request one bounded browser-startup attempt. Windows defaults to `on_demand`; Linux defaults to `manual`. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
+| `updates.check.enabled` | boolean | `false` turns off the update check a person starts from About or `ghostlight update`; on when unset. Ghostlight never checks on its own (ADR-0206). |
 
 Every `config` entry names a `level`, `mandatory` or `recommended`, and both set a ceiling. Layers
 combine each setting the same way whatever its level: a value that takes something away in one

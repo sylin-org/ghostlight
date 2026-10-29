@@ -34,6 +34,7 @@ pub mod reconcile;
 pub mod record;
 pub mod setup_state;
 pub mod swap;
+pub mod update;
 pub mod user_assets;
 mod user_dirs;
 pub mod user_path;

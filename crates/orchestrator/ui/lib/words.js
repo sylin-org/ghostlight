@@ -43,6 +43,9 @@
   /** Said after Settings sends the notification test. */
   const TEST_NOTIFICATION_SENT = "Test notification sent.";
 
+  /** Said on About while the update check waits for GitHub (ADR-0206). */
+  const UPDATE_CHECKING = "Asking GitHub for the latest release...";
+
   /** Said after Settings copies the address of the watch view. */
   const ADDRESS_COPIED = "Address copied.";
 
@@ -930,6 +933,17 @@
       ]
     },
     {
+      title: "Updates",
+      items: [
+        {
+          key: "updates.check.enabled",
+          name: "Update check",
+          on: "Check for updates on About asks GitHub for a newer release when someone clicks it.",
+          off: "Check for updates is turned off."
+        }
+      ]
+    },
+    {
       title: "Privacy",
       items: [
         {
@@ -1215,7 +1229,7 @@
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME, OUTCOME_WORD, PHASE, PHASE_WORD, RUNTIME, CHEVRON, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, POLICY_IN_WINDOW, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
-    WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
+    WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, UPDATE_CHECKING, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES, CARD, browserChipTitle,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun,
     screenState, byteSize,

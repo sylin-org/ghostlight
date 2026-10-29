@@ -98,6 +98,10 @@ pub mod event {
     /// An agent icon source that could not be read was skipped; the agent keeps its next source
     /// or its monogram.
     pub const AGENT_ICON_SKIPPED: &str = "agent_icon_skipped";
+    /// The person checked for a newer release (ADR-0206): the versions and what was found.
+    pub const UPDATE_CHECKED: &str = "update_checked";
+    /// The person started installing a newer release (ADR-0206): the versions and the outcome.
+    pub const UPDATE_STARTED: &str = "update_started";
 }
 
 /// Which process writes through this sink. Its name appears in file names and records. The edge

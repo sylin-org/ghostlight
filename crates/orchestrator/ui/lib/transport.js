@@ -49,7 +49,9 @@
     revealDiagnostics: "reveal_diagnostics",
     locate: "locate",
     setupAct: "setup_act",
-    quit: "quit"
+    quit: "quit",
+    checkUpdate: "check_update",
+    installUpdate: "install_update"
   });
   /**
    * The contexts a window is in, as the service names them (`WebContext`): the window with this
@@ -127,7 +129,9 @@
       path: "/api/window",
       body: ({ address }) => (address ? { view: WORKBENCH_VIEW, address } : { view: WORKBENCH_VIEW })
     },
-    quit_ghostlight: { method: POST, path: "/api/quit", body: () => ({}) }
+    quit_ghostlight: { method: POST, path: "/api/quit", body: () => ({}) },
+    check_update: { method: POST, path: "/api/update/check", body: () => ({}) },
+    install_update: { method: POST, path: "/api/update/install", body: () => ({}) }
   });
 
   /**
@@ -468,6 +472,12 @@
 
       /** Open the diagnostics folder through the service. */
       revealDiagnostics: () => call("reveal_diagnostics"),
+
+      /** Ask GitHub for a newer release, because the person clicked (ADR-0206). */
+      checkUpdate: () => call("check_update"),
+
+      /** Install the newer release a check found; the service restarts (ADR-0206). */
+      installUpdate: () => call("install_update"),
 
       /** The compiled policy: what applies here, and who decided each line. */
       policy: () => call("workbench_policy"),

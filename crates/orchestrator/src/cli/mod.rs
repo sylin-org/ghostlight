@@ -27,6 +27,7 @@ pub mod setup;
 pub mod sign_out;
 pub mod start;
 pub mod status;
+pub mod update;
 
 use std::io::{BufRead, Write};
 
@@ -318,6 +319,7 @@ pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
         }
         parse::LaunchMode::Doctor { fix, json } => doctor::run_doctor(fix, json),
         parse::LaunchMode::Status { json } => status::run_status(json),
+        parse::LaunchMode::Update { install } => update::run(install),
         parse::LaunchMode::Help => {
             parse::print_help();
             Ok(())

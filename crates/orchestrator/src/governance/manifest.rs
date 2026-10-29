@@ -187,11 +187,14 @@ pub enum PolicySetting {
     PreserveTargetNames,
     /// `content.security.sacred_domains`: the destinations a layer marks never-touch.
     NeverTouch,
+    /// `updates.check.enabled`: `false` turns off the update check the person starts from the
+    /// window or the command line (ADR-0206 Decision 7).
+    UpdatesCheckEnabled,
 }
 
 impl PolicySetting {
     /// Every registered setting.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::AuditAvailability,
         Self::TabsAllowClose,
         Self::ScreenshotsEnabled,
@@ -200,6 +203,7 @@ impl PolicySetting {
         Self::CliChannelEnabled,
         Self::PreserveTargetNames,
         Self::NeverTouch,
+        Self::UpdatesCheckEnabled,
     ];
 
     /// The key a schema-4 document authors for this setting.
@@ -214,6 +218,7 @@ impl PolicySetting {
             Self::CliChannelEnabled => "channels.cli.enabled",
             Self::PreserveTargetNames => "privacy.preserve_target_names",
             Self::NeverTouch => "content.security.sacred_domains",
+            Self::UpdatesCheckEnabled => "updates.check.enabled",
         }
     }
 
@@ -248,7 +253,8 @@ impl PolicySetting {
             | Self::ScreenshotsEnabled
             | Self::McpChannelEnabled
             | Self::CliChannelEnabled
-            | Self::PreserveTargetNames => {
+            | Self::PreserveTargetNames
+            | Self::UpdatesCheckEnabled => {
                 if !value.is_boolean() {
                     return field(source, path, "must be a boolean");
                 }
@@ -877,7 +883,8 @@ mod tests {
             | PolicySetting::ScreenshotsEnabled
             | PolicySetting::McpChannelEnabled
             | PolicySetting::CliChannelEnabled
-            | PolicySetting::PreserveTargetNames => json!(false),
+            | PolicySetting::PreserveTargetNames
+            | PolicySetting::UpdatesCheckEnabled => json!(false),
             PolicySetting::BrowserStartup => json!("manual"),
             PolicySetting::NeverTouch => json!(["vault.example", "*.bank.example"]),
         }
@@ -909,6 +916,7 @@ mod tests {
                 "channels.cli.enabled",
                 "privacy.preserve_target_names",
                 "content.security.sacred_domains",
+                "updates.check.enabled",
             ]
         );
         let config: Vec<Value> = PolicySetting::ALL

@@ -68,6 +68,16 @@ prints the same observation as one JSON document and cannot be combined with
 .BR status " [" \-\-json ]
 Report the local service endpoint without starting it.
 .TP
+.BR update " [" \-\-install ]
+Ask GitHub's latest-release record whether a newer Ghostlight exists. Nothing checks on its own;
+this asks only when run.
+.B \-\-install
+downloads the newer release's images, checks them against its
+.BR SHA256SUMS ,
+and installs them, which restarts Ghostlight. A development build and an administrator's
+.B updates.check.enabled
+set to false offer nothing.
+.TP
 .BI call " tool" " [json]"
 Run one browser tool and print its outcome.
 .B \-\-stdin

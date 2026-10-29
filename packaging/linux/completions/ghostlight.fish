@@ -5,7 +5,7 @@
 # and the client list against the agent catalog, by tests in the orchestrator. Adding a
 # subcommand, a policy command or an agent without adding it here fails those tests.
 
-set -l ghostlight_commands open install uninstall doctor status call diagnostics policy
+set -l ghostlight_commands open install uninstall doctor status call diagnostics policy update
 set -l ghostlight_policy_commands validate migrate explain simulate keygen pubkey sign publish
 set -l ghostlight_clients codex claude-code claude-desktop cursor vscode windsurf devin zed zcode opencode crush copilot-cli cline kiro qwen-code junie kilo-code goose continue antigravity cline-cli cline-vscode cline-cursor cline-windsurf
 
@@ -16,6 +16,7 @@ complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a uninstall -d "Remove only Ghostlight-owned registrations"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a doctor -d "Check the complete local installation"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a status -d "Check the local service endpoint"
+complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a update -d "Ask GitHub for a newer release"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a call -d "Run one browser tool"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a diagnostics -d "Read the shared diagnostics log, or turn it on and off"
 complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands" -a policy -d "Validate, explain, sign, or publish policy"
@@ -31,6 +32,7 @@ complete -c ghostlight -n "__fish_seen_subcommand_from uninstall" -l dry-run -d 
 complete -c ghostlight -n "__fish_seen_subcommand_from doctor" -l json -d "Print one JSON document"
 complete -c ghostlight -n "__fish_seen_subcommand_from doctor" -l fix -d "Apply ownership-safe repairs"
 complete -c ghostlight -n "__fish_seen_subcommand_from status" -l json -d "Print one JSON document"
+complete -c ghostlight -n "__fish_seen_subcommand_from update" -l install -d "Install the newer release the check finds"
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l json -d "Print the structured result"
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l stdin -d "Run a batch over one session"
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l output -d "Write bounded content to a file" -r -F

@@ -29,7 +29,7 @@
 
 const {
   POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, COPIED_SETUP, COPIED_COMMAND,
-  WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONNECTION_ID_COPIED, SETTINGS, DEFAULT_VIEW,
+  WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, UPDATE_CHECKING, ADDRESS_COPIED, CONNECTION_ID_COPIED, SETTINGS, DEFAULT_VIEW,
   SETUP_ADDRESS, SETUP, AGENTS, parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
 
@@ -589,6 +589,60 @@ async function quitGhostlight() {
   view.leaving(answer?.message ?? "");
 }
 
+/**
+ * Ask GitHub for a newer release, because the person clicked (ADR-0206). The service answers what
+ * it found; a newer release shows its notes and an Install button, which is a second click.
+ */
+async function checkForUpdate() {
+  if (!transport.available || !allowed(ACT.checkUpdate)) return;
+  const el = view.el;
+  const say = (text) => {
+    el["update-result"].textContent = text;
+    el["update-result"].hidden = !text;
+  };
+  el["check-update"].disabled = true;
+  el["install-update"].hidden = true;
+  el["update-notes"].hidden = true;
+  el["update-warning"].hidden = true;
+  say(UPDATE_CHECKING);
+  try {
+    const found = await transport.checkUpdate();
+    say(found.sentence);
+    if (found.notes) {
+      el["update-notes"].textContent = found.notes;
+      el["update-notes"].hidden = false;
+    }
+    if (found.install && allowed(ACT.installUpdate)) {
+      el["install-update"].textContent = found.install;
+      el["install-update"].hidden = false;
+      el["update-warning"].textContent = found.warning ?? "";
+      el["update-warning"].hidden = !found.warning;
+    }
+  } catch (error) {
+    say(failureWords(error));
+  } finally {
+    el["check-update"].disabled = false;
+  }
+}
+
+/** Install the newer release the check found. The service restarts, and the window reconnects. */
+async function installUpdate() {
+  if (!transport.available || !allowed(ACT.installUpdate)) return;
+  const el = view.el;
+  el["install-update"].disabled = true;
+  el["check-update"].disabled = true;
+  try {
+    const answer = await transport.installUpdate();
+    el["update-result"].textContent = answer?.message ?? "";
+    el["update-warning"].hidden = true;
+    el["install-update"].hidden = true;
+  } catch (error) {
+    el["update-result"].textContent = failureWords(error);
+    el["install-update"].disabled = false;
+    el["check-update"].disabled = false;
+  }
+}
+
 /** Put the address of the watch view on the clipboard of this screen. */
 async function copyAddress(address) {
   try {
@@ -985,6 +1039,8 @@ function wire() {
   el["sacred-hosts"].addEventListener("input", (event) => view.setSacred(event.target.value));
   el["add-rule"].addEventListener("click", () => view.addRule());
   el["check-policy"].addEventListener("click", () => checkPolicy());
+  el["check-update"].addEventListener("click", () => checkForUpdate());
+  el["install-update"].addEventListener("click", () => installUpdate());
   // Only a screen that may write the rules shows Apply; a watching page reads them.
   el["apply-policy"].addEventListener("click", () => applyPolicy());
   el["discard-policy"].addEventListener("click", () => discardPolicyDraft());

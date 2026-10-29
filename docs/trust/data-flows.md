@@ -25,6 +25,8 @@ audit run on the endpoint.
 | Connection source | Local reads by the service when an agent connects: the names of the programs above the connecting process, at most 16, to name the app that started it in the window, the history and the audit. Nothing is sent | Same endpoint. |
 | Suggested first request | The window shows a sentence for the person to give their agent. The agent's browser then opens a demo page on sylin.org, which the site states submits nothing elsewhere, calls out to nothing else and stores nothing | Browser page traffic the person asked for. |
 | Managed policy fetch | Local file read or conditional HTTPS GET | Customer-configured source, only when an administrator provisions `managed.json`. |
+| Update check | Only when the person clicks Check for updates on About or runs `ghostlight update`: one HTTPS GET of the latest-release record, with the user agent `Ghostlight` and nothing that identifies the person, the computer or the installation. A release in another major.minor block also reads that release's `compatibility.json`. Never at start, on a schedule or in the background, and never when an administrator sets `updates.check.enabled` to false (ADR-0206) | GitHub (`api.github.com`, `raw.githubusercontent.com`). |
+| Update install | Only when the person then clicks Install or runs `ghostlight update --install`: HTTPS downloads of that release's `SHA256SUMS` and this computer's three programs, each checked against it, kept in `~/.ghostlight/updates/<version>` and installed by the release's own installer | GitHub's release hosts, as the npm launcher uses them. |
 | Workbench page | HTTP on 127.0.0.1 only, answered only when the Host header is that address and port. While "Others can watch" is on, anyone on this computer can see activity with hosts, client names and policy rules, and can pause agents; the person's never-touch list shows only as a count. Changes need a secret made at each service start, which the service hands out only on its per-user pipe, to the Ghostlight window. A person turns watching off in the Ghostlight window's Settings > Sharing; while it is off, a browser tab shows only the About page | Same endpoint. |
 
 The managed HTTPS source may use a bearer token and organization CA pin. The signed bundle is the
@@ -33,14 +35,15 @@ refused by monotonic sequence. No bootstrap means no policy network work.
 
 ## Flows that do not exist
 
-- No telemetry, analytics, crash upload, activation callback, or update ping.
+- No telemetry, analytics, crash upload, activation callback, or automatic update check.
 - No audit upload, direct syslog delivery, HTTP collector, or listener on any address but loopback.
 - No Ghostlight model-provider call. The MCP client owns its model relationship.
 - No vendor policy endpoint or embedded vendor policy key.
 
-There is zero vendor-bound traffic. Two Ghostlight-initiated network flows may leave the endpoint:
-the explicitly configured managed HTTPS fetch to the customer's own source, and the npm launcher's
-download of release files from GitHub when npm runs a package newer than the installed set.
+There is zero vendor-bound traffic. Three Ghostlight-initiated network flows may leave the
+endpoint: the explicitly configured managed HTTPS fetch to the customer's own source, the npm
+launcher's download of release files from GitHub when npm runs a package newer than the installed
+set, and the update check and install a person starts, which ask GitHub directly.
 Ordinary site traffic remains browser traffic.
 
 When the extension is installed on a computer where the Ghostlight service is absent, it opens its

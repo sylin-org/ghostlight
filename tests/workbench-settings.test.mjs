@@ -3612,7 +3612,7 @@ test("every Policy switch is a named switch, described by its detail and, for a 
   shown.view.policy(openPolicy());
   const root = drawn(shown.el("setting-groups").innerHTML).root;
   const switches = [...root.descendants()].filter((node) => node.tag === "input" && "restriction" in node.dataset);
-  assert.equal(switches.length, 5, "MCP agents, Command line, Closing tabs, Screenshots and Page-authored names");
+  assert.equal(switches.length, 6, "MCP agents, Command line, Closing tabs, Screenshots, Update check and Page-authored names");
   for (const box of switches) {
     const key = box.dataset.restriction;
     assert.equal(box.attributes.role, "switch", key);
@@ -3629,7 +3629,7 @@ test("every Policy switch is a named switch, described by its detail and, for a 
     assert.ok(texts.includes(Words.escapeHtml(limit)), `${key} is not described by the channel limit`);
   }
   const names = switches.map((box) => textOf(root, box.attributes["aria-labelledby"]));
-  assert.deepEqual(names, ["MCP agents", "Command line", "Closing tabs", "Screenshots", "Page-authored names"]);
+  assert.deepEqual(names, ["MCP agents", "Command line", "Closing tabs", "Screenshots", "Update check", "Page-authored names"]);
 });
 
 test("the channel limit leads Who may work, under its heading, said plainly and kept to a reading width", () => {
@@ -3683,7 +3683,7 @@ test("a watching page reads Policy: every draft control holds its state, under o
     assert.deepEqual(shown.failures, [], order);
     const groups = drawn(shown.el("setting-groups").innerHTML).root;
     const controls = [...groups.descendants()].filter((node) => node.tag === "input" || node.tag === "select");
-    assert.equal(controls.length, 7, `${order}: five switches, the history choice and the startup choice`);
+    assert.equal(controls.length, 8, `${order}: six switches, the history choice and the startup choice`);
     for (const control of controls) {
       assert.equal(control.disabled, true, `${order}: ${control.dataset.restriction ?? control.dataset.settingChoice}`);
     }

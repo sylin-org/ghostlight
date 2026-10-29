@@ -25,8 +25,9 @@ have a structural rather than a procedural answer.
 ### Does any of our data ever reach the vendor?
 
 No. Ghostlight generates zero vendor-bound traffic: the binary never phones home, carries no
-telemetry, and initiates no network activity beyond your own tool calls and the optional signed
-policy fetch from an endpoint your own organization hosts. When the extension is installed on a
+telemetry, and initiates no network activity beyond your own tool calls, the optional signed
+policy fetch from an endpoint your own organization hosts, and an update check you start yourself,
+which asks GitHub's release record and sends nothing that identifies you. When the extension is installed on a
 computer where the Ghostlight service is absent, it opens its own bundled setup page once; that
 page loads nothing from the network and no vendor page opens. While setup is incomplete, the
 service also reads each installed browser's profile names and looks for the extension's folder, a

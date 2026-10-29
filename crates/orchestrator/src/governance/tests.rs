@@ -229,6 +229,14 @@ fn a_setting_either_layer_tightens_stays_tight_and_credits_the_layer_that_did() 
             },
         },
         Setting {
+            key: PolicySetting::UpdatesCheckEnabled,
+            tight: "false",
+            open: "true",
+            holds: |facade, _, credit| {
+                assert_eq!(facade.snapshot().allows_update_check(), credit.is_none());
+            },
+        },
+        Setting {
             key: PolicySetting::AuditAvailability,
             tight: r#""require_audit""#,
             open: r#""keep_working""#,

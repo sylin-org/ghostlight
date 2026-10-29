@@ -290,6 +290,16 @@ Now:
   which covers it. WinGet still serves 2.0.0 (its 2.0.1 pull request waits on the Defender review)
   and no 2.0.2 manifest is submitted. The public install is proven on Windows through npm. The
   custody record is [testing/release-2.0.2-2026-10-29.md](testing/release-2.0.2-2026-10-29.md).
+- A version check the person starts ([ADR-0206](adr/0206-a-version-check-the-person-starts.md),
+  accepted 2026-10-29, with ADR-0028 Decision 9 clarified to mean automated checks). On `dev`:
+  Check for updates on About and `ghostlight update [--install]` read GitHub's latest-release
+  record once, and Install downloads the release's images, checks them against `SHA256SUMS`,
+  stages them in `~/.ghostlight/updates/<version>` and starts their `deployment install`. A
+  development build offers nothing; `updates.check.enabled: false` turns it off. The trust pages
+  and PRIVACY.md say so. Deployed on the owner's machine: `ghostlight update` asked GitHub live and
+  named 2.0.2 as a development build should, and a watching tab shows no button and is refused.
+  Owed: a click in the window itself, and the first real install, which needs a release newer than
+  the one installed.
 - The 2.0.1 candidate is release run 39715160480 on 8e185d67 (2026-10-22), every job green. Test
   machines upgraded and passed: Bluefin (588ddd95), Alpine (48ef55fd, 657495a3; the 2.0.0 extension's
   dialog stall needs a browser restart, now in the notes) and leo-desktop-02 (3ff45599, 55cb0756, with

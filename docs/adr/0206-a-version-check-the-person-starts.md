@@ -1,6 +1,6 @@
 # ADR-0206: A version check the person starts
 
-Date: 2026-10-29. Status: Proposed, for the owner's review before any code. On 2026-10-29 the
+Date: 2026-10-29. Status: Accepted by the owner on 2026-10-29 ("Accept and build"). On 2026-10-29 the
 owner asked for "a 'check version' button to the About page, and if a newer version is detected we
 download/install it", made passive ("the user clicks to check for updates") and pointed at the
 release hosts ("it could directly contact, say, npm or github"). The same day the owner clarified
@@ -82,13 +82,17 @@ release's `SHA256SUMS`.
   Chrome Web Store updates only the extension, and most people install with the one-line command,
   which has no update of its own.
 
-## Open questions for the build
+## Settled in the build, and still open
 
-- Whether the HTTPS transport the managed policy fetch uses honors a system or environment proxy
-  on corporate networks, and what the check says when a proxy blocks it.
-- Whether the Claude Desktop bundle's own reinstall on start can put an older version back after a
-  button install. Its rule installs only over an absent or older set, so it should not, but that
-  is checked live.
+- The check goes through a proxy the environment names (`HTTPS_PROXY`, `ALL_PROXY`), as the HTTPS
+  library reads it. Windows' own proxy settings are not read; a network that requires them makes
+  the check say "Couldn't reach GitHub." Reading them is a later change if a person needs it.
+- The command line runs outside the service and sees no browser, so it never installs a release
+  in another major.minor block; it says the release needs a newer extension, and the window,
+  which knows each browser's extension, installs it.
+- Still open: whether the Claude Desktop bundle's own reinstall on start can put an older version
+  back after a button install. Its rule installs only over an absent or older set, so it should
+  not; the first button install of a real release checks it live.
 
 ## Verification
 

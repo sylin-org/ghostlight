@@ -1134,6 +1134,8 @@
         );
       }
       if (license) facts.push(["License", license]);
+      // Only the window may ask GitHub; a watching screen does not offer it (ADR-0206).
+      el["check-update"].hidden = !can(ACT.checkUpdate);
       el["about-facts"].innerHTML = facts
         .map(([term, value]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd>`)
         .join("");

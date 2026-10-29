@@ -61,12 +61,16 @@ use crate::events::DomainEvent;
 use crate::governance::effective::EffectiveAuthority;
 use crate::governance::{AuthoringError, CapabilitySet, GovernanceFacade};
 use crate::install::icons::IconCache;
+use crate::install::layout::Layout;
+use crate::install::record::Channel;
+use crate::install::update::{self, Finding, UpdateError, Version};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSetupResult,
     HarnessSummary,
 };
 use crate::language::outcome::Observed;
 use crate::language::readiness;
+use crate::language::update as update_words;
 use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::sync::lock;
 use crate::workspace::WorkspaceStore;
@@ -508,6 +512,85 @@ pub enum WatchingError {
     NotSaved(#[source] io::Error),
 }
 
+/// What the About page shows once the person checked for updates (ADR-0206 Decision 4).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct UpdateView {
+    /// What was found: `current`, `newer`, `needs_extension` or `development`.
+    pub state: &'static str,
+    /// The installed version.
+    pub installed: String,
+    /// The latest release's version, when the check read one newer or a development build's.
+    pub latest: Option<String>,
+    /// The sentence that says what was found.
+    pub sentence: String,
+    /// The newer release's notes as plain text, bounded.
+    pub notes: Option<String>,
+    /// The install button's label, only when the release may be installed.
+    pub install: Option<String>,
+    /// What installing does to connected agents, only when the release may be installed.
+    pub warning: Option<String>,
+}
+
+impl UpdateView {
+    fn of(finding: &Finding, installed: Version, agents: usize) -> Self {
+        let installed_text = installed.to_string();
+        let mut view = Self {
+            state: "current",
+            installed: installed_text.clone(),
+            latest: None,
+            sentence: update_words::current(&installed_text),
+            notes: None,
+            install: None,
+            warning: None,
+        };
+        match finding {
+            Finding::Current { .. } => {}
+            Finding::Development { latest } => {
+                view.state = "development";
+                view.latest = Some(latest.to_string());
+                view.sentence = update_words::development(&latest.to_string());
+            }
+            Finding::NeedsExtension { release, .. } => {
+                let latest = release.version.to_string();
+                view.state = "needs_extension";
+                view.sentence = update_words::needs_extension(&latest);
+                view.notes = Some(release.notes.clone());
+                view.latest = Some(latest);
+            }
+            Finding::Newer { release, .. } => {
+                let latest = release.version.to_string();
+                view.state = "newer";
+                view.sentence = update_words::newer(&latest);
+                view.notes = Some(release.notes.clone());
+                view.install = Some(update_words::install_label(&latest));
+                view.warning = Some(update_words::restart_warning(agents));
+                view.latest = Some(latest);
+            }
+        }
+        view
+    }
+}
+
+/// Why the update check or install did not run.
+#[derive(Debug, Error)]
+pub enum UpdateRefusal {
+    /// The authority turns the check off (`updates.check.enabled`).
+    #[error("{}", update_words::TURNED_OFF)]
+    TurnedOff,
+    /// An install was asked for and no release can be installed; says what the check found.
+    #[error("{0}")]
+    NothingNewer(String),
+    /// The check, the download or the start failed.
+    #[error(transparent)]
+    Failed(#[from] UpdateError),
+}
+
+/// This service's own version, as a release names it.
+fn installed_version() -> Result<Version, UpdateRefusal> {
+    Version::parse(env!("CARGO_PKG_VERSION"))
+        .ok_or_else(|| UpdateError::Unexpected(env!("CARGO_PKG_VERSION").into()).into())
+}
+
 /// Why a state-guarded client act did not happen.
 #[derive(Debug, Error)]
 pub enum HarnessActError {
@@ -748,6 +831,107 @@ impl WorkbenchFacade {
             .ok_or(WorkbenchError::QuitUnavailable)?;
         port.quit();
         Ok(())
+    }
+
+    /// Check GitHub for a newer release, because the person asked (ADR-0206). Nothing else ever
+    /// calls this.
+    ///
+    /// # Errors
+    ///
+    /// [`UpdateRefusal::TurnedOff`] when the authority turns the check off, and the check's own
+    /// failure.
+    pub fn check_update(&self) -> Result<UpdateView, UpdateRefusal> {
+        let gathered = self.live.gather();
+        let installed = installed_version()?;
+        let finding = self.find_update(&gathered, installed)?;
+        let view = UpdateView::of(&finding, installed, gathered.counts().agents);
+        self.note_update(
+            ghostlight_bridge::diagnostics::event::UPDATE_CHECKED,
+            &format!(
+                "installed {installed}; found {}; latest {}",
+                view.state,
+                view.latest.as_deref().unwrap_or("-")
+            ),
+        );
+        Ok(view)
+    }
+
+    /// Install the newer release a check finds, because the person asked (ADR-0206 Decision 5).
+    ///
+    /// The release is looked up again here rather than taken from the page, its images are
+    /// downloaded and checked against its checksums, staged in the home, and its own
+    /// `deployment install` is started detached, which stops this service. Returns the sentence
+    /// the page shows while Ghostlight restarts.
+    ///
+    /// # Errors
+    ///
+    /// [`UpdateRefusal::TurnedOff`], [`UpdateRefusal::NothingNewer`] when no release can be
+    /// installed, and the download's, check's or start's failure. Nothing is replaced on any of
+    /// them.
+    pub fn install_update(&self) -> Result<String, UpdateRefusal> {
+        let gathered = self.live.gather();
+        let installed = installed_version()?;
+        let finding = self.find_update(&gathered, installed)?;
+        let Finding::Newer { release, .. } = finding else {
+            return Err(UpdateRefusal::NothingNewer(
+                UpdateView::of(&finding, installed, 0).sentence,
+            ));
+        };
+        let target = update::this_target().ok_or(UpdateError::NoImages)?;
+        let layout = Layout::current().map_err(UpdateError::from)?;
+        let started = update::stage(
+            &update::Https::new(),
+            &release,
+            target,
+            cfg!(windows),
+            &layout.home().join(update::STAGING_DIRECTORY),
+        )
+        .and_then(|staged| update::start(&staged).map_err(UpdateError::from));
+        self.note_update(
+            ghostlight_bridge::diagnostics::event::UPDATE_STARTED,
+            &format!(
+                "installed {installed}; release {}; {}",
+                release.version,
+                if started.is_ok() { "started" } else { "failed" }
+            ),
+        );
+        started?;
+        Ok(update_words::installing(&release.version.to_string()))
+    }
+
+    /// What a check finds for this installation, under the published authority.
+    fn find_update(
+        &self,
+        gathered: &live::Gathered,
+        installed: Version,
+    ) -> Result<Finding, UpdateRefusal> {
+        if !self.governance.snapshot().allows_update_check() {
+            return Err(UpdateRefusal::TurnedOff);
+        }
+        let adapters: Vec<String> = gathered
+            .browsers
+            .iter()
+            .filter_map(|browser| browser.adapter_version.clone())
+            .collect();
+        let channel = Layout::current().map_or(Channel::Development, |layout| {
+            update::installed_channel(&layout)
+        });
+        Ok(update::check(
+            &update::Https::new(),
+            installed,
+            channel,
+            &adapters,
+        )?)
+    }
+
+    /// One diagnostics line for a check or an install: versions and an outcome, nothing else.
+    fn note_update(&self, event: &str, detail: &str) {
+        self.diagnostics.sink().emit(
+            event,
+            ghostlight_bridge::diagnostics::Level::Info,
+            None,
+            detail,
+        );
     }
 
     /// The attached native acts, or the failure every native act ends in without them.

@@ -7,7 +7,7 @@
 # subcommand, a policy command or an agent without adding it here fails those tests.
 
 _ghostlight() {
-    local -a ghostlight_commands=(open install uninstall doctor status call diagnostics policy)
+    local -a ghostlight_commands=(open install uninstall doctor status call diagnostics policy update)
     local -a ghostlight_policy_commands=(validate migrate explain simulate keygen pubkey sign publish)
     local -a ghostlight_clients=(codex claude-code claude-desktop cursor vscode windsurf devin zed zcode opencode crush copilot-cli cline kiro qwen-code junie kilo-code goose continue antigravity cline-cli cline-vscode cline-cursor cline-windsurf)
 
@@ -46,6 +46,9 @@ _ghostlight() {
             ;;
         status)
             _arguments '--json[Print one JSON document]'
+            ;;
+        update)
+            _arguments '--install[Install the newer release the check finds]'
             ;;
         call)
             _arguments \

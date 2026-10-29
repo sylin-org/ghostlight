@@ -111,6 +111,8 @@ enum Api {
     Locate,
     SetupAct,
     Quit,
+    CheckUpdate,
+    InstallUpdate,
 }
 
 /// What a route does, which decides whom it answers: a read answers every context that receives
@@ -145,7 +147,7 @@ const fn route(api: Api, method: Method, path: &'static str, does: Does, body_ca
 }
 
 /// The closed table. Anything not here is not served.
-static ROUTES: [Route; 21] = [
+static ROUTES: [Route; 23] = [
     route(Api::Context, Method::Get, "/api/context", Does::Read, 0),
     route(Api::Snapshot, Method::Get, "/api/snapshot", Does::Read, 0),
     route(Api::Events, Method::Get, "/api/events", Does::Read, 0),
@@ -267,6 +269,20 @@ static ROUTES: [Route; 21] = [
         Method::Post,
         "/api/quit",
         Does::Act(WebAct::Quit),
+        SMALL_BODY,
+    ),
+    route(
+        Api::CheckUpdate,
+        Method::Post,
+        "/api/update/check",
+        Does::Act(WebAct::CheckUpdate),
+        SMALL_BODY,
+    ),
+    route(
+        Api::InstallUpdate,
+        Method::Post,
+        "/api/update/install",
+        Does::Act(WebAct::InstallUpdate),
         SMALL_BODY,
     ),
 ];
@@ -724,6 +740,8 @@ fn api(
         Api::Locate => acted(shared, locate(shared, &projection, &body)),
         Api::SetupAct => setup_act(shared, &body),
         Api::Quit => quit(shared, &body),
+        Api::CheckUpdate => check_update(shared, &body),
+        Api::InstallUpdate => install_update(shared, &body),
     };
     drop(preview_permit);
     response
@@ -1170,6 +1188,34 @@ fn quit(shared: &Shared, body: &[u8]) -> Response {
     }
     match shared.facade.quit() {
         Ok(()) => json_response(Status::Accepted, &json!({ "message": words::QUITTING })),
+        Err(error) => refused(&error.to_string()),
+    }
+}
+
+/// Ask GitHub for a newer release, because the person clicked (ADR-0206). The answer is what the
+/// About page shows; a check that could not run is refused with the sentence that says why.
+fn check_update(shared: &Shared, body: &[u8]) -> Response {
+    if let Err(response) = decode::<NoArguments>(body) {
+        return response;
+    }
+    match shared.facade.check_update() {
+        Ok(view) => json_response(
+            Status::Ok,
+            &serde_json::to_value(view).expect("the update view is plain data"),
+        ),
+        Err(error) => refused(&error.to_string()),
+    }
+}
+
+/// Install the newer release, because the person clicked Install (ADR-0206 Decision 5). The
+/// answer is 202: the installer has started and will stop this service, so the page says so
+/// instead of waiting for a change that will not come.
+fn install_update(shared: &Shared, body: &[u8]) -> Response {
+    if let Err(response) = decode::<NoArguments>(body) {
+        return response;
+    }
+    match shared.facade.install_update() {
+        Ok(message) => json_response(Status::Accepted, &json!({ "message": message })),
         Err(error) => refused(&error.to_string()),
     }
 }

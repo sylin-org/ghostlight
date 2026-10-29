@@ -6,7 +6,7 @@
 # subcommand, a policy command or an agent without adding it here fails those tests.
 
 _ghostlight() {
-    local commands="open install uninstall doctor status call diagnostics policy"
+    local commands="open install uninstall doctor status call diagnostics policy update"
     local policy_commands="validate migrate explain simulate keygen pubkey sign publish"
     local clients="codex claude-code claude-desktop cursor vscode windsurf devin zed zcode opencode crush copilot-cli cline kiro qwen-code junie kilo-code goose continue antigravity cline-cli cline-vscode cline-cursor cline-windsurf"
     local current previous
@@ -30,6 +30,9 @@ _ghostlight() {
             ;;
         status)
             COMPREPLY=($(compgen -W "--json" -- "${current}"))
+            ;;
+        update)
+            COMPREPLY=($(compgen -W "--install" -- "${current}"))
             ;;
         call)
             COMPREPLY=($(compgen -W "--json --stdin --output --catalog --help" -- "${current}"))

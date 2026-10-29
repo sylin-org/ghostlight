@@ -509,6 +509,20 @@ struct LayerOutcome {
 }
 
 impl AuthoritySnapshot {
+    /// Whether the person may check for a newer release (ADR-0206 Decision 7). Unset is yes; a
+    /// layer that sets `updates.check.enabled` to `false` turns it off, and an authority that
+    /// could not be read turns it off too, so an organization's choice is never missed.
+    #[must_use]
+    pub fn allows_update_check(&self) -> bool {
+        self.valid
+            && self.layers.iter().all(|layer| {
+                layer
+                    .manifest
+                    .boolean_setting(PolicySetting::UpdatesCheckEnabled)
+                    != Some(false)
+            })
+    }
+
     /// Admit the complete rendered image, without per-document capture filtering.
     #[must_use]
     pub fn authorize_screenshot(&self) -> Decision {

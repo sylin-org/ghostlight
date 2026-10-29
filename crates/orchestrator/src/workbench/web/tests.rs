@@ -452,6 +452,8 @@ fn act_call(act: WebAct) -> Call {
             r#"{"kind":"add_in_browser","browser":"chrome"}"#,
         ),
         WebAct::Quit => post("/api/quit", "{}"),
+        WebAct::CheckUpdate => post("/api/update/check", "{}"),
+        WebAct::InstallUpdate => post("/api/update/install", "{}"),
     }
 }
 

@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Privacy Policy
 
-Last updated: 2026-10-18
+Last updated: 2026-10-29
 
 Canonical public URL: https://sylin.org/ghostlight/privacy/
 
@@ -91,6 +91,10 @@ frames or GIFs, dialog text, console text, or network payloads.
 - No sale or developer transfer of browser data.
 - Extension page code is supplied by the Ghostlight application on this computer, not by a remote
   server, and changes only when you update that application.
+- The Ghostlight application never checks for updates on its own. When you click Check for updates
+  in its window, or run `ghostlight update`, it asks GitHub's release record directly and sends
+  nothing that identifies you or your computer; it downloads and installs a newer release only
+  when you then choose Install.
 - The extension's setup page is bundled with it, loads nothing from the network, and opens its
   documentation link only when you click it.
 - While setup is incomplete, the Ghostlight application on this computer reads each installed
