@@ -121,6 +121,13 @@ the owner wants, and what this project learned the hard way.
   and an in-flight command do not prove that Ghostlight caused a browser event. Silently stale
   agent references when the page changes; govern the next actual agent request (ADR-0164).
 
+- **Friendly usage, strict authority.** "I want Ghostlight to be a friendly helper to the agent
+  that'll be calling it, accepting what it can. All the really important restrictive stuff - say,
+  the policies - can still be strict. Usage can be friendly." (owner, 2026-10-29). Values read the
+  way CSS reads them: a number, a unit, a keyword, or nothing when the call or the page implies it.
+  Say how a call was read (`ignored`, `adjusted`); stay strict on authority, content, and two
+  readings with different effects (ADR-0205).
+
 - **Delight through sane defaults.** Anticipate the caller's intent with safe defaults instead of
   boilerplate configuration; bounded settlement across page tools is the model case (see
   'Settlement is a timing preference' below, ADR-0174/ADR-0195).
@@ -433,6 +440,14 @@ the owner wants, and what this project learned the hard way.
   labels were unclear.
 
 ## Durable lessons
+
+- **A client may enforce the schema before Ghostlight sees the call.** Claude Code refused
+  `browser_tabs {}` with "Input validation error" on 2026-10-29, while another client passed the
+  same kind of call through to the decoder. Leniency that lives only in the decoder never reaches
+  a validating client, so the schema itself must admit the forms models reach for (optional
+  fields with defaults, a number or a word where both mean something); pure spelling can stay
+  decoder-only. A session also keeps the catalog it listed at start, so a live check of a schema
+  change needs a fresh MCP connection (ADR-0205 Decision 7).
 
 - **A gate on one system never compiles the other system's gated code.** On 2026-10-17 the two
   coordinated sessions broke each other's platform within an hour: a Linux-written test called
