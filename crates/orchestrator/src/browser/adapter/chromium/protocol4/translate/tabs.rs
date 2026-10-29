@@ -102,16 +102,38 @@ pub fn navigate(
     to: wire::NavigationTarget,
     discard_beforeunload: bool,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let navigated = l.send(wire::Navigate {
+    let tab = match l.send(wire::Navigate {
         tab_id,
         to,
         discard_beforeunload,
         ready_timeout_ms: ready_timeout_ms(l),
-    })?;
+    }) {
+        Ok(navigated) => navigated.tab,
+        Err(error) => landed_loading(l, tab_id, error)?,
+    };
     Ok(BrowserOutcome::Navigated {
-        tab: navigated.tab.into(),
+        tab: tab.into(),
         committed_urls: l.committed(),
     })
+}
+
+/// The tab of a navigation that ran out of time waiting for its page to load after the browser
+/// had reported its commit. The navigation happened: the page is at the committed address and
+/// still loading, and the tab the receipt read says so (ADR-0205 Decision 8). Any other failure,
+/// or a timeout with no reported commit, stands.
+fn landed_loading(
+    l: &Link<'_>,
+    tab_id: u64,
+    error: BrowserError,
+) -> Result<wire::Tab, BrowserError> {
+    let timed_out = matches!(
+        error,
+        BrowserError::DeadlineBeforeDispatch | BrowserError::DeadlineAfterDispatch
+    );
+    match l.last_tab() {
+        Some(tab) if timed_out && tab.tab_id == tab_id && !l.committed().is_empty() => Ok(tab),
+        _ => Err(error),
+    }
 }
 
 /// Move one entry back or forward in a tab's history.

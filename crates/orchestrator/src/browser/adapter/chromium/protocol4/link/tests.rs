@@ -481,6 +481,42 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
         );
     }
 
+    // The browser reported the commit and the page was still loading when the ready wait ended:
+    // the navigation happened, so it lands loading at the committed address (ADR-0205
+    // Decision 8). A navigation of another tab never borrows that receipt.
+    let committed = "https://example.com/";
+    let mut loading = tab(committed);
+    loading["readiness"] = json!("loading");
+    for (tab_id, lands) in [(12, true), (99, false)] {
+        *next.lock().unwrap() = wire::Receipt {
+            dispatched: true,
+            committed_urls: vec![committed.into()],
+            tab: Some(serde_json::from_value(loading.clone()).unwrap()),
+            ..FakeExtension::failed("", wire::Failure::Timeout)
+        };
+        let result = call(
+            &port,
+            BrowserCommand::Navigate {
+                tab_id,
+                url: committed.into(),
+            },
+        );
+        if lands {
+            assert_eq!(
+                result,
+                Ok(BrowserOutcome::Navigated {
+                    tab: PhysicalTab {
+                        readiness: BrowserReadiness::Loading,
+                        ..physical_tab(committed)
+                    },
+                    committed_urls: vec![committed.into()],
+                })
+            );
+        } else {
+            assert_eq!(result, Err(BrowserError::DeadlineAfterDispatch));
+        }
+    }
+
     *next.lock().unwrap() = wire::Receipt {
         message: Some("Kept open by the preserve-tabs setting.".into()),
         ..FakeExtension::failed("", wire::Failure::LocalInterlock)

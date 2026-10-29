@@ -439,6 +439,13 @@ impl<'a> Link<'a> {
         self.committed.clone()
     }
 
+    /// The tab as the command's last receipt reported it, read after something was dispatched
+    /// against it, failed receipts included.
+    #[must_use]
+    pub fn last_tab(&self) -> Option<wire::Tab> {
+        self.last_tab.clone()
+    }
+
     /// Whether anything the command sent may already have changed the browser.
     #[must_use]
     pub const fn effect_started(&self) -> bool {
