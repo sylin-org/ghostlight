@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Calls are read the way agents write them (ADR-0205): scroll amounts in pixels, percentages or
+  words, durations with units, keys by common name, chords and sequences, `repeat` with one key,
+  words in any case, camel- and kebab-case field names, and an address without a scheme. A
+  left-out action, wait condition or scroll direction comes from the call or the page. A field
+  the action does not use is ignored, and results name it in `ignored` and what was used instead
+  in `adjusted`. The catalog admits these forms for clients that validate calls against it.
+  Authority, credential authorization and content stay strict.
+
+### Fixed
+
+- A screenshot or read during a page change no longer says the tab is not open; it runs once
+  more on the new page.
+- A navigation the browser reported as committed succeeds with readiness `loading` when the page
+  takes longer than 8 seconds to load, instead of reporting that nothing was confirmed.
+- A page scroll moves the scrolling pane on applications whose document does not scroll, reports
+  `moved` and `at_end`, and says so when nothing moved.
+
 ## [2.0.1] - 2026-10-22
 
 ### Added

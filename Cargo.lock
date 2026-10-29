@@ -876,7 +876,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-bridge"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ghostlight-relay",
  "notify",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-desktop"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "dbus",
  "embed-resource",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-service"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "ghostlight-win-peer"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ghostlight-relay",
 ]
