@@ -276,10 +276,15 @@ Now:
   2.0 block covers it. Notes in `release/notes-v2.0.2.md`. Release run 40889472200 on 00f2bc43
   passed all ten jobs, supply chain and the installs from the bundle on Ubuntu 22.04 and 24.04 and
   Alpine included; `scripts/check-release-candidate.ps1` verifies 2.0.2, 19 artifacts. Its
-  extension ZIP is the published 2.0.1 adapter (`aaa234b1...`), so the store needs nothing. Owed
-  before the cutover: the bundle on the test machines (CachyOS, Bluefin, Alpine,
-  leo-desktop-02), the ADR-0205 catalog through at least three MCP harnesses, then the owner's
-  go. Nothing is published.
+  extension ZIP is the published 2.0.1 adapter (`aaa234b1...`), so the store needs nothing. The
+  owner set the bar for this candidate at the owner's machine ("no need. as long as they work
+  here."), so the test machines and other harnesses are not run. The bundle is installed on the
+  owner's Windows machine over the development build (`get.ps1 -Restore` with `GHOSTLIGHT_FROM`;
+  status 2.0.2, release channel). The ADR-0205 call shapes pass on it through the installed edge,
+  and through a fresh headless Claude Code 2.1.311, whose client-side schema check accepted every
+  one (`browser_tabs {}`, `browser_wait {}` and `{"value":"1s"}`, `browser_scroll {"amount":600}`,
+  `browser_press_key` with `repeat` and `esc`). Codex and Copilot CLI are not installed on this
+  machine. Owed: the owner's go for the cutover. Nothing is published.
 - The 2.0.1 candidate is release run 39715160480 on 8e185d67 (2026-10-22), every job green. Test
   machines upgraded and passed: Bluefin (588ddd95), Alpine (48ef55fd, 657495a3; the 2.0.0 extension's
   dialog stall needs a browser restart, now in the notes) and leo-desktop-02 (3ff45599, 55cb0756, with
