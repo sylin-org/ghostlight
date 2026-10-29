@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-10-29
+
 ### Changed
 
 - Calls are read the way agents write them (ADR-0205): scroll amounts in pixels, percentages or

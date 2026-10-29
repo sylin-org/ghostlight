@@ -1,4 +1,4 @@
-# STATUS -- Ghostlight 2.0.0 published
+# STATUS -- Ghostlight 2.0.2 published
 
 This page is the current state and nothing else. Every earlier dated section, from the 1.0 rebuild
 through 2026-10-16, moved verbatim to [history/status-through-2026-10-16.md](history/status-through-2026-10-16.md).
@@ -284,7 +284,12 @@ Now:
   and through a fresh headless Claude Code 2.1.311, whose client-side schema check accepted every
   one (`browser_tabs {}`, `browser_wait {}` and `{"value":"1s"}`, `browser_scroll {"amount":600}`,
   `browser_press_key` with `repeat` and `esc`). Codex and Copilot CLI are not installed on this
-  machine. Owed: the owner's go for the cutover. Nothing is published.
+  machine.
+- 2.0.2 is published (2026-10-29): the GitHub release `v2.0.2` (Latest), npm `ghostlight@2.0.2`,
+  the MCP Registry record and `main` at the release; the Chrome Web Store keeps adapter 2.0.1,
+  which covers it. WinGet still serves 2.0.0 (its 2.0.1 pull request waits on the Defender review)
+  and no 2.0.2 manifest is submitted. The public install is proven on Windows through npm. The
+  custody record is [testing/release-2.0.2-2026-10-29.md](testing/release-2.0.2-2026-10-29.md).
 - The 2.0.1 candidate is release run 39715160480 on 8e185d67 (2026-10-22), every job green. Test
   machines upgraded and passed: Bluefin (588ddd95), Alpine (48ef55fd, 657495a3; the 2.0.0 extension's
   dialog stall needs a browser restart, now in the notes) and leo-desktop-02 (3ff45599, 55cb0756, with
