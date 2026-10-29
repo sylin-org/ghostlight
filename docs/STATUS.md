@@ -269,7 +269,17 @@ Now:
   `page_changed` and the read runs once more; a navigation with a reported commit lands as
   `loading`; a page scroll moves what actually scrolls and reports `moved` and `at_end`. Deployed
   on the owner's machine and checked live through the installed edge (the desk and reading demo
-  stages, a page whose document does not scroll). The extension is unchanged. Not pushed.
+  stages, a page whose document does not scroll). The extension is unchanged. Pushed to `dev`
+  (324bf1df); CI run 40881303486 green.
+- The 2.0.2 candidate, at the owner's go (2026-10-29): version 2.0.2 stamped (00f2bc43), a patch
+  under ADR-0093 because the extension contract is unchanged, so the published 2.0.1 adapter's
+  2.0 block covers it. Notes in `release/notes-v2.0.2.md`. Release run 40889472200 on 00f2bc43
+  passed all ten jobs, supply chain and the installs from the bundle on Ubuntu 22.04 and 24.04 and
+  Alpine included; `scripts/check-release-candidate.ps1` verifies 2.0.2, 19 artifacts. Its
+  extension ZIP is the published 2.0.1 adapter (`aaa234b1...`), so the store needs nothing. Owed
+  before the cutover: the bundle on the test machines (CachyOS, Bluefin, Alpine,
+  leo-desktop-02), the ADR-0205 catalog through at least three MCP harnesses, then the owner's
+  go. Nothing is published.
 - The 2.0.1 candidate is release run 39715160480 on 8e185d67 (2026-10-22), every job green. Test
   machines upgraded and passed: Bluefin (588ddd95), Alpine (48ef55fd, 657495a3; the 2.0.0 extension's
   dialog stall needs a browser restart, now in the notes) and leo-desktop-02 (3ff45599, 55cb0756, with
