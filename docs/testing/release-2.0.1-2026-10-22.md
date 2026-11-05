@@ -40,6 +40,13 @@ on the owner's Windows machine) at the owner's direction ("do the full run!"). T
    submitted to Microsoft as an incorrect detection (WDSI submission
    d5b9b3cd-7c4f-4b17-a9ed-60fb9b19a0a7, as hello@sylin.org), and the PR asks a moderator to re-run
    validation once the determination clears.
+   Correction and outcome (2026-11-05): the zip was not what Defender blocked. The PR's check
+   `07. Installers Scan`, the static scan of the zip, passed; `08. Installation Validation` failed,
+   so the verdict fell after the zip was unpacked and installed in the validation VM. The public
+   logs do not name the file. A moderator re-ran validation on 2026-11-02 and 2026-11-05 and both
+   runs were blocked the same way. A local scan with definitions 1.463.140.0 still finds nothing.
+   The PR was closed on 2026-11-05 in favor of the 2.0.2 manifests,
+   [microsoft/winget-pkgs#471699](https://github.com/microsoft/winget-pkgs/pull/471699).
 
 ## Public install
 

@@ -252,8 +252,10 @@ Now:
   decode.
 - 2.0.1 is published (2026-10-22): the GitHub release `v2.0.1` (Latest), npm `ghostlight@2.0.1`,
   the Chrome Web Store adapter 2.0.1 at 100%, the MCP Registry record and `main` at the release.
-  WinGet's manifest is microsoft/winget-pkgs#458539, held by a Defender machine-learning false
-  positive (Wacatac.C!ml) that Microsoft is reviewing (WDSI d5b9b3cd). The custody record is
+  WinGet's manifest was microsoft/winget-pkgs#458539. A Defender machine-learning verdict
+  (Wacatac.C!ml) blocked its Installation Validation, though the zip's own Installers Scan passed;
+  two moderator re-runs were blocked the same way, and it was closed on 2026-11-05 in favor of the
+  2.0.2 manifests (the result of WDSI d5b9b3cd is not yet checked). The custody record is
   [testing/release-2.0.1-2026-10-22.md](testing/release-2.0.1-2026-10-22.md); the public install
   is proven on Alpine and Windows, with Bluefin to follow when its session is back.
 - The 2.0.1 extension (`aaa234b1...`, from candidate run 39669867246) was submitted to the Chrome Web
@@ -287,8 +289,9 @@ Now:
   machine.
 - 2.0.2 is published (2026-10-29): the GitHub release `v2.0.2` (Latest), npm `ghostlight@2.0.2`,
   the MCP Registry record and `main` at the release; the Chrome Web Store keeps adapter 2.0.1,
-  which covers it. WinGet still serves 2.0.0 (its 2.0.1 pull request waits on the Defender review)
-  and no 2.0.2 manifest is submitted. The public install is proven on Windows through npm. The
+  which covers it. WinGet still serves 2.0.0; the 2.0.2 manifests are in
+  microsoft/winget-pkgs#471699 (2026-11-05), awaiting validation and review, and they replace the
+  closed 2.0.1 pull request. The public install is proven on Windows through npm. The
   custody record is [testing/release-2.0.2-2026-10-29.md](testing/release-2.0.2-2026-10-29.md).
 - A version check the person starts ([ADR-0206](adr/0206-a-version-check-the-person-starts.md),
   accepted 2026-10-29, with ADR-0028 Decision 9 clarified to mean automated checks). On `dev`:

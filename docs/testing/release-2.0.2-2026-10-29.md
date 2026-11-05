@@ -35,6 +35,11 @@ Windows machine at the owner's direction ("Publish 2.0.2"). Times are UTC.
 5. WinGet: not submitted. The 2.0.1 pull request
    ([microsoft/winget-pkgs#458539](https://github.com/microsoft/winget-pkgs/pull/458539)) still
    waits on Microsoft's review of a Defender false positive; WinGet serves 2.0.0.
+   On 2026-11-05 the 2.0.2 manifests went to
+   [microsoft/winget-pkgs#471699](https://github.com/microsoft/winget-pkgs/pull/471699), generated
+   by `scripts/prepare-winget-manifest.ps1 -ValidateWinGet` from this release's own assets (the
+   candidate check passed, and so did the zip's provenance attestation). It replaces #458539, which
+   was closed the same day.
 
 ## Public install
 
