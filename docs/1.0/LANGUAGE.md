@@ -356,7 +356,9 @@ Refusals say what is true, and their next steps suggest only what the caller can
   nothing about the move: no refusal, no fact, no sentence. The process log records it, and the
   audit record and the window name the browser each action ran in. Every tab the session held
   in the browser that left reads as no longer open, so a call that names one of them is told
-  that (`tab_unavailable`) and reaches no browser (ADR-0196 Decision 12 amendment, 2026-11-13).
+  that (`tab_unavailable`) and reaches no browser; `browser_navigate` with such a handle keeps its
+  usual recovery and opens the page in a new tab, saying the old tab was gone (ADR-0196 Decision 12
+  amendment, 2026-11-13).
 
   Otherwise the refusal says which fact stopped the call, with `failed`, no effect, and
   `repeat_safe: true`:
