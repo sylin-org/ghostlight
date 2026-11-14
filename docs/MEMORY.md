@@ -128,6 +128,17 @@ the owner wants, and what this project learned the hard way.
   Say how a call was read (`ignored`, `adjusted`); stay strict on authority, content, and two
   readings with different effects (ADR-0205).
 
+- **It just works: resolve it inside, and tell the client only what changes what it does.** "Never
+  bleed unnecessary details to the client. If we can resolve on your own in a meaningful manner, do
+  so; the best Ghostlight can be, the highest degree of delight is 'it just works'. We should have
+  our internal processes be aligned with that." (owner, 2026-11-13, after a session was refused
+  because its browser had been replaced by the only other one connected). When Ghostlight can
+  settle something in a way that means the same to the caller, it does, with no refusal and no
+  notice in the result. A fact reaches the client only when it changes what the client should do
+  next. Everything else goes to the process log, the audit and the window, where a person can find
+  it. Refuse or ask only when there is a real choice or when authority is at stake. Test for any
+  new result field, refusal or notice: would the caller act differently because of it?
+
 - **Delight through sane defaults.** Anticipate the caller's intent with safe defaults instead of
   boilerplate configuration; bounded settlement across page tools is the model case (see
   'Settlement is a timing preference' below, ADR-0174/ADR-0195).
