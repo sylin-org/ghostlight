@@ -459,6 +459,7 @@ that refused all work after it left a page with nested cross-site frames, and sc
 came back blank or squeezed. Both causes are in the extension. The changed packaged files are
 `lib/capture.js`, `lib/buffers.js`, `lib/sessions.js`, `lib/inventory.js`, `lib/world.js`,
 `lib/primitives.js` and `worker.js`, and the freeze golden is regenerated. The adapter protocol
-and its goldens do not change. Whether and when this build goes to the store is the owner's call;
-until it does, the published extension keeps both defects and the service works around the first
+and its goldens do not change. With this the extension's version becomes 2.0.2, and `compatibility.json` names adapter 2.0.2 for
+the 2.0 services. The owner directed the store submission on 2026-11-14 ("Let's bump, changelog,
+then push the store submission."). Until the store serves it, the published extension keeps both defects and the service works around the first
 under a policy that admits every document. Decision 16's rule is unchanged.

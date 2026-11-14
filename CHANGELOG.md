@@ -12,13 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A tab no longer refuses every read, click, scroll and key with "Document access could not be
   verified" after it leaves a page that holds a cross-site frame inside another cross-site frame
   (ADR-0207). With no policy that restricts documents the service fix is enough. The complete fix
-  needs the next Ghostlight in Browser version.
+  is in Ghostlight in Browser 2.0.2.
 - A click or scroll at a point below the fold of a full-page screenshot works: the point is
   scrolled into view instead of being refused.
 - A session whose browser went away keeps working when exactly one other browser is connected:
   it moves there instead of refusing. With several connected it still asks which one.
 - A wait that used its whole time says so. It no longer reports a version mismatch.
-- With the next Ghostlight in Browser version, a screenshot no longer comes back blank or with an
+- With Ghostlight in Browser 2.0.2, a screenshot no longer comes back blank or with an
   embedded app squeezed into a corner: a capture of what is on screen does not touch the page.
 
 ### Changed
