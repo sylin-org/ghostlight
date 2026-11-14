@@ -523,8 +523,10 @@ impl WorkbenchNativeActs for ShellRoute {
 
 /// Serve one shell of this build on an accepted `desktop` stream.
 ///
-/// The service has one desktop place. A shell that finds it taken is told `already_open` instead of
-/// the workbench and the stream ends. The shell that holds the place is asked to show its window,
+/// The service has one desktop place, and [`Shells::claim`] alone decides who holds it: no other
+/// count of `desktop` streams stands in front of it, so every shell that finds the place taken
+/// hears the same answer however many arrive at once. A shell that finds it taken is told
+/// `already_open` instead of the workbench and the stream ends. The shell that holds the place is asked to show its window,
 /// unless the newcomer said it shows only the tray: that is presence's own launch, made while the
 /// shell it would have replaced was coming back, and nothing is there to show.
 /// Otherwise the shell is handed the workbench address and its secret and the tray to draw. It is
@@ -542,10 +544,6 @@ pub(super) fn serve_desktop(
 ) -> Result<()> {
     let Some(server) = context.workbench_server.get() else {
         listener::refuse(&connection, OpeningRefusal::Unsupported);
-        return Ok(());
-    };
-    let Some(_place) = context.desktops.acquire(1) else {
-        listener::refuse(&connection, OpeningRefusal::Capacity);
         return Ok(());
     };
     listener::accept(&connection, &context.accepted())?;

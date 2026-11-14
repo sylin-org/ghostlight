@@ -52,8 +52,6 @@ pub(super) struct ServiceContext {
     pub(super) diagnostics: Arc<DiagnosticsHub>,
     pub(super) quit: Quit,
     pub(super) sessions: Capacity,
-    /// The places for `desktop` streams.
-    pub(super) desktops: Capacity,
     pub(super) budget: QueueBudget,
     pub(super) stop: Arc<AtomicBool>,
     /// The workbench's server, once `publish_ready` has started it. The desktop role reads its

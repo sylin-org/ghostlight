@@ -187,7 +187,6 @@ fn serve(home: &TestHome, relayed: bool, sources: SourceReader, policy: Option<P
         diagnostics,
         quit,
         sessions: super::Capacity::new(super::admission::SESSIONS),
-        desktops: super::Capacity::new(super::admission::DESKTOPS),
         budget: super::QueueBudget::default(),
         stop: Arc::default(),
         workbench_server: std::sync::OnceLock::new(),

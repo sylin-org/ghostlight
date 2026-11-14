@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Opening Ghostlight several times in quick succession while its window is already open no longer
+  answers that there are too many open sessions; each launch is told the window is already open.
+
 ## [2.0.3] - 2026-11-14
 
 ### Fixed

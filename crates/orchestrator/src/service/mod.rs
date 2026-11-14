@@ -479,7 +479,6 @@ impl ServiceHost {
             diagnostics: Arc::clone(&diagnostics),
             quit: quit.clone(),
             sessions: Capacity::new(admission::SESSIONS),
-            desktops: Capacity::new(admission::DESKTOPS),
             budget: QueueBudget::default(),
             stop: Arc::clone(&stop),
             workbench_server: OnceLock::new(),

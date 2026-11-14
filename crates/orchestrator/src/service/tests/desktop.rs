@@ -3,6 +3,9 @@
 
 use super::*;
 
+/// How many shells arrive at once in the burst that finds the desktop place taken.
+const BURST_SHELLS: usize = 12;
+
 /// The address, the bearer and the tray of a frame that hands over the workbench.
 fn handed_over(handed: DesktopFrame) -> (String, String, TrayModel) {
     match handed {
@@ -94,6 +97,24 @@ fn a_shell_that_attaches_gets_the_workbench_and_its_bearer_or_is_told_the_place_
         frame::read_frame::<DesktopFrame>(&mut tray_shell).unwrap(),
         Some(DesktopFrame::AlreadyOpen)
     );
+    // Shells that arrive in a burst while the place is taken all hear that it is taken. A second
+    // count of desktop streams once told some of them the service had too many open sessions,
+    // because a shell that was turned away was still counted after its stream had ended.
+    let burst: Vec<_> = (0..BURST_SHELLS)
+        .map(|_| {
+            let opening = tray_opening.clone();
+            thread::spawn(move || dial(&opening))
+        })
+        .collect();
+    for shell in burst {
+        let (mut shell, reply) = shell.join().unwrap();
+        assert!(reply.accepted, "{reply:?}");
+        assert_eq!(
+            frame::read_frame::<DesktopFrame>(&mut shell).unwrap(),
+            Some(DesktopFrame::AlreadyOpen)
+        );
+    }
+    assert_eq!(host.quit.shells().attached(), 1);
     host.workbench.reveal(Some(PageAddress::About)).unwrap();
     assert_eq!(
         next_frame(&mut first),
