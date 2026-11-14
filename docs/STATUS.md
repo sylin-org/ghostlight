@@ -45,7 +45,9 @@ released.
   is the owner's call.
 - **A session moves to the only connected browser** instead of refusing, and says nothing of it
   (ADR-0196 amendment of 2026-11-13; the owner's "it just works" rule in MEMORY). Checked live.
-- **Owed.** `dev` is not pushed. The journey has not run on the Chrome CI pins (152). Not
+- **Service version 2.0.3** is stamped for this work (2.0.2 is the published service). Notes in
+  `release/notes-v2.0.3.md`. No tag, release or publication yet.
+- **Owed.** A release of 2.0.3 on the owner's go. The journey has not run on the Chrome CI pins (152). Not
   investigated: the navigation timeouts in the field report.
 - **Left for the owner, each its own decision (ADR-0207, Considered and not taken):** admitting
   `about:blank` and `srcdoc` frames with their parent, not pausing new frames at start, letting
