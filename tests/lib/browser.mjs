@@ -1,8 +1,9 @@
 // Real Chromium with the protocol-4 extension, wired to a test home's service through a real
 // browser edge.
 //
-// A browser journey copies `extension/` into its scratch area and puts a few lines in front of
-// the worker. Those lines replace only `chrome.runtime.connectNative`: each port the worker opens
+// A browser journey copies the extension under test (`extension/`, or the copy that
+// GHOSTLIGHT_TEST_EXTENSION names) into its scratch area and puts a few lines in front of the
+// worker. Those lines replace only `chrome.runtime.connectNative`: each port the worker opens
 // starts a real `ghostlight chrome-extension://<id>/` of the test home and carries its frames over
 // a loopback bridge, because a browser started by a test cannot use the machine's native-messaging
 // registration. Everything else is the shipped extension: its worker, its modules, the page code
@@ -17,13 +18,21 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { decodeFrames, encodeFrame, repository, until } from "./home.mjs";
 import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./chromium.mjs";
 import { McpEdge } from "./peers.mjs";
 
-/** The extension under test. */
-export const EXTENSION_DIRECTORY = join(repository, "extension");
+/**
+ * The environment variable that names another copy of the extension to put under test, such as an
+ * export of one commit. A journey then says what that copy does, not what the tree does.
+ */
+export const EXTENSION_VARIABLE = "GHOSTLIGHT_TEST_EXTENSION";
+
+/** The extension under test: the tree's, unless `EXTENSION_VARIABLE` names another copy. */
+export const EXTENSION_DIRECTORY = process.env[EXTENSION_VARIABLE]
+  ? resolve(process.env[EXTENSION_VARIABLE])
+  : join(repository, "extension");
 
 /** The worker file the manifest names; the bridge lines go in front of it. */
 export const WORKER_FILE = "worker.js";
@@ -376,6 +385,8 @@ export class BrowserRig {
     this.chromium = spawn(testBrowser(), [
       "--remote-debugging-port=0", `--user-data-dir=${profile}`,
       ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
+      // A run on a person's own computer can keep the browser off their screen.
+      ...(process.env.GHOSTLIGHT_TEST_HEADLESS === "1" ? ["--headless=new"] : []),
       ...(hostRules ? [`--host-resolver-rules=${hostRules}`] : []),
       `--load-extension=${extension}`, "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
       "--disable-component-update", "--disable-sync", "--window-size=1280,900", "about:blank"

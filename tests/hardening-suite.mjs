@@ -92,6 +92,7 @@ const BROWSER_JOURNEYS = [
   { name: "script-browser", file: "script-browser-journey.mjs", needsBrowser: true },
   { name: "frame-browser", file: "frame-browser-journey.mjs", needsBrowser: true },
   { name: "keyboard-browser", file: "keyboard-browser-journey.mjs", needsBrowser: true },
+  { name: "nested-frame-browser", file: "nested-frame-browser-journey.mjs", needsBuild: false, needsBrowser: true },
   { name: "history-browser", file: "workbench-history-browser.mjs", needsBrowser: true }
 ];
 function launch({ name, file, kind = "node", files = [] }) {
