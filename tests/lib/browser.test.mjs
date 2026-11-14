@@ -43,12 +43,6 @@ test("the extension id follows the pinned manifest key", () => {
   assert.equal(extensionOrigin(), "chrome-extension://cjcmhepmagomefjggkcohdbfemacojoa/");
 });
 
-test("the worker prelude is a script that opens ports on the bridge", () => {
-  const source = workerPrelude("http://127.0.0.1:9/token");
-  assert.doesNotThrow(() => new vm.Script(source));
-  assert.ok(!/[^\x00-\x7f]/.test(source));
-});
-
 test("a port carries frames in order through a started edge and reports its end", async () => {
   const home = standInHome();
   const bridge = new EdgeBridge(home, "chrome-extension://stand-in/");

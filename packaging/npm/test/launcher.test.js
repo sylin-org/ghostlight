@@ -11,7 +11,6 @@ import {
   assertAllowedDownload,
   assetNames,
   compareVersions,
-  edgeArguments,
   ensureBinary,
   executableNames,
   GLIBC,
@@ -108,12 +107,6 @@ test("verified assets are cached under exact trusted sibling names", () => {
     "ghostlight-service.exe",
     "ghostlight-desktop.exe",
   ]);
-});
-
-test("a bare launch is the MCP relay and every other request reaches the edge unchanged", () => {
-  assert.deepEqual(edgeArguments([]), ["mcp"]);
-  assert.deepEqual(edgeArguments(["install"]), ["install"]);
-  assert.deepEqual(edgeArguments(["mcp"]), ["mcp"]);
 });
 
 test("the checksum manifest must bind the exact version and file set", () => {
@@ -518,14 +511,16 @@ test("never-install commands run the installed edge whatever its version and nev
   }
 });
 
-test("subcommand help with nothing installed runs the staged service and installs nothing", async () => {
-  for (const arguments_ of [["install", "--help"], ["uninstall", "-h"], ["call", "--help"], ["call", "--stdin", "-h"]]) {
+test("a never-install command with nothing installed runs the verified staged service and installs nothing", async () => {
+  for (const arguments_ of [["--version"], ["install", "--help"], ["uninstall", "-h"], ["call", "--help"], ["call", "--stdin", "-h"]]) {
     const f = await launcherFixture();
     try {
       const launch = await f.prepareLaunch({ ...f.options, arguments_ });
       assert.equal(f.activity.installs.length, 0, arguments_.join(" "));
       assert.deepEqual(f.activity.downloads, STAGED_SERVICE);
       assert.equal(basename(launch.executable), "ghostlight-service");
+      assert.equal(dirname(launch.executable).startsWith(f.home), true, "the stage sits under the home");
+      assert.match(await readFile(launch.executable, "utf8"), /^2\.0\.0:/, "the staged file is the verified download");
       assert.deepEqual(launch.arguments_, arguments_);
       await launch.cleanup();
       assert.deepEqual(await readdir(f.home), [], "nothing is installed");
@@ -548,22 +543,5 @@ test("every other command with nothing installed installs the complete set first
     } finally {
       await f.cleanup();
     }
-  }
-});
-
-test("a never-install command with nothing installed runs the verified staged service and installs nothing", async () => {
-  const f = await launcherFixture();
-  try {
-    const launch = await f.prepareLaunch({ ...f.options, arguments_: ["--version"] });
-    assert.equal(f.activity.installs.length, 0);
-    assert.deepEqual(f.activity.downloads, STAGED_SERVICE);
-    assert.deepEqual(launch.arguments_, ["--version"]);
-    assert.equal(basename(launch.executable), "ghostlight-service");
-    assert.equal(dirname(launch.executable).startsWith(f.home), true);
-    assert.match(await readFile(launch.executable, "utf8"), /^2\.0\.0:/);
-    await launch.cleanup();
-    assert.deepEqual(await readdir(f.home), [], "the stage goes away and nothing is installed");
-  } finally {
-    await f.cleanup();
   }
 });

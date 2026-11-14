@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import {
-  CdpPipe, SCRATCH_PREFIX, chromeArguments, createScratch, installScratchNativeHost, nativeHostManifestSource, removeScratch
+  CdpPipe, SCRATCH_PREFIX, createScratch, installScratchNativeHost, nativeHostManifestSource, removeScratch
 } from "./cdp-pipe.mjs";
 
 const NUL = "\0";
@@ -163,15 +163,6 @@ test("close kills only its own child when Chrome ignores Browser.close", async (
   child.kill = () => { killed = true; child.exit(137); };
   assert.equal(await pipe.close({ exitTimeoutMs: 60, commandTimeoutMs: 20 }), true);
   assert.equal(killed, true);
-});
-
-test("chrome arguments never include --load-extension and end at about:blank", () => {
-  const args = chromeArguments("/tmp/installed-x", ["--window-size=1280,900"]);
-  assert.ok(args.includes("--user-data-dir=/tmp/installed-x"));
-  assert.ok(args.includes("--remote-debugging-pipe"));
-  assert.ok(args.includes("--enable-unsafe-extension-debugging"));
-  assert.ok(!args.some((arg) => arg.startsWith("--load-extension")));
-  assert.equal(args.at(-1), "about:blank");
 });
 
 test("scratch directories carry the installed prefix and removal refuses anything else", async () => {

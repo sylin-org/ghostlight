@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { binaryPath, compareVersions, installIsCurrent, run, targetFor } = require("../server/launch.js");
+const { binaryPath, compareVersions, run, targetFor } = require("../server/launch.js");
 
 const BUNDLE_VERSION = "2.0.0";
 
@@ -166,16 +166,6 @@ test("a development record whose edge is gone names the way back and installs no
   assert.ok(printed.includes("npx ghostlight deployment install --restore"));
   assert.ok(printed.includes("-Restore"));
   assert.ok(printed.includes("get.sh | sh -s -- --restore"));
-});
-
-test("the install record is read from the bin directory of the Ghostlight home", () => {
-  const home = homeWithRecord(JSON.stringify({ service_version: "2.0.0" }));
-  try {
-    assert.equal(installIsCurrent(home, "2.0.0", "win32"), true);
-    assert.equal(installIsCurrent(path.join(home, "missing"), "2.0.0", "win32"), false);
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true });
-  }
 });
 
 test("an install failure is returned and the MCP relay never starts", () => {

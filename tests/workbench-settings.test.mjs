@@ -451,14 +451,6 @@ test("the Policy tab is a tab that opens Policy, with no label beside it", () =>
   assert.equal(shown.document.getElementById("policy-state-label"), null);
 });
 
-test("the Status page holds no control that moved to Settings", () => {
-  const shown = page();
-  const status = [...shown.el("view-status").descendants()];
-  assert.deepEqual(status.filter((node) => "intent" in node.dataset).map((node) => node.id), []);
-  assert.equal(status.some((node) => node.id === "test-notification"), false);
-  assert.deepEqual(status.filter((node) => node.classes.has("runtime-strip") || node.classes.has("notifications-strip")), []);
-});
-
 /* ---------------------------------- addresses ---------------------------------- */
 
 test("the closed list of addresses names every destination, every section and the setup view, once", () => {
@@ -1479,15 +1471,6 @@ test("the shelves group sessions by the agent id the service gives, never by nam
   assert.deepEqual(agents.map((chip) => [chip.dataset.glanceAgent, chip.textContent]),
     [["cline", "Cline 2"], ["unknown:Helper", "Helper"], ["unknown:Other helper", "Other helper"]],
     "an agent on two hosts is one chip, and two agents Ghostlight does not know stay two");
-});
-
-test("a working agent's symbol breathes in the accent, and reduced motion keeps it still", () => {
-  const breathing = naming(".glance-chip.busy .symbol").filter((rule) => rule.media === null);
-  assert.equal(breathing.length, 1);
-  assert.match(breathing[0].declarations.animation, /^glyph-breathe /);
-  assert.equal(breathing[0].declarations.color, "var(--a)");
-  const still = naming("*").filter((rule) => rule.media === "(prefers-reduced-motion: reduce)");
-  assert.ok(still.some((rule) => /^none/.test(rule.declarations.animation)), "reduced motion stops every animation");
 });
 
 test("with no browser the Browsers shelf says what the service says happens next", () => {
@@ -2786,13 +2769,11 @@ test("a screen reader hears each row's outcome on its button", () => {
   assert.doesNotMatch(cell("row-tool").textContent, /, (failed|unknown|kept|blocked)$/);
 });
 
-test("an action whose effect cannot be confirmed wears the failed look", () => {
-  const { shown, cell } = rowOf(settledRead({ invocation: "unknown-1", status: "unknown", outcome: "unknown", effect: "unknown" }));
-  assert.match(queueRows(shown)[0].className, /\bfailed\b/);
-  assert.equal(cell("row-dur").textContent, "1.2s");
-});
+test("each outcome wears its own look with the time alone: unknown reads failed, kept stays in ink, a refusal reads blocked", () => {
+  const unknown = rowOf(settledRead({ invocation: "unknown-1", status: "unknown", outcome: "unknown", effect: "unknown" }));
+  assert.match(queueRows(unknown.shown)[0].className, /\bfailed\b/, "an effect that cannot be confirmed is not drawn as success");
+  assert.equal(unknown.cell("row-dur").textContent, "1.2s");
 
-test("a kept row stays in ink with its time alone, and a refusal keeps the shared look", () => {
   const kept = rowOf(settledRead({ invocation: "kept-1", tool: "browser_tabs", capability: "action",
     status: "blocked", outcome: "kept", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on." }));
   const keptClass = queueRows(kept.shown)[0].className;

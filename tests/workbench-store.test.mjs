@@ -174,22 +174,17 @@ test("the no-browser line follows the connections part, and goes when a browser 
   assert.equal("no_browser" in store.snapshot(), false);
 });
 
-test("the rows in use follow the connections part, as the service publishes them with the sessions", () => {
+test("the rows in use and the counts follow the connections part, as the service publishes them", () => {
   const { store } = latched({ browsers: [], configuration: {}, harnesses_in_use: [] });
   const session = { id: "w", agent: { id: "codex" } };
-  store.applyChange({ seq: 1, change: { kind: "connections_changed",
-    connections: { sessions: [session], browsers: [], harnesses_in_use: ["codex"] } } });
-  assert.deepEqual(store.snapshot().harnesses_in_use, ["codex"]);
-  store.applyChange({ seq: 2, change: { kind: "connections_changed", connections: { sessions: [], browsers: [], harnesses_in_use: [] } } });
-  assert.deepEqual(store.snapshot().harnesses_in_use, []);
-});
-
-test("the counts follow the connections part, as the service counted them for the tray", () => {
-  const { store } = latched({ browsers: [], configuration: {}, harnesses_in_use: [] });
   const counts = { agents: 2, mcp_clients: 3, command_line: 0, browsers: 1 };
   store.applyChange({ seq: 1, change: { kind: "connections_changed",
-    connections: { sessions: [{ id: "w" }], browsers: [{ id: "b" }], harnesses_in_use: [], counts } } });
-  assert.deepEqual(store.snapshot().counts, counts);
+    connections: { sessions: [session], browsers: [], harnesses_in_use: ["codex"], counts } } });
+  assert.deepEqual(store.snapshot().harnesses_in_use, ["codex"]);
+  // Commit 3f27d340: the counts say what the service decided.
+  assert.deepEqual(store.snapshot().counts, counts, "what the service counted, not what the page could count from the rows");
+  store.applyChange({ seq: 2, change: { kind: "connections_changed", connections: { sessions: [], browsers: [], harnesses_in_use: [] } } });
+  assert.deepEqual(store.snapshot().harnesses_in_use, []);
 });
 
 /* ------------------------------------ the latch ------------------------------------ */

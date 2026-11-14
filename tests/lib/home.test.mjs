@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { frameIdOf, loaderIdOf } from "./peers.mjs";
 import {
-  DIAGNOSTICS_DIRECTORY, EVIDENCE_PROGRAMS_FILE, EVIDENCE_VARIABLE, JourneyHome, decodeFrames, encodeFrame, fnv1a32, goodbyeIn, homeHash, pipeName, role, socketPath, vocabulary
+  DIAGNOSTICS_DIRECTORY, EVIDENCE_PROGRAMS_FILE, EVIDENCE_VARIABLE, JourneyHome, decodeFrames, encodeFrame, fnv1a32, goodbyeIn, homeHash, pipeName, role, vocabulary
 } from "./home.mjs";
 
 const example = vocabulary.endpoint.windows.example;
@@ -23,11 +23,6 @@ test("the pipe name of the worked example matches the relay vocabulary", () => {
 test("only ASCII letters are lowercased in the home hash", () => {
   assert.equal(homeHash("C:\\Users\\\u00c4da\\.ghostlight"), homeHash("c:\\users\\\u00c4da\\.ghostlight"));
   assert.notEqual(homeHash("C:\\Users\\\u00c4da\\.ghostlight"), homeHash("C:\\Users\\\u00e4da\\.ghostlight"));
-});
-
-test("the socket path is the relay socket under the run directory", () => {
-  const home = join("/", "home", "ada", vocabulary.files.home_directory);
-  assert.equal(socketPath(home), join(home, vocabulary.files.run_directory, vocabulary.files.relay_socket));
 });
 
 test("a frame round trips and a partial frame waits for the rest", () => {

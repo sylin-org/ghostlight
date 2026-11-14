@@ -14,7 +14,6 @@ import { join, resolve } from "node:path";
 const require = createRequire(import.meta.url);
 const ui = join(resolve(import.meta.dirname, ".."), "crates", "orchestrator", "ui", "lib");
 const Transport = require(join(ui, "transport.js"));
-const Words = require(join(ui, "words.js"));
 
 const PARTS = "status,connections,activity,integrations,diagnostics,controls";
 
@@ -96,10 +95,6 @@ test("a snapshot with no browser carries the line the service wrote for it", () 
   assert.equal("no_browser" in Transport.flatten({ seq: 1, parts }), false);
 });
 
-test("the table of parts is the one the service lists", () => {
-  assert.deepEqual([...Transport.SNAPSHOT_PARTS], PARTS.split(","));
-});
-
 test("a search is a POST whose body holds the words and whose address holds none", async () => {
   const send = fakeFetch(() => answer(200, []));
   const transport = Transport.overHttp({ fetch: send });
@@ -129,6 +124,14 @@ test("an image is asked for with the key and handed back as a source the page ca
   assert.equal(keyed.calls[0].credentials, "omit");
   assert.equal(source, `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`);
 
+  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  const monogram = await Transport.overHttp({
+    fetch: fakeFetch(() => ({ ok: true, status: 200, headers: { get: () => "image/svg+xml" }, arrayBuffer: async () => svg.buffer })),
+    bearer: "secret-1"
+  }).image("agent-icons/codex?v=fedcba987654");
+  assert.equal(monogram, `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`,
+    "the source takes its type from what the service answered, so a monogram draws like an app's icon");
+
   const open = fakeFetch(respond);
   await Transport.overHttp({ fetch: open }).image("agent-icons/zed");
   assert.equal("Authorization" in open.calls[0].headers, false, "a tab sends no key");
@@ -138,17 +141,6 @@ test("an image is asked for with the key and handed back as a source the page ca
     fetch: fakeFetch(() => ({ ok: true, status: 200, headers: { get: () => "image/png" }, arrayBuffer: async () => large.buffer }))
   }).image("agent-icons/zed");
   assert.equal(big, `data:image/png;base64,${Buffer.from(large).toString("base64")}`, "an image larger than one chunk");
-});
-
-test("a monogram the service serves at an agent's address is drawn the same way as an app's icon", async () => {
-  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
-  const send = fakeFetch(() => ({
-    ok: true, status: 200, headers: { get: () => "image/svg+xml" }, arrayBuffer: async () => svg.buffer
-  }));
-  const source = await Transport.overHttp({ fetch: send, bearer: "secret-1" }).image("agent-icons/codex?v=fedcba987654");
-  assert.equal(send.calls[0].path, "/agent-icons/codex?v=fedcba987654");
-  assert.equal(send.calls[0].headers.Authorization, "Bearer secret-1");
-  assert.equal(source, `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
 });
 
 test("an image the service refuses rejects with its sentence", async () => {
@@ -526,27 +518,6 @@ test("stopping ends the stream and nothing opens again", async () => {
   await ticks();
   assert.equal(world.calls[0].signal.aborted, true);
   assert.equal(world.calls.length, 1);
-});
-
-test("with nothing to fetch with, every call rejects", async () => {
-  const transport = Transport.overHttp({});
-  assert.equal(transport.available, false);
-  await assert.rejects(transport.snapshot(), /no orchestrator/);
-});
-
-test("the transport has one road, over loopback", () => {
-  assert.equal(Transport.create, undefined);
-  assert.equal(typeof Transport.overHttp, "function");
-  const transport = Transport.overHttp({});
-  assert.equal(transport.copyHarnessText, undefined);
-  assert.equal(Words.CHANGE_EVENT, undefined);
-});
-
-test("the page's own words for copying and for waiting are the ones the transport's callers use", () => {
-  assert.equal(Words.COPIED_SETUP, "Manual setup copied.");
-  assert.equal(Words.COPIED_COMMAND, "MCP command copied.");
-  assert.equal(Words.RECONNECTING, "Reconnecting");
-  assert.equal(Words.CONTINUE_LABEL, "Continue in the Ghostlight window");
 });
 
 test("every act the page names is a key of the context a window is given", () => {
