@@ -120,3 +120,29 @@ Chrome's document identity changes across navigation while a frame id may remain
 Document-targeted messaging supplies the required binding:
 [webNavigation](https://developer.chrome.com/docs/extensions/reference/api/webNavigation),
 [tabs.sendMessage](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-sendMessage).
+
+## Amendment: an incomplete inventory under an all-open policy (2026-11-13)
+
+A field session on Office for the web in SharePoint (2026-11-13) left tabs where every read,
+click, scroll, key and script was refused with "Document access could not be verified", on any
+page the tab later showed, example.com included. Screenshots kept working. It reproduced on the
+owner's machine: a tab taken from a Word document to a PowerPoint deck refused from then on, and
+a fresh tab did not.
+
+The extension marks a tab's frame inventory incomplete when it cannot read one of the tab's
+debugger sessions. The executor refused all document-scoped work on an incomplete inventory,
+whatever the policy. That refusal exists so a restricting policy never acts on a page that may
+hold a document it has not judged. A policy that admits every document has nothing to judge
+there, and the refusal only took browser work away from the ungoverned.
+
+Decision: when the policy admits every document for the request's capabilities, an incomplete
+inventory does not refuse the request. The work runs on the documents the inventory shows, and
+coverage still counts one unavailable document, so the result says content may be missing. A
+wait for text to be absent still fails on limited coverage. Under any restricting policy the
+refusal stands unchanged.
+
+[ADR-0207](0207-observe-without-changing-the-page.md) completes this the same day. It gives
+the refusal a closed set of causes with next steps that can work, moves the binding of a point
+and of the focus out of the gate, and removes the cause in the extension: a session Chrome has
+ended no longer marks the inventory incomplete. The tolerance above stays for the life of adapter
+protocol 4, because published extensions keep the old behavior.

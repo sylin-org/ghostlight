@@ -449,3 +449,16 @@ dialog, and the tab takes its focus state when the dialog closes. The changed pa
 2.0.1, as the prompt field's amendment says, and `compatibility.json` names adapter 2.0.1 for the 2.0
 services. This build goes to the store with the prompt field and the history fix. Decision 16's rule
 is unchanged.
+
+## Amendment (2026-11-13): captures that do not touch the page, and sessions that end
+
+The owner decided that packaged files change for [ADR-0207](0207-observe-without-changing-the-page.md)
+("Service and extension"; "Yes, go ahead"; "Mandate: eliminate fragile structures, concentrate
+complexity at the correct seams, proper separation of concerns."). A field session showed a tab
+that refused all work after it left a page with nested cross-site frames, and screenshots that
+came back blank or squeezed. Both causes are in the extension. The changed packaged files are
+`lib/capture.js`, `lib/buffers.js`, `lib/sessions.js`, `lib/inventory.js`, `lib/world.js`,
+`lib/primitives.js` and `worker.js`, and the freeze golden is regenerated. The adapter protocol
+and its goldens do not change. Whether and when this build goes to the store is the owner's call;
+until it does, the published extension keeps both defects and the service works around the first
+under a policy that admits every document. Decision 16's rule is unchanged.

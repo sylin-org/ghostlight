@@ -806,6 +806,29 @@ Every one of these cost something to learn.
   The shell keeps its own clock and records its own window's end; judge the shell by the windows
   the compositor counts, not by what the process believes.
 
+- **Chrome does not announce every session's end.** A debugger session auto-attached through
+  another child session gets no `Target.detachedFromTarget` when that child ends (Chrome 157,
+  probed 2026-11-13). A registry kept only by events then holds a session Chrome no longer knows.
+  Record who announced each session, end the subtree with its announcer, and let Chrome's own
+  answer ("Session with given id not found") end a session at the one function every command
+  crosses (ADR-0207).
+- **Bookkeeping doubt must not cross a boundary as a fact about the page.** One flag,
+  `complete: false`, stood for a dead session, a busy frame and a failed cross-check, and the
+  service refused all work on it for everyone. Report what exists; keep doubt about your own
+  records inside the module that owns them.
+- **A clipped capture re-lays out the page.** `Page.captureScreenshot` with a clip, and more so
+  with `captureBeyondViewport`, resizes the view (first to 1 x 1). Single-process pages hide it;
+  a busy cross-process frame is caught squeezed or blank. A capture with no clip touches nothing.
+  ADR-0010 said so and a rewrite lost it without a decision.
+- **Reading the browser's source is not evidence of its behavior.** Two explanations of the stuck
+  tab came from reasoning and both were wrong; a 300-line probe against real Chrome settled it in
+  a minute. Probe first.
+- **A gate that does three jobs lies about two of them.** Admission also judged the frame list's
+  shape and bound click points, so an off-screen point read as "document access". Give each fact
+  one owner at the moment it is true.
+- **Test on a page shaped like the real web.** The demo pages had no frame inside a frame, no CSS
+  minimum size and nothing slow. One fixture with all three reproduces both defects every run.
+
 ## Where to look
 
 The documentation map is [docs/README.md](README.md); onboarding order is AGENTS.md 'Read this first'; task batches are in [tasks/README.md](tasks/README.md).

@@ -22,6 +22,30 @@ Only `main` and `dev`, locally and on the remote (AGENTS.md, Branches). `main` h
 2.0.0 product and its public state (e789913b). `dev` holds all work toward the next release.
 Older branch heads are kept as `archive/` tags.
 
+## In flight: the document seam (ADR-0207)
+
+Opened and built on 2026-11-13 after a field session on Office for the web
+([record](testing/office-web-field-session-2026-11-13.md)). Committed on `dev`, not pushed, not
+released.
+
+- **Service.** The gate only admits documents; a point and the focus are bound where input is
+  sent; the frame tree is total; `document_unavailable` names its cause; a spent time budget is a
+  deadline. Works with the published extension. Deployed in place on the owner's machine as a
+  development build and checked live.
+- **Extension (packaged files changed, freeze record regenerated).** A capture of what is on
+  screen is a plain photograph cropped in the worker. A debugger session ends when Chrome says so
+  or when its announcer ends, and an ended session no longer marks the inventory incomplete.
+- **Proof.** `tests/nested-frame-browser-journey.mjs` runs the shipped extension in a real
+  browser with no service. It failed both promises 9 of 9 runs on the extension as it was and
+  holds 3 of 3 on this tree (Chrome for Testing 156).
+- **Owed.** The owner loads `extension/` unpacked and the SharePoint check is repeated on it. The
+  extension still reads 2.0.1: its next version, its `compatibility.json` row and the store
+  submission are the owner's call. The journey has not run on the Chrome CI pins (152). Not
+  investigated: the navigation timeouts in the field report.
+- **Left for the owner, each its own decision (ADR-0207, Considered and not taken):** admitting
+  `about:blank` and `srcdoc` frames with their parent, not pausing new frames at start, letting
+  an absence wait succeed with a note, and unrouted input under a policy that admits everything.
+
 ## 2.0 work
 
 `dev` carried the 2.0 break set of

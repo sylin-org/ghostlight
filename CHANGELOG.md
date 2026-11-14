@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A tab no longer refuses every read, click, scroll and key with "Document access could not be
+  verified" after it leaves a page that holds a cross-site frame inside another cross-site frame
+  (ADR-0207). With no policy that restricts documents the service fix is enough. The complete fix
+  needs the next Ghostlight in Browser version.
+- A click or scroll at a point below the fold of a full-page screenshot works: the point is
+  scrolled into view instead of being refused.
+- A wait that used its whole time says so. It no longer reports a version mismatch.
+- With the next Ghostlight in Browser version, a screenshot no longer comes back blank or with an
+  embedded app squeezed into a corner: a capture of what is on screen does not touch the page.
+
+### Changed
+
+- `document_unavailable` says why, in a `document_cause` fact, with next steps that can work.
+- A wait or check for text to be gone says when that could not be established because part of
+  the page could not be read.
+- A magnified region of what is on screen is an enlargement of those pixels.
+
 ## [2.0.2] - 2026-10-29
 
 ### Changed
