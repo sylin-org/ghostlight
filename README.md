@@ -34,12 +34,12 @@ browser work and its controls on your machine.
 
 ## Where it stands today
 
-The published release is 2.0.2. It is available as the GitHub release
-[`v2.0.2`](https://github.com/sylin-org/ghostlight/releases/tag/v2.0.2), the npm package
-`ghostlight@2.0.2` and the MCP Registry record `org.sylin/ghostlight 2.0.2`, with the Chrome Web
-Store adapter v2.0.1, all observed on 2026-10-29 and recorded in
+The published release is 2.0.3. It is available as the GitHub release
+[`v2.0.3`](https://github.com/sylin-org/ghostlight/releases/tag/v2.0.3), the npm package
+`ghostlight@2.0.3` and the MCP Registry record `org.sylin/ghostlight 2.0.3`, with the Chrome Web
+Store adapter v2.0.2, all observed on 2026-11-14 and recorded in
 [`docs/public-status.json`](docs/public-status.json) and the
-[release custody record](docs/testing/release-2.0.2-2026-10-29.md).
+[release custody record](docs/testing/release-2.0.3-2026-11-14.md).
 
 ## What you get
 
@@ -242,18 +242,18 @@ On Windows, WinGet is another way to install: `winget install Sylin.Ghostlight`,
 `ghostlight install` once. The self-contained Claude Desktop MCPB is a third. Every route puts the
 three executables in `~/.ghostlight/bin`: WinGet only delivers them, and `ghostlight install`
 copies them there. After `winget upgrade`, the next `ghostlight install` carries the newer version
-there. An older copy never replaces a newer one. WinGet serves 2.0.0 until a newer manifest is
-accepted into winget-pkgs; the one-line installer serves 2.0.2.
+there. An older copy never replaces a newer one. WinGet serves 2.0.2 until a newer manifest is
+accepted into winget-pkgs; the one-line installer serves 2.0.3.
 
 <details>
 <summary><strong>Current release and compatibility</strong></summary>
 
 **Platform state.** Windows (x64) and Linux (x86_64, with glibc or musl, such as Alpine) are the
-supported 2.0 platforms. 2.0.2 was tested before publication on Windows, and its release workflow
+supported 2.0 platforms. 2.0.3 was tested before publication on Windows, and its release workflow
 installs it from the release bundle on Ubuntu and Alpine. Its public install was proven on Windows
-on 2026-10-29. macOS has no artifact yet.
+on 2026-11-14. macOS has no artifact yet.
 
-**Extension state.** The Chrome Web Store listing serves adapter v2.0.1, compatible with
+**Extension state.** The Chrome Web Store listing serves adapter v2.0.2, compatible with
 service 2.0.x under adapter protocol 4. The service gives the extension the page code it runs, so
 a 2.0 service update needs no extension update or reload. A 1.x extension updates once to 2.0.
 

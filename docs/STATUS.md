@@ -1,4 +1,4 @@
-# STATUS -- Ghostlight 2.0.2 published
+# STATUS -- Ghostlight 2.0.3 published
 
 This page is the current state and nothing else. Every earlier dated section, from the 1.0 rebuild
 through 2026-10-16, moved verbatim to [history/status-through-2026-10-16.md](history/status-through-2026-10-16.md).
@@ -22,11 +22,16 @@ Only `main` and `dev`, locally and on the remote (AGENTS.md, Branches). `main` h
 2.0.0 product and its public state (e789913b). `dev` holds all work toward the next release.
 Older branch heads are kept as `archive/` tags.
 
-## In flight: the document seam (ADR-0207)
+## Released in 2.0.3: the document seam (ADR-0207)
+
+2.0.3 is published (2026-11-14): the GitHub release `v2.0.3` (Latest), npm `ghostlight@2.0.3`, the
+MCP Registry record and `main` at the release, with Ghostlight in Browser 2.0.2 published in the
+Chrome Web Store the same day. WinGet serves 2.0.2; no 2.0.3 manifest is submitted. The public
+install is proven on Windows through npm. The custody record is
+[testing/release-2.0.3-2026-11-14.md](testing/release-2.0.3-2026-11-14.md).
 
 Opened and built on 2026-11-13 after a field session on Office for the web
-([record](testing/office-web-field-session-2026-11-13.md)). Committed on `dev`, not pushed, not
-released.
+([record](testing/office-web-field-session-2026-11-13.md)).
 
 - **Service.** The gate only admits documents; a point and the focus are bound where input is
   sent; the frame tree is total; `document_unavailable` names its cause; a spent time budget is a
@@ -39,15 +44,12 @@ released.
   browser with no service. It failed both promises 9 of 9 runs on the extension as it was and
   holds 3 of 3 on this tree (Chrome for Testing 156).
 - **Extension 2.0.2 submitted.** Checked live on the owner's machine with the unpacked build,
-  then bumped to 2.0.2 and submitted to the Chrome Web Store on 2026-11-14 as a staged publish:
-  `PENDING_REVIEW`, the store still serves 2.0.1
-  ([custody](testing/extension-2.0.2-store-submission-2026-11-14.md)). Publishing after approval
-  is the owner's call.
+  then bumped to 2.0.2 and submitted to the Chrome Web Store on 2026-11-14 as a staged publish
+  ([custody](testing/extension-2.0.2-store-submission-2026-11-14.md)). The owner published it
+  the same day and the store serves 2.0.2.
 - **A session moves to the only connected browser** instead of refusing, and says nothing of it
   (ADR-0196 amendment of 2026-11-13; the owner's "it just works" rule in MEMORY). Checked live.
-- **Service version 2.0.3** is stamped for this work (2.0.2 is the published service). Notes in
-  `release/notes-v2.0.3.md`. No tag, release or publication yet.
-- **Owed.** A release of 2.0.3 on the owner's go. The journey has not run on the Chrome CI pins (152). Not
+- **Owed.** A WinGet manifest for 2.0.3, on the owner's go. The journey has not run on the Chrome CI pins (152). Not
   investigated: the navigation timeouts in the field report.
 - **Left for the owner, each its own decision (ADR-0207, Considered and not taken):** admitting
   `about:blank` and `srcdoc` frames with their parent, not pausing new frames at start, letting

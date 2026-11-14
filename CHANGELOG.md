@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-11-14
+
 ### Fixed
 
 - A tab no longer refuses every read, click, scroll and key with "Document access could not be
