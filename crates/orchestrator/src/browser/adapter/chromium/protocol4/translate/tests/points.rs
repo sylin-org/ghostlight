@@ -3,11 +3,13 @@
 //! The scripted page is a top document that embeds two documents with the same URL, `C` and `E`,
 //! and `C` embeds `G`. The top document is scrolled 100 pixels down, so a page point is 100
 //! pixels higher in the viewport. The embedded documents sit at fixed places, and every document
-//! answers what lies under a point from those places.
+//! answers what lies under a point from those places. A page point below the viewport is one
+//! the top document scrolls to, and until it has, nothing is under it.
 
 use super::interaction::{expected_view, inputs_seen, kinds, primitives_seen, unscoped, view};
 use super::*;
 use crate::browser::adapter::{PhysicalFile, RecordingDestination};
+use crate::language::document_refusal::DocumentCause;
 use serde_json::json;
 
 use super::super::super::geometry;
@@ -23,8 +25,10 @@ use crate::language::{PointerButton, ScrollDirection};
 
 /// How far the top document is scrolled, in pixels.
 const SCROLL: f64 = 100.0;
-/// The error text of a point that no document owns.
-const UNRESOLVED: &str = "point has no current document subject";
+/// The height of the viewport, in pixels.
+const VIEW_HEIGHT: f64 = 600.0;
+/// Where the top document puts a point it had to scroll to, from the top of the viewport.
+const SCROLLED_TO: f64 = 100.0;
 /// The subject the top document reports for any point, as the all-open path reads it.
 const TOP_ROLE: &str = "frame";
 
@@ -161,12 +165,20 @@ fn answer(world: &wire::WorldCall, owners: Owners) -> Value {
     let y = message["y"].as_f64().unwrap_or_default();
     match message["kind"].as_str().unwrap_or_default() {
         "scroll_point" => {
-            returned(json!({"x": x, "y": y - SCROLL, "subject": {"role": TOP_ROLE, "name": "Top"}}))
+            let shown = if y - SCROLL < VIEW_HEIGHT {
+                y - SCROLL
+            } else {
+                SCROLLED_TO
+            };
+            returned(json!({"x": x, "y": shown, "subject": {"role": TOP_ROLE, "name": "Top"}}))
         }
         "viewport_point" if y - SCROLL < 0.0 => refused("outside_viewport"),
         "viewport_point" => {
             returned(json!({"x": x, "y": y - SCROLL, "subject": {"role": TOP_ROLE, "name": "Top"}}))
         }
+        // A real page finds nothing under a point outside its viewport, and a point in page
+        // coordinates below the fold is such a point.
+        "hit_point" if y >= VIEW_HEIGHT || message["page"] == true => refused("no_subject"),
         "hit_point" => match embed_at(frame, x, y) {
             Some(_) => returned(json!({"x": x, "y": y, "embed": true, "subject": null})),
             None => returned(json!({"x": x, "y": y, "embed": false, "subject": subject_in(frame)})),
@@ -215,6 +227,14 @@ fn recording_facts(op: &wire::RecordingOp) -> Value {
 /// A port whose extension holds the scripted page, reports `current_view`, and finishes every
 /// input.
 fn rig(owners: Owners, current_view: Value) -> (RelayBrowserPort, FakeExtension) {
+    rig_answering(move |world| answer(world, owners), current_view)
+}
+
+/// The same port, with `answer` as the scripted page's answer to each world call.
+fn rig_answering(
+    answer: impl Fn(&wire::WorldCall) -> Value + Send + 'static,
+    current_view: Value,
+) -> (RelayBrowserPort, FakeExtension) {
     port_with(Box::new(move |correlation, primitive| {
         Reply::Now(match primitive {
             wire::Primitive::Frames(_) => FakeExtension::ok(correlation, nested_inventory()),
@@ -227,7 +247,7 @@ fn rig(owners: Owners, current_view: Value) -> (RelayBrowserPort, FakeExtension)
             wire::Primitive::Call(call) => FakeExtension::ok(
                 correlation,
                 json!({"answers": call.calls.iter()
-                    .map(|world| answer(world, owners)).collect::<Vec<_>>()}),
+                    .map(&answer).collect::<Vec<_>>()}),
             ),
             wire::Primitive::Input(input) => wire::Receipt {
                 dispatched: true,
@@ -458,13 +478,22 @@ fn identical_embeds_are_told_apart_by_their_owners() {
     assert_eq!(frames_of(&calls[2]), ["E"]);
 }
 
+/// The refusal of a subject in a document the scope leaves out, which names the document.
+fn outside(document: &str) -> Result<BrowserOutcome, BrowserError> {
+    Err(BrowserError::OutsideScope {
+        document: document.into(),
+    })
+}
+
 /// A point or a target reaches only the admitted document it lands in, checked before any input:
 /// an open page sends a point without routing it; a governed one routes it through its nested
 /// documents to the subject, tells identical embeds apart by their owners, and refuses a point
 /// over a document the scope leaves out, one no owner or several claim, a stale view, a click
 /// covered by a denied document and a recording exported into a document left out, with nothing
 /// sent; a dropped image is delivered inside the document under the point (ACCEPTANCE, document
-/// boundary evidence 4 and executor and truth gates 8).
+/// boundary evidence 4 and executor and truth gates 8). A point is bound to its document when
+/// the input is sent, after the view check and the scroll into view, so a point below the fold
+/// of a full-page view works (field session of 2026-11-13).
 #[test]
 fn a_point_over_a_document_the_scope_leaves_out_is_refused_before_input() {
     for command in [
@@ -473,16 +502,13 @@ fn a_point_over_a_document_the_scope_leaves_out_is_refused_before_input() {
         wheel_at(OVER_G, ScrollDirection::Down, 1),
     ] {
         let (port, fake) = exact();
-        assert_eq!(
-            call(&port, scoped(without_c(), command)),
-            Err(BrowserError::DocumentUnavailable)
-        );
+        assert_eq!(call(&port, scoped(without_c(), command)), outside("G.g1"));
         assert!(inputs_seen(&fake).is_empty());
     }
     let (port, fake) = exact();
     assert_eq!(
         call(&port, scoped(without_c(), drop_at(OVER_G))),
-        Err(BrowserError::DocumentUnavailable)
+        outside("G.g1")
     );
     assert!(
         calls_seen(&fake)
@@ -491,6 +517,7 @@ fn a_point_over_a_document_the_scope_leaves_out_is_refused_before_input() {
         "the drop is never delivered"
     );
 
+    a_point_below_the_fold_is_bound_once_it_is_in_view();
     an_open_scope_sends_a_point_click_without_routing_it();
     a_stale_view_refuses_the_point_before_anything_is_sent();
     a_scoped_point_is_routed_through_nested_documents_to_its_subject();
@@ -508,11 +535,121 @@ fn a_point_that_zero_or_several_owners_claim_is_unresolved_and_sends_nothing() {
         let (port, fake) = rig(owners, view());
         assert_eq!(
             call(&port, scoped(without_c(), click_at(OVER_E))),
-            Err(BrowserError::primitive(UNRESOLVED)),
+            Err(BrowserError::DocumentUnavailable(
+                DocumentCause::SubjectUnreachable
+            )),
             "an embed no single owner claims is never guessed"
         );
         assert!(inputs_seen(&fake).is_empty());
     }
+    // A document that could not say what is under the point is its own fact, not a point nobody
+    // claims: the page changed under the call, and with no handle to blame it is a page change.
+    let (port, fake) = rig_answering(
+        |world| match world.message["kind"].as_str() {
+            Some("hit_point") => {
+                json!({"status": "failed", "code": "document_changed", "message": "", "started": false})
+            }
+            _ => answer(world, Owners::Exact),
+        },
+        view(),
+    );
+    assert_eq!(
+        call(&port, scoped(without_c(), click_at(OVER_E))),
+        Err(BrowserError::PageChanged)
+    );
+    assert!(inputs_seen(&fake).is_empty());
+}
+
+/// The defect of the 2026-11-13 field session: a point chosen on a full-page view lies below the
+/// fold, where the page finds nothing until it scrolls there. Describing documents used to place
+/// the point first, in page coordinates, and report it unbound, so the work was refused before
+/// the scroll that makes the point real. Now the description asks the page nothing, and the
+/// point is bound where the page shows it.
+fn a_point_below_the_fold_is_bound_once_it_is_in_view() {
+    // Page points far below the 600 pixel viewport: one over nothing embedded, one that the
+    // scroll brings over `E`.
+    const BELOW_FOLD: (f64, f64) = (750.0, 5000.0);
+    const BELOW_FOLD_OVER_E: (f64, f64) = (550.0, 5000.0);
+    let landed = Point {
+        x: BELOW_FOLD.0,
+        y: SCROLLED_TO,
+    };
+
+    let (port, fake) = exact();
+    let described = call(
+        &port,
+        BrowserCommand::DescribeDocuments {
+            tab_id: 12,
+            locators: vec![],
+            settle_ms: 0,
+        },
+    );
+    assert!(
+        matches!(
+            described,
+            Ok(BrowserOutcome::Documents { ref inventory, .. })
+                if inventory.subjects.is_empty() && !inventory.incomplete
+        ),
+        "{described:?}"
+    );
+    assert_eq!(
+        primitives_seen(&fake),
+        ["frames"],
+        "a point is not placed before the page shows it"
+    );
+
+    for (scope, routed) in [(all_open(), false), (without_e(), true)] {
+        for command in [
+            click_at(BELOW_FOLD),
+            wheel_at(BELOW_FOLD, ScrollDirection::Down, 3),
+        ] {
+            let (port, fake) = exact();
+            let wheel = matches!(command, BrowserCommand::WheelAt(_));
+            call(&port, scoped(scope.clone(), command)).unwrap();
+            let calls = calls_seen(&fake);
+            assert_eq!(kinds(&calls[0]), ["scroll_point"]);
+            assert_eq!(calls.len(), if routed { 2 } else { 1 });
+            if routed {
+                let hit = &calls[1].calls[0].message;
+                assert_eq!(
+                    (
+                        hit["kind"].as_str(),
+                        hit["y"].as_f64(),
+                        hit["page"].as_bool()
+                    ),
+                    (Some("hit_point"), Some(SCROLLED_TO), Some(false)),
+                    "the point is placed in viewport coordinates, where the scroll put it"
+                );
+            }
+            let steps = &inputs_seen(&fake)[0].steps;
+            if wheel {
+                assert_eq!(
+                    *steps,
+                    keys::wheel(landed, keys::WheelDirection::Down, 3),
+                    "the wheel turns where the page shows the point"
+                );
+            } else {
+                assert_eq!(
+                    *steps,
+                    keys::click(landed, keys::mouse_button(PointerButton::Primary), 1, 0)
+                );
+            }
+        }
+    }
+
+    let (port, fake) = exact();
+    assert_eq!(
+        call(
+            &port,
+            scoped(
+                without_e(),
+                wheel_at(BELOW_FOLD_OVER_E, ScrollDirection::Down, 1)
+            )
+        ),
+        outside("E.e1"),
+        "a point the scroll brings over a document the scope leaves out is still refused"
+    );
+    assert!(inputs_seen(&fake).is_empty());
 }
 
 fn a_restricted_click_on_a_target_lands_when_the_point_is_where_the_target_is() {
@@ -562,7 +699,7 @@ fn a_restricted_click_covered_by_a_denied_document_is_refused_before_input() {
     };
     assert_eq!(
         covered(without_c()),
-        (Err(BrowserError::DocumentUnavailable), 0),
+        (outside("G.g1"), 0),
         "the target is in the top document, but a document that is not allowed lies over it"
     );
     let (result, inputs) = covered(without_e());
@@ -819,7 +956,7 @@ fn a_recording_is_never_exported_into_a_document_the_scope_leaves_out() {
     .unwrap();
     assert_eq!(
         call(&port, scoped(without_c(), export_to("C:c1:locator_a1_4"))),
-        Err(BrowserError::DocumentUnavailable)
+        outside("C.c1")
     );
     assert!(exports_seen(&fake).is_empty());
 }

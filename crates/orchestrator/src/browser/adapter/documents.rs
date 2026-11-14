@@ -1,7 +1,15 @@
 //! Browser-observed document identity and closed physical execution constraints.
 
+use crate::browser::BrowserError;
+
 /// Maximum document metadata retained or admitted in one physical tab observation.
 pub const DOCUMENT_LIMIT: usize = 256;
+/// The longest document url an inventory may carry, in bytes.
+pub const DOCUMENT_URL_LIMIT: usize = 8192;
+/// The longest document id an inventory may carry, in bytes.
+const DOCUMENT_ID_LIMIT: usize = 160;
+/// The protocol failure of an inventory that is not one bounded tree.
+const NOT_ONE_TREE: &str = "document inventory is not one bounded tree";
 
 /// One browser-observed document, independent of reusable frame routing ids.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,13 +29,64 @@ pub struct PhysicalDocument {
 pub struct DocumentInventory {
     /// Stable ordered current documents, bounded by `DOCUMENT_LIMIT`.
     pub documents: Vec<PhysicalDocument>,
-    /// Document identities of explicitly targeted locators, points, or current focus.
+    /// Document identities of the request's locators. A point and the focus are not here: the
+    /// adapter binds them when it sends the input, once the page shows where they are.
     pub subjects: Vec<String>,
-    /// A requested point or the focus could not be bound to a current document. A locator never
-    /// sets it: it binds, fails the description as stale, or is left to `incomplete`.
-    pub unresolved: bool,
-    /// Browser metadata omitted documents or was otherwise incomplete.
+    /// The tab may hold a document this list does not show: the browser could not complete its
+    /// inventory, or listed a frame the adapter could not place in the tree.
     pub incomplete: bool,
+}
+
+impl DocumentInventory {
+    /// Check that the inventory is one bounded tree whose subjects are documents of it.
+    ///
+    /// An adapter owns the shape of the tree it reports, so a list that is not one is a breach
+    /// by the adapter, not a state of the page, and nothing the model could act on.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BrowserError::Protocol`] for an empty or oversized list, an empty, oversized or
+    /// repeated id, an oversized url, no top or several, a parent that is not listed, a loop,
+    /// and a subject that is not a listed document.
+    pub fn validate(&self) -> Result<(), BrowserError> {
+        use std::collections::HashSet;
+        let breach = || BrowserError::Protocol(NOT_ONE_TREE.into());
+        let mut ids = HashSet::new();
+        if self.documents.is_empty()
+            || self.documents.len() > DOCUMENT_LIMIT
+            || self.subjects.len() > DOCUMENT_LIMIT
+            || self.documents.iter().any(|document| {
+                document.id.is_empty()
+                    || document.id.len() > DOCUMENT_ID_LIMIT
+                    || document.url.len() > DOCUMENT_URL_LIMIT
+                    || !ids.insert(document.id.as_str())
+            })
+            || self
+                .documents
+                .iter()
+                .filter(|document| document.parent.is_none())
+                .count()
+                != 1
+            || self.subjects.iter().any(|id| !ids.contains(id.as_str()))
+        {
+            return Err(breach());
+        }
+        for document in &self.documents {
+            let mut ancestry = HashSet::new();
+            let mut current = document;
+            while let Some(parent) = &current.parent {
+                if !ancestry.insert(current.id.as_str()) {
+                    return Err(breach());
+                }
+                current = self
+                    .documents
+                    .iter()
+                    .find(|item| &item.id == parent)
+                    .ok_or_else(breach)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Application-supplied physical scope, with no policy rule or capability classification.

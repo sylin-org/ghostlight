@@ -10,6 +10,7 @@ use serde_json::json;
 
 use crate::browser::BrowserError;
 use crate::governance::{Capability, CapabilitySet, Decision};
+use crate::language::document_refusal::DocumentCause;
 use crate::language::{
     outcome::{Outcome, Refusal, SavedTo},
     Record, RecordAction,
@@ -408,6 +409,8 @@ impl ApplicationExecutor {
         value: &Record,
         stopped: &PhysicalRecordingSummary,
     ) -> Result<SaveDestination, Box<Terminal>> {
+        // The fact this site knows: the recording cannot name every document it captured, and
+        // the policy leaves documents out, so a save could disclose one it would refuse.
         if !stopped.source_urls_complete
             && !context
                 .snapshot
@@ -424,7 +427,7 @@ impl ApplicationExecutor {
             return Err(Box::new(self.browser_failure(
                 context,
                 Decision::permitted(),
-                super::BrowserError::DocumentUnavailable,
+                super::BrowserError::DocumentUnavailable(DocumentCause::RecordingSourcesIncomplete),
                 Some(stopped.tab_id),
             )));
         }

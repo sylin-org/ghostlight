@@ -5,7 +5,8 @@
 //! [`BrowserOutcome`](crate::browser::adapter::BrowserOutcome) the rest of the service reads.
 //! This module holds what the families share: the scope every content command needs, the
 //! reading of one world call's answer, the sending of input and the reading of how it ended, and
-//! the routing of a point to the document it lands in.
+//! the routing of a point to the document it lands in, which happens when input is sent and
+//! nowhere else.
 
 pub mod capture;
 pub mod forms;
@@ -25,18 +26,17 @@ use serde_json::Value;
 use super::geometry::{self, RouteStep, MAX_ROUTE_DEPTH};
 use super::link::{CallRequest, Link};
 use super::scope::{PlannedCall, Scope};
-use super::tree::FrameTree;
+use super::tree::{Described, FrameTree};
 use super::wire::{
     CallAnswer, CallFailure, DocumentGuard, FrameRef, Input, InputDone, InputStep, InputStop, Point,
 };
-use super::world::{self, AssetDetail, EffectClass, Hit, OwnerProbe};
+use super::world::{self, AssetDetail, AssetErrorCode, EffectClass, Hit};
 use crate::browser::adapter::PhysicalActionSubject;
 use crate::browser::BrowserError;
+use crate::language::document_refusal::DocumentCause;
 
 /// The protocol failure of a content command sent without a document scope.
 const UNSCOPED_CONTENT: &str = "content command sent without a document scope";
-/// The failure of a point that cannot be placed in exactly one document.
-const UNRESOLVED_POINT: &str = "point has no current document subject";
 /// The failure of a world call the extension skipped because an earlier one failed.
 const CALL_SKIPPED: &str = "a page call was skipped";
 /// The protocol failure of a world call status this service does not know.
@@ -58,15 +58,15 @@ pub fn reach(scope: Option<&mut Scope>) -> Result<&mut Scope, BrowserError> {
     scope.ok_or_else(|| BrowserError::Protocol(UNSCOPED_CONTENT.into()))
 }
 
-/// The tab's frame tree, from one `frames` primitive.
+/// The tab's frame tree, from one `frames` primitive, and whether it is the whole tab.
 ///
 /// # Errors
 ///
 /// Returns the primitive's failure, and [`BrowserError::DocumentUnavailable`] for an inventory
-/// that is not one tree.
-pub fn frame_tree(l: &mut Link<'_>, tab_id: u64) -> Result<FrameTree, BrowserError> {
+/// with no top document.
+pub fn frame_tree(l: &mut Link<'_>, tab_id: u64) -> Result<Described, BrowserError> {
     let inventory = l.send(super::link::Frames(tab_id))?;
-    FrameTree::from_inventory(&inventory)
+    FrameTree::describe(&inventory)
 }
 
 /// Read one world call's answer as the value its kind returns.
@@ -76,9 +76,10 @@ pub fn frame_tree(l: &mut Link<'_>, tab_id: u64) -> Result<FrameTree, BrowserErr
 /// Returns the asset's own failure as a plain failure, as [`BrowserError::FieldsRejected`]
 /// when it named the fields a fill could not take, as [`BrowserError::StaleLocator`] for a
 /// locator that names no control, or as [`BrowserError::PageRefused`] for a control the page
-/// refused to act on. Returns [`BrowserError::DocumentUnavailable`] when the
-/// document was gone or replaced, [`BrowserError::DialogOpen`] when a JavaScript dialog blocks
-/// the page, and [`BrowserError::Protocol`] for a value that does not have the kind's shape.
+/// refused to act on. Returns [`BrowserError::PageChanged`] when the document was gone or
+/// replaced or its session ended, [`BrowserError::DialogOpen`] when a JavaScript dialog blocks
+/// the page, and [`BrowserError::Protocol`] for a value that does not have the kind's shape. A
+/// command that names one handle restates the change as that handle gone stale.
 pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError> {
     match answer {
         CallAnswer::Returned { .. } => match world::decode_answer(answer) {
@@ -102,10 +103,13 @@ pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError
             }),
             None => Err(BrowserError::Protocol(CALL_UNKNOWN.into())),
         },
+        // A session lost under one call is that document's session ending, not the tab's: the
+        // document is gone, as much as one that was replaced or whose frame went away.
         CallAnswer::Failed {
-            code: CallFailure::DocumentChanged | CallFailure::FrameMissing,
+            code:
+                CallFailure::DocumentChanged | CallFailure::FrameMissing | CallFailure::SessionLost,
             ..
-        } => Err(BrowserError::DocumentUnavailable),
+        } => Err(BrowserError::PageChanged),
         CallAnswer::Failed {
             code: CallFailure::DialogOpen,
             ..
@@ -236,7 +240,6 @@ pub fn send_input(
     }
 }
 
-/// A closed code as the wire spells it.
 /// A point placed in the document it lands in.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Routed {
@@ -248,63 +251,49 @@ pub struct Routed {
     pub subject: Option<PhysicalActionSubject>,
 }
 
-/// Find the document a point lands in, and the subject under it there.
+/// Find the document a point of the top viewport lands in, and the subject under it there.
 ///
 /// Routing starts at the top document and descends one embedded document per round trip, at
-/// most [`MAX_ROUTE_DEPTH`] deep. `page` says the point is in the top page's coordinates rather
-/// than its viewport's. A point that cannot be placed in exactly one document answers `None`:
-/// nothing under it, an embed no probe owns, an embed the extension could not describe, or a
-/// route deeper than the bound.
+/// most [`MAX_ROUTE_DEPTH`] deep. Every call goes through the scope, and a hit or an owner probe
+/// reads no content, so it may ask any document of the tree. A point that cannot be placed in
+/// exactly one document answers `None`: nothing under it, an embed no probe owns, an embed the
+/// extension could not describe, or a route deeper than the bound.
+///
+/// The point must already be in the viewport. A page point is brought there first, by the work
+/// that owns the view check, so a point below the fold is placed where the page shows it.
 ///
 /// # Errors
 ///
-/// Returns the failure of a `call` primitive.
-pub fn route(
+/// Returns the failure of a `call` primitive, and a document's own failure to say what is under
+/// the point when that failure is not the point having no place: a document that changed under
+/// the call or a dialog over it is that fact, not a point nobody claims.
+fn route(
     l: &mut Link<'_>,
-    tree: &FrameTree,
+    scope: &Scope,
     tab_id: u64,
     point: Point,
-    page: bool,
 ) -> Result<Option<Routed>, BrowserError> {
+    let tree = scope.tree();
     let mut doc = tree.top().clone();
     let mut local = point;
-    let mut page = page;
     for _ in 0..MAX_ROUTE_DEPTH {
         let children: Vec<FrameRef> = tree.children(&doc).into_iter().cloned().collect();
-        let probes = |at: Point| -> Vec<PlannedCall> {
-            children
-                .iter()
-                .map(|child| {
-                    PlannedCall::owner(&doc, &child.frame_id, world::owner_probe(at.x, at.y))
-                })
-                .collect()
-        };
-        let mut plans = vec![PlannedCall::unscoped(
-            &doc,
-            world::hit_point(local.x, local.y, page),
-        )];
-        let together = !page && !children.is_empty();
-        if together {
-            plans.extend(probes(local));
-        }
+        let mut plans = vec![scope.call(&doc, world::hit_point(local.x, local.y, false))?];
+        plans.extend(children.iter().map(|child| {
+            PlannedCall::owner(&doc, &child.frame_id, world::owner_probe(local.x, local.y))
+        }));
         let answers = l.call(CallRequest::parallel(tab_id, &plans), None)?;
-        let Ok(hit) = value::<Hit>(&answers[0]) else {
-            return Ok(None);
+        let hit = match value::<Hit>(&answers[0]) {
+            Ok(hit) => hit,
+            Err(error) => {
+                return if unplaced(tree, &doc, &answers[0]) {
+                    Ok(None)
+                } else {
+                    Err(error)
+                }
+            }
         };
-        let owners: Vec<Option<OwnerProbe>> = if together {
-            answers[1..]
-                .iter()
-                .map(|answer| value(answer).ok())
-                .collect()
-        } else if hit.embed && !children.is_empty() {
-            let at = Point { x: hit.x, y: hit.y };
-            l.call(CallRequest::parallel(tab_id, &probes(at)), None)?
-                .iter()
-                .map(|answer| value(answer).ok())
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let owners = answers[1..].iter().map(|answer| value(answer).ok());
         match geometry::route_step(&hit, children.iter().cloned().zip(owners)) {
             RouteStep::Subject { subject } => {
                 return Ok(Some(Routed {
@@ -316,7 +305,6 @@ pub fn route(
             RouteStep::Descend { child, local: next } => {
                 doc = child;
                 local = next;
-                page = false;
             }
             RouteStep::Unresolved => return Ok(None),
         }
@@ -324,26 +312,43 @@ pub fn route(
     Ok(None)
 }
 
+/// Whether a failed hit means the point has no place in `doc`: the page found nothing under it,
+/// or `doc` is a document the adapter does not address, which answers no call reliably.
+fn unplaced(tree: &FrameTree, doc: &FrameRef, answer: &CallAnswer) -> bool {
+    !tree.addresses(doc)
+        || matches!(
+            world::decode_answer(answer),
+            Some(Err(error)) if error.code == AssetErrorCode::NoSubject
+        )
+}
+
 /// Place a point of the top viewport in its document, and admit that document as the subject of
 /// the input that will reach the point.
 ///
-/// This is the check a scope that leaves some document unreadable needs before input: a point
-/// over an embedded document that scope does not allow must not be clicked, and neither must
-/// one that cannot be placed at all.
+/// This is the one place a point is bound to a document, and it runs when the input is about to
+/// be sent: after the view check and after the point was brought into the viewport. It is the
+/// check a scope that leaves some document unreadable needs before input: a point over an
+/// embedded document that scope does not allow must not be clicked, and neither must one that
+/// cannot be placed at all.
 ///
 /// # Errors
 ///
-/// Returns the failure of a `call` primitive, a plain failure for a point that cannot be placed
-/// in exactly one document, and [`BrowserError::DocumentUnavailable`] when the scope does not
-/// allow the document the point lands in. Nothing has been sent as input in any of these cases.
+/// Returns the failure of a `call` primitive, [`BrowserError::DocumentUnavailable`] for a point
+/// that cannot be placed in exactly one document, and [`BrowserError::OutsideScope`] when the
+/// scope does not allow the document the point lands in. Nothing has been sent as input in any
+/// of these cases.
 pub fn route_and_admit(
     l: &mut Link<'_>,
     scope: &mut Scope,
     tab_id: u64,
     point: Point,
 ) -> Result<Routed, BrowserError> {
-    let routed = route(l, scope.tree(), tab_id, point, false)?
-        .ok_or_else(|| BrowserError::primitive(UNRESOLVED_POINT))?;
+    // The fact this site knows: the point is in the viewport and no single document of the tree
+    // claims it (nothing under it, an embed no owner or several claim, an embed the extension
+    // could not describe, or a route past the depth bound), so its document cannot be judged.
+    let routed = route(l, scope, tab_id, point)?.ok_or(BrowserError::DocumentUnavailable(
+        DocumentCause::SubjectUnreachable,
+    ))?;
     scope.admit_input_subject(&routed.doc)?;
     Ok(routed)
 }

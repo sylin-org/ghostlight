@@ -1,6 +1,16 @@
 //! Document admission at the executor's common browser boundary, before content extraction.
+//!
+//! This gate decides policy: which documents of a tab the work may touch, and the two rules for
+//! a restricting policy that cannot judge a page (an inventory that may hide a document, and
+//! unbounded work beside a document nobody can address). It does not own the shape of the
+//! inventory (the adapter does, and a list that is not one tree is a protocol failure) or the
+//! binding of a point or the focus to a document (the adapter does that when it sends the input,
+//! through the scope this gate hands it). When the adapter finds such a subject in a document the
+//! scope leaves out, it names the document, and this gate, which holds the decisions, says why.
 
-use crate::browser::adapter::documents::{DocumentInventory, DocumentScope, DOCUMENT_LIMIT};
+use std::collections::HashMap;
+
+use crate::browser::adapter::documents::{DocumentScope, DOCUMENT_LIMIT, DOCUMENT_URL_LIMIT};
 
 use crate::language::coverage::{Coverage, HumanCoverage};
 
@@ -11,15 +21,12 @@ use crate::browser::adapter::{
     PhysicalSemantic, PhysicalTypeFocused, PhysicalTypeText, PhysicalViewPoint, PhysicalWait,
 };
 
-/// The longest document url the executor accepts from an adapter.
-const URL_LIMIT: usize = 8192;
-/// The longest document id, in bytes, an inventory may carry.
-const DOCUMENT_ID_LIMIT: usize = 160;
-
+/// What a command asks of its tab's documents.
 struct RequestScope {
     tab: u64,
+    /// The handles the command names. Their documents are its subjects.
     locators: Vec<String>,
-    points: Vec<PhysicalPoint>,
+    /// The command works on whatever holds the focus, so the top document is not its subject.
     focused: bool,
     whole: bool,
     unbounded: bool,
@@ -30,7 +37,6 @@ impl RequestScope {
         let mut scope = Self {
             tab: 0,
             locators: vec![],
-            points: vec![],
             focused: false,
             whole: false,
             unbounded: false,
@@ -73,22 +79,21 @@ impl RequestScope {
                 scope.locators.push(locator.clone());
                 *tab_id
             }
+            // A point names no document until the page shows where it is. The adapter binds
+            // it when it sends the input, after the view check and the scroll into view.
             BrowserCommand::ActivatePoint(PhysicalPointClick {
-                at: PhysicalViewPoint { tab_id, point, .. },
+                at: PhysicalViewPoint { tab_id, .. },
                 ..
             })
             | BrowserCommand::WheelAt(PhysicalPointWheel {
-                at: PhysicalViewPoint { tab_id, point, .. },
+                at: PhysicalViewPoint { tab_id, .. },
                 ..
             })
-            | BrowserCommand::HoverPoint(PhysicalViewPoint { tab_id, point, .. })
+            | BrowserCommand::HoverPoint(PhysicalViewPoint { tab_id, .. })
             | BrowserCommand::DropImageAt(PhysicalPointDrop {
-                at: PhysicalViewPoint { tab_id, point, .. },
+                at: PhysicalViewPoint { tab_id, .. },
                 ..
-            }) => {
-                scope.points.push(*point);
-                *tab_id
-            }
+            }) => *tab_id,
             BrowserCommand::Fill(PhysicalFill {
                 tab_id,
                 fields,
@@ -125,10 +130,7 @@ impl RequestScope {
                 scope.unbounded = true;
                 *tab_id
             }
-            BrowserCommand::DragPoints(PhysicalPointDrag {
-                tab_id, start, end, ..
-            }) => {
-                scope.points.extend([*start, *end]);
+            BrowserCommand::DragPoints(PhysicalPointDrag { tab_id, .. }) => {
                 scope.unbounded = true;
                 *tab_id
             }
@@ -238,9 +240,13 @@ impl ApplicationExecutor {
         if *present {
             let Some(url) = url
                 .as_deref()
-                .filter(|url| !url.is_empty() && url.len() <= URL_LIMIT)
+                .filter(|url| !url.is_empty() && url.len() <= DOCUMENT_URL_LIMIT)
             else {
-                return Err(BrowserError::DocumentUnavailable);
+                // The fact this site knows: a dialog is showing and the browser named no usable
+                // url for the document that raised it, so nothing can authorize it.
+                return Err(BrowserError::DocumentUnavailable(
+                    DocumentCause::DialogDocumentUnknown,
+                ));
             };
             // The raising frame may be embedded.
             let decision = self.authorize_document(context, context.requirements, url);
@@ -328,16 +334,15 @@ impl ApplicationExecutor {
             BrowserCommand::DescribeDocuments {
                 tab_id: requested.tab,
                 locators: requested.locators.clone(),
-                points: requested.points.clone(),
-                focused: requested.focused,
                 settle_ms,
             },
         )? {
             BrowserOutcome::Documents { tab_id, inventory } if tab_id == requested.tab => inventory,
             _ => return Err(BrowserError::Protocol("expected document inventory".into())),
         };
-        validate_inventory(&inventory)?;
+        inventory.validate()?;
         let mut allowed = Vec::new();
+        let mut denials: HashMap<String, Decision> = HashMap::new();
         let mut hosts = Vec::new();
         let mut first_denial = None;
         let mut required_denial = None;
@@ -365,6 +370,7 @@ impl ApplicationExecutor {
             if decision.allowed {
                 allowed.push(document.id.clone());
             } else {
+                denials.insert(document.id.clone(), decision);
                 first_denial.get_or_insert(decision);
                 coverage.page_excluded_documents += 1;
                 if required {
@@ -378,7 +384,14 @@ impl ApplicationExecutor {
                 }
             }
         }
-        if inventory.incomplete || inventory.unresolved {
+        let unrestricted_documents = context.snapshot.permits_any_document(context.requirements);
+        // A document the inventory may hide is part of what the work asked for when the work
+        // reads the whole page or is not bounded to the documents it names, and when the policy
+        // would have to judge it. Work on named documents under a policy that admits every
+        // document asked nothing of it: a handle's document is always one the inventory shows.
+        if inventory.incomplete
+            && (requested.whole || requested.unbounded || !unrestricted_documents)
+        {
             coverage.unavailable_documents += 1;
         }
         let denied = if requested.unbounded {
@@ -392,18 +405,37 @@ impl ApplicationExecutor {
         if let Some(decision) = denied {
             return Err(BrowserError::DocumentAccess(decision));
         }
-        let unrestricted_documents = context.snapshot.permits_any_document(context.requirements);
-        if inventory.unresolved
-            || inventory.incomplete
-            || allowed.is_empty()
-            || (requested.unbounded
-                && !unrestricted_documents
-                && inventory
-                    .documents
-                    .iter()
-                    .any(|document| !document.supported))
+        // The fact this site knows: the inventory may hide a document, and the policy would
+        // have to judge it. A policy that admits every document has nothing to judge there, so
+        // the documents the inventory does show stay usable and coverage counts the gap
+        // (ADR-0158 amendment of 2026-11-13).
+        if inventory.incomplete && !unrestricted_documents {
+            return Err(BrowserError::DocumentUnavailable(
+                DocumentCause::InventoryIncomplete,
+            ));
+        }
+        // The fact this site knows: the policy admits no document of the tab. When it refused
+        // one, that refusal is the answer, whatever the work asked for. Otherwise the tab holds
+        // no document the adapter can address: nothing in it has a web address.
+        if allowed.is_empty() {
+            return Err(match first_denial {
+                Some(decision) => BrowserError::DocumentAccess(decision),
+                None => BrowserError::DocumentUnavailable(DocumentCause::NoWebDocument),
+            });
+        }
+        // The fact this site knows: the work is not bounded to the documents it names, the
+        // policy leaves documents out, and the tab holds a document nobody can address, so the
+        // work could reach a document the policy never judged.
+        if requested.unbounded
+            && !unrestricted_documents
+            && inventory
+                .documents
+                .iter()
+                .any(|document| !document.supported)
         {
-            return Err(BrowserError::DocumentUnavailable);
+            return Err(BrowserError::DocumentUnavailable(
+                DocumentCause::UnboundedWork,
+            ));
         }
         let tests_absence = matches!(&command, BrowserCommand::Observe(PhysicalWait { condition, .. }) if condition.tests_absence());
         let admitted = allowed.clone();
@@ -460,12 +492,22 @@ impl ApplicationExecutor {
                         | BrowserOutcome::DocumentTree { .. }
                         | BrowserOutcome::Observed { .. }
                 );
+                // The fact this site knows: the observation ran and no admitted document
+                // answered it, so its result says nothing about the page. An adapter that knows
+                // why nothing answered fails with that reason itself; one that reports an empty
+                // result leaves only this: every document the gate admitted was there a moment
+                // ago, so the page changed or stopped answering under the call, and a rerun
+                // reads what the tab shows now.
                 if observation_result && coverage.inspected_documents == 0 {
-                    return Err(BrowserError::DocumentUnavailable);
+                    return Err(BrowserError::PageChanged);
                 }
+                // Absence across content nobody read is never established (ADR-0158 Decision
+                // 4). The result stays unsatisfied, and the frame keeps why, so the sentence
+                // does not say the text stayed.
                 if let BrowserOutcome::Observed { satisfied, .. } = &mut result {
-                    if tests_absence && coverage.limited() {
+                    if tests_absence && coverage.limited() && *satisfied {
                         *satisfied = false;
+                        context.findings.doubt_absence();
                     }
                 }
                 Ok(result)
@@ -473,6 +515,25 @@ impl ApplicationExecutor {
             Ok(_) => Err(BrowserError::Protocol(
                 "expected document-bound receipt".into(),
             )),
+            // The adapter bound a subject (a point, the focus) when it sent the input and found
+            // it in a document the scope leaves out. Nothing was sent there. This gate holds the
+            // reason: the policy refused that document, or nobody can address it.
+            Err(BrowserError::OutsideScope { document }) => {
+                let denied = denials.get(&document).copied();
+                if denied.is_some() {
+                    coverage.excluded_documents += 1;
+                } else {
+                    coverage.unavailable_documents += 1;
+                }
+                self.retain_coverage(context, coverage, hosts);
+                Err(match denied {
+                    Some(decision) => BrowserError::DocumentAccess(decision),
+                    // The fact this site knows: the subject is in a document that is not one
+                    // the adapter can address (no web address, or not described), so it could
+                    // not be put to the policy.
+                    None => BrowserError::DocumentUnavailable(DocumentCause::SubjectUnreachable),
+                })
+            }
             Err(error) => Err(error),
         }
     }
@@ -488,46 +549,4 @@ fn preparation_budget_ms(deadline: Instant) -> u64 {
     u64::try_from(left)
         .unwrap_or(u64::MAX)
         .min(language::settlement::MAX_WAIT_MS)
-}
-
-fn validate_inventory(inventory: &DocumentInventory) -> Result<(), BrowserError> {
-    use std::collections::HashSet;
-    let mut ids = HashSet::new();
-    if inventory.documents.is_empty()
-        || inventory.documents.len() > DOCUMENT_LIMIT
-        || inventory.subjects.len() > DOCUMENT_LIMIT
-        || inventory.documents.iter().any(|document| {
-            document.id.is_empty()
-                || document.id.len() > DOCUMENT_ID_LIMIT
-                || document.url.len() > URL_LIMIT
-                || !ids.insert(document.id.as_str())
-        })
-        || inventory
-            .documents
-            .iter()
-            .filter(|document| document.parent.is_none())
-            .count()
-            != 1
-        || inventory
-            .subjects
-            .iter()
-            .any(|id| !ids.contains(id.as_str()))
-    {
-        return Err(BrowserError::DocumentUnavailable);
-    }
-    for document in &inventory.documents {
-        let mut ancestry = HashSet::new();
-        let mut current = document;
-        while let Some(parent) = &current.parent {
-            if !ancestry.insert(current.id.as_str()) {
-                return Err(BrowserError::DocumentUnavailable);
-            }
-            current = inventory
-                .documents
-                .iter()
-                .find(|item| &item.id == parent)
-                .ok_or(BrowserError::DocumentUnavailable)?;
-        }
-    }
-    Ok(())
 }

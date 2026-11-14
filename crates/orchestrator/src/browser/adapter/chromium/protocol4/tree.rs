@@ -7,6 +7,11 @@
 //! describe stay in the tree as placeholders. They are never targetable, and they make the tree
 //! incomplete for any check that needs all of it.
 //!
+//! This module owns tree shape. An inventory is whatever a published extension sends, so reading
+//! one never fails on its shape: what reaches the top is placed, the rest is left out, and the
+//! result says it is not whole. The authority's list is this module's own output handed back, so
+//! a list that is not one tree is a protocol failure.
+//!
 //! A document is named to the authority by `{frame_id}.{loader_id}` and a placeholder by
 //! `unseen.{n}`. Frame ids are not unique over time, so the loader id is part of every name.
 
@@ -14,15 +19,19 @@ use std::collections::{HashMap, HashSet};
 
 use super::locator::is_browser_id;
 use super::scope::PlannedCall;
-use super::wire::{FrameInventory, FrameRef, GuardDoc};
+use super::wire::{FrameFact, FrameInventory, FrameRef, GuardDoc};
 use super::world;
 use crate::browser::adapter::documents::{PhysicalDocument, DOCUMENT_LIMIT};
 use crate::browser::BrowserError;
+use crate::language::document_refusal::DocumentCause;
 
 /// The separator between the parts of a document name.
 const ID_SEPARATOR: char = '.';
 /// The first part of a placeholder's name.
 const UNSEEN: &str = "unseen";
+/// The protocol failure of a document list or a document that is not of the tree the adapter
+/// described.
+const NOT_THE_DESCRIBED_TREE: &str = "documents are not the tree the adapter described";
 /// The schemes whose documents the adapter can address.
 const ADDRESSABLE_SCHEMES: [&str; 2] = ["http:", "https:"];
 
@@ -96,6 +105,10 @@ fn parse_document_id(id: &str) -> Option<DocumentId> {
     })
 }
 
+fn not_the_described_tree() -> BrowserError {
+    BrowserError::Protocol(NOT_THE_DESCRIBED_TREE.into())
+}
+
 /// Whether the adapter can address a document at this URL.
 fn addressable(url: &str) -> bool {
     ADDRESSABLE_SCHEMES.iter().any(|scheme| {
@@ -112,77 +125,138 @@ pub struct FrameTree {
     nodes: Vec<Node>,
 }
 
+/// The tree read from one frame inventory, and whether it is the whole tab.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Described {
+    /// Every listed frame that reaches the top, with the frames the extension could not describe
+    /// as placeholders.
+    pub tree: FrameTree,
+    /// Whether the tree holds every document of the tab: the extension called its inventory
+    /// complete and nothing it listed was left out.
+    pub whole: bool,
+}
+
 impl FrameTree {
-    /// Read the tree from the extension's frame inventory.
+    /// Read the tree from the extension's frame inventory. This is the one owner of tree shape:
+    /// whatever the extension lists, the result is one tree.
     ///
     /// Frames come in the order the extension walked its sessions, so an out-of-process child
-    /// can follow frames that are not its siblings. Each lands under its parent. Unseen frames
-    /// become placeholders under the top.
+    /// can follow frames that are not its siblings. Each lands under its parent. The top is the
+    /// first frame with no parent, and a frame is placed when its parents reach the top. A
+    /// frame that does not (a parent that is not listed, a second frame with no parent, a
+    /// repeated frame id, a loop) is left out, as is one whose ids cannot make a document name
+    /// and anything past the document limit. Unseen
+    /// frames become placeholders under the top while room is left. A tree with anything left
+    /// out is not whole, and neither is one from an inventory the extension called incomplete.
     ///
     /// # Errors
     ///
-    /// Returns [`BrowserError::DocumentUnavailable`] for an inventory that is not one tree: no
-    /// frames, no or several tops, a duplicate frame, a missing parent, a cycle, or more
-    /// documents than the document limit.
-    pub fn from_inventory(inventory: &FrameInventory) -> Result<Self, BrowserError> {
-        let by_frame: HashMap<&str, usize> = inventory
-            .frames
-            .iter()
-            .enumerate()
-            .map(|(index, frame)| (frame.frame_id.as_str(), index))
-            .collect();
-        let mut slots = Vec::with_capacity(inventory.frames.len() + inventory.unseen.len());
-        let mut parents = Vec::with_capacity(slots.capacity());
-        for frame in &inventory.frames {
-            slots.push(Slot::Real(TreeDocument {
-                doc: FrameRef {
-                    frame_id: frame.frame_id.clone(),
-                    loader_id: frame.loader_id.clone(),
-                },
-                url: frame.url.clone(),
-                supported: !frame.unreachable && addressable(&frame.url),
-            }));
-            parents.push(match &frame.parent_frame_id {
-                None => None,
-                Some(parent) => Some(
-                    *by_frame
-                        .get(parent.as_str())
-                        .ok_or(BrowserError::DocumentUnavailable)?,
-                ),
-            });
+    /// Returns [`BrowserError::DocumentUnavailable`] when no listed frame is a top document.
+    pub fn describe(inventory: &FrameInventory) -> Result<Described, BrowserError> {
+        let frames = &inventory.frames;
+        // A frame is named to the authority by its two ids, and the name must read back. One
+        // whose ids cannot make a name is not listed as far as the tree goes.
+        let nameable =
+            |frame: &FrameFact| is_browser_id(&frame.frame_id) && is_browser_id(&frame.loader_id);
+        let mut by_frame: HashMap<&str, usize> = HashMap::with_capacity(frames.len());
+        for (index, frame) in frames.iter().enumerate() {
+            if nameable(frame) {
+                by_frame.entry(frame.frame_id.as_str()).or_insert(index);
+            }
         }
-        let top = parents
+        // The fact this site knows: the inventory lists no frame without a parent, so the tab
+        // shows no top document to place anything under.
+        let top = frames
             .iter()
-            .position(Option::is_none)
-            .ok_or(BrowserError::DocumentUnavailable)?;
-        for (ordinal, url) in inventory.unseen.iter().enumerate() {
-            slots.push(Slot::Unseen {
-                ordinal,
-                url: url.clone(),
-            });
-            parents.push(Some(top));
+            .position(|frame| frame.parent_frame_id.is_none() && nameable(frame))
+            .ok_or(BrowserError::DocumentUnavailable(
+                DocumentCause::NoWebDocument,
+            ))?;
+        let mut children = vec![Vec::new(); frames.len()];
+        for (index, frame) in frames.iter().enumerate() {
+            let first = by_frame.get(frame.frame_id.as_str()) == Some(&index);
+            let parent = frame
+                .parent_frame_id
+                .as_deref()
+                .and_then(|parent| by_frame.get(parent));
+            if let (true, Some(parent)) = (first, parent) {
+                children[*parent].push(index);
+            }
         }
-        Self::assemble(slots, &parents)
+        let mut nodes = Vec::with_capacity(frames.len().min(DOCUMENT_LIMIT));
+        let mut pending = vec![(top, None)];
+        while let Some((index, parent)) = pending.pop() {
+            if nodes.len() == DOCUMENT_LIMIT {
+                break;
+            }
+            let frame = &frames[index];
+            let placed = nodes.len();
+            nodes.push(Node {
+                slot: Slot::Real(TreeDocument {
+                    doc: FrameRef {
+                        frame_id: frame.frame_id.clone(),
+                        loader_id: frame.loader_id.clone(),
+                    },
+                    url: frame.url.clone(),
+                    supported: !frame.unreachable && addressable(&frame.url),
+                }),
+                parent,
+            });
+            pending.extend(
+                children[index]
+                    .iter()
+                    .rev()
+                    .map(|child| (*child, Some(placed))),
+            );
+        }
+        let placed_frames = nodes.len();
+        let room = DOCUMENT_LIMIT - placed_frames;
+        nodes.extend(
+            inventory
+                .unseen
+                .iter()
+                .enumerate()
+                .take(room)
+                .map(|(ordinal, url)| Node {
+                    slot: Slot::Unseen {
+                        ordinal,
+                        url: url.clone(),
+                    },
+                    parent: Some(0),
+                }),
+        );
+        let whole = inventory.complete
+            && placed_frames == frames.len()
+            && nodes.len() == frames.len() + inventory.unseen.len();
+        let top = FrameRef {
+            frame_id: frames[top].frame_id.clone(),
+            loader_id: frames[top].loader_id.clone(),
+        };
+        Ok(Described {
+            tree: Self { top, nodes },
+            whole,
+        })
     }
 
     /// Read the tree from the documents the authority admitted a request against.
     ///
     /// # Errors
     ///
-    /// Returns [`BrowserError::DocumentUnavailable`] for a name that is neither
-    /// `{frame}.{loader}` nor `unseen.{n}`, and for a list that is not one tree.
+    /// Returns [`BrowserError::Protocol`] for a name that is neither `{frame}.{loader}` nor
+    /// `unseen.{n}`, and for a list that is not one tree. The authority hands back the documents
+    /// [`Self::describe`] reported, so either is a breach between the two, not a page state.
     pub fn from_documents(documents: &[PhysicalDocument]) -> Result<Self, BrowserError> {
         let mut by_id = HashMap::with_capacity(documents.len());
         for (index, document) in documents.iter().enumerate() {
             if by_id.insert(document.id.as_str(), index).is_some() {
-                return Err(BrowserError::DocumentUnavailable);
+                return Err(not_the_described_tree());
             }
         }
         let mut slots = Vec::with_capacity(documents.len());
         let mut parents = Vec::with_capacity(documents.len());
         for document in documents {
             slots.push(
-                match parse_document_id(&document.id).ok_or(BrowserError::DocumentUnavailable)? {
+                match parse_document_id(&document.id).ok_or_else(not_the_described_tree)? {
                     DocumentId::Real(doc) => Slot::Real(TreeDocument {
                         doc,
                         url: document.url.clone(),
@@ -199,7 +273,7 @@ impl FrameTree {
                 Some(parent) => Some(
                     *by_id
                         .get(parent.as_str())
-                        .ok_or(BrowserError::DocumentUnavailable)?,
+                        .ok_or_else(not_the_described_tree)?,
                 ),
             });
         }
@@ -211,7 +285,7 @@ impl FrameTree {
     fn assemble(slots: Vec<Slot>, parents: &[Option<usize>]) -> Result<Self, BrowserError> {
         let count = slots.len();
         if count == 0 || count > DOCUMENT_LIMIT {
-            return Err(BrowserError::DocumentUnavailable);
+            return Err(not_the_described_tree());
         }
         let mut frames = HashSet::new();
         let mut ordinals = HashSet::new();
@@ -221,7 +295,7 @@ impl FrameTree {
                 Slot::Unseen { ordinal, .. } => ordinals.insert(*ordinal),
             };
             if !fresh {
-                return Err(BrowserError::DocumentUnavailable);
+                return Err(not_the_described_tree());
             }
         }
         let mut children = vec![Vec::new(); count];
@@ -229,18 +303,18 @@ impl FrameTree {
         for (index, parent) in parents.iter().enumerate() {
             match parent {
                 None if root.is_none() => root = Some(index),
-                None => return Err(BrowserError::DocumentUnavailable),
+                None => return Err(not_the_described_tree()),
                 Some(parent) => {
                     if *parent == index || !matches!(slots[*parent], Slot::Real(_)) {
-                        return Err(BrowserError::DocumentUnavailable);
+                        return Err(not_the_described_tree());
                     }
                     children[*parent].push(index);
                 }
             }
         }
-        let root = root.ok_or(BrowserError::DocumentUnavailable)?;
+        let root = root.ok_or_else(not_the_described_tree)?;
         let Slot::Real(top) = &slots[root] else {
-            return Err(BrowserError::DocumentUnavailable);
+            return Err(not_the_described_tree());
         };
         let top = top.doc.clone();
         let mut order = Vec::with_capacity(count);
@@ -250,7 +324,7 @@ impl FrameTree {
             pending.extend(children[index].iter().rev());
         }
         if order.len() != count {
-            return Err(BrowserError::DocumentUnavailable);
+            return Err(not_the_described_tree());
         }
         let mut position = vec![0; count];
         for (new, old) in order.iter().enumerate() {
@@ -266,7 +340,7 @@ impl FrameTree {
                 })
             })
             .collect::<Option<Vec<_>>>()
-            .ok_or(BrowserError::DocumentUnavailable)?;
+            .ok_or_else(not_the_described_tree)?;
         Ok(Self { top, nodes })
     }
 
@@ -307,11 +381,11 @@ impl FrameTree {
         self.index_of(doc).is_some()
     }
 
-    /// Whether a real document of the tree lives in this frame, whatever loader it holds.
+    /// Whether this exact document is in the tree and the adapter can address it.
     #[must_use]
-    pub fn holds_frame(&self, frame_id: &str) -> bool {
+    pub fn addresses(&self, doc: &FrameRef) -> bool {
         self.real_documents()
-            .any(|document| document.doc.frame_id == frame_id)
+            .any(|document| document.doc == *doc && document.supported)
     }
 
     /// The URL of the top document, as the inventory reported it or the authority admitted it.
@@ -336,9 +410,7 @@ impl FrameTree {
     #[must_use]
     pub fn supported_ref(&self, id: &str) -> Option<FrameRef> {
         let doc = self.real_ref(id)?;
-        self.real_documents()
-            .any(|document| document.doc == doc && document.supported)
-            .then_some(doc)
+        self.addresses(&doc).then_some(doc)
     }
 
     /// The real documents, in depth-first order.
@@ -381,15 +453,14 @@ impl FrameTree {
     ///
     /// # Errors
     ///
-    /// Returns [`BrowserError::DocumentUnavailable`] when the document is not in the tree.
+    /// Returns [`BrowserError::Protocol`] when the document is not in the tree: a caller binds
+    /// its document to the tree before it asks where the document sits.
     pub fn chain(&self, doc: &FrameRef) -> Result<Vec<PlannedCall>, BrowserError> {
-        let mut index = self
-            .index_of(doc)
-            .ok_or(BrowserError::DocumentUnavailable)?;
+        let mut index = self.index_of(doc).ok_or_else(not_the_described_tree)?;
         let mut calls = Vec::new();
         while let Some(parent) = self.nodes[index].parent {
             let (Some(frame), Some(owner)) = (self.real_at(index), self.real_at(parent)) else {
-                return Err(BrowserError::DocumentUnavailable);
+                return Err(not_the_described_tree());
             };
             calls.push(PlannedCall::owner(
                 &owner.doc,

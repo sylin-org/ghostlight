@@ -70,17 +70,17 @@ pub fn evaluate(
         single_expression(script).filter(|wrapped| wrapped.chars().count() <= SCRIPT_MAX_CHARS);
     let (evaluated, form) = match awaited {
         Some(wrapped) => {
-            let timeout_ms = l.budget_ms();
+            let timeout_ms = l.timed_budget_ms()?;
             match l.send_unless_refused(request(&wrapped, timeout_ms))? {
                 Answer::Done(evaluated) => (evaluated, ScriptForm::Awaited),
                 Answer::Refused => {
-                    let timeout_ms = l.budget_ms();
+                    let timeout_ms = l.timed_budget_ms()?;
                     (l.send(request(script, timeout_ms))?, ScriptForm::AsWritten)
                 }
             }
         }
         None => {
-            let timeout_ms = l.budget_ms();
+            let timeout_ms = l.timed_budget_ms()?;
             (l.send(request(script, timeout_ms))?, ScriptForm::AsWritten)
         }
     };

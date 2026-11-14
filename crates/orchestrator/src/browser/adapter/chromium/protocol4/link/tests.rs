@@ -391,7 +391,7 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
         (
             wire::Failure::DocumentChanged,
             None,
-            BrowserError::DocumentUnavailable,
+            BrowserError::PageChanged,
         ),
         (
             wire::Failure::Timeout,
@@ -735,7 +735,7 @@ fn a_written_command_reached_the_browser_whatever_its_failure() {
     );
     assert_eq!(
         run(FOUR, navigate(), PATIENCE),
-        (Err(BrowserError::DocumentUnavailable), true)
+        (Err(BrowserError::PageChanged), true)
     );
     assert_eq!(
         run("browser_gone", navigate(), PATIENCE),

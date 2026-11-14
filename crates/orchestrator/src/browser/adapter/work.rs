@@ -649,13 +649,12 @@ pub enum PresentationKind {
 /// A closed physical primitive request.
 #[derive(Clone, Debug, PartialEq)]
 pub enum BrowserCommand {
-    /// Observe document identity and routing without extracting page content.
+    /// Observe document identity without extracting page content, and say which documents the
+    /// locators belong to. It asks the page nothing.
     DescribeDocuments {
         tab_id: u64,
         locators: Vec<String>,
-        points: Vec<PhysicalPoint>,
-        focused: bool,
-        /// Optional bounded geometry preparation before binding current subjects.
+        /// Optional bounded geometry preparation before the documents are listed.
         settle_ms: u64,
     },
     /// Run one primitive inside an application-selected physical document scope.

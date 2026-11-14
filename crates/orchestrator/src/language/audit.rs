@@ -311,7 +311,7 @@ impl Refusal {
             | Self::PageRefused { .. }
             | Self::FieldsReverted { .. }
             | Self::FieldValuesRejected { .. }
-            | Self::DocumentUnavailable
+            | Self::DocumentUnavailable { .. }
             | Self::CancelledBeforeDispatch { .. }
             | Self::BrowserUnavailable { .. }
             | Self::BrowserContract
@@ -410,7 +410,7 @@ impl Refusal {
             Self::PageRefused { refusal, .. } => AuditRefusal::PageRefused { cause: *refusal },
             Self::FieldValuesRejected { .. } => AuditRefusal::FieldValuesRejected,
             Self::FieldsReverted { .. } => AuditRefusal::FieldsReverted,
-            Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
+            Self::DocumentUnavailable { .. } => AuditRefusal::DocumentUnavailable,
             Self::CancelledBeforeDispatch { .. } => AuditRefusal::CancelledBeforeDispatch,
             Self::BrowserUnavailable { reason } => {
                 AuditRefusal::BrowserUnavailable { cause: *reason }

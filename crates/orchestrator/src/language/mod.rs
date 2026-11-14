@@ -23,6 +23,7 @@ pub mod control;
 pub mod coverage;
 mod decode;
 pub mod deployment;
+pub mod document_refusal;
 pub mod environment;
 pub mod field_echo;
 pub mod field_problem;

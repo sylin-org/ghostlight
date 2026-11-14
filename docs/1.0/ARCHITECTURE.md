@@ -1418,10 +1418,14 @@ subjects before extraction. Governance admits actual documents through the immut
 the negotiated `document_scope` mechanism carries exact identities and permitted scope. The
 extension uses Chrome document-targeted messaging and supplies physical coverage. Its locator
 mechanism binds frame routing to document identity. Neither relay interprets policy. A locator
-whose embedded document now holds another document, or whose frame is gone from a complete
-inventory, is a stale target that navigated, decided where the adapter describes the documents,
-and a `document_changed` answer to a call that names one locator is the same; an incomplete
-inventory still reads as unverified access. A read targeted below the top document reports the
+whose embedded document now holds another document, or whose frame is not in the described tree,
+is a stale target that navigated, decided where the adapter describes the documents, and a
+`document_changed` answer to a call that names one locator is the same. The frame tree is total:
+it places every frame that reaches the top and marks the inventory incomplete for what it leaves
+out. A restricting policy refuses on an incomplete inventory; a policy that admits every document
+works on the documents shown. A point and the keyboard focus are bound where input is sent, after
+the view check and the scroll, and checked there against the admitted documents. The gate decides
+admission only, and each refusal carries its cause (ADR-0207). A read targeted below the top document reports the
 tab's top URL and no title, so the landing check, the observed host and the `url` fact are the
 tab's, and an embedded host never enters the durable record (ADR-0203 Decisions 5.4 and 6.1).
 

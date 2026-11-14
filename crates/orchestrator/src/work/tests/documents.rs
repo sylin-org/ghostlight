@@ -270,6 +270,14 @@ fn content_and_effects_come_only_from_admitted_documents() {
     );
     assert_eq!(absent.status, Status::Failed, "{}", absent.summary);
     assert_eq!(absent.facts["coverage"]["excluded_documents"], 1);
+    // The text was gone where it was read, so the result does not say it stayed.
+    assert_eq!(absent.facts["satisfied"], false);
+    assert!(
+        absent.summary.contains("absence could not be established")
+            && !absent.summary.contains("never disappeared"),
+        "{}",
+        absent.summary
+    );
     let script = executor.execute(
         &workspace,
         "browser_execute",
@@ -279,6 +287,36 @@ fn content_and_effects_come_only_from_admitted_documents() {
     assert_eq!(script.status, Status::Blocked);
     assert_eq!(script.effect, Effect::None);
     assert_eq!(browser.calls().len(), 2, "the open and the wait");
+    // The same holds for an action's check: the key was pressed, and the check says the page
+    // could not be read in full instead of that the condition failed.
+    browser.push(Ok(BrowserOutcome::KeyPressed {
+        tab: tab(7, "https://example.com/"),
+        key: "Tab".into(),
+        subject: None,
+        committed_urls: vec![],
+    }));
+    browser.push(Ok(BrowserOutcome::Observed {
+        tab_id: 7,
+        satisfied: true,
+        elapsed_ms: 0,
+        readiness: BrowserReadiness::Complete,
+    }));
+    let pressed = executor.execute(
+        &workspace,
+        "browser_press_key",
+        json!({"key":"Tab","expect":{"condition":"text_absent","value":"private"}}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(pressed.status, Status::Failed, "{}", pressed.summary);
+    assert_eq!(pressed.effect, Effect::Applied);
+    assert_eq!(pressed.facts["reason"], "document_unavailable");
+    assert!(
+        pressed
+            .summary
+            .starts_with("The expected condition could not be confirmed"),
+        "{}",
+        pressed.summary
+    );
     browser.set_documents(7, inventory(false));
     browser.push(Ok(BrowserOutcome::Text {
         tab_id: 7,
@@ -338,6 +376,8 @@ fn content_and_effects_come_only_from_admitted_documents() {
             assert_eq!(result.status, Status::Failed, "{}", result.summary);
             assert_eq!(result.effect, Effect::None);
             assert_eq!(result.facts["coverage"]["unavailable_documents"], 1);
+            assert_eq!(result.facts["reason"], "document_unavailable");
+            assert_eq!(result.facts["document_cause"], "unbounded_work");
             assert!(browser.scopes().is_empty(), "no scoped work is sent");
             assert_eq!(browser.calls().len(), 1, "only the navigation ran");
             assert_eq!(
@@ -364,11 +404,156 @@ fn content_and_effects_come_only_from_admitted_documents() {
     let scope = browser.scopes().last().unwrap().clone();
     assert!(!scope.strict_tree && !scope.watch_changes);
 
-    // A recording is saved nowhere unless every captured page is still admitted.
-    for destination in [
+    // An inventory the browser could not complete: all-open work reads what is shown and counts
+    // the gap, while a restricting policy cannot judge what it cannot see and sends nothing.
+    for restricted in [false, true] {
+        let path = restricted.then(|| policy_file(false));
+        let (executor, browser, _, workspace, _) = fixture_with_governance(GovernanceFacade::new(
+            path.as_ref().map(|path| path.to_path_buf()),
+        ));
+        open(&executor, &browser, &workspace);
+        let mut documents = inventory(true);
+        documents.documents.truncate(1);
+        documents.incomplete = true;
+        browser.set_documents(7, documents);
+        if !restricted {
+            browser.push(Ok(BrowserOutcome::Text {
+                tab_id: 7,
+                text: "Shown".into(),
+                title: "Page".into(),
+                url: "https://example.com/".into(),
+                truncated: false,
+            }));
+        }
+        let read = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(read.facts["coverage"]["unavailable_documents"], 1);
+        if restricted {
+            assert_eq!(read.status, Status::Failed, "{}", read.summary);
+            assert_eq!(read.facts["document_cause"], "inventory_incomplete");
+            assert!(browser.scopes().is_empty(), "no scoped work is sent");
+            continue;
+        }
+        assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
+        // Work on a handle asked nothing of a document the list may hide, so with no policy
+        // the gap is not its coverage and a target's absence in its own document stands.
+        let target = handle_of(
+            &executor,
+            &browser,
+            &workspace,
+            ObservedTarget {
+                locator: "spinner".into(),
+                role: "status".into(),
+                name: "Loading".into(),
+                ..Default::default()
+            },
+        );
+        browser.push(Ok(BrowserOutcome::Observed {
+            tab_id: 7,
+            satisfied: true,
+            elapsed_ms: 0,
+            readiness: BrowserReadiness::Complete,
+        }));
+        let gone = executor.execute(
+            &workspace,
+            "browser_wait",
+            json!({"condition":"target_absent","target":target}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(gone.status, Status::Succeeded, "{}", gone.summary);
+        assert_eq!(gone.facts["satisfied"], true);
+    }
+
+    // A point and the focus are bound by the adapter when it sends the input, so the gate
+    // describes no subject for them and still sends the scope. When the adapter finds the
+    // subject in a document the scope leaves out, it names the document and sends nothing; the
+    // gate holds the reason: the policy refused that document, or nobody can address it.
+    for (child_supported, status) in [(true, Status::Blocked), (false, Status::Failed)] {
+        let (_policy, executor, browser, workspace, _) = governed(false);
+        browser.set_documents(7, inventory(child_supported));
+        browser.push(Err(BrowserError::OutsideScope {
+            document: "child".into(),
+        }));
+        let pressed = executor.execute(
+            &workspace,
+            "browser_press_key",
+            json!({"key":"Tab"}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(pressed.status, status, "{}", pressed.summary);
+        assert_eq!(pressed.effect, Effect::None);
+        // A policy refusal carries no document cause; an unreachable subject names its own.
+        let cause = (!child_supported).then_some("subject_unreachable");
+        assert_eq!(pressed.facts["document_cause"].as_str(), cause);
+        let scope = browser.scopes().last().unwrap().clone();
+        assert!(scope.subjects.is_empty() && scope.allowed == ["top"]);
+        let (excluded, unavailable) = if child_supported { (1, 0) } else { (0, 1) };
+        assert_eq!(pressed.facts["coverage"]["excluded_documents"], excluded);
+        assert_eq!(
+            pressed.facts["coverage"]["unavailable_documents"],
+            unavailable
+        );
+    }
+
+    // A tab with no document that has a web address is its own cause, under every policy; one
+    // whose every document the policy refused is the policy's refusal.
+    for (url, status, cause) in [
+        ("about:blank", Status::Failed, Some("no_web_document")),
+        (
+            "https://private-frame.invalid/",
+            Status::Blocked,
+            None::<&str>,
+        ),
+    ] {
+        let (_policy, executor, browser, workspace, _) = governed(false);
+        let mut documents = inventory(true);
+        documents.documents.truncate(1);
+        documents.documents[0].url = url.into();
+        documents.documents[0].supported = url.starts_with("https:");
+        browser.set_documents(7, documents);
+        let read = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(read.status, status, "{}", read.summary);
+        assert_eq!(read.facts["document_cause"].as_str(), cause);
+        assert!(browser.scopes().is_empty(), "no scoped work is sent");
+    }
+
+    // A document that changed while an observation ran, with no single handle to blame, is a
+    // page change: the observation runs once more on the page the tab shows now.
+    let (_policy, executor, browser, workspace, _) = governed(false);
+    browser.set_documents(7, inventory(true));
+    browser.push(Err(BrowserError::PageChanged));
+    browser.push(Ok(BrowserOutcome::Text {
+        tab_id: 7,
+        text: "Now".into(),
+        title: "Page".into(),
+        url: "https://example.com/".into(),
+        truncated: false,
+    }));
+    let read = executor.execute(
+        &workspace,
+        "browser_read",
         json!({}),
-        json!({"download":true}),
-        json!({"target":"target_fixture"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(read.status, Status::Succeeded, "{}", read.summary);
+    assert_eq!(browser.scopes().len(), 2, "the read ran twice");
+
+    // A recording is saved nowhere unless every captured page is still admitted, and nowhere
+    // when the browser could not list every page it captured.
+    for (destination, listed) in [
+        (json!({}), true),
+        (json!({"download":true}), true),
+        (json!({"target":"target_fixture"}), true),
+        (json!({}), false),
     ] {
         let path = policy_file(false);
         let (executor, browser, _, workspace, _) =
@@ -376,9 +561,12 @@ fn content_and_effects_come_only_from_admitted_documents() {
         holding_recording(&executor, &workspace);
         open(&executor, &browser, &workspace);
         let mut summary = recording_summary(RecordingState::Frozen, "https://example.com/");
-        summary
-            .source_urls
-            .push("https://private-frame.invalid/".into());
+        if listed {
+            summary
+                .source_urls
+                .push("https://private-frame.invalid/".into());
+        }
+        summary.source_urls_complete = listed;
         browser.push(Ok(BrowserOutcome::RecordingStopped {
             summary,
             changed: false,
@@ -391,7 +579,13 @@ fn content_and_effects_come_only_from_admitted_documents() {
             arguments,
             &CancellationToken::default(),
         );
-        assert_eq!(result.status, Status::Blocked, "{}", result.summary);
+        let (status, cause) = if listed {
+            (Status::Blocked, None)
+        } else {
+            (Status::Failed, Some("recording_sources_incomplete"))
+        };
+        assert_eq!(result.status, status, "{}", result.summary);
+        assert_eq!(result.facts["document_cause"].as_str(), cause);
         assert_eq!(
             browser.calls().len(),
             2,

@@ -7,6 +7,7 @@ use super::super::super::wire::{CaptureClip, InputStep};
 use super::*;
 use crate::browser::adapter::{CaptureScope, PhysicalRectangle, ScriptForm, ViewportGeometry};
 use crate::browser::adapter::{PhysicalClick, PhysicalPressKey, PhysicalTypeFocused};
+use crate::language::document_refusal::DocumentCause;
 use crate::language::page_refusal::PageRefusal;
 use crate::language::PointerButton;
 
@@ -145,8 +146,12 @@ pub(super) fn kinds(call: &wire::Call) -> Vec<String> {
         .collect()
 }
 
+/// Every document allowed, by a policy that admits every document.
 fn all_open() -> DocumentScope {
-    scope(&["T.t1", "C.c1", "D.d1"], false)
+    DocumentScope {
+        watch_changes: false,
+        ..scope(&["T.t1", "C.c1", "D.d1"], false)
+    }
 }
 
 fn activate(locator: &str) -> BrowserCommand {
@@ -227,8 +232,10 @@ fn a_dialog_during_a_click_is_success() {
 /// failed, a click on a removed control (which offers the page's lookup bound to its document only
 /// when the service reads it whole), and a key press or text whose control lost the focus, went
 /// stale, moved or is not a text control; text typed into the focused control is typed only in the
-/// first document that holds the focus, and a key press without a handle needs the bound subject
-/// to hold it (ACCEPTANCE, executor and truth gates 6 and document boundary evidence 1).
+/// document that holds the focus, and a key press without a handle is bound to that document when
+/// it is sent: refused before any key when the scope leaves the document out, and sent to
+/// whatever holds the focus only when no document reports it and the policy admits every
+/// document (ACCEPTANCE, executor and truth gates 6 and document boundary evidence 1).
 #[test]
 fn a_preparation_failure_is_its_own_refusal_and_sends_no_input() {
     for code in ["stale_locator", "not_visible", "disabled"] {
@@ -248,7 +255,7 @@ fn a_preparation_failure_is_its_own_refusal_and_sends_no_input() {
 
     a_click_on_a_removed_control_returns_the_page_lookup_bound_to_its_document();
     a_click_on_a_removed_control_offers_no_lookup_it_cannot_read_whole();
-    a_key_press_without_a_locator_requires_the_bound_subject_to_hold_the_focus();
+    a_key_press_without_a_locator_goes_to_the_document_that_holds_the_focus();
     a_lost_focus_refuses_the_key_press_with_nothing_sent();
     a_stale_locator_refuses_the_key_press_with_nothing_sent();
     a_focus_that_moved_refuses_the_text_with_nothing_sent();
@@ -361,21 +368,54 @@ fn a_failure_after_the_click_has_an_unknown_effect() {
     a_dialog_while_typing_leaves_the_effect_unknown();
 }
 
-fn a_key_press_without_a_locator_requires_the_bound_subject_to_hold_the_focus() {
-    let (port, fake) = rig(page(), finished);
-    let mut bound = all_open();
-    bound.subjects = vec!["C.c1".into()];
-    call(&port, scoped(bound, press(None, "Tab", &[]))).unwrap();
+fn a_key_press_without_a_locator_goes_to_the_document_that_holds_the_focus() {
+    let (port, fake) = rig(focus_held_by(&["C"]), finished);
+    call(&port, scoped(all_open(), press(None, "Tab", &[]))).unwrap();
+    let calls = calls_seen(&fake);
+    assert_eq!(kinds(&calls[0]), ["focus_probe"; 3]);
+    assert_eq!(frames_of(&calls[0]), ["T", "C", "D"]);
+    assert!(calls[0].guard.is_some());
     let precondition = inputs_seen(&fake)[0].precondition.clone().unwrap();
     assert_eq!(precondition.message["kind"], "require_focused");
     assert_eq!(precondition.frame.unwrap().frame_id, "C");
 
-    let (port, fake) = rig(page(), finished);
+    // The focus is in a document the scope leaves out: every document of the tree is asked,
+    // and the key is refused before it is sent, naming the document.
+    let (port, fake) = rig(focus_held_by(&["C"]), finished);
+    assert_eq!(
+        call(
+            &port,
+            scoped(scope(&["T.t1", "D.d1"], false), press(None, "Tab", &[]))
+        ),
+        Err(BrowserError::OutsideScope {
+            document: "C.c1".into()
+        })
+    );
+    assert!(inputs_seen(&fake).is_empty());
+
+    // No document reports the focus. A policy that admits every document has nothing to
+    // refuse, so the key goes to whatever holds the focus; one that leaves documents out
+    // cannot tell whether the focus is in one of them.
+    let (port, fake) = rig(focus_held_by(&[]), finished);
     call(&port, scoped(all_open(), press(None, "Tab", &[]))).unwrap();
     assert!(
         inputs_seen(&fake)[0].precondition.is_none(),
-        "a scope that bound no subject presses into whatever holds the focus"
+        "a focus no document claims is pressed into under an open policy"
     );
+    let (port, fake) = rig(focus_held_by(&[]), finished);
+    assert_eq!(
+        call(
+            &port,
+            scoped(
+                scope(&["T.t1", "C.c1", "D.d1"], false),
+                press(None, "Tab", &[])
+            )
+        ),
+        Err(BrowserError::DocumentUnavailable(
+            DocumentCause::SubjectUnreachable
+        ))
+    );
+    assert!(inputs_seen(&fake).is_empty());
 }
 
 /// An input the extension reports as the real one does for a refused precondition: the receipt
@@ -385,10 +425,8 @@ fn precondition_refused(code: &'static str) -> impl Fn(&wire::Primitive) -> Out 
 }
 
 fn a_lost_focus_refuses_the_key_press_with_nothing_sent() {
-    let (port, _fake) = rig(page(), precondition_refused("focus_lost"));
-    let mut bound = all_open();
-    bound.subjects = vec!["C.c1".into()];
-    let error = call(&port, scoped(bound, press(None, "Tab", &[]))).unwrap_err();
+    let (port, _fake) = rig(focus_held_by(&["C"]), precondition_refused("focus_lost"));
+    let error = call(&port, scoped(all_open(), press(None, "Tab", &[]))).unwrap_err();
     assert_eq!(error, BrowserError::primitive("focus_lost"));
 }
 
@@ -416,7 +454,7 @@ fn a_focus_that_moved_refuses_the_text_with_nothing_sent() {
     assert_eq!(error, BrowserError::primitive("no_focused_control"));
 }
 
-/// Typing into the focused control with the focus held by `holders`, each answering its
+/// A page whose focus is held by `holders`: each says so to a focus probe and answers its
 /// `verify_focused_text`.
 fn focus_held_by(holders: &'static [&'static str]) -> Calls {
     Box::new(move |call| {
@@ -425,6 +463,9 @@ fn focus_held_by(holders: &'static [&'static str]) -> Calls {
             .zip(frames_of(call))
             .map(
                 |(world, frame)| match world.message["kind"].as_str().unwrap() {
+                    "focus_probe" => {
+                        returned(json!({"focused": holders.contains(&frame.as_str())}))
+                    }
                     "verify_focused_text" if !holders.contains(&frame.as_str()) => {
                         refused("no_focused_control")
                     }
@@ -448,16 +489,18 @@ fn typing_into_the_focused_control_clears_and_types_only_in_the_first_focused_do
     ));
     let calls = calls_seen(&fake);
     assert_eq!(calls[0].mode, wire::CallMode::Parallel);
+    assert_eq!(kinds(&calls[0]), ["focus_probe"; 3]);
     assert_eq!(frames_of(&calls[0]), ["T", "C", "D"]);
     assert!(calls[0].guard.is_some());
-    assert_eq!(calls[1].mode, wire::CallMode::Sequence);
-    assert_eq!(kinds(&calls[1]), ["clear_focused", "verify_focused_text"]);
+    assert_eq!(kinds(&calls[1]), ["verify_focused_text"]);
+    assert_eq!(calls[2].mode, wire::CallMode::Sequence);
+    assert_eq!(kinds(&calls[2]), ["clear_focused", "verify_focused_text"]);
     assert_eq!(
-        frames_of(&calls[1]),
-        ["C", "C"],
+        [frames_of(&calls[1]), frames_of(&calls[2])].concat(),
+        ["C", "C", "C"],
         "the first focused document in tree order, and no other"
     );
-    assert_eq!(calls.len(), 2);
+    assert_eq!(calls.len(), 3);
     let input = &inputs_seen(&fake)[0];
     let precondition = input.precondition.as_ref().unwrap();
     assert_eq!(precondition.message["kind"], "verify_focused_text");
@@ -476,7 +519,13 @@ fn typing_with_no_focused_text_control_fails_before_anything_is_sent() {
     let error = call(&port, scoped(all_open(), type_focused(true))).unwrap_err();
     assert_eq!(error, BrowserError::primitive("no_focused_control"));
     assert!(inputs_seen(&fake).is_empty());
-    assert_eq!(calls_seen(&fake).len(), 1, "nothing was cleared");
+    let calls = calls_seen(&fake);
+    assert_eq!(
+        frames_of(&calls[1]),
+        ["T", "C", "D"],
+        "with no document reporting the focus, every readable one is asked"
+    );
+    assert_eq!(calls.len(), 2, "nothing was cleared");
 }
 
 fn a_dialog_while_typing_leaves_the_effect_unknown() {

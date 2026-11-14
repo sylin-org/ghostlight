@@ -29,13 +29,14 @@ pub mod world;
 use self::link::Link;
 use self::locator::bind_lookup;
 use self::scope::Scope;
-use self::translate::observe::{self, Subjects};
+use self::translate::observe;
 use self::translate::records::{self, PageExport};
 use self::translate::{
     capture, forms, keyboard, pointer, points, present, reach, read, script, tabs,
 };
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, RecordingDestination};
 use crate::browser::BrowserError;
+use crate::workspace::StaleReason;
 
 /// The failure of document-scoped work inside document-scoped work, or of a document
 /// description inside a scope.
@@ -44,19 +45,20 @@ const NESTED_DOCUMENTS: &str = "nested document execution is invalid";
 /// Carry one unit of browser work over a protocol-4 connection.
 ///
 /// Work inside a document scope runs with that scope admitted, and answers with what it read
-/// alongside what the scope reached. A command that names one locator tells the [`Link`], so a
-/// document change the browser reports is that locator gone stale, and a stale locator's lookup
-/// is bound to that locator's document.
+/// alongside what the scope reached. A command that names one locator works in that locator's
+/// document and the documents above it, so a page change reported before any effect is that
+/// locator gone stale as navigated, and a stale locator's lookup is bound to that locator's
+/// document. With no single handle to blame, the change stays a page change.
 ///
 /// # Errors
 ///
 /// Returns the failure of the first primitive that failed, as the [`Link`] maps it.
 pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, BrowserError> {
     let subject = command.sole_locator().map(str::to_owned);
-    if subject.is_some() {
-        l.names_one_locator();
-    }
-    carry(command, l).map_err(|error| bind_lookup(error, subject.as_deref()))
+    carry(command, l).map_err(|error| match (error, subject.as_deref()) {
+        (BrowserError::PageChanged, Some(_)) => BrowserError::stale(StaleReason::Navigated),
+        (error, subject) => bind_lookup(error, subject),
+    })
 }
 
 /// Carry one unit of browser work, scoped or not.
@@ -101,19 +103,8 @@ fn translate(
         BrowserCommand::DescribeDocuments {
             tab_id,
             locators,
-            points,
-            focused,
             settle_ms,
-        } => observe::describe_documents(
-            l,
-            tab_id,
-            Subjects {
-                locators: &locators,
-                points: &points,
-                focused,
-            },
-            settle_ms,
-        ),
+        } => observe::describe_documents(l, tab_id, &locators, settle_ms),
         BrowserCommand::ListTabs => tabs::list_tabs(l),
         BrowserCommand::FocusTab { tab_id } => tabs::focus_tab(l, tab_id),
         BrowserCommand::OpenTab {

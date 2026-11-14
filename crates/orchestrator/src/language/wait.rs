@@ -14,6 +14,41 @@ const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
 pub(super) const EXPECT_REFUSAL: &str =
     "expect supports load_ready, url_contains, text_present, or text_absent";
 
+/// What a wait or a check found.
+///
+/// A wait that was not met is one of two things, and they are different sentences: the page was
+/// seen without the condition, or an absence held in everything that was read while part of the
+/// page went unread. The second is still not met, because absence across unread content is never
+/// established (ADR-0158 Decision 4).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Finding {
+    /// The condition held.
+    Met,
+    /// The condition did not hold in what was read.
+    Unmet,
+    /// An absence held in what was read, and part of the page could not be read.
+    Unproven,
+}
+
+impl Finding {
+    /// The finding of an observation: whether it was satisfied, and whether the document gate
+    /// withdrew an absence because coverage was limited.
+    #[must_use]
+    pub const fn of(satisfied: bool, absence_doubted: bool) -> Self {
+        match (satisfied, absence_doubted) {
+            (true, _) => Self::Met,
+            (false, true) => Self::Unproven,
+            (false, false) => Self::Unmet,
+        }
+    }
+
+    /// Whether the condition held. Only this reaches the `satisfied` fact and the status.
+    #[must_use]
+    pub const fn satisfied(self) -> bool {
+        matches!(self, Self::Met)
+    }
+}
+
 /// One condition a wait can wait for.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum WaitCondition {

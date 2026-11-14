@@ -3,19 +3,23 @@
 //! A read asks every admitted document at once where it can, and folds the answers in tree
 //! order with the top document first, so the merged answer never depends on which document
 //! answered first. A document that fails contributes nothing to a whole-page read; the scope
-//! records it as unavailable. Reads that name their documents, by locator or by focus, fail
-//! with the document's own failure.
+//! records it as unavailable. A whole-page read that no document answered is not an empty page:
+//! it fails with the first document's own failure, because only this side knows why nothing
+//! answered. Reads that name their documents, by locator or by focus, fail with the document's
+//! own failure.
 
 use super::super::link::{CallRequest, Link};
 use super::super::locator::{rescope, Locator};
 use super::super::merge::{self, DocumentTargets};
 use super::super::scope::{PlannedCall, Scope};
-use super::super::wire::FrameRef;
-use super::super::world::{self, Article, Message, Targets, Text, TreeValue};
+use super::super::wire::{CallAnswer, FrameRef};
+use super::super::world::{self, Article, FocusProbe, Message, Targets, Text, TreeValue};
 use super::value;
 use crate::browser::adapter::{BrowserOutcome, Listing, ObservedTarget, PhysicalSemantic};
 use crate::browser::BrowserError;
+use crate::language::document_refusal::DocumentCause;
 use crate::language::{FindScope, InspectScope, ReadMode};
+use serde::de::DeserializeOwned;
 
 /// The most nodes one structure tree holds across every document. Every document is asked
 /// for its share as `max_nodes`, and the merged tree is trimmed to it once.
@@ -150,6 +154,7 @@ fn targets(
         true,
         ask * merge::TARGET_WORST_CHARS,
     )?;
+    some_answered::<Targets>(&answers)?;
     let found = docs.iter().zip(&answers).filter_map(|(doc, answer)| {
         value::<Targets>(answer).ok().map(|found| DocumentTargets {
             targets: rescope(doc, found.targets),
@@ -212,15 +217,21 @@ pub fn read_document(
             });
         }
     }
+    // The fact this site knows: the scope holds no readable document to ask.
     let Some((first, rest)) = docs.split_first() else {
-        return Err(BrowserError::DocumentUnavailable);
+        return Err(BrowserError::DocumentUnavailable(
+            DocumentCause::NoWebDocument,
+        ));
     };
     let plan = scope.call(
         first,
         world::read_text(None, Some(ReadMode::Visible.as_str()), max_chars),
     )?;
     let answers = one(l, scope, tab_id, plan)?;
-    let first_text = value::<Text>(&answers[0]).ok();
+    let (first_text, first_failure) = match value::<Text>(&answers[0]) {
+        Ok(text) => (Some(text), None),
+        Err(error) => (None, Some(error)),
+    };
     if top_readable && first_text.is_some() {
         top_answer.clone_from(&first_text);
     }
@@ -238,6 +249,13 @@ pub fn read_document(
         sections.extend(answers.iter().map(|answer| value::<Text>(answer).ok()));
         unread = later;
         remaining = merge::remaining_after(sections.iter().map(Option::as_ref), max_chars);
+    }
+    if let (Some(failure), None, true) = (
+        first_failure,
+        &top_answer,
+        sections.iter().all(Option::is_none),
+    ) {
+        return Err(failure);
     }
     let skipped = !unread.is_empty();
     let merged = merge::text_sections(sections.iter().map(Option::as_ref), max_chars, skipped);
@@ -280,10 +298,13 @@ pub fn inspect_tree(
     }
     let docs = scope.content_docs();
     let top = scope.top();
+    let mut failure = None;
     let (root, children) = if docs.first() == Some(&top) {
         let plan = scope.call(&top, world::inspect_tree(None, max_depth, TREE_NODE_LIMIT))?;
         let answers = one(l, scope, tab_id, plan)?;
-        (value::<TreeValue>(&answers[0]).ok(), &docs[1..])
+        let root = value::<TreeValue>(&answers[0]);
+        failure = root.as_ref().err().cloned();
+        (root.ok(), &docs[1..])
     } else {
         (None, docs.as_slice())
     };
@@ -301,7 +322,13 @@ pub fn inspect_tree(
             first,
             plan.max_nodes * merge::TREE_NODE_WORST_CHARS,
         )?;
+        if failure.is_none() {
+            failure = some_answered::<TreeValue>(&answers).err();
+        }
         subtrees.extend(answers.iter().filter_map(|answer| value(answer).ok()));
+    }
+    if let (Some(failure), None, true) = (failure, &root, subtrees.is_empty()) {
+        return Err(failure);
     }
     let unread = plan.is_none() && !children.is_empty();
     let merged = merge::append_and_trim(root, subtrees, unread, TREE_NODE_LIMIT);
@@ -355,8 +382,8 @@ pub fn describe_targets(
     })
 }
 
-/// Describe the focused control: ask the request's subject documents, or every readable one,
-/// and take the first that answers in tree order.
+/// Describe the focused control: ask the document that holds the focus, or every readable one
+/// when none reports it, and take the first that answers in tree order.
 ///
 /// # Errors
 ///
@@ -367,7 +394,7 @@ pub fn describe_focused(
     scope: &mut Scope,
     tab_id: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let docs = focus_candidates(scope);
+    let docs = focus_documents(l, scope, tab_id)?;
     let plans = plan_each(scope, &docs, |_| world::describe_focused())?;
     let answers = all(l, scope, tab_id, &plans, true)?;
     let mut failure = None;
@@ -385,23 +412,94 @@ pub fn describe_focused(
             }
         }
     }
-    Err(failure.unwrap_or(BrowserError::DocumentUnavailable))
+    // The fact this site knows: the scope holds no readable document to ask.
+    Err(failure.unwrap_or(BrowserError::DocumentUnavailable(
+        DocumentCause::NoWebDocument,
+    )))
 }
 
-/// The documents that may hold the page's focus: the request's subject documents that are
-/// readable, or every readable document when the request bound none.
-pub(super) fn focus_candidates(scope: &Scope) -> Vec<FrameRef> {
-    let readable = scope.content_docs();
-    let subjects: Vec<FrameRef> = readable
-        .iter()
-        .filter(|doc| scope.subjects().contains(doc))
-        .cloned()
+/// The document that holds the page's focus, found when the work that needs it runs.
+///
+/// Every addressable document of the tree is asked at once, with the scope's guard, whether it
+/// holds the focus. Asking reads no content, so a document the scope leaves out is asked too:
+/// that is how a focus in such a document is refused instead of typed into. The first document
+/// in tree order that says so is the holder, and it is admitted as a subject of the scope's
+/// input. When no document reports the focus, a policy that admits every document has nothing
+/// to refuse and the answer is `None`.
+///
+/// # Errors
+///
+/// Returns the failure of the `call` primitive, [`BrowserError::OutsideScope`] when the holder
+/// is a document the scope does not allow, and [`BrowserError::DocumentUnavailable`] when no
+/// document reports the focus and the policy leaves some document out. Nothing has been sent as
+/// input in any of these cases.
+pub(super) fn focus_holder(
+    l: &mut Link<'_>,
+    scope: &mut Scope,
+    tab_id: u64,
+) -> Result<Option<FrameRef>, BrowserError> {
+    let docs: Vec<FrameRef> = scope
+        .tree()
+        .real_documents()
+        .filter(|document| document.supported)
+        .map(|document| document.doc.clone())
         .collect();
-    if subjects.is_empty() {
-        readable
-    } else {
-        subjects
+    let plans = plan_each(scope, &docs, |_| world::focus_probe())?;
+    let answers = all(l, scope, tab_id, &plans, true)?;
+    let holder = docs
+        .into_iter()
+        .zip(&answers)
+        .find(|(_, answer)| value::<FocusProbe>(answer).is_ok_and(|probe| probe.focused))
+        .map(|(doc, _)| doc);
+    match holder {
+        Some(holder) => {
+            scope.admit_input_subject(&holder)?;
+            Ok(Some(holder))
+        }
+        None if scope.unrestricted() => Ok(None),
+        // The fact this site knows: no addressable document reports the page's focus, and the
+        // policy leaves documents out, so the focus may be in one it would refuse.
+        None => Err(BrowserError::DocumentUnavailable(
+            DocumentCause::SubjectUnreachable,
+        )),
     }
+}
+
+/// The documents to ask about the focused control: the one that holds the focus, or every
+/// readable document when none reports it.
+///
+/// # Errors
+///
+/// Returns what [`focus_holder`] returns.
+pub(super) fn focus_documents(
+    l: &mut Link<'_>,
+    scope: &mut Scope,
+    tab_id: u64,
+) -> Result<Vec<FrameRef>, BrowserError> {
+    Ok(match focus_holder(l, scope, tab_id)? {
+        Some(holder) => vec![holder],
+        None => scope.content_docs(),
+    })
+}
+
+/// Check that some document answered a whole-page read with a value of its kind.
+///
+/// # Errors
+///
+/// Returns the first document's own failure, in plan order, when none did.
+pub(super) fn some_answered<T: DeserializeOwned>(
+    answers: &[CallAnswer],
+) -> Result<(), BrowserError> {
+    let mut first = None;
+    for answer in answers {
+        match value::<T>(answer) {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                first.get_or_insert(error);
+            }
+        }
+    }
+    first.map_or(Ok(()), Err)
 }
 
 /// Plan one message for each document. Every call goes through the scope.
@@ -440,8 +538,11 @@ fn within_frames(
     guarded: bool,
     characters: usize,
 ) -> Result<super::super::link::Answers, BrowserError> {
+    // The fact this site knows: the scope holds no readable document to ask.
     if plans.is_empty() {
-        return Err(BrowserError::DocumentUnavailable);
+        return Err(BrowserError::DocumentUnavailable(
+            DocumentCause::NoWebDocument,
+        ));
     }
     let mut answers = Vec::with_capacity(plans.len());
     for (index, batch) in plans
@@ -462,8 +563,11 @@ pub(super) fn all(
     plans: &[PlannedCall],
     guarded: bool,
 ) -> Result<super::super::link::Answers, BrowserError> {
+    // The fact this site knows: the scope holds no readable document to ask.
     if plans.is_empty() {
-        return Err(BrowserError::DocumentUnavailable);
+        return Err(BrowserError::DocumentUnavailable(
+            DocumentCause::NoWebDocument,
+        ));
     }
     let request = CallRequest::parallel(tab_id, plans);
     let request = if guarded {

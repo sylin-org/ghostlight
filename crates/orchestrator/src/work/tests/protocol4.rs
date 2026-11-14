@@ -649,12 +649,19 @@ fn a_dialog_is_answered_from_the_browsers_record_and_authorized_by_its_document(
         let before = requests_so_far(&fake);
         for arguments in [json!({"action": "status"}), json!({"action": "accept"})] {
             let result = execute(&executor, &workspace, "browser_dialog", arguments);
+            let cause = crate::language::document_refusal::DocumentCause::DialogDocumentUnknown;
             assert_plain(
                 &result,
                 Status::Failed,
-                "Document access could not be verified.",
+                crate::language::document_refusal::summary(cause),
                 "document_unavailable",
             );
+            // The cause is one fact, and no step is the dialog call this same rule refuses.
+            assert_eq!(result.facts["document_cause"], cause.word());
+            assert!(result
+                .next_steps
+                .iter()
+                .all(|step| !step.contains("browser_dialog")));
             assert!(!serde_json::to_string(&result)
                 .unwrap()
                 .contains(DIALOG_MESSAGE));

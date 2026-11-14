@@ -5,8 +5,10 @@
 //! whatever holds the focus first finds the document that holds it, checks the control still
 //! takes text, and sends the text as input with the same check as its precondition, so the page
 //! cannot move the focus between the check and the first keystroke. A key press is input behind
-//! a precondition too: the located control takes the focus first, or the document the request
-//! bound as the focus must still hold it. A refused precondition sends no key.
+//! a precondition too: the located control takes the focus first, or the document found holding
+//! the focus must still hold it. A refused precondition sends no key. The focus is bound here,
+//! when the input is sent, through the scope: a focus in a document the scope leaves out is
+//! refused before any key.
 
 use serde_json::Value;
 
@@ -16,12 +18,13 @@ use super::super::locator::Locator;
 use super::super::scope::Scope;
 use super::super::wire::InputStep;
 use super::super::world::{self, Focused, Typed, Uploaded};
-use super::read::{all, focus_candidates, one, plan_each};
+use super::read::{all, focus_documents, focus_holder, one, plan_each};
 use super::{input_for, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{
     BrowserOutcome, PhysicalFile, PhysicalPressKey, PhysicalTypeFocused, PhysicalTypeText,
 };
 use crate::browser::BrowserError;
+use crate::language::document_refusal::DocumentCause;
 
 /// Type text into a located control.
 ///
@@ -57,8 +60,9 @@ pub fn type_text(
 
 /// Type text into the control that holds the focus.
 ///
-/// Every candidate document is asked whether its focused control takes text, and the first that
-/// says so in tree order is the one. Clearing happens there alone, and is checked again before
+/// The document that holds the focus is asked whether its focused control takes text; when no
+/// document reports the focus, every readable document is asked and the first that says so in
+/// tree order is the one. Clearing happens there alone, and is checked again before
 /// the text is sent. A dialog the text opens leaves its effect unknown.
 ///
 /// # Errors
@@ -70,7 +74,7 @@ pub fn type_focused(
     scope: &mut Scope,
     request: &PhysicalTypeFocused,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let candidates = focus_candidates(scope);
+    let candidates = focus_documents(l, scope, request.tab_id)?;
     let plans = plan_each(scope, &candidates, |_| {
         world::verify_focused_text(request.allow_credentials)
     })?;
@@ -89,7 +93,10 @@ pub fn type_focused(
         }
     }
     let Some(holder) = holder else {
-        return Err(refusal.unwrap_or(BrowserError::DocumentUnavailable));
+        // The fact the fallback knows: the scope has no readable document to ask.
+        return Err(refusal.unwrap_or(BrowserError::DocumentUnavailable(
+            DocumentCause::NoWebDocument,
+        )));
     };
     scope.admit_input_subject(&holder)?;
     if request.clear_first {
@@ -133,9 +140,9 @@ pub fn type_focused(
 
 /// Press one key.
 ///
-/// With a locator the control takes the focus first. Without one, a scope that bound the focus
-/// to a document requires that document to still hold it; a request whose scope bound none
-/// presses into whatever holds the focus.
+/// With a locator the control takes the focus first. Without one, the document that holds the
+/// focus is found now and must still hold it when the key is sent. When no document reports the
+/// focus and the policy admits every document, the key goes to whatever holds the focus.
 ///
 /// # Errors
 ///
@@ -152,10 +159,10 @@ pub fn press_key(
             let plan = scope.call(&target.doc, world::focus(&target.local))?;
             (Some(target.doc), Some(plan))
         }
-        None => match scope.subjects().first() {
-            Some(subject) => {
-                let plan = scope.call(subject, world::require_focused())?;
-                (Some(subject.clone()), Some(plan))
+        None => match focus_holder(l, scope, request.tab_id)? {
+            Some(holder) => {
+                let plan = scope.call(&holder, world::require_focused())?;
+                (Some(holder), Some(plan))
             }
             None => (None, None),
         },

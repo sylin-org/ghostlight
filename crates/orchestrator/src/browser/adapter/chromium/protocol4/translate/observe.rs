@@ -1,9 +1,9 @@
-//! Observation: which documents a tab holds and where a request's subjects live, and waiting for
-//! a condition to hold.
+//! Observation: which documents a tab holds and which of them a request's locators belong to,
+//! and waiting for a condition to hold.
 //!
-//! Describing documents reads no page content. It reports the tab's frame tree as the authority
-//! names documents, and binds each locator, point and the focus to the document it belongs to,
-//! so the authority can decide before any content is read. A wait asks the document its
+//! Describing documents asks the page nothing. It reports the tab's frame tree as the authority
+//! names documents, and names the document of each locator, so the authority can decide before
+//! any content is read. A wait asks the document its
 //! condition lives in: the top for readiness and URL, the locator's document for a target, and
 //! every readable document for text, because an embedded form's confirmation is as real as the
 //! top page's.
@@ -13,30 +13,21 @@ use std::time::Instant;
 use super::super::link::{CallRequest, Link};
 use super::super::locator::Locator;
 use super::super::scope::{PlannedCall, Scope};
-use super::super::tree::{document_id, FrameTree};
-use super::super::wire::{CallMode, FrameRef, Point};
-use super::super::world::{self, FocusProbe, Observed};
-use super::{route, value};
+use super::super::tree::{document_id, Described};
+use super::super::wire::{CallAnswer, CallMode};
+use super::super::world::{self, AssetErrorCode, Observed};
+use super::read::some_answered;
+use super::{frame_tree, value};
 use crate::browser::adapter::documents::DocumentInventory;
-use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalPoint, PhysicalWait};
+use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalWait};
 use crate::browser::BrowserError;
+use crate::language::document_refusal::DocumentCause;
 use crate::language::PageCondition;
 use crate::workspace::StaleReason;
 
 /// How much longer than the page's own wait a waiting call may take, so the page answers
 /// before the call gives up.
 const CALL_MARGIN_MS: u64 = 500;
-/// What a request asks a document description to bind.
-#[derive(Clone, Copy, Debug)]
-pub struct Subjects<'a> {
-    /// Locators whose documents are subjects.
-    pub locators: &'a [String],
-    /// Page points whose documents are subjects.
-    pub points: &'a [PhysicalPoint],
-    /// Whether the focused document is a subject.
-    pub focused: bool,
-}
-
 /// The call that waits up to `settle_ms` for the top document to stop moving. It answers rather
 /// than fails when the page does not settle in time.
 pub(super) fn settle(settle_ms: u64) -> PlannedCall {
@@ -59,96 +50,49 @@ pub(super) fn settle_top(l: &mut Link<'_>, tab_id: u64, settle_ms: u64) {
     }
 }
 
-/// Describe the tab's documents and bind the request's subjects to them.
+/// Describe the tab's documents and say which of them the request's locators belong to.
 ///
-/// With a preparation budget the top document first gets up to `settle_ms` to settle, and a
-/// failure there changes nothing. A locator is current only while its frame still holds
-/// the loader that minted it: a frame that holds another loader, or that a complete inventory
-/// no longer has, replaced or removed the locator's document. A locator whose frame an
-/// incomplete inventory does not show binds nothing, and the incomplete mark says so. A point
-/// is routed from the top page down. The focus is the first document in tree order that holds
-/// it. A point or focus that cannot be bound marks the inventory unresolved; an inventory the
-/// extension could not complete is marked incomplete.
+/// This is one `frames` primitive and asks the page nothing. With a preparation budget the top
+/// document first gets up to `settle_ms` to settle, and a failure there changes nothing. A
+/// locator is current only while the tree still holds the document that minted it. One whose
+/// document the tree does not hold is stale as navigated, however complete the inventory: a
+/// handle is never left to a later refusal that would name another cause. A point and the focus
+/// are not bound here. The page shows where they are only once the view is checked and the point
+/// is in the viewport, so the work that sends the input binds them, through its scope.
 ///
 /// # Errors
 ///
 /// Returns the failure of a primitive after the settle,
-/// [`BrowserError::DocumentUnavailable`] for an inventory that is not one tree, and
+/// [`BrowserError::DocumentUnavailable`] for an inventory with no top document, and
 /// [`BrowserError::StaleLocator`] for a locator that is malformed (`unknown`) or whose document
 /// was replaced or removed (`navigated`), before anything is read.
 pub fn describe_documents(
     l: &mut Link<'_>,
     tab_id: u64,
-    subjects: Subjects<'_>,
+    locators: &[String],
     settle_ms: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
     settle_top(l, tab_id, settle_ms);
-    let inventory = l.send(super::super::link::Frames(tab_id))?;
-    let tree = FrameTree::from_inventory(&inventory)?;
-    let mut bound: Vec<String> = Vec::new();
-    let mut unresolved = false;
-    let mut bind = |doc: Option<FrameRef>| match doc {
-        Some(doc) => {
-            let id = document_id(&doc);
-            if !bound.contains(&id) {
-                bound.push(id);
-            }
-        }
-        None => unresolved = true,
-    };
-    for locator in subjects.locators {
+    let Described { tree, whole } = frame_tree(l, tab_id)?;
+    let mut subjects: Vec<String> = Vec::new();
+    for locator in locators {
         let doc = Locator::decode(locator)?.doc;
-        if tree.contains(&doc) {
-            bind(Some(doc));
-        } else if inventory.complete || tree.holds_frame(&doc.frame_id) {
+        if !tree.contains(&doc) {
             return Err(BrowserError::stale(StaleReason::Navigated));
         }
-    }
-    for point in subjects.points {
-        let at = Point {
-            x: point.x,
-            y: point.y,
-        };
-        bind(route(l, &tree, tab_id, at, true)?.map(|routed| routed.doc));
-    }
-    if subjects.focused {
-        bind(focused_document(l, &tree, tab_id)?);
+        let id = document_id(&doc);
+        if !subjects.contains(&id) {
+            subjects.push(id);
+        }
     }
     Ok(BrowserOutcome::Documents {
         tab_id,
         inventory: DocumentInventory {
             documents: tree.documents(),
-            subjects: bound,
-            unresolved,
-            incomplete: !inventory.complete,
+            subjects,
+            incomplete: !whole,
         },
     })
-}
-
-/// The first addressable document in tree order that holds the page's focus.
-fn focused_document(
-    l: &mut Link<'_>,
-    tree: &FrameTree,
-    tab_id: u64,
-) -> Result<Option<FrameRef>, BrowserError> {
-    let docs: Vec<FrameRef> = tree
-        .real_documents()
-        .filter(|document| document.supported)
-        .map(|document| document.doc.clone())
-        .collect();
-    if docs.is_empty() {
-        return Ok(None);
-    }
-    let plans: Vec<PlannedCall> = docs
-        .iter()
-        .map(|doc| PlannedCall::unscoped(doc, world::focus_probe()))
-        .collect();
-    let answers = l.call(CallRequest::parallel(tab_id, &plans), None)?;
-    Ok(docs
-        .into_iter()
-        .zip(&answers)
-        .find(|(_, answer)| value::<FocusProbe>(answer).is_ok_and(|probe| probe.focused))
-        .map(|(doc, _)| doc))
 }
 
 /// Wait for one condition in the document it lives in.
@@ -161,7 +105,8 @@ fn focused_document(
 /// # Errors
 ///
 /// Returns the plain failure of a malformed locator, the failure of a
-/// `call` primitive, and a single document's own failure.
+/// `call` primitive, a single document's own failure, and the first document's own failure when
+/// no readable document answered a text wait.
 pub fn observe(
     l: &mut Link<'_>,
     scope: &mut Scope,
@@ -211,8 +156,11 @@ fn observe_text(
 ) -> Result<BrowserOutcome, BrowserError> {
     let presence = wait.condition == PageCondition::TextPresent;
     let docs = scope.content_docs();
+    // The fact this site knows: the scope holds no readable document to wait in.
     if docs.is_empty() {
-        return Err(BrowserError::DocumentUnavailable);
+        return Err(BrowserError::DocumentUnavailable(
+            DocumentCause::NoWebDocument,
+        ));
     }
     let plans = docs
         .iter()
@@ -237,6 +185,11 @@ fn observe_text(
     let started = Instant::now();
     let request = CallRequest::new(tab_id, &plans, mode).guard(scope.guard());
     let answers = l.call(request.budget(budget), Some(&mut *scope))?;
+    // A document that waited out an unmet condition answered. When none answered at all, the
+    // wait says nothing about the page, and the first document's own failure says why.
+    if !answers.iter().any(waited_out) {
+        some_answered::<Observed>(&answers)?;
+    }
     let observed: Vec<Option<Observed>> = answers.iter().map(|answer| value(answer).ok()).collect();
     let satisfied = if presence {
         observed.iter().flatten().any(|answer| answer.satisfied)
@@ -259,7 +212,16 @@ fn observe_text(
     })
 }
 
-/// How far the top document has loaded, or loading when the top cannot say.
+/// Whether a document answered a wait by waiting until its timeout with the condition unmet.
+fn waited_out(answer: &CallAnswer) -> bool {
+    matches!(
+        world::decode_answer(answer),
+        Some(Err(error)) if error.code == AssetErrorCode::Unsatisfied
+    )
+}
+
+/// How far the top document has loaded, or loading when the top cannot say or the wait left no
+/// time to ask it: a wait that used its whole deadline still reports what it saw.
 ///
 /// # Errors
 ///
@@ -270,6 +232,9 @@ fn top_readiness(
     tab_id: u64,
 ) -> Result<BrowserReadiness, BrowserError> {
     let top = scope.top();
+    if l.budget_ms() == 0 {
+        return Ok(BrowserReadiness::Loading);
+    }
     let Ok(plan) = scope.call(
         &top,
         world::observe(PageCondition::LoadReady.as_str(), None, None, 0, false),

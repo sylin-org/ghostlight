@@ -214,13 +214,24 @@ impl ApplicationExecutor {
                 json!({}),
             );
         }
-        if error == BrowserError::DocumentUnavailable {
+        if error == BrowserError::PageChanged {
+            return self.workspace_failure(context, WorkspaceError::PageChanged);
+        }
+        // The document gate words a subject outside the scope before it gets here. One that
+        // arrives from anywhere else still names no document, and what is known of it is that
+        // the subject could not be reached.
+        let document_cause = match &error {
+            BrowserError::DocumentUnavailable(cause) => Some(*cause),
+            BrowserError::OutsideScope { .. } => Some(DocumentCause::SubjectUnreachable),
+            _ => None,
+        };
+        if let Some(cause) = document_cause {
             return self.failed(
                 context,
                 decision,
                 physical_id,
-                Refusal::DocumentUnavailable,
-                json!({}),
+                Refusal::DocumentUnavailable { cause },
+                json!({ DOCUMENT_CAUSE_FACT: cause.word() }),
             );
         }
         if let BrowserError::RuntimeControl(reason) = error {
@@ -509,7 +520,9 @@ pub(super) fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailu
         BrowserError::RuntimeControl(reason) => {
             (governed_check(*reason), Decision::refused(*reason))
         }
-        BrowserError::DocumentUnavailable => (CheckFailure::DocumentUnavailable, admitted),
+        BrowserError::DocumentUnavailable(_)
+        | BrowserError::OutsideScope { .. }
+        | BrowserError::PageChanged => (CheckFailure::DocumentUnavailable, admitted),
         BrowserError::DialogOpen | BrowserError::TabNotShowing | BrowserError::NoHistoryEntry => {
             (CheckFailure::BrowserRefused, admitted)
         }

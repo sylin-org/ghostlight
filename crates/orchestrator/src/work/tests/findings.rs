@@ -172,7 +172,12 @@ fn each_record_holds_only_what_its_own_frame_reached() {
     // A command written to the browser names it whatever the failure; one never written does not.
     for (written, failure) in [
         (true, BrowserError::DeadlineBeforeDispatch),
-        (true, BrowserError::DocumentUnavailable),
+        (
+            true,
+            BrowserError::DocumentUnavailable(
+                crate::language::document_refusal::DocumentCause::NoWebDocument,
+            ),
+        ),
         (false, BrowserError::DisconnectedBeforeDispatch),
     ] {
         let (executor, browser, workspaces, workspace, audit) = fixture();

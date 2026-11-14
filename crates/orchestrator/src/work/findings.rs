@@ -43,6 +43,9 @@ pub(super) struct Findings {
     pub(super) coverage: Option<Coverage>,
     /// The recovery a stale-target refusal offers, taken by the same frame's refusal.
     pub(super) stale_offer: Option<StaleOffer>,
+    /// An absence held where it was read while part of the page went unread, taken by the same
+    /// frame's wait or check.
+    pub(super) absence_doubted: bool,
 }
 
 /// The recovery a stale-target refusal offers (ADR-0198 Decision 28): controls the page found,
@@ -130,6 +133,16 @@ impl FrameFindings {
     /// Take the recovery a stale-target refusal offers, leaving none behind.
     pub(super) fn take_offer(&self) -> Option<StaleOffer> {
         self.0.borrow_mut().stale_offer.take()
+    }
+
+    /// Note that an absence held only in the content that was read (ADR-0158 Decision 4).
+    pub(super) fn doubt_absence(&self) {
+        self.0.borrow_mut().absence_doubted = true;
+    }
+
+    /// Take whether the frame's last absence observation held only where it was read.
+    pub(super) fn take_absence_doubt(&self) -> bool {
+        std::mem::take(&mut self.0.borrow_mut().absence_doubted)
     }
 
     /// Take everything the frame learned, for its completion, leaving nothing behind.

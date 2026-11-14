@@ -34,6 +34,7 @@ use crate::language::catalog;
 use crate::language::composition::{
     CompositionProgress, EffectCounts, StepCause, StepCounts, StepIssue,
 };
+use crate::language::document_refusal::DocumentCause;
 use crate::language::field_echo::HeldField;
 use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
@@ -42,6 +43,7 @@ use crate::language::outcome::{
     PolicyAuthor, QuitCause, Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
 };
 use crate::language::page_refusal::{PageGesture, PageRefusal};
+use crate::language::wait::Finding;
 use crate::workspace::StaleReason;
 
 /// Words a hint may put between `with` and the field it names.
@@ -471,6 +473,33 @@ fn unavailable_reasons() -> Vec<BrowserUnavailableReason> {
     all
 }
 
+/// Every document cause, with the same compile-time tripwire.
+fn document_causes() -> Vec<DocumentCause> {
+    let all = DocumentCause::ALL.to_vec();
+    for cause in &all {
+        match cause {
+            DocumentCause::NoWebDocument
+            | DocumentCause::InventoryIncomplete
+            | DocumentCause::UnboundedWork
+            | DocumentCause::SubjectUnreachable
+            | DocumentCause::DialogDocumentUnknown
+            | DocumentCause::RecordingSourcesIncomplete => {}
+        }
+    }
+    all
+}
+
+/// Every wait finding, with the same compile-time tripwire.
+fn findings() -> Vec<Finding> {
+    let all = vec![Finding::Met, Finding::Unmet, Finding::Unproven];
+    for finding in &all {
+        match finding {
+            Finding::Met | Finding::Unmet | Finding::Unproven => {}
+        }
+    }
+    all
+}
+
 /// Every workspace reason, with the same compile-time tripwire.
 fn workspace_reasons() -> Vec<WorkspaceReason> {
     let mut all = vec![
@@ -869,18 +898,18 @@ fn outcome_samples() -> Vec<Outcome> {
             });
         }
     }
-    for satisfied in [false, true] {
+    for finding in findings() {
         samples.push(Outcome::Waited {
-            condition: crate::language::WaitCondition::TextPresent,
+            condition: crate::language::WaitCondition::TextAbsent,
             elapsed_ms: 1_200,
-            satisfied,
+            finding,
             host: host(),
         });
     }
     samples.push(Outcome::Waited {
         condition: crate::language::WaitCondition::Duration,
         elapsed_ms: 1_200,
-        satisfied: true,
+        finding: Finding::Met,
         host: host(),
     });
     samples.extend(
@@ -919,7 +948,6 @@ fn refusal_samples() -> Vec<Refusal> {
             detail: "no such frame".into(),
             cause: crate::language::outcome::PrimitiveCause::Refused,
         },
-        Refusal::DocumentUnavailable,
         Refusal::BrowserContract,
         Refusal::BrowserAmbiguous,
         Refusal::BrowserUnknown,
@@ -965,6 +993,9 @@ fn refusal_samples() -> Vec<Refusal> {
         samples.push(Refusal::CancelledBeforeStart { by });
         samples.push(Refusal::CancelledBeforeDispatch { by: Some(by) });
         samples.push(Refusal::CancelledAfterDispatch { by: Some(by) });
+    }
+    for cause in document_causes() {
+        samples.push(Refusal::DocumentUnavailable { cause });
     }
     samples.push(Refusal::CancelledBeforeDispatch { by: None });
     samples.push(Refusal::CancelledAfterDispatch { by: None });

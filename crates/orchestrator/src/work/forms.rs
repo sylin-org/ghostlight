@@ -1027,10 +1027,16 @@ impl ApplicationExecutor {
         let elapsed_ms = measured
             .elapsed_ms
             .saturating_add(settlement.map_or(0, |(_, elapsed)| elapsed));
+        // The document gate withdraws an absence that held only in what was read, and the
+        // frame keeps that it did, so the sentence says which of the two this unmet wait is.
+        let finding = crate::language::wait::Finding::of(
+            measured.satisfied,
+            context.findings.take_absence_doubt(),
+        );
         let outcome = Outcome::Waited {
             condition: value.condition,
             elapsed_ms,
-            satisfied: measured.satisfied,
+            finding,
             host: observed_host(&selected.url),
         };
         let facts = json!({

@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use super::area::{LeftOut, LeftOutKey};
 use super::choices::ScrollDirection;
+use super::document_refusal::{self, DocumentCause};
 use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
 use super::page_refusal::{self, PageGesture, PageRefusal};
 use super::phrase::{article, counted, counted_or_none, one_line_bounded};
-use super::wait::WaitCondition;
+use super::wait::{Finding, WaitCondition};
 use super::{adapter, deployment, setup, MAX_INSPECT_ITEMS};
 use crate::governance::ReasonCode;
 use crate::intake::session::IntakeChannel;
@@ -618,7 +619,7 @@ pub enum Outcome {
     Waited {
         condition: WaitCondition,
         elapsed_ms: u64,
-        satisfied: bool,
+        finding: Finding,
         host: Option<String>,
     },
     /// A browser dialog was resolved.
@@ -970,9 +971,9 @@ impl Outcome {
             Self::Waited {
                 condition,
                 elapsed_ms,
-                satisfied,
+                finding,
                 host,
-            } => waited(*condition, *elapsed_ms, *satisfied, host),
+            } => waited(*condition, *elapsed_ms, *finding, host),
             Self::DialogHandled { accepted: true } => "Accepted the browser dialog.".into(),
             Self::DialogHandled { accepted: false } => "Dismissed the browser dialog.".into(),
             Self::DialogObserved {
@@ -1106,9 +1107,18 @@ impl Outcome {
             ],
             Self::CompositionRan(progress) => progress.next_steps(),
             Self::Waited {
-                satisfied: false, ..
+                finding: Finding::Unmet,
+                ..
             } => vec![
                 "Read or inspect the page to see its current state before choosing another action."
+                    .into(),
+            ],
+            // Reading again meets the same unread content; a capture shows it.
+            Self::Waited {
+                finding: Finding::Unproven,
+                ..
+            } => vec![
+                "browser_screenshot shows the page as rendered, embedded documents included."
                     .into(),
             ],
             Self::DialogObserved {
@@ -1383,7 +1393,8 @@ pub enum CheckFailure {
     Disconnected,
     /// Ghostlight could not reach a browser to run the check.
     BrowserUnavailable,
-    /// Access to the page could not be verified for the check.
+    /// The page could not be read in full for the check: a document it needs could not be
+    /// used, or an absence held only in the part that was read.
     DocumentUnavailable,
     /// The browser could not run the check or answered outside the contract.
     BrowserRefused,
@@ -1454,6 +1465,12 @@ const CHECK_BEFORE_REPEATING: &str =
 /// Sentence for an applied action whose check never ran.
 const CHECK_NOT_RUN: &str = "The expected condition was not checked";
 
+/// What an unconfirmed action says when its check could not read the whole page. It covers a
+/// check that could not run and an absence that held only where it was read, so it does not say
+/// the condition failed.
+const CHECK_UNPROVEN: &str =
+    "The expected condition could not be confirmed because the page could not be read in full.";
+
 /// Render why an applied action's requested check did not confirm it, then the action itself.
 ///
 /// The failure leads, so a sentence cut short anywhere still says the check fell short. The
@@ -1487,7 +1504,7 @@ fn unconfirmed_summary(action: &Outcome, cause: CheckFailure) -> String {
             format!("{CHECK_NOT_RUN} because Ghostlight could not reach the browser. {done}")
         }
         CheckFailure::DocumentUnavailable => {
-            format!("{CHECK_NOT_RUN} because access to the page could not be verified. {done}")
+            format!("{CHECK_UNPROVEN} {done}")
         }
         CheckFailure::BrowserRefused => {
             format!("{CHECK_NOT_RUN} because the browser could not run the check. {done}")
@@ -1751,8 +1768,8 @@ pub enum Refusal {
         /// How many fields the call asked to fill.
         total: usize,
     },
-    /// A required browser document could not be bound to current authority.
-    DocumentUnavailable,
+    /// A document the work needs could not be used, for the cause the raising site named.
+    DocumentUnavailable { cause: DocumentCause },
     /// The job was cancelled after it started but before any browser command was sent.
     ///
     /// The cause is absent when the browser reported the cancellation and the call's own
@@ -1890,7 +1907,7 @@ impl Refusal {
             Self::PageRefused { refusal, .. } => refusal.as_str(),
             Self::FieldsReverted { .. } => field_problem::REVERTED_REASON,
             Self::FieldValuesRejected { .. } => field_problem::REJECTED_REASON,
-            Self::DocumentUnavailable => DOCUMENT_UNAVAILABLE_CODE,
+            Self::DocumentUnavailable { .. } => DOCUMENT_UNAVAILABLE_CODE,
             Self::BrowserUnavailable { reason } => reason.fact(),
             Self::BrowserAmbiguous => "browser_ambiguous",
             Self::BrowserUnknown => "browser_unknown",
@@ -1985,7 +2002,7 @@ impl Refusal {
             Self::FieldsReverted { set, reverted } => {
                 return field_problem::reverted_summary(*set, reverted, SUMMARY_MAX_CHARS);
             }
-            Self::DocumentUnavailable => "Document access could not be verified.",
+            Self::DocumentUnavailable { cause } => document_refusal::summary(*cause),
             Self::DeadlineExpired {
                 before_dispatch, ..
             } => {
@@ -2176,7 +2193,7 @@ impl Refusal {
             Self::PageRefused { refusal, .. } => page_refusal::next_steps(*refusal),
             Self::FieldValuesRejected { fields, .. } => field_problem::rejected_next_steps(fields),
             Self::FieldsReverted { reverted, .. } => field_problem::rejected_next_steps(reverted),
-            Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],
+            Self::DocumentUnavailable { cause } => document_refusal::next_steps(*cause),
             // Only advice the decoder will take: timeout_ms never grows past its maximum. After
             // dispatch the first job is learning whether the action already happened.
             Self::DeadlineExpired {
@@ -2293,6 +2310,9 @@ impl Refusal {
 
 /// The fact that carries the word of a stale target handle, beside the reason `stale_target`.
 pub const STALE_FACT: &str = "stale";
+/// The fact that carries the word of a document refusal's cause, beside the reason
+/// `document_unavailable`.
+pub const DOCUMENT_CAUSE_FACT: &str = "document_cause";
 /// The fact that lists the controls a stale-target refusal offers, each with a fresh handle.
 pub const RECOVERY_CANDIDATES_FACT: &str = "recovery_candidates";
 /// The fact that names the one control the page proved is the stale handle's control.
@@ -2403,7 +2423,7 @@ impl WorkspaceReason {
             }
             Self::TabUnavailable => "That tab handle names no open tab in this session.".into(),
             Self::PageChanged => {
-                "The tab's page changed to a new document while Ghostlight was working on it."
+                "The page or a document it embeds changed or stopped answering while Ghostlight was working on it."
                     .into()
             }
             Self::StaleTarget { reason, help } => match (reason, help) {
@@ -2734,7 +2754,7 @@ fn channel_off(channel: IntakeChannel, author: PolicyAuthor) -> String {
 fn waited(
     condition: WaitCondition,
     elapsed_ms: u64,
-    satisfied: bool,
+    finding: Finding,
     host: &Option<String>,
 ) -> String {
     let location = on_page(host);
@@ -2764,10 +2784,16 @@ fn waited(
             |subject| format!("{subject} {verb} on {location}"),
         )
     };
-    if satisfied {
-        format!("{} in {}.", clause(arrived), spanned(elapsed_ms))
-    } else {
-        format!("{} within {}.", clause(missing), spanned(elapsed_ms))
+    match finding {
+        Finding::Met => format!("{} in {}.", clause(arrived), spanned(elapsed_ms)),
+        Finding::Unmet => format!("{} within {}.", clause(missing), spanned(elapsed_ms)),
+        // Only an absence can be unproven. The sentence says what was read and what was not,
+        // never that the thing stayed.
+        Finding::Unproven => format!(
+            "{} was gone from everything Ghostlight could read on {location} after {}, but part of the page could not be read, so its absence could not be established.",
+            subject.unwrap_or("It"),
+            spanned(elapsed_ms)
+        ),
     }
 }
 
@@ -2869,8 +2895,10 @@ mod tests {
     use crate::intake::session::IntakeChannel;
     use crate::language::area::{LeftOut, LeftOutKey};
     use crate::language::audit::AuditRefusal;
+    use crate::language::document_refusal::DocumentCause;
     use crate::language::field_problem::ControlRef;
     use crate::language::page_refusal::{PageGesture, PageRefusal};
+    use crate::language::wait::Finding;
     use crate::language::WaitCondition;
     use crate::workspace::StaleReason;
 
@@ -3085,13 +3113,28 @@ mod tests {
         let waited = |elapsed_ms| Outcome::Waited {
             condition: WaitCondition::LoadReady,
             elapsed_ms,
-            satisfied: true,
+            finding: Finding::Met,
             host: host(),
         };
         assert!(waited(1_830).summary().contains("2 seconds"));
         assert_eq!(waited(1_830).observed().count, Some(2));
         assert!(waited(300).summary().contains("under a second"));
         assert_eq!(waited(300).observed().count, Some(0));
+        // Promise (ADR-0158 Decision 4): an absence that held only in what was read says so,
+        // and never says the text stayed.
+        for condition in [WaitCondition::TextAbsent, WaitCondition::TargetAbsent] {
+            let unproven = Outcome::Waited {
+                condition,
+                elapsed_ms: 1_830,
+                finding: Finding::Unproven,
+                host: host(),
+            };
+            let said = unproven.summary();
+            assert!(said.contains("absence could not be established"), "{said}");
+            assert!(said.contains("2 seconds"), "{said}");
+            assert!(!said.contains("never disappeared"), "{said}");
+            assert_eq!(unproven.observed().count, Some(2));
+        }
 
         let capture = Outcome::Captured {
             scope: CaptureKind::Viewport,
@@ -3501,11 +3544,6 @@ mod tests {
                 json!({"reason":"field_values_rejected"}),
             ),
             (
-                Refusal::DocumentUnavailable,
-                "document_unavailable",
-                json!({"reason":"document_unavailable"}),
-            ),
-            (
                 Refusal::CancelledBeforeDispatch { by: None },
                 "cancelled",
                 json!({"reason":"cancelled_before_dispatch"}),
@@ -3842,6 +3880,14 @@ mod tests {
                 json!({"reason":"action_unconfirmed","cause":kept}),
             ));
         }
+        // Every document cause keeps the one code and the one audit shape.
+        all.extend(DocumentCause::ALL.map(|cause| {
+            (
+                Refusal::DocumentUnavailable { cause },
+                "document_unavailable",
+                json!({"reason":"document_unavailable"}),
+            )
+        }));
         all
     }
 
@@ -3869,5 +3915,17 @@ mod tests {
             .collect();
         let every: std::collections::BTreeSet<&str> = REFUSAL_VARIANTS.iter().copied().collect();
         assert_eq!(named, every, "every variant has a row");
+        // Contract (ADR-0158, amendment of 2026-11-13): behind the one code each document cause
+        // is its own word and its own sentence, with one or two steps, and the sentence leaves
+        // room for the coverage notes a result appends.
+        let mut words = std::collections::BTreeSet::new();
+        let mut sentences = std::collections::BTreeSet::new();
+        for cause in DocumentCause::ALL {
+            let refusal = Refusal::DocumentUnavailable { cause };
+            assert!(words.insert(cause.word()), "{cause:?}");
+            assert!(sentences.insert(refusal.summary()), "{cause:?}");
+            assert!(refusal.summary().len() <= 300, "{cause:?}");
+            assert!((1..=2).contains(&refusal.next_steps().len()), "{cause:?}");
+        }
     }
 }

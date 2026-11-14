@@ -892,7 +892,7 @@ short still says the check failed:
 | Out of time | `failed` | `deadline` | `The expected condition was not checked because the call ran out of time.` |
 | Browser disconnected | `failed` | `browser_disconnected` | `The expected condition was not checked because the browser disconnected.` |
 | No browser reachable | `failed` | `browser_unavailable` | `The expected condition was not checked because Ghostlight could not reach the browser.` |
-| Page access unverified | `failed` | `document_unavailable` | `The expected condition was not checked because access to the page could not be verified.` |
+| Page not read in full | `failed` | `document_unavailable` | `The expected condition could not be confirmed because the page could not be read in full.` |
 | Browser could not check | `failed` | `browser_refused` | `The expected condition was not checked because the browser could not run the check.` |
 | Policy refused the check | `blocked` | the policy reason | `The expected condition was not checked.` then the policy sentence |
 
@@ -969,7 +969,8 @@ A dialog is answered by the browser from its own record and authorized by the on
 raised it, not by the tab's frame inventory, because a dialog blocks the page and the inventory
 cannot be read while one is open. A dialog raised by a document the authority refuses is refused
 as document access and its message is not returned. A dialog whose raising document the browser
-cannot name fails closed as `Document access could not be verified.` `accept`, `dismiss` and
+cannot name fails closed as `document_unavailable` with the cause `dialog_document_unknown` (see
+Document coverage). `accept`, `dismiss` and
 `respond` ask the browser once; when no dialog is showing the result is `No JavaScript dialog is
 currently visible.`
 
@@ -1196,6 +1197,51 @@ scope, inspected/excluded/page excluded/unavailable document counts and `limited
 observed maxima across physical preparation and execution, not repeated-read sums. Policy
 exclusions, unavailable content, and size ceilings have separate qualifications. Negative findings
 are limited to inspected content; absence across unseen content is never established.
+
+An absence that held in everything Ghostlight read, while part of the page went unread, is still
+not met: the wait keeps status `failed` and `satisfied: false`. It does not say the text stayed. A
+`text_absent` wait answers `Text was gone from everything Ghostlight could read on example.com
+after 2 seconds, but part of the page could not be read, so its absence could not be
+established.` (a `target_absent` wait says `The target`), with the next step `browser_screenshot
+shows the page as rendered, embedded documents included.` An `expect` check in the same state is
+the `document_unavailable` row of the check table above, not `expectation_unmet`.
+
+A document the work needs that cannot be used refuses with `reason: document_unavailable`, status
+`failed`, no effect and `repeat_safe: true`, for every cause. A `document_cause` fact says why in
+one of six words. The sentence and the steps depend on the word only; they quote no page text and
+name no host, address or frame. The audit keeps the reason and the sentence, never the word.
+
+| `document_cause` | Raised when | Summary | Next steps |
+| --- | --- | --- | --- |
+| `no_web_document` | The tab lists no document with a web address, under any policy | `This tab shows no web page Ghostlight can work on: its page has no web address, is a browser error page, or has not loaded yet. Nothing was sent.` | `Call browser_tabs with action list to see what this tab shows; if its page is still loading, repeat the call.` and `Otherwise call browser_navigate with url set to a web address.` |
+| `inventory_incomplete` | The browser's document list is incomplete and the policy does not admit every document | `The browser could not list every document of this page, and this session's policy must judge each document before Ghostlight works on the page. Nothing was sent.` | `Repeat the call; a page that is still loading lists its documents once it settles.` and `If this tab keeps refusing, call browser_navigate with new_tab true and the page's url to open it in a new tab.` |
+| `unbounded_work` | A script, a diagnostics read, a recording start or a drag meets a document that cannot be put to a policy that does not admit every document | `This call can reach every document of the page, and the page embeds one this session's policy cannot judge: it has no web address or the browser could not describe it. Nothing was sent.` | `Read with browser_read or browser_find, or act on one target handle; those calls reach only the documents this session's policy admits.` |
+| `subject_unreachable` | A point no single document claims; the keyboard focus that no document reports, under a policy that does not admit every document; a point, the focus or what covers a target in a document with no web address | `Ghostlight could not place the point, the keyboard focus or what covers the target in a document it can work in: it may be in an embedded document that has no web address or that the browser did not describe. No click, key or text was sent.` | `browser_screenshot shows what is there now, embedded documents included.` and `To act inside a document Ghostlight can reach, use a target handle from browser_find or browser_inspect; a call with a target sets the focus itself.` |
+| `dialog_document_unknown` | A dialog is open and the browser named no document for it | `A JavaScript dialog is open on this page and the browser did not say which document raised it, so this session's access to it could not be checked. The dialog was not read or answered.` | `Ask the user to answer the dialog in the browser, then repeat the call.` and `Or call browser_tabs with action close to close this tab.` |
+| `recording_sources_incomplete` | A save of a recording whose captured documents the browser could not all name, under a policy that does not admit every document | `The browser could not list every document this recording captured, and this session's policy must check each one before a recording is saved. The recording is stopped and held; nothing was saved.` | `Call browser_record with action discard to drop this recording, then record again.` |
+
+When several hold at once, the first in this order is the answer: a document the call needs that
+the policy refused (a policy refusal, status `blocked`, no `document_cause`; a whole-page read
+needs no single document and leaves a refused one out instead), then `inventory_incomplete`, then
+`no_web_document`, then `unbounded_work`. `subject_unreachable` is found later, when the input is
+about to be sent; the page may have been scrolled to the point by then. A tab whose every
+addressable document the policy refused is the policy refusal, not `no_web_document`. A subject
+found in a document the policy refused is the policy refusal too. Under a policy that admits every
+document, `inventory_incomplete`, `unbounded_work` and `recording_sources_incomplete` never occur.
+
+A document that changed, went missing or stopped answering while a call ran, with no single
+handle to blame, is not `document_unavailable`: it is `reason: page_changed`, `The page or a
+document it embeds changed or stopped answering while Ghostlight was working on it.`, with the
+step `Repeat the call; it works on the page the tab shows now.` A read, inspect, find or
+screenshot is run once more before that refusal is returned. With one handle it is the stale
+target `navigated`. A whole-page read or text wait that no document answered is never an empty
+page: it fails with the first document's own failure, so a dialog that opened is `dialog_open` and
+a page that changed is `page_changed`.
+
+Under a policy that admits every document, an incomplete document list counts one unavailable
+document in the coverage of a whole-page read, a script, a diagnostics read, a recording start
+and a drag. A call on a target handle, a point or the focus asked nothing of a document the list
+may hide, so its coverage does not count it and a `target_absent` wait on a handle can be met.
 
 The model view carries `facts.coverage` only when something limited the read: an excluded, page
 excluded or unavailable document, or `limited_by_size`. A read without it saw every

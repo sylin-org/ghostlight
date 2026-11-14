@@ -26,7 +26,6 @@ use crate::browser::transport::{SocketWriter, DELIVERY_TIMEOUT};
 use crate::browser::{BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
 use crate::install::icons::sha256_hex;
 use crate::language::outcome::PrimitiveCause;
-use crate::workspace::StaleReason;
 
 /// How long a cancelled primitive may take to report what it did.
 pub const CANCEL_GRACE: Duration = Duration::from_millis(500);
@@ -394,7 +393,6 @@ pub struct Link<'a> {
     dispatch: BrowserDispatch<'a>,
     effect_started: bool,
     refused_invalid: bool,
-    one_locator: bool,
     committed: Vec<String>,
     last_tab: Option<wire::Tab>,
 }
@@ -418,19 +416,9 @@ impl<'a> Link<'a> {
             dispatch,
             effect_started: false,
             refused_invalid: false,
-            one_locator: false,
             committed: Vec::new(),
             last_tab: None,
         }
-    }
-
-    /// Note that the command names exactly one locator.
-    ///
-    /// Its documents are then that locator's document and the documents above it, so a
-    /// receipt saying a document changed means the locator's document was replaced or removed,
-    /// and the failure is a stale locator that navigated.
-    pub fn names_one_locator(&mut self) {
-        self.one_locator = true;
     }
 
     /// Every top-frame URL the command's receipts reported committed, in order, each once.
@@ -462,6 +450,22 @@ impl<'a> Link<'a> {
             .saturating_duration_since(Instant::now())
             .saturating_sub(RECEIPT_MARGIN);
         u64::try_from(left.as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// [`Self::budget_ms`] for a primitive that carries its own time bound.
+    ///
+    /// The margin a receipt needs can use up the budget before the deadline itself passes, and
+    /// the extension refuses a time bound of zero as an invalid request. That is this command
+    /// running out of time, not a disagreement about the request.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deadline failure when no time is left for the primitive.
+    pub fn timed_budget_ms(&self) -> Result<u64, BrowserError> {
+        match self.budget_ms() {
+            0 => Err(self.settle(BrowserError::DeadlineBeforeDispatch)),
+            left => Ok(left),
+        }
     }
 
     /// Send one primitive and return its outcome.
@@ -564,7 +568,7 @@ impl<'a> Link<'a> {
         mut scope: Option<&mut Scope>,
     ) -> Result<Answers, BrowserError> {
         let plans = request.plans;
-        let left = self.budget_ms();
+        let left = self.timed_budget_ms()?;
         let (called, dispatched) = self.exchange(WorldCalls {
             call: wire::Call {
                 tab_id: request.tab_id,
@@ -611,7 +615,7 @@ impl<'a> Link<'a> {
         mut input: wire::Input,
         precondition: EffectClass,
     ) -> Result<wire::InputDone, BrowserError> {
-        input.timeout_ms = input.timeout_ms.min(self.budget_ms());
+        input.timeout_ms = input.timeout_ms.min(self.timed_budget_ms()?);
         let (done, _) = self.exchange(input)?;
         self.effect_started |= input_acted(&done, precondition);
         Ok(done)
@@ -767,16 +771,13 @@ impl<'a> Link<'a> {
         }
     }
 
-    /// The error a receipt's failure code stands for. A document change is a stale locator for
-    /// a command that names one locator, and an unavailable document otherwise.
+    /// The error a receipt's failure code stands for. A document change is a page change here;
+    /// the command, which knows whether it names one locator, says whose.
     fn failure<P: Spec>(&self, failure: wire::Failure, message: Option<String>) -> BrowserError {
         let message = message.unwrap_or_else(|| failure_code(failure));
         match failure {
             wire::Failure::LocalInterlock => BrowserError::LocalInterlock(message),
-            wire::Failure::DocumentChanged if self.one_locator => {
-                BrowserError::stale(StaleReason::Navigated)
-            }
-            wire::Failure::DocumentChanged => BrowserError::DocumentUnavailable,
+            wire::Failure::DocumentChanged => BrowserError::PageChanged,
             wire::Failure::Cancelled => BrowserError::CancelledBeforeDispatch,
             wire::Failure::Timeout => BrowserError::DeadlineBeforeDispatch,
             wire::Failure::TabMissing => BrowserError::primitive(TAB_MISSING),

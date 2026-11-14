@@ -72,21 +72,26 @@ fn outcome() -> BrowserOutcome {
 
 /// A content call or input reaches only a real document the scope allows, a metadata call only a
 /// document in the tree, and a reused frame id never revives a handle to the document it
-/// replaced: everything else is refused before anything is sent (ACCEPTANCE, document boundary
-/// evidence 1). A point needs routing unless every document is allowed and readable, so a frame
+/// replaced: everything else is refused before anything is sent, naming the document so the
+/// authority can say why it was left out (ACCEPTANCE, document boundary evidence 1). A scope
+/// that allows a document the adapter cannot address is a breach, not a page state. A point needs routing unless every document is allowed and readable, so a frame
 /// the scope cannot read grants no coordinate authority, and an open page pays nothing (document
 /// boundary evidence 4).
 #[test]
 fn a_call_reaches_only_the_documents_its_scope_admits() {
     let scope = Scope::admit(&scope_of(two_documents(), &["T.t1"])).unwrap();
-    let unavailable = Err(BrowserError::DocumentUnavailable);
+    let outside = |id: &str| {
+        Err(BrowserError::OutsideScope {
+            document: id.into(),
+        })
+    };
     assert_eq!(
         scope.call(&doc("C", "c1"), world::read_text(None, None, 100)),
-        unavailable
+        outside("C.c1")
     );
     assert_eq!(
         scope.call(&doc("C", "c1"), world::type_text("l", "t", false, false)),
-        unavailable
+        outside("C.c1")
     );
     let planned = read(&scope, &doc("T", "t1"));
     assert_eq!(planned.call.frame, Some(doc("T", "t1")));
@@ -96,13 +101,16 @@ fn a_call_reaches_only_the_documents_its_scope_admits() {
         .call(&doc("C", "c1"), world::viewport_point(1.0, 2.0))
         .unwrap();
     assert_eq!(metadata.scope, ScopeClass::Metadata);
-    for frame in [doc("C", "c2"), doc("Z", "z1")] {
-        assert_eq!(scope.call(&frame, world::scroll_offset()), unavailable);
+    for (frame, id) in [(doc("C", "c2"), "C.c2"), (doc("Z", "z1"), "Z.z1")] {
+        assert_eq!(scope.call(&frame, world::scroll_offset()), outside(id));
     }
 
     let both = Scope::admit(&scope_of(two_documents(), &["T.t1", "C.c1"])).unwrap();
     for message in [world::read_text(None, None, 1), world::focus_probe()] {
-        assert_eq!(both.call(&doc("C", "c-replaced"), message), unavailable);
+        assert_eq!(
+            both.call(&doc("C", "c-replaced"), message),
+            outside("C.c-replaced")
+        );
     }
 
     let mut unsupported = two_documents();
@@ -119,9 +127,11 @@ fn a_call_reaches_only_the_documents_its_scope_admits() {
         (placeholder, &["unseen.0"]),
         (vec![], &[]),
     ] {
-        assert_eq!(
-            Scope::admit(&scope_of(documents, allowed)).map(|_| ()),
-            Err(BrowserError::DocumentUnavailable),
+        assert!(
+            matches!(
+                Scope::admit(&scope_of(documents, allowed)),
+                Err(BrowserError::Protocol(_))
+            ),
             "{allowed:?}"
         );
     }
@@ -148,7 +158,13 @@ fn a_call_reaches_only_the_documents_its_scope_admits() {
     let mut inputs = Scope::admit(&authority).unwrap();
     assert_eq!(
         inputs.admit_input_subject(&doc("C", "c1")),
-        Err(BrowserError::DocumentUnavailable)
+        outside("C.c1").map(|_| ())
+    );
+    assert!(!inputs.unrestricted(), "this policy leaves documents out");
+    authority.watch_changes = false;
+    assert!(
+        Scope::admit(&authority).unwrap().unrestricted(),
+        "a policy that admits every document has nothing to watch"
     );
     assert_eq!(inputs.admit_input_subject(&doc("T", "t1")), Ok(()));
 }

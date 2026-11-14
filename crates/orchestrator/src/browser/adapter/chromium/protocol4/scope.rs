@@ -7,7 +7,8 @@
 //! every input, and records what the request actually reached.
 //!
 //! Nothing here decides policy. A content call to a document outside `allowed` fails before
-//! anything is sent.
+//! anything is sent, and so does input whose subject, found when the input is sent, is such a
+//! document. The failure names the document; the authority knows why it was left out.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -20,6 +21,8 @@ use crate::browser::adapter::documents::{DocumentObservation, DocumentScope};
 use crate::browser::adapter::BrowserOutcome;
 use crate::browser::BrowserError;
 
+/// The protocol failure of a scope that allows a document the adapter cannot address.
+const ALLOWED_NOT_ADDRESSABLE: &str = "an allowed document is not an addressable document";
 /// The member of an asset's answer that says its output was cut.
 const TRUNCATED_FIELD: &str = "truncated";
 
@@ -99,8 +102,9 @@ impl Scope {
     ///
     /// # Errors
     ///
-    /// Returns [`BrowserError::DocumentUnavailable`] when the documents are not one tree, or
-    /// when an allowed document is not a real document the adapter can address.
+    /// Returns [`BrowserError::Protocol`] when the documents are not one tree, or when an
+    /// allowed document is not a real document the adapter can address. The authority admits
+    /// from the tree the adapter described, so either is a breach between the two.
     pub fn admit(scope: &DocumentScope) -> Result<Self, BrowserError> {
         let tree = FrameTree::from_documents(&scope.documents)?;
         let allowed = scope
@@ -108,7 +112,7 @@ impl Scope {
             .iter()
             .map(|id| {
                 tree.supported_ref(id)
-                    .ok_or(BrowserError::DocumentUnavailable)
+                    .ok_or_else(|| BrowserError::Protocol(ALLOWED_NOT_ADDRESSABLE.into()))
             })
             .collect::<Result<_, _>>()?;
         let subjects = scope
@@ -142,7 +146,7 @@ impl Scope {
         self.tree.top().clone()
     }
 
-    /// The documents the authority routed the request's locators, points or focus to.
+    /// The documents the request's locators belong to.
     #[must_use]
     pub fn subjects(&self) -> &[FrameRef] {
         &self.subjects
@@ -207,15 +211,15 @@ impl Scope {
     ///
     /// # Errors
     ///
-    /// Returns [`BrowserError::DocumentUnavailable`] before anything is sent when the document
-    /// is not admitted for this message.
+    /// Returns [`BrowserError::OutsideScope`], naming the document, before anything is sent
+    /// when the document is not admitted for this message.
     pub fn call(&self, doc: &FrameRef, message: Message) -> Result<PlannedCall, BrowserError> {
         let admitted = match message.scope_class() {
             ScopeClass::Content => self.allowed.contains(doc),
             ScopeClass::Metadata => self.tree.contains(doc),
         };
         if !admitted {
-            return Err(BrowserError::DocumentUnavailable);
+            return Err(outside(doc));
         }
         let message = if message.takes_settle() {
             message.with_settle(self.remaining_settle_ms(), self.settle_requested)
@@ -261,11 +265,11 @@ impl Scope {
     ///
     /// # Errors
     ///
-    /// Returns [`BrowserError::DocumentUnavailable`] when the document is not allowed, before any
-    /// input is sent.
+    /// Returns [`BrowserError::OutsideScope`], naming the document, when it is not allowed,
+    /// before any input is sent.
     pub fn admit_input_subject(&mut self, subject: &FrameRef) -> Result<(), BrowserError> {
         if !self.allowed.contains(subject) {
-            return Err(BrowserError::DocumentUnavailable);
+            return Err(outside(subject));
         }
         self.input_subjects.push(subject.clone());
         Ok(())
@@ -328,6 +332,13 @@ impl Scope {
         }
     }
 
+    /// Whether the authority's policy admits every document. A subject no document claims, such
+    /// as a focus no document reports, then cannot be one the policy leaves out.
+    #[must_use]
+    pub const fn unrestricted(&self) -> bool {
+        !self.watch
+    }
+
     /// Whether a point must be routed to its document before input. When every document is
     /// addressable and allowed, any point lands in an allowed document, so the round trips are
     /// skipped and an ungoverned page pays nothing for governance.
@@ -346,6 +357,13 @@ impl Scope {
     pub fn remaining_settle_ms(&self) -> u64 {
         let remaining = self.settle_until.saturating_duration_since(Instant::now());
         u64::try_from(remaining.as_millis()).unwrap_or(u64::MAX)
+    }
+}
+
+/// The failure of a subject in a document the scope leaves out. The authority holds the reason.
+fn outside(doc: &FrameRef) -> BrowserError {
+    BrowserError::OutsideScope {
+        document: document_id(doc),
     }
 }
 

@@ -161,18 +161,14 @@ impl FakeBrowser {
             DocumentInventory, DocumentObservation, PhysicalDocument,
         };
         if let BrowserCommand::DescribeDocuments {
-            tab_id,
-            locators,
-            points,
-            focused,
-            ..
+            tab_id, locators, ..
         } = &command
         {
             let mut inventory = lock(&self.documents)
                 .get(tab_id)
                 .cloned()
                 .unwrap_or_default();
-            if locators.is_empty() && points.is_empty() && !focused {
+            if locators.is_empty() {
                 inventory.subjects.clear();
             } else if inventory.subjects.is_empty() {
                 inventory.subjects = inventory

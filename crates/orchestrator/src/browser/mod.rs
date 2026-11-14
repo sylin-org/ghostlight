@@ -1491,9 +1491,24 @@ pub enum BrowserError {
     /// The authority refused the actual embedded-document subject before access.
     #[error("document access denied: {0:?}")]
     DocumentAccess(crate::governance::Decision),
-    /// Current document scope could not be established before access.
+    /// A document the work needs could not be used, and nothing was sent to it. The site that
+    /// knows the fact names the cause; the text names none, because it can travel to the model
+    /// as a detail.
     #[error("document scope unavailable before access")]
-    DocumentUnavailable,
+    DocumentUnavailable(crate::language::document_refusal::DocumentCause),
+    /// The adapter found a subject of the work (a located control, the document under a point,
+    /// the document that holds the focus) in a document the admitted scope leaves out, and sent
+    /// nothing to it. The adapter knows which document; the authority, which holds the
+    /// decisions, says why it was left out. The text names no document, because it can travel.
+    #[error("the subject is in a document outside the admitted scope")]
+    OutsideScope {
+        /// The document, as the authority names it.
+        document: String,
+    },
+    /// A document of the page changed, went missing or lost its session while the work ran, and
+    /// no single handle names the document. Raised before any effect.
+    #[error("the page changed while the work ran")]
+    PageChanged,
     /// Application control refused before this physical dispatch began.
     #[error("runtime control refused browser dispatch: {0:?}")]
     RuntimeControl(crate::governance::ReasonCode),

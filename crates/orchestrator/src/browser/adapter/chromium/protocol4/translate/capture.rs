@@ -20,6 +20,7 @@ use super::observe::{settle, settle_top};
 use super::{frame_tree, value};
 use crate::browser::adapter::{BrowserOutcome, CaptureScope, PhysicalRectangle, ViewportGeometry};
 use crate::browser::BrowserError;
+use crate::workspace::StaleReason;
 
 /// Refuse a capture of `tab_id` when its window shows another tab. A tab the listing does not
 /// name is left to the capture's own failure.
@@ -42,8 +43,9 @@ fn require_showing(l: &mut Link<'_>, tab_id: u64) -> Result<(), BrowserError> {
 ///
 /// # Errors
 ///
-/// Returns [`BrowserError::TabNotShowing`] for a tab its window does not show, the plain failure
-/// of a target that cannot be measured, and the failure of the capture.
+/// Returns [`BrowserError::TabNotShowing`] for a tab its window does not show, a stale handle
+/// for a target whose document the tab no longer holds, the plain failure of a target that
+/// cannot be measured, and the failure of the capture.
 pub fn screenshot(
     l: &mut Link<'_>,
     tab_id: u64,
@@ -55,7 +57,12 @@ pub fn screenshot(
     let (clip, scope) = match locator {
         Some(locator) => {
             let target = Locator::decode(locator)?;
-            let tree = frame_tree(l, tab_id)?;
+            let tree = frame_tree(l, tab_id)?.tree;
+            // A handle whose document the tab no longer holds is stale, as it is for any other
+            // work that names it.
+            if !tree.contains(&target.doc) {
+                return Err(BrowserError::stale(StaleReason::Navigated));
+            }
             let mut plans: Vec<PlannedCall> = (settle_ms > 0)
                 .then(|| settle(settle_ms))
                 .into_iter()

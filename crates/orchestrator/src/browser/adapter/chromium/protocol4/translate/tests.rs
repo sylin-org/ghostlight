@@ -20,7 +20,7 @@ use crate::browser::adapter::{
 };
 use crate::browser::{BrowserError, BrowserPort, RelayBrowserPort};
 use crate::language::PageCondition;
-use crate::language::{FindScope, PointerButton};
+use crate::language::{FindScope, PointerButton, ReadMode};
 use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
@@ -178,7 +178,7 @@ fn wait(condition: PageCondition) -> BrowserCommand {
     })
 }
 
-fn a_strict_guard_mismatch_before_any_effect_is_an_unavailable_document() {
+fn a_strict_guard_mismatch_before_any_effect_is_a_page_change() {
     let (port, _fake) = port_with(Box::new(|correlation, _| {
         Reply::Now(FakeExtension::failed(
             correlation,
@@ -197,7 +197,7 @@ fn a_strict_guard_mismatch_before_any_effect_is_an_unavailable_document() {
                 },
             ),
         ),
-        Err(BrowserError::DocumentUnavailable)
+        Err(BrowserError::PageChanged)
     );
 }
 
@@ -287,8 +287,6 @@ fn nested_document_execution_is_a_protocol_failure_and_sends_nothing() {
     let describe = BrowserCommand::DescribeDocuments {
         tab_id: 12,
         locators: vec![],
-        points: vec![],
-        focused: false,
         settle_ms: 0,
     };
     for nested in [inner, describe] {
@@ -380,17 +378,17 @@ fn describe_locator(
         BrowserCommand::DescribeDocuments {
             tab_id: 12,
             locators: vec![locator.into()],
-            points: vec![],
-            focused: false,
             settle_ms: 0,
         },
     )
 }
 
-/// A handle whose document changed is stale as navigated, whether the frame reloaded, left an
-/// incomplete inventory, or changed under a call that names one handle, including a recording
-/// exported into a page; a change before any effect with no single handle is an unavailable
-/// document (commit fa3bcb02, finding G1; ADR-0203 Decision 5.4).
+/// A handle whose document changed is stale as navigated, whether the frame reloaded, is missing
+/// from an inventory however complete, or changed, went missing or lost its session under a call
+/// that names one handle, including a recording exported into a page; a change before any effect
+/// with no single handle is a page change, which an observation runs once more on (commit
+/// fa3bcb02, finding G1; ADR-0203 Decision 5.4; ADR-0205 Decision 8). Describing documents asks
+/// the page nothing, whatever the list a published extension sends.
 #[test]
 fn a_target_in_a_reloaded_iframe_is_refused_as_navigated() {
     for locator in [
@@ -416,32 +414,46 @@ fn a_target_in_a_reloaded_iframe_is_refused_as_navigated() {
     );
     points::a_document_change_during_a_page_export_is_a_navigated_target();
 
-    a_strict_guard_mismatch_before_any_effect_is_an_unavailable_document();
-    an_incomplete_inventory_keeps_document_unavailable();
+    a_strict_guard_mismatch_before_any_effect_is_a_page_change();
+    an_inventory_that_is_not_whole_still_describes_what_it_places();
     a_document_change_on_a_one_locator_call_is_a_navigated_target();
 }
 
-fn an_incomplete_inventory_keeps_document_unavailable() {
-    let incomplete = json!({"frames": [frame("T", "t1", None, TOP)], "complete": false,
-                            "unseen": []});
-    let (port, _fake) = port(incomplete, Box::new(|_| vec![]));
+fn an_inventory_that_is_not_whole_still_describes_what_it_places() {
+    // What a published extension can send for the life of a tab: complete false, and a frame
+    // whose parent it does not list.
+    let partial = json!({"frames": [frame("T", "t1", None, TOP), frame("C", "c1", Some("T"), CHILD),
+                                    frame("O", "o1", Some("Gone"), SECOND)],
+                         "complete": false, "unseen": []});
+    let (port, fake) = port(partial, Box::new(|_| vec![]));
     assert_eq!(
         describe_locator(&port, "C:c1:locator_a1_2"),
         Ok(BrowserOutcome::Documents {
             tab_id: 12,
             inventory: DocumentInventory {
-                documents: vec![physical("T.t1", None, TOP)],
-                subjects: vec![],
-                unresolved: false,
+                documents: vec![
+                    physical("T.t1", None, TOP),
+                    physical("C.c1", Some("T.t1"), CHILD)
+                ],
+                subjects: vec!["C.c1".into()],
                 incomplete: true,
             },
         }),
-        "a frame the extension could not show may still hold the locator's document"
+        "what reaches the top is placed, and the gap is said"
     );
-    assert_eq!(
-        describe_locator(&port, "T:t0:locator_a1_1"),
-        Err(BrowserError::stale(StaleReason::Navigated)),
-        "a frame that holds another loader is stale however complete the inventory"
+    for locator in ["O:o1:locator_a1_2", "T:t0:locator_a1_1"] {
+        assert_eq!(
+            describe_locator(&port, locator),
+            Err(BrowserError::stale(StaleReason::Navigated)),
+            "{locator} names a document the tree does not hold, however complete the inventory"
+        );
+    }
+    assert!(
+        fake.wait(|_| true)
+            .requests
+            .iter()
+            .all(|(_, primitive)| matches!(primitive, wire::Primitive::Frames(_))),
+        "describing documents is one frames primitive and asks the page nothing"
     );
 }
 
@@ -533,9 +545,82 @@ fn a_document_change_on_a_one_locator_call_is_a_navigated_target() {
             tab_id: 12,
             locators: vec!["T:t1:locator_a1_1".into(), "C:c1:locator_a1_2".into()],
         }),
-        Err(BrowserError::DocumentUnavailable),
+        Err(BrowserError::PageChanged),
         "a change among several locators' documents names none of them"
     );
+
+    // A published extension answers a call whose child session died with a call-level failure.
+    for code in ["document_changed", "frame_missing", "session_lost"] {
+        let (lost, _fake) = self::port(
+            inventory(),
+            Box::new(move |call: &wire::Call| {
+                call.calls
+                    .iter()
+                    .map(|_| json!({"status": "failed", "code": code, "message": "", "started": false}))
+                    .collect()
+            }),
+        );
+        assert_eq!(
+            call(
+                &lost,
+                scoped(
+                    scope(&["T.t1", "C.c1"], false),
+                    BrowserCommand::ReadText {
+                        tab_id: 12,
+                        locator: Some("C:c1:locator_a1_2".into()),
+                        max_chars: 100,
+                    },
+                ),
+            ),
+            Err(BrowserError::stale(StaleReason::Navigated)),
+            "{code}"
+        );
+    }
+
+    // A whole-page read or text wait that no document answered is not an empty page: it fails
+    // with the first document's own failure, so a dialog is a dialog and a change a page change.
+    for (code, failure) in [
+        ("dialog_open", BrowserError::DialogOpen),
+        ("document_changed", BrowserError::PageChanged),
+    ] {
+        for command in [
+            BrowserCommand::Find {
+                tab_id: 12,
+                text: "Save".into(),
+                kind: FindScope::Any,
+                max_results: 5,
+            },
+            BrowserCommand::ReadDocument {
+                tab_id: 12,
+                mode: ReadMode::Article,
+                max_chars: 100,
+            },
+            BrowserCommand::InspectTree {
+                tab_id: 12,
+                locator: None,
+                max_depth: 3,
+            },
+            wait(PageCondition::TextAbsent),
+        ] {
+            let (silent, _fake) = self::port(
+                inventory(),
+                Box::new(move |call: &wire::Call| {
+                    call.calls
+                        .iter()
+                        .map(|_| json!({"status": "failed", "code": code, "message": "", "started": false}))
+                        .collect()
+                }),
+            );
+            assert_eq!(
+                call(
+                    &silent,
+                    scoped(scope(&["T.t1", "C.c1"], false), command.clone())
+                ),
+                Err(failure.clone()),
+                "{code} {command:?}"
+            );
+        }
+    }
 }
 
 mod forms;

@@ -64,12 +64,14 @@ use crate::governance::{
 use crate::language::{
     self,
     audit::AuditProjection,
+    document_refusal::DocumentCause,
     field_problem::ControlRef,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
         CheckFailure, ExtensionAdvice, FileProblem, Observed, Outcome, Refusal, StaleHelp,
-        TargetRole, WorkspaceReason, CANDIDATE_TABS_FACT, EXCEPTION_FACT, HANDLE_TAB_FACT,
-        IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
+        TargetRole, WorkspaceReason, CANDIDATE_TABS_FACT, DOCUMENT_CAUSE_FACT, EXCEPTION_FACT,
+        HANDLE_TAB_FACT, IMAGE_SIZE_FACT, OWNER_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT,
+        STALE_FACT,
     },
     page_refusal::{PageGesture, PageRefusal},
     Operation, Record, RecordAction, TakeScreenshot,
@@ -1008,6 +1010,13 @@ impl ApplicationExecutor {
             Ok(BrowserOutcome::Observed {
                 satisfied: true, ..
             }) => return applied,
+            // An absence that held only in what was read is not a condition that failed: the
+            // check could not read the whole page, which is the word for that.
+            Ok(BrowserOutcome::Observed {
+                satisfied: false, ..
+            }) if context.findings.take_absence_doubt() => {
+                (CheckFailure::DocumentUnavailable, decision)
+            }
             Ok(BrowserOutcome::Observed {
                 satisfied: false, ..
             }) => (CheckFailure::Unmet, decision),
