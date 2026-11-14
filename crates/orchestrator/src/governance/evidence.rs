@@ -114,7 +114,7 @@ mod tests {
     fn trace_bounds_and_deduplication_keep_omission_explicit() {
         let snapshot = snapshot(None, None);
         let mut trace = PermissionTrace::default();
-        for index in 0..=PERMISSION_CHECK_LIMIT {
+        for index in 0..PERMISSION_CHECK_LIMIT {
             let (_, check) = snapshot.authorize_with_evidence(
                 CapabilitySet::READ,
                 Some(&format!("https://host{index}.test/")),
@@ -122,8 +122,18 @@ mod tests {
             trace.record(check.clone());
             trace.record(check);
         }
+        // A repeated check neither takes a slot nor flags omission, including the repeat of the
+        // last check recorded when the trace is already full.
         assert_eq!(trace.checks.len(), PERMISSION_CHECK_LIMIT);
+        assert!(!trace.truncated);
+
+        let (_, one_more) = snapshot.authorize_with_evidence(
+            CapabilitySet::READ,
+            Some(&format!("https://host{PERMISSION_CHECK_LIMIT}.test/")),
+        );
+        trace.record(one_more);
         assert!(trace.truncated);
+        assert_eq!(trace.checks.len(), PERMISSION_CHECK_LIMIT);
     }
 }
 

@@ -300,21 +300,31 @@ mod tests {
 
     use super::mcp_opening;
 
+    /// The service picks the governing channel (`channels.cli.enabled`,
+    /// `IntakeChannel::of_opening` in `intake/session.rs`) from the channel word of this opening,
+    /// and reads a missing or other word as an MCP client (ADR-0202 Decision 22, commit
+    /// 1c025dea). An absent session owner is left out, not sent as null.
     #[test]
-    fn the_command_line_sends_the_opening_bytes_it_sent_before() {
-        let build = env!("CARGO_PKG_VERSION");
+    fn a_command_line_call_opens_an_mcp_stream_on_the_cli_channel_with_its_session_owner() {
         let session = json!({"kind": "process", "pid": 7, "started_at": 9, "name": "bash.exe"});
+        let edge = json!({
+            "program": "service",
+            "revision": RELAY,
+            "build": env!("CARGO_PKG_VERSION"),
+        });
         assert_eq!(
-            serde_json::to_string(&mcp_opening(Some(session))).unwrap(),
-            format!(
-                r#"{{"relay":{RELAY},"role":"mcp","edge":{{"program":"service","revision":{RELAY},"build":"{build}"}},"channel":"cli","session":{{"kind":"process","name":"bash.exe","pid":7,"started_at":9}}}}"#
-            )
+            serde_json::to_value(mcp_opening(Some(session.clone()))).unwrap(),
+            json!({
+                "relay": RELAY,
+                "role": "mcp",
+                "edge": edge,
+                "channel": "cli",
+                "session": session,
+            })
         );
         assert_eq!(
-            serde_json::to_string(&mcp_opening(None)).unwrap(),
-            format!(
-                r#"{{"relay":{RELAY},"role":"mcp","edge":{{"program":"service","revision":{RELAY},"build":"{build}"}},"channel":"cli"}}"#
-            )
+            serde_json::to_value(mcp_opening(None)).unwrap(),
+            json!({"relay": RELAY, "role": "mcp", "edge": edge, "channel": "cli"})
         );
     }
 }
