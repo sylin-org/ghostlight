@@ -139,6 +139,13 @@ the owner wants, and what this project learned the hard way.
   it. Refuse or ask only when there is a real choice or when authority is at stake. Test for any
   new result field, refusal or notice: would the caller act differently because of it?
 
+- **When the service and the extension change together, they take the same version.** "In the
+  future, in similar situations, let's bump both to the same version." (owner, 2026-11-14, after
+  the extension went to the store as 2.0.2 while the service fixes of the same work became
+  2.0.3). The extension still changes its version only when its source changes (ADR-0142); when
+  one piece of work changes both, pick one number for both, skipping a number on one side if
+  needed.
+
 - **Delight through sane defaults.** Anticipate the caller's intent with safe defaults instead of
   boilerplate configuration; bounded settlement across page tools is the model case (see
   'Settlement is a timing preference' below, ADR-0174/ADR-0195).
