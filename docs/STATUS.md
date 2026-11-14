@@ -38,9 +38,14 @@ released.
 - **Proof.** `tests/nested-frame-browser-journey.mjs` runs the shipped extension in a real
   browser with no service. It failed both promises 9 of 9 runs on the extension as it was and
   holds 3 of 3 on this tree (Chrome for Testing 156).
-- **Owed.** The owner loads `extension/` unpacked and the SharePoint check is repeated on it. The
-  extension still reads 2.0.1: its next version, its `compatibility.json` row and the store
-  submission are the owner's call. The journey has not run on the Chrome CI pins (152). Not
+- **Extension 2.0.2 submitted.** Checked live on the owner's machine with the unpacked build,
+  then bumped to 2.0.2 and submitted to the Chrome Web Store on 2026-11-14 as a staged publish:
+  `PENDING_REVIEW`, the store still serves 2.0.1
+  ([custody](testing/extension-2.0.2-store-submission-2026-11-14.md)). Publishing after approval
+  is the owner's call.
+- **A session moves to the only connected browser** instead of refusing, and says nothing of it
+  (ADR-0196 amendment of 2026-11-13; the owner's "it just works" rule in MEMORY). Checked live.
+- **Owed.** `dev` is not pushed. The journey has not run on the Chrome CI pins (152). Not
   investigated: the navigation timeouts in the field report.
 - **Left for the owner, each its own decision (ADR-0207, Considered and not taken):** admitting
   `about:blank` and `srcdoc` frames with their parent, not pausing new frames at start, letting
