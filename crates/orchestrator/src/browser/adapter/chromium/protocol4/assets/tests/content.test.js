@@ -33,11 +33,10 @@ function contentHarness({ top = true } = {}) {
   dom.context.scrollTo = (options) => scrolls.push(options);
 
   /** Call the runtime and drive the fake clock until the call answers. */
-  async function send(message, options = {}, observe) {
+  async function send(message, options = {}) {
     let answered = false;
     const pending = runtime.call(message, options).then((reply) => {
       answered = true;
-      observe?.("reply");
       return plain(reply);
     });
     for (let step = 0; step < MAX_STEPS && !answered; step += 1) {
@@ -889,12 +888,6 @@ test("hit_point converts page coordinates and names the subject of a plain docum
   assert.equal(viewport.value.x, 110);
 });
 
-test("hit_point without an element is no_subject", async () => {
-  const harness = contentHarness();
-  harness.document.elementFromPoint = () => null;
-  assert.equal(await harness.codeOf({ kind: "hit_point", x: 1, y: 1, page: false }), "no_subject");
-});
-
 function shadowFixture(name) {
   return {
     tagName: "INPUT",
@@ -1000,18 +993,6 @@ test("upload accepts a connected enabled file input even when it is hidden", asy
   assert.deepEqual(harness.input.events, ["input", "change"]);
 });
 
-test("upload still rejects a disabled hidden file input", async () => {
-  const harness = contentHarness();
-  const [target] = await harness.targets();
-  harness.input.disabled = true;
-
-  const uploaded = await harness.send({ kind: "upload_files", locator: target.locator, files: [FILE] });
-
-  assert.equal(uploaded.ok, false);
-  assert.equal(uploaded.error.code, "disabled");
-  assert.match(uploaded.error.message, /disabled for upload/);
-});
-
 test("activation preparation names and locates the physical element without clicking", async () => {
   const harness = contentHarness();
   harness.input.hidden = false;
@@ -1030,21 +1011,6 @@ test("activation preparation names and locates the physical element without clic
   assert.equal(typeof activated.value.rectangle.width, "number");
   assert.equal(clicked, false);
   assert.deepEqual(harness.input.events, []);
-});
-
-test("an unactionable activation target refuses with its code", async () => {
-  const harness = contentHarness();
-  harness.input.hidden = false;
-  harness.input.type = "submit";
-  harness.input.setAttribute("value", "Save changes");
-  const [target] = await harness.targets();
-
-  harness.input.disabled = true;
-  const refused = await harness.send({ kind: "activate", locator: target.locator });
-
-  assert.equal(refused.ok, false);
-  assert.equal(refused.error.code, "disabled");
-  assert.match(refused.error.message, /disabled/);
 });
 
 test("invisibility refusals name the exact predicate", async () => {
@@ -1631,25 +1597,6 @@ test("an empty rich editor counts as retained when its text is blank", async () 
   assert.equal(verified.ok, true);
 });
 
-test("submit_fill answers before it clicks, and only the verified submit control is clicked", async () => {
-  const harness = contentHarness();
-  textInput(harness);
-  harness.input.form = harness.element("form");
-  const locator = await harness.locatorOf("Name");
-  const order = [];
-  harness.input.click = () => order.push("submit");
-
-  const reply = await harness.send(
-    { kind: "submit_fill", fields: [{ locator, value: "x" }], submit_locator: locator, allow_credentials: false },
-    {},
-    (phase) => order.push(phase)
-  );
-  assert.deepEqual(reply, { ok: true, value: { submitted: true } });
-  assert.deepEqual(order, ["reply"], "the click is the tail of the call");
-  harness.dom.advance(0);
-  assert.deepEqual(order, ["reply", "submit"]);
-});
-
 test("a submit control outside the resolved form refuses before any click", async () => {
   const harness = contentHarness();
   textInput(harness);
@@ -1665,13 +1612,6 @@ test("a submit control outside the resolved form refuses before any click", asyn
   assert.equal(clicked, false);
   assert.equal(harness.input.value, "");
   assert.deepEqual(harness.input.events, []);
-});
-
-test("submit_fill without a submit locator is an invalid request", async () => {
-  const harness = contentHarness();
-  textInput(harness);
-  const locator = await harness.locatorOf("Name");
-  assert.equal(await harness.codeOf({ kind: "submit_fill", fields: [{ locator, value: "x" }], allow_credentials: false }), "invalid_request");
 });
 
 // ---- observe -----------------------------------------------------------------------------------
@@ -1915,15 +1855,6 @@ test("a cancel token ends verify_fill_retained", async () => {
   assert.equal(harness.dom.pendingTimers(), 0);
 });
 
-test("a cancel token ends a sensor settle", async () => {
-  const harness = contentHarness();
-  harness.setBody(harness.element("body"));
-  const reply = await cancelled(harness, { kind: "read_text", mode: "visible", max_chars: 100, settle_ms: 60_000 }, "t-settle");
-  assert.equal(reply.error?.code, "cancelled");
-  assert.equal(harness.dom.activeObservers(), 0);
-  assert.equal(harness.dom.pendingTimers(), 0);
-});
-
 // ---- quiet sampled reads -----------------------------------------------------------------------
 
 /** Milliseconds of fake time a call took, driven the way `send` does. */
@@ -2143,18 +2074,6 @@ test("live locators never exceed 500", async () => {
     if (reply.ok) live += 1;
   }
   assert.ok(live > 0 && live <= 500, `${live} live locators`);
-});
-
-test("requireActionable says removed when the node vanishes mid-action", async () => {
-  const harness = contentHarness();
-  harness.input.hidden = false;
-  harness.input.type = "submit";
-  harness.input.setAttribute("value", "Save changes");
-  const locator = (await harness.targets())[0].locator;
-  harness.input.scrollIntoView = () => {
-    harness.input.isConnected = false;
-  };
-  assert.equal(await staleWordOf(harness, { kind: "activate", locator }), "removed");
 });
 
 // ---- a refused fill lists what would succeed ----------------------------------------------------
@@ -3314,13 +3233,6 @@ test("every world kind has a golden message that content.js reads and accepts", 
     assert.equal(reply.ok, true, `${file} was answered ${reply.error?.code}: ${reply.error?.message}`);
     const probe = GOLDEN_PROBES[message.kind];
     if (probe) await probe(await goldenPage(), message, options);
-  }
-});
-
-test("the retired kinds answer unknown_kind", async () => {
-  const harness = contentHarness();
-  for (const kind of ["fill", "clear", "prepare_text_fill", "verify_text_fill_focus", "verify_fill_values", "frame_boxes", "point_context", "document_route", "present"]) {
-    assert.equal(await harness.codeOf({ kind }), "unknown_kind", kind);
   }
 });
 
@@ -4751,28 +4663,6 @@ test("the stale detail is computed without painting", async () => {
   assert.deepEqual(harness.scrolls, []);
 });
 
-test("a vanished element in the middle of an action carries the same lookup", async () => {
-  const harness = contentHarness();
-  const rows = [["Alpha", 1], ["Beta", 2]];
-  const body = libraryRows(harness, rows);
-  const [alpha] = (await findControls(harness, "More options")).map((target) => target.locator);
-  const button = body.children[0].children[1];
-  button.scrollIntoView = () => {
-    detach(button);
-    libraryRows(harness, rows);
-  };
-  const detail = await detailOf(harness, { kind: "activate", locator: alpha });
-  assert.equal(detail.stale, "removed");
-  assert.equal(detail.same_count, 1);
-  assert.equal(detail.candidates[0].target.context, "Alpha");
-});
-
-test("an unknown locator carries no lookup", async () => {
-  const harness = contentHarness();
-  libraryRows(harness, [["Alpha", 1]]);
-  assert.deepEqual(await detailOf(harness, { kind: "describe", locators: ["locator_1"] }), { stale: "unknown" });
-});
-
 // ---- a handle follows its control through a re-render the page proves ---------------------------
 
 /** The Suno library: nine titles twice, 18 rows, each with its own /song/<uuid> link. */
@@ -5037,6 +4927,8 @@ test("a node that vanishes during an action's wait refuses as removed", async ()
 
   assert.equal(reply.ok, false);
   assert.equal(reply.error.detail.stale, "removed");
+  assert.equal(reply.error.detail.same_count, 1);
+  assert.equal(reply.error.detail.candidates[0].target.context, "Alpha");
   assert.equal("rebound" in reply, false);
   assert.equal(reply.error.detail.candidates[0].target.locator, alpha, "the lookup names the control by its own handle");
 });

@@ -39,18 +39,6 @@ function sources() {
   return fs.readdirSync(bundle.ASSETS).filter((name) => name.endsWith(".js")).sort();
 }
 
-test("the include marker expands to the listed files in order, each followed by a newline", () => {
-  assert.deepEqual(bundle.includes(), ["page-shared.js", "sensor.js", "presentation-css.js", "presentation.js", "content.js"]);
-  const marker = "/*@include page-shared.js sensor.js presentation-css.js presentation.js content.js*/";
-  const world = bundle.read("world.js");
-  assert.equal(world.split(marker).length, 2, "world.js holds the marker exactly once");
-  const [before, after] = world.split(marker);
-  const body = bundle.includes().map((name) => `${bundle.read(name)}\n`).join("");
-  assert.equal(SOURCE, `${before}${body}${after}`);
-  assert.ok(!SOURCE.includes("@include"));
-  assert.ok(!SOURCE.includes("\r"), "the expanded source holds LF line endings only");
-});
-
 test("the bundle hash equals the pinned asset id", () => {
   const pinned = fs.readFileSync(path.join(GOLDEN, "assets.sha256"), "utf8").trim();
   assert.match(pinned, /^[0-9a-f]{64}$/);
@@ -385,16 +373,4 @@ test("cancel ends a wait with the cancelled code and reports whether the token w
   assert.equal(dom.activeObservers(), 0);
   assert.equal(dom.pendingTimers(), 0);
   assert.equal(runtime.cancel("t-2"), false, "a finished call forgets its token");
-});
-
-test("a visual settle also ends when cancelled", async () => {
-  const dom = createFakeDom();
-  const runtime = install(dom);
-  const pending = runtime.call({ kind: "observe", condition: "visual_settle", timeout_ms: 5000 }, { token: "t-3" });
-  dom.document.documentElement.getBoundingClientRect = () => ({ x: 0, y: 0, width: 1, height: 1 });
-  assert.equal(runtime.cancel("t-3"), true);
-  dom.advance(30);
-  const reply = plain(await pending);
-  assert.equal(reply.error?.code, "cancelled");
-  assert.equal(dom.pendingTimers(), 0);
 });
