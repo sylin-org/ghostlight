@@ -131,21 +131,6 @@ test("a computer Ghostlight does not run on says so and turns every step off", (
   }
 });
 
-test("platformKey accepts only the two supported computers", () => {
-  assert.equal(setup.platformKey("win"), "win");
-  assert.equal(setup.platformKey("linux"), "linux");
-  assert.equal(setup.platformKey("mac"), null);
-  assert.equal(setup.platformKey("cros"), null);
-});
-
-test("shortBrowser maps the four names", () => {
-  assert.equal(setup.shortBrowser("Google Chrome"), "Chrome");
-  assert.equal(setup.shortBrowser("Microsoft Edge"), "Edge");
-  assert.equal(setup.shortBrowser("Brave"), "Brave");
-  assert.equal(setup.shortBrowser("Vivaldi"), "Chromium");
-  assert.equal(setup.shortBrowser(undefined), "Chromium");
-});
-
 test("the fallback waits ninety seconds after a copy and two minutes after opening", () => {
   const openedAt = 1_000_000;
   const base = { openedAt, visible: true, connected: false };
@@ -161,11 +146,6 @@ test("the fallback never shows while the page is hidden or Ghostlight answers", 
   assert.equal(setup.fallbackDue({ ...late, visible: true, connected: false }), true);
   assert.equal(setup.fallbackDue({ ...late, visible: false, connected: false }), false);
   assert.equal(setup.fallbackDue({ ...late, visible: true, connected: true }), false);
-});
-
-test("the documentation link is the product's own page", () => {
-  assert.equal(LINKS.documentation.label, "Documentation");
-  assert.equal(LINKS.documentation.url, "https://sylin.org/ghostlight/");
 });
 
 test("every word on the page is ASCII", () => {

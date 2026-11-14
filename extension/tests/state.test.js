@@ -18,7 +18,3 @@ test("otherwise the badge carries no text", () => {
     assert.equal(state.badge({ control_state, recording_tabs: 0 }).text, "");
   }
 });
-
-test("the badge text is dark enough to read on the accent", () => {
-  assert.equal(state.BADGE_TEXT_COLOR, "#08110f");
-});

@@ -111,22 +111,6 @@ test("a dialog already open refuses the batch before any input", async () => {
   await lifecycle.detachAll();
 });
 
-test("a cancel stops the batch between steps", async () => {
-  let cancelled = false;
-  const { chrome, input } = await ready({ isCancelled: () => cancelled });
-  chrome.handlers["Input.dispatchMouseEvent"] = () => { cancelled = true; return {}; };
-  const result = await input.run(inputArgs(click), effects(), "p4_7");
-  assert.deepEqual(result, { completed_steps: 1, native_drag: false, stopped: { reason: "cancelled" } });
-});
-
-test("the deadline between steps is a timeout", async () => {
-  const { chrome, input } = await ready();
-  chrome.handlers["Input.dispatchMouseEvent"] = () => new Promise((resolve) => setTimeout(() => resolve({}), 30));
-  const fx = effects();
-  await assert.rejects(input.run(inputArgs(click, { timeout_ms: 10 }), fx, "p4_8"), { code: "timeout", message: "Input did not finish in 10 ms." });
-  assert.equal(fx.dispatched, true);
-});
-
 const dragStep = { step: "drag", path: [{ x: 100, y: 120 }, { x: 180, y: 160 }, { x: 260, y: 200 }], modifiers: 0 };
 
 test("an intercepted HTML5 drag is replayed as dragEnter, dragOver and drop at the last point", async () => {

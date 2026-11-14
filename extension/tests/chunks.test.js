@@ -80,6 +80,7 @@ test("digest and correlation mismatches never dispatch", async () => {
   await settle();
   assert.equal(correlationHarness.delivered.length, 0);
   assert.match(correlationHarness.rejected[0].reason, /correlation mismatch/);
+  assert.equal(correlationHarness.rejected.length, 1);
 });
 
 test("duplicates, expiry, and all hard bounds erase partial bytes", () => {
@@ -239,14 +240,4 @@ test("a cancelled verifier cannot erase a later transfer with the same id", asyn
   await settle();
   assert.deepEqual(h.delivered, [newRequest]);
   assert.deepEqual(h.rejected, []);
-});
-
-test("a reassembled request whose correlation differs from the transfer is refused", async () => {
-  const h = harness();
-  const request = { kind: "request", correlation: "physical_6", primitive: { name: "list_tabs", args: {} } };
-  const frames = framesFor(request, 1000).map((frame) => ({ ...frame, correlation: "physical_other" }));
-  for (const frame of frames) h.accept(frame);
-  await settle();
-  assert.deepEqual(h.delivered, []);
-  assert.equal(h.rejected.length, 1);
 });

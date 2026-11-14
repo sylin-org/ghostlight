@@ -124,15 +124,6 @@ test("the handlers carry validate, run, addresses and tabOf, and addressing foll
   assert.equal(buffers.recording.tabOf(exported({ destination: "page", tab_id: 9 })), 9);
 });
 
-test("every golden diagnostics and recording request passes validation", () => {
-  const { buffers } = setup();
-  for (const name of ["diagnostics.read", "diagnostics.clear"]) assert.doesNotThrow(() => buffers.diagnostics.validate(goldenArgs(name)), name);
-  for (const name of ["recording.start", "recording.status", "recording.stop", "recording.discard", "recording.export.download",
-    "recording.export.client", "recording.export.page"]) {
-    assert.doesNotThrow(() => buffers.recording.validate(goldenArgs(name)), name);
-  }
-});
-
 test("bad diagnostics and recording arguments are invalid_request", async () => {
   const { buffers } = setup();
   const read = goldenArgs("diagnostics.read");

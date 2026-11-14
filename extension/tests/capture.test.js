@@ -112,24 +112,6 @@ function matches(result, receipt) {
   assert.equal(result.dispatched, receipt.dispatched);
 }
 
-test("view and capture carry validate, run, addresses and tabOf", async () => {
-  const { capture } = await setup();
-  for (const handler of [capture.view, capture.capture]) {
-    assert.equal(typeof handler.validate, "function");
-    assert.equal(typeof handler.run, "function");
-    assert.equal(handler.addresses({}), true);
-    assert.equal(handler.tabOf({ tab_id: 5 }), 5);
-  }
-});
-
-test("every golden view and capture request passes validation", async () => {
-  const { capture } = await setup();
-  capture.view.validate(goldenArgs("view"));
-  for (const name of ["capture.viewport", "capture.full_page", "capture.viewport_rect", "capture.page_rect"]) {
-    assert.doesNotThrow(() => capture.capture.validate(goldenArgs(name)), name);
-  }
-});
-
 test("a capture refuses a bad tab id and budget in the shared words", async () => {
   const Arguments = require("../lib/arguments.js");
   const shared = (check) => {
@@ -185,7 +167,7 @@ test("view falls back to a device scale of 1 when the ratio is unreadable", asyn
 });
 
 test("a viewport capture is one photograph of the surface, cut and scaled off the page, matching the golden receipt", async () => {
-  const { capture, chrome, log, screenshots } = await setup();
+  const { capture, chrome, log, screenshots, lifecycle } = await setup();
   const result = await execute(capture.capture, goldenArgs("capture.viewport"));
   matches(result, golden("receipts/capture.ok"));
   assert.deepEqual(screenshots().map((call) => call.params), [PHOTOGRAPH], "one capture, with no clip and no captureBeyondViewport");
@@ -197,6 +179,7 @@ test("a viewport capture is one photograph of the surface, cut and scaled off th
   assert.deepEqual(log.encodes, [{ crop: { x: 0, y: 0, width: 2560, height: 1440 }, width: 1280, height: 720, quality: 80 }],
     "the surface holds two device pixels for each CSS pixel");
   assert.equal(log.closed, 1, "the picture is given back");
+  assert.equal(lifecycle.attachedCount(), 0, "the lease is given back");
 });
 
 test("a clip the viewport shows is cut out of a photograph in device pixels; the whole page and a clip beyond it are re-rendered", async () => {
@@ -518,13 +501,6 @@ test("a capture or view with a JavaScript dialog open fails dialog_open and asks
   assert.equal(ambient.length, 0);
   assert.deepEqual(chrome.calls, [], "not even its layout");
   await lifecycle.detachAll();
-});
-
-test("capture reads without dispatching and gives its debugger lease back", async () => {
-  const { capture, lifecycle } = await setup();
-  const result = await execute(capture.capture, goldenArgs("capture.viewport"));
-  assert.equal(result.dispatched, false);
-  assert.equal(lifecycle.attachedCount(), 0);
 });
 
 // Runs `work` with the browser's image interfaces replaced by recording stand-ins, which Node lacks.

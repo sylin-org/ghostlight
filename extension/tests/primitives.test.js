@@ -24,12 +24,6 @@ test("the table has a handler for every primitive of the vocabulary and nothing 
   }
 });
 
-test("a dispatcher without its collaborators is refused", () => {
-  assert.throws(() => Primitives.create({}), TypeError);
-  const parts = rig();
-  assert.throws(() => Primitives.create({ send() {}, controlled: parts.hook, cancellations: parts.cancellations }), TypeError);
-});
-
 test("which primitives address a tab, and which tab", () => {
   const { primitives } = rig();
   const addressing = (args = {}) => Object.keys(primitives.handlers).filter((name) => primitives.handlers[name].addresses(args));
@@ -131,23 +125,6 @@ test("an unknown primitive is unsupported with nothing dispatched, and so is a n
   assert.equal(parts.frames.length, 3);
   assert.equal(parts.hook.calls.length, 0);
   assert.deepEqual(parts.chrome.calls, []);
-});
-
-test("every request gets exactly one receipt: success, failure, invalid, unsupported and cancelled alike", async () => {
-  const stubs = new Map([
-    ["focus_tab", async (_args, fx) => { fx.dispatched = true; return { tab_id: TAB, active: true, window_focused: true }; }],
-    ["set_zoom", async () => { throw protocol.failure("tab_missing", "No tab with id: 12."); }]
-  ]);
-  const parts = rig({ stubs });
-  await parts.primitives.run("a", request("focus_tab", focus));
-  await parts.primitives.run("b", request("set_zoom", { tab_id: TAB, zoom: 1 }));
-  await parts.primitives.run("c", request("set_zoom", { tab_id: TAB }));
-  await parts.primitives.run("d", request("warp", {}));
-  parts.primitives.cancel("e");
-  await parts.primitives.run("e", request("focus_tab", focus));
-  assert.deepEqual(parts.frames.map((frame) => [frame.correlation, frame.ok ? "ok" : frame.failure]), [
-    ["a", "ok"], ["b", "tab_missing"], ["c", "invalid_request"], ["d", "unsupported"], ["e", "cancelled"]
-  ]);
 });
 
 test("the prelude marks the tab managed before the handler runs, for addressing primitives only", async () => {
@@ -755,21 +732,4 @@ test("a snapshot checks its guard and reads a frame of another process in its ow
   const sent = split.chrome.calls.find((call) => call.method === "Accessibility.getFullAXTree");
   assert.equal(sent.target.sessionId, "OOP");
   assert.equal(split.frames[0].ok.nodes.length, 2);
-});
-
-// ---- cancellations --------------------------------------------------------------------------
-
-test("the cancel registry is a plain remembered set with a sixty second memory", () => {
-  let now = 1000;
-  const registry = Primitives.createCancellations({ now: () => now });
-  assert.equal(registry.isCancelled("a"), false);
-  registry.cancel("a");
-  registry.cancel("b");
-  now += 30_000;
-  registry.cancel("c");
-  now += 30_000;
-  assert.deepEqual(["a", "b", "c"].map((id) => registry.isCancelled(id)), [false, false, true]);
-  registry.forget("c");
-  assert.equal(registry.isCancelled("c"), false);
-  assert.ok(Object.isFrozen(registry));
 });

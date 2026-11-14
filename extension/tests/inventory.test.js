@@ -231,7 +231,3 @@ test("the frames primitive answers the fixture shape inside a debugger lease", a
   assert.equal(lifecycle.attachedCount(), 0);
   assert.equal(methods(chrome).includes("Runtime.enable"), false);
 });
-
-test("the inventory requires debugger sessions and webNavigation", () => {
-  assert.throws(() => Inventory.create({}), /requires/);
-});

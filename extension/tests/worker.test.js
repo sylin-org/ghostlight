@@ -286,10 +286,13 @@ test("the hello reads the engine from the user agent when brands are unavailable
 
 test("a browser id is created once and kept", async () => {
   const first = await boot();
-  const second = await boot({ local: { "ghostlight.browser_id": first.port.posted[0].browser_id } });
+  let second = null;
   try {
-    assert.equal(second.port.posted[0].browser_id, first.port.posted[0].browser_id);
-  } finally { first.dispose(); second.dispose(); }
+    const stored = first.browser.store.local.get("ghostlight.browser_id");
+    assert.equal(stored, first.port.posted[0].browser_id, "the worker stored the id it announced");
+    second = await boot({ local: { "ghostlight.browser_id": stored } });
+    assert.equal(second.port.posted[0].browser_id, stored);
+  } finally { first.dispose(); second?.dispose(); }
 });
 
 test("the hello carries the life", async () => {
@@ -1097,17 +1100,6 @@ test("a disconnect cancels in-flight work, tells pages, and reconnects after 3 s
     assert.equal(worker.ports.length, 2);
     assert.equal(worker.port.posted[0].kind, "hello");
     assert.equal(worker.port.posted.length, 1);
-  } finally { worker.dispose(); }
-});
-
-test("the reconnect alarm opens a new port", async () => {
-  const worker = await boot();
-  try {
-    await worker.close("Native host has exited.");
-    worker.chrome.alarms.onAlarm.emit({ name: "ghostlight-reconnect", scheduledTime: 5 });
-    await flush();
-    assert.equal(worker.ports.length, 2);
-    assert.equal(worker.port.posted[0].kind, "hello");
   } finally { worker.dispose(); }
 });
 

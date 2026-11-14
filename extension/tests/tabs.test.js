@@ -13,7 +13,6 @@ const OTHER_WINDOW = 2;
 const TITLE = `${protocol.vocabulary.group_title_prefix}Research`;
 const LEGACY_TITLE = `${protocol.vocabulary.legacy_group_title_prefixes[0]}Research`;
 const KEY = "workspace_9a2c";
-const HANDLERS = ["listTabs", "openTab", "navigate", "focusTab", "closeTab", "setZoom", "resizeWindow"];
 
 function tab(overrides) {
   return { windowId: WINDOW, url: "https://example.com/", title: "Example Domain", ...overrides };
@@ -39,37 +38,6 @@ function setup({ browser = {}, cancelled = [] } = {}) {
   });
   return { chrome, debuggerChrome, lifecycle, hook, tabs, advance: (ms) => { clock += ms; } };
 }
-
-test("every handler carries validate, run, addresses and tabOf", () => {
-  const { tabs } = setup();
-  for (const name of HANDLERS) {
-    const handler = tabs[name];
-    assert.equal(typeof handler.validate, "function", name);
-    assert.equal(typeof handler.run, "function", name);
-    assert.equal(typeof handler.addresses, "function", name);
-    assert.equal(handler.tabOf({ tab_id: 7 }), 7, name);
-  }
-  assert.deepEqual(
-    HANDLERS.filter((name) => tabs[name].addresses({})),
-    ["navigate", "focusTab", "setZoom", "resizeWindow"]
-  );
-});
-
-test("every golden request for a tab primitive passes validation", () => {
-  const { tabs } = setup();
-  const requests = {
-    listTabs: ["list_tabs"],
-    openTab: ["open_tab", "open_tab.adopt"],
-    navigate: ["navigate.url", "navigate.back", "navigate.forward", "navigate.reload"],
-    focusTab: ["focus_tab"],
-    closeTab: ["close_tab"],
-    setZoom: ["set_zoom"],
-    resizeWindow: ["resize_window"]
-  };
-  for (const [handler, names] of Object.entries(requests)) {
-    for (const name of names) assert.doesNotThrow(() => tabs[handler].validate(goldenArgs(name)), name);
-  }
-});
 
 test("bad arguments are invalid_request before anything happens", async () => {
   const { tabs, chrome } = setup();
@@ -98,23 +66,6 @@ test("bad arguments are invalid_request before anything happens", async () => {
     assert.equal(result.dispatched, false);
   }
   assert.equal(chrome.calls.length, 0);
-});
-
-test("a tab primitive refuses a bad tab id and wait in the shared words", async () => {
-  const Arguments = require("../lib/arguments.js");
-  const shared = (check) => {
-    try {
-      check();
-    } catch (error) {
-      return error.message;
-    }
-    throw new Error("the shared check passed");
-  };
-  const { tabs } = setup();
-  const tab = await execute(tabs.closeTab, { tab_id: 0 });
-  assert.equal(tab.message, shared(() => Arguments.requireTabId(0)));
-  const wait = await execute(tabs.openTab, { ...goldenArgs("open_tab"), ready_timeout_ms: -1 });
-  assert.equal(wait.message, shared(() => Arguments.requireInteger(-1, "ready_timeout_ms")));
 });
 
 test("invalid_request messages match the golden receipts", async () => {

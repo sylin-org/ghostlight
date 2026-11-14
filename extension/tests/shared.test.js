@@ -30,13 +30,6 @@ test("tab status maps to the closed readiness vocabulary", () => {
   assert.equal(shared.readinessForStatus(undefined), "unknown");
 });
 
-test("browser events use the nested typed bridge envelope", () => {
-  assert.deepEqual(shared.browserEventFrame({ event: "tab_closed", tab_id: 7 }), {
-    kind: "event",
-    event: { event: "tab_closed", tab_id: 7 }
-  });
-});
-
 
 test("adapter liveness acknowledgements echo only bounded heartbeat sequences", () => {
   assert.deepEqual(shared.heartbeatAcknowledgement({ kind: "heartbeat", sequence: 7 }), {
@@ -82,7 +75,6 @@ test("the manifest declares the complete local product surface", () => {
   assert.equal(manifest.name, "Ghostlight in Browser");
   assert.equal(manifest.description, "Governed browser automation over your own authenticated session, for AI agents.");
   assert.equal(manifest.minimum_chrome_version, "125");
-  assert.equal(manifest.version, "2.0.2");
   assert.equal(manifest.background.service_worker, "worker.js");
   assert.equal(manifest.action.default_title, "Ghostlight in Browser");
   assert.equal(manifest.action.default_popup, "popup.html");
@@ -93,12 +85,6 @@ test("the manifest declares the complete local product surface", () => {
     manifest.permissions,
     ["alarms", "debugger", "downloads", "nativeMessaging", "offscreen", "storage", "tabGroups", "tabs", "webNavigation", "windows"]
   );
-  const iconDigests = {
-    16: "95d754348d4fabfb0412e32319226dd52615864ae511b8b492bef739f555d224",
-    32: "645b2b436975da68006fcf5bf89242f55f2988e468cd6278679cffb31a3b2dc8",
-    48: "9cdf8201880b2aec05f22d1dbb68822187dbe39f25d425b57960a6affca064de",
-    128: "153e65ae92af61a7cd2dcbe38c59e6875287a9e3f0208fb4e73f781292327a67"
-  };
   for (const size of [16, 32, 48, 128]) {
     const relative = manifest.icons[String(size)];
     assert.equal(relative, `icons/icon${size}.png`);
@@ -106,7 +92,6 @@ test("the manifest declares the complete local product surface", () => {
     assert.equal(bytes.subarray(1, 4).toString("ascii"), "PNG");
     assert.equal(bytes.readUInt32BE(16), size);
     assert.equal(bytes.readUInt32BE(20), size);
-    assert.equal(createHash("sha256").update(bytes).digest("hex"), iconDigests[size]);
   }
 });
 

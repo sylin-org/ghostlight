@@ -30,7 +30,12 @@ test("an unrecognized disconnect reason falls back to the unreachable state", ()
   }
 });
 
-test("a connected snapshot is never classified as host-absent", () => {
+test("an outdated service outranks every disconnect reason, and a connected link is never reclassified", () => {
+  assert.equal(
+    shared.linkState({ connected: false, compatible: false, outdated: true, lastError: "Specified native messaging host not found." }),
+    shared.LINK_SERVICE_OUTDATED
+  );
+  assert.equal(shared.linkState({ connected: false, compatible: false, outdated: true }), "service_outdated");
   assert.equal(
     shared.linkState({
       connected: true,
@@ -39,15 +44,6 @@ test("a connected snapshot is never classified as host-absent", () => {
     }),
     shared.LINK_CONNECTED
   );
-});
-
-test("an outdated service outranks every disconnect reason, and a connected link is never reclassified", () => {
-  assert.equal(
-    shared.linkState({ connected: false, compatible: false, outdated: true, lastError: "Specified native messaging host not found." }),
-    shared.LINK_SERVICE_OUTDATED
-  );
-  assert.equal(shared.linkState({ connected: false, compatible: false, outdated: true }), "service_outdated");
-  assert.equal(shared.linkState({ connected: true, compatible: true, outdated: false }), shared.LINK_CONNECTED);
 });
 
 test("an extension the service refused outranks an outdated service and every disconnect reason", () => {

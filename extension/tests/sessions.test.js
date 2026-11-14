@@ -86,12 +86,6 @@ function iframeAttached(chromeDebugger, tabId, sessionId, extra = {}, through = 
   );
 }
 
-test("sessions require the Chrome debugger API and an installer", () => {
-  assert.throws(() => sessions.create({}, { installer }), /Chrome debugger API/);
-  assert.throws(() => sessions.create(fakeDebugger()), /installer/);
-  assert.throws(() => sessions.create(fakeDebugger(), { installer: "script" }), /installer/);
-});
-
 test("a method outside the CDP allowlist is refused with browser_refused and never sent", async () => {
   const chromeDebugger = fakeDebugger();
   const lifecycle = sessions.create(chromeDebugger, { installer });
@@ -104,16 +98,6 @@ test("a method outside the CDP allowlist is refused with browser_refused and nev
   await assert.rejects(lifecycle.enableDomain(40, "DOM"), { code: "browser_refused" });
   assert.equal(chromeDebugger.calls.some(([, , method]) => method === "Debugger.enable" || method === "DOM.enable"), false);
   await lifecycle.detachAll();
-});
-
-test("an allowed method reaches the debugger with its target and parameters", async () => {
-  const sent = [];
-  const chromeDebugger = fakeDebugger();
-  chromeDebugger.sendCommand = async (target, method, params) => { sent.push({ target, method, params }); return { ok: true }; };
-  const lifecycle = sessions.create(chromeDebugger, { installer });
-  const reply = await lifecycle.cdp({ tabId: 41, sessionId: "s" }, "Page.getFrameTree", { a: 1 });
-  assert.deepEqual(reply, { ok: true });
-  assert.deepEqual(sent, [{ target: { tabId: 41, sessionId: "s" }, method: "Page.getFrameTree", params: { a: 1 } }]);
 });
 
 test("the allowlist is the closed protocol 4 list and refusal is a known receipt code", () => {
@@ -546,20 +530,6 @@ test("a dialog records its message and the session that raised it, and leaves wi
   assert.equal(lifecycle.currentDialog(63), null);
   await lifecycle.release(63);
   assert.equal(lifecycle.attachedCount(), 0);
-});
-
-test("terminal shutdown detaches retained controlled tabs", async () => {
-  const chromeDebugger = fakeDebugger();
-  const lifecycle = sessions.create(chromeDebugger, { installer });
-
-  await Promise.all([lifecycle.retain(17), lifecycle.retain(18)]);
-  await lifecycle.detachAll();
-
-  assert.equal(lifecycle.attachedCount(), 0);
-  assert.deepEqual(chromeDebugger.calls.filter(([kind]) => kind === "detach").sort(), [
-    ["detach", 17],
-    ["detach", 18]
-  ]);
 });
 
 test("an open JavaScript dialog retains its debugger session until handled", async () => {

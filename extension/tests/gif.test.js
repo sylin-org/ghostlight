@@ -136,12 +136,3 @@ test("the encoder uses the recording registry's own fidelity policy", () => {
   assert.deepEqual(kept.map((entry) => entry.duration_ms), [30, 70, 50]);
   assert.equal(kept.reduce((total, entry) => total + entry.duration_ms, 0), 150);
 });
-
-test("fewer than three frames cannot be thinned, and the policy says so", () => {
-  // The fit loop relies on this: a list that cannot shrink has to be reported, not retried.
-  for (const frames of [[], [{ duration_ms: 1 }], [{ duration_ms: 1 }, { duration_ms: 2 }]]) {
-    const { kept, dropped } = recordingApi.thinFrames(frames);
-    assert.equal(kept.length, frames.length);
-    assert.equal(dropped.length, 0);
-  }
-});

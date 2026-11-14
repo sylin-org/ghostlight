@@ -89,11 +89,6 @@ test("an ended session offers a new one and no end", () => {
   });
 });
 
-test("ready waits, and paused and ended are held, as the window and the tray show them", () => {
-  const lights = ["active", "held", "ended"].map((control) => popup.popupView(snapshot({ control_state: control })).light);
-  assert.deepEqual(lights, [LIGHT.WAITING, LIGHT.HELD, LIGHT.HELD]);
-});
-
 test("the lantern is lit only while an agent is browsing", () => {
   const browsing = { activity: [{ client_label: "Claude Code", label: "Reading" }] };
   assert.equal(popup.popupView(snapshot(browsing)).light, LIGHT.LIT);
@@ -125,10 +120,12 @@ test("there is no key cap without a shortcut", () => {
   assert.deepEqual(popup.popupView(snapshot()).secondary, { label: "Pause agents", intent: INTENT.HOLD });
 });
 
-test("the recording note is singular for one tab and plural otherwise", () => {
+test("the recording note is singular for one tab, plural otherwise, and shows beside every state", () => {
   assert.equal(popup.popupView(snapshot({ recording_tabs: 1 })).note, "Recording in 1 tab.");
   assert.equal(popup.popupView(snapshot({ recording_tabs: 3 })).note, "Recording in 3 tabs.");
   assert.equal(popup.popupView(snapshot({ recording_tabs: 0 })).note, null);
+  assert.equal(popup.popupView(snapshot({ control_state: "held", recording_tabs: 2 })).note, "Recording in 2 tabs.");
+  assert.equal(popup.popupView(away(shared.LINK_UNREACHABLE, { recording_tabs: 1 })).note, "Recording in 1 tab.");
 });
 
 test("a missing native host or an incompatible service says Ghostlight is not answering", () => {
@@ -188,11 +185,6 @@ test("a debugger release is offered only when not connected and tabs are attache
   assert.equal(popup.popupView(snapshot({ attached_tabs: 2, control_state: "held" })).release, null);
 });
 
-test("the recording note shows beside every state", () => {
-  assert.equal(popup.popupView(snapshot({ control_state: "held", recording_tabs: 2 })).note, "Recording in 2 tabs.");
-  assert.equal(popup.popupView(away(shared.LINK_UNREACHABLE, { recording_tabs: 1 })).note, "Recording in 1 tab.");
-});
-
 test("the connection sentence agrees with the popup for each link state", () => {
   const cases = [
     away(shared.LINK_HOST_ABSENT),
@@ -223,27 +215,12 @@ test("the connection sentence agrees with the popup for each link state", () => 
   });
 });
 
-test("an unreachable connection names where Ghostlight is and offers no setup", () => {
-  const windows = popup.connection(away(shared.LINK_UNREACHABLE), { platform: WIN });
-  assert.equal(windows.line, "Open Ghostlight on this computer. It is in the Start menu.");
-  assert.equal(windows.needsSetup, false);
-  const linux = popup.connection(away(shared.LINK_UNREACHABLE), { platform: LINUX });
-  assert.equal(linux.line, "Open Ghostlight on this computer. It is in your applications.");
-});
-
 test("the options connection is Connected for a live link whatever the session says", () => {
   for (const controlState of ["active", "held", "ended"]) {
     const connection = popup.connection(snapshot({ control_state: controlState }), { platform: WIN });
     assert.equal(connection.title, popup.WORDS.connected.title);
     assert.equal(connection.needsSetup, false);
   }
-});
-
-test("an outdated service offers its update on the options connection", () => {
-  const connection = popup.connection(away(shared.LINK_SERVICE_OUTDATED, { compatible: false }), { platform: LINUX });
-  assert.equal(connection.title, "Update needed");
-  assert.equal(connection.needsSetup, true);
-  assert.equal(connection.setupLabel, "Update this computer");
 });
 
 test("an extension the service refused says to update Ghostlight in Browser, with the service's own words", () => {

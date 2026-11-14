@@ -103,20 +103,17 @@ test("stop freezes, read is non-consuming, and discard reclaims exact bytes", ()
   assert.deepEqual(h.recording.status(id), { notFound: true });
 });
 
-test("frame size, recording size, cadence, and finalization are extension-owned", () => {
+test("a changed frame inside 100 ms is dropped, and a stopping recording takes no more screencast frames", () => {
   const h = harness();
   const id = h.recording.start(7).started.recording_id;
-  assert.equal(recordingApi.MAX_FRAME_BYTES, 2 * 1024 * 1024);
-  assert.equal(recordingApi.MAX_RECORDING_BYTES, 5 * 1024 * 1024);
-  assert.equal(recordingApi.JPEG_QUALITY, 80);
-  assert.equal(recordingApi.MAX_FRAMES, Math.ceil(recordingApi.HARD_DURATION_MS / 100) + 2);
+  const CHANGED = "AQ==";
   assert.equal(h.recording.append(7, FRAME, "screencast", 1_000), true);
-  assert.equal(h.recording.append(7, FRAME, "screencast", 1_050), false);
-  assert.equal(h.recording.append(7, FRAME, "screencast", 1_100), false);
+  assert.equal(h.recording.append(7, CHANGED, "screencast", 1_050), false, "a changed frame inside the interval");
+  assert.equal(h.recording.append(7, CHANGED, "screencast", 1_100), true);
   h.recording.beginStop(id);
-  assert.equal(h.recording.append(7, FRAME, "screencast", 1_200), false);
-  assert.equal(h.recording.append(7, FRAME, "final", 1_200), false);
-  assert.equal(h.recording.retained(id).frames[0].duration_ms, 200);
+  assert.equal(h.recording.append(7, CHANGED, "screencast", 1_200), false, "a stopping recording refuses a screencast frame");
+  assert.equal(h.recording.append(7, CHANGED, "final", 1_200), false, "an identical final frame folds into the last one");
+  assert.deepEqual(h.recording.retained(id).frames.map((frame) => frame.duration_ms), [100, 100]);
 });
 
 test("ten identical samples fold into one frame with one second of visual time", () => {

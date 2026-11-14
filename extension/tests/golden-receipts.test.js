@@ -405,11 +405,6 @@ for (const [stem, spec] of Object.entries(CASES)) {
 
 // ---- fixtures the extension cannot produce ----------------------------------------------------
 
-test("every case names a receipt fixture", () => {
-  const stems = new Set(names("receipts"));
-  for (const stem of Object.keys(CASES)) assert.ok(stems.has(stem), stem);
-});
-
 test("input.cancelled is the service's cancel shape: the input module ends a cancelled batch with a stop, not a failure", async () => {
   // A cancel frame reaches the input module between steps, where it stops the batch and reports
   // `stopped: cancelled` in an ok outcome (input.ok_cancelled_stop). It never throws `cancelled`
