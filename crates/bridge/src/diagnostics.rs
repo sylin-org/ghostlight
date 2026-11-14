@@ -774,9 +774,16 @@ mod tests {
     /// Drive re-checks until an observable effect lands, bounded. The product contract is
     /// eventual (watch or tick, whichever fires first), and resolution alone proves nothing:
     /// only an opened file, a written line, or a callback is the transition.
+    ///
+    /// The deadline only bounds a failure: a condition that never holds fails the test here. A
+    /// wait that gave up quietly let the next step produce the awaited state by another road.
     fn wait_until_bounded(mut predicate: impl FnMut() -> bool) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !predicate() && std::time::Instant::now() < deadline {
+        while !predicate() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the awaited effect never landed"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }
