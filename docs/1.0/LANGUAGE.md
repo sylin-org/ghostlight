@@ -342,31 +342,41 @@ Refusals say what is true, and their next steps suggest only what the caller can
   which installed browser a session's own browser is, the session waits only while a browser is
   evidently returning, and a browser still gone after that is started again, so the start keeps
   the call's budget. The call then goes through when the same browser connects within the
-  deadline, even after another profile of it connected first; another profile alone at the
-  deadline is `browser_wrong_profile`, and a start whose adapter never connects is
-  `browser_handshake_timeout`, with the words every browser start has. A retry within 30 seconds
+  wait that follows the start, even after another profile of it connected first. Nothing is
+  started while that installed browser is already connected under another identity. A start
+  whose adapter never connects is `browser_handshake_timeout`, with the words every browser
+  start has. A retry within 30 seconds
   of a start that has not connected waits for that start instead of starting the browser again,
   so repeating the call after a handshake timeout is safe. No new sentence is
   needed (ADR-0196 Decision 12 amendment, 2026-10-17). Otherwise a session that already works in
-  a browser is never sent to browser startup. Then the refusal says which fact stopped the call,
-  with `failed`, no effect, and `repeat_safe: true`:
+  a browser is never sent to browser startup.
+
+  A session whose browser stayed away while exactly one other browser is connected moves to
+  that browser, and the call runs there. One connected browser is no choice, so the result says
+  nothing about the move: no refusal, no fact, no sentence. The process log records it, and the
+  audit record and the window name the browser each action ran in. Every tab the session held
+  in the browser that left reads as no longer open, so a call that names one of them is told
+  that (`tab_unavailable`) and reaches no browser (ADR-0196 Decision 12 amendment, 2026-11-13).
+
+  Otherwise the refusal says which fact stopped the call, with `failed`, no effect, and
+  `repeat_safe: true`:
 
   | Fact | `reason` | Summary | Next step |
   | --- | --- | --- | --- |
   | Connected but not answering | `browser_not_answering` | `The browser this session works in stopped answering. Nothing was sent.` | `Check that the browser window is open and responsive, then repeat the call.` |
   | Not connected, no other browser is | `browser_disconnected` | `The browser this session works in is not connected. Nothing was sent.` | `Ask the user to reopen that browser, then repeat the call.` |
-  | Not connected, a different browser is | `browser_wrong_profile` | `This session works in a browser that is not connected; a different browser is.` | `Ask the user to reopen the browser profile this session started in, then repeat the call.` and `To work in a connected browser instead, call browser_tabs with action list, then browser_navigate with new_tab true and that browser.` |
+  | Not connected, several other browsers are | `browser_wrong_profile` | `This session works in a browser that is not connected, and more than one other browser is. Nothing was sent.` | `Ask the user to reopen the browser this session started in, then repeat the call.` and `To work in one of the connected browsers instead, call browser_tabs with action list, then browser_navigate with new_tab true and that browser.` |
   | Connection busy with other work | `browser_busy` | `The browser connection was busy, so nothing was sent.` | `Repeat the call.` |
   | Bridge contract failure | `browser_contract_failed` | `Ghostlight and the browser extension do not agree on this request.` | `Ask the user to update Ghostlight in Browser (to update now, open chrome://extensions, turn on Developer mode and click Update), then repeat the call.` |
 
   None of these says "disconnected" for a browser that is still attached, and none tells the
   model to reconnect an adapter it cannot reach (ADR-0196 Decision 12). A session whose browser is
-  not connected moves when the agent names a connected one with `browser_navigate`, `new_tab`
+  not connected also moves when the agent names a connected one with `browser_navigate`, `new_tab`
   true and `browser`: it leaves its browser, every tab it held there reads as no longer open, and
-  the new tab binds the named browser. It never moves by itself, not even to the only browser
-  connected, because that can be another profile of the person's while their own restarts, and
-  finishing the work there is a different act from the one asked for (ADR-0084 Decision 4; arch-1
-  W-D5). While the session's browser is connected, naming another stays `browser_pinned`. The contract summary
+  the new tab binds the named browser (arch-1 W-D5). A named browser is always the one used.
+  Among several connected browsers the session never moves by itself, because choosing between
+  the person's signed-in browsers is a different act from the one asked for (ADR-0084 Decision
+  4). While the session's browser is connected, naming another stays `browser_pinned`. The contract summary
   does not say whether anything was sent. A receipt in the wrong shape arrives after the
   browser already received the request.
 - A deadline before dispatch suggests a longer `timeout_ms` only when the call's own value is

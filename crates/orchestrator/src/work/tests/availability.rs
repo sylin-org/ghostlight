@@ -363,12 +363,15 @@ fn counting_launches(
 ///   goes through there, and nothing is started even under on-demand startup.
 /// - Gone longer than the grace under on-demand startup: it is started at once, without spending
 ///   the grace, and the call goes through in it, also beside another connected browser.
-/// - Started but connecting as another profile: the call waits out its deadline for its own
-///   profile and is the wrong profile, sending nothing; when the other profile only comes
-///   first, the call goes to its own. Started and never connecting: the handshake timeout.
+/// - Started but connecting as another profile, the only browser connected: the session moves
+///   there and the call runs, with nothing in the result and one line in the process log
+///   (amendment of 2026-11-13); when the other profile only comes first, the call goes to its
+///   own. Started and never connecting: the handshake timeout.
 /// - Never started under manual startup, or when this service never saw which installed browser
-///   it is: not connected, or the wrong profile when another browser is connected, each with its
-///   own sentence and steps, nothing sent, the session not moved, and no browser in the record.
+///   it is: not connected, or the wrong profile when several other browsers are connected, each
+///   with its own sentence and steps, nothing sent, the session not moved, and no browser in the
+///   record. With one other browser connected, a call naming a tab of the browser that left
+///   hears that the tab is not open and reaches no browser, and the next open moves the session.
 #[test]
 fn a_session_browser_that_left_is_waited_for_or_started_again_only_when_known() {
     // Back within the grace: by reconnecting, or by answering a heartbeat again.
@@ -468,23 +471,42 @@ fn a_session_browser_that_left_is_waited_for_or_started_again_only_when_known() 
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert_eq!(browser.routed(), vec!["browser_chrome".to_owned()]);
 
-    // Started as another profile: the wrong profile after the deadline.
+    // Started as another profile, the only browser connected: the session moves there with time
+    // left to run, and the result is the one a session that began there gets. Only the process
+    // log says it moved (ADR-0196 Decision 12 amendment, 2026-11-13).
     let (governance, _policy) = on_demand_startup();
-    let (executor, browser, workspace, launches) = closed_session_browser(governance, |browser| {
-        browser.remember_installed("browser_other_profile", "chromium");
-        browser.connect(vec![summary("browser_other_profile", true)]);
-    });
-    let began = Instant::now();
-    let refused = navigate_within_a_second(&executor, &workspace);
-    assert!(
-        began.elapsed() >= Duration::from_millis(900),
-        "took {:?}",
-        began.elapsed()
-    );
-    assert_eq!(refused.effect, Effect::None);
-    assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
+    let (mut executor, browser, workspace, launches) =
+        closed_session_browser(governance, |browser| {
+            browser.remember_installed("browser_other_profile", "chromium");
+            browser.connect(vec![summary("browser_other_profile", true)]);
+        });
+    let log = Scratch::new();
+    executor.diagnostics = crate::diagnostics::DiagnosticsHub::for_tests_in(log.path());
+    browser.push(opened_tab(7, "https://example.com/"));
+    let moved = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(moved.status, Status::Succeeded, "{}", moved.summary);
     assert_eq!(launches.load(Ordering::SeqCst), 1);
-    assert!(browser.routed().is_empty());
+    assert_eq!(browser.routed(), vec!["browser_other_profile".to_owned()]);
+    let (plain_executor, plain_browser, _, plain_workspace, _) = fixture();
+    plain_browser.connect(vec![summary("browser_other_profile", true)]);
+    plain_browser.push(opened_tab(7, "https://example.com/"));
+    let plain = navigate_within_a_second(&plain_executor, &plain_workspace);
+    assert_eq!(
+        (&moved.summary, &moved.next_steps, key_names(&moved.facts)),
+        (&plain.summary, &plain.next_steps, key_names(&plain.facts))
+    );
+    let logged: String = fs::read_dir(log.path())
+        .unwrap()
+        .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
+    let line = logged
+        .lines()
+        .find(|line| line.contains(crate::diagnostics::SESSION_BROWSER_MOVED))
+        .expect("the process log records the move");
+    assert!(
+        line.contains("left browser_chrome, not connected, for browser_other_profile"),
+        "{line}"
+    );
 
     // Another profile first, then its own: the call goes to its own.
     let (governance, _policy) = on_demand_startup();
@@ -547,7 +569,10 @@ fn a_session_browser_that_left_is_waited_for_or_started_again_only_when_known() 
             (BrowserUnavailableReason::NotConnected, vec![]),
             (
                 BrowserUnavailableReason::WrongProfile,
-                vec![summary("browser_edge", true)],
+                vec![
+                    summary("browser_edge", true),
+                    summary("browser_brave", false),
+                ],
             ),
         ] {
             browser.connect(connected);
@@ -570,8 +595,73 @@ fn a_session_browser_that_left_is_waited_for_or_started_again_only_when_known() 
                 "{label}"
             );
         }
+        // A call naming a tab of the browser that left hears that the tab is no longer open,
+        // and nothing reaches the browser that is there.
+        workspaces.apply_browser_disconnect("browser_chrome", None);
+        browser.connect(vec![summary("browser_edge", true)]);
+        let held = workspaces.tab_bindings(workspace.as_str())[0]
+            .handle
+            .clone();
+        let gone = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({"tab":held,"timeout_ms":1000}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            gone.facts["reason"],
+            json!("tab_unavailable"),
+            "known={known}"
+        );
+        assert_eq!(gone.effect, Effect::None, "known={known}");
+        assert!(browser.routed().is_empty(), "known={known}");
+        // With no browser Ghostlight can start, the next open goes to the only one connected.
+        browser.push(opened_tab(7, "https://example.com/"));
+        let moved = navigate_within_a_second(&executor, &workspace);
+        assert_eq!(moved.status, Status::Succeeded, "{}", moved.summary);
+        assert_eq!(browser.routed(), vec!["browser_edge".to_owned()]);
+        assert_eq!(
+            workspaces.browser_of(workspace.as_str()).as_deref(),
+            Some("browser_edge"),
+            "known={known}"
+        );
         assert_eq!(launches.load(Ordering::SeqCst), 0, "known={known}");
+        // A recording call holds no lease, so a second call of the session can end the same wait
+        // later: it leaves nothing, and the tab opened since in Edge stays.
+        assert!(!workspaces.leave_browser(workspace.as_str(), "browser_chrome"));
+        assert_eq!(
+            workspaces.browser_of(workspace.as_str()).as_deref(),
+            Some("browser_edge"),
+            "known={known}"
+        );
+        assert_eq!(workspaces.tab_bindings(workspace.as_str()).len(), 1);
     }
+
+    // The wait and the count of connected browsers are two moments. A browser that came back
+    // between them takes the call, alone or beside another, and the session moves nowhere.
+    let (chrome, edge, brave) = (
+        summary("browser_chrome", false),
+        summary("browser_edge", true),
+        summary("browser_brave", false),
+    );
+    for (connected, goes) in [
+        (vec![chrome.clone()], Ok("browser_chrome")),
+        (vec![edge.clone(), chrome], Ok("browser_chrome")),
+        (vec![edge.clone()], Ok("browser_edge")),
+        (vec![edge, brave], Err(BrowserError::WrongProfile)),
+        (vec![], Err(BrowserError::DisconnectedBeforeDispatch)),
+    ] {
+        assert_eq!(
+            crate::work::routing::after_absence("browser_chrome", &connected),
+            goes.map(str::to_owned),
+            "{connected:?}"
+        );
+    }
+}
+
+/// The names of a result's facts, which a move between browsers must not add to.
+fn key_names(facts: &serde_json::Value) -> Vec<&String> {
+    facts.as_object().unwrap().keys().collect()
 }
 
 /// ADR-0196 Decision 12 (ACCEPTANCE Contract 17): a session with no browser waits only while

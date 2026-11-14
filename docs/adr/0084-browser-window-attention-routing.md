@@ -9,6 +9,10 @@ part of the v1 release line.
 
 Amends: ADR-0058 Decision 3 (focus routing and ambiguity fallback)
 
+Amendment, 2026-11-13: D4 is amended by ADR-0196's amendment of the same day, for one case. A
+session whose browser is not connected moves to the only connected browser, which is no choice,
+and the move is logged, not announced. Choosing among several browsers is still never silent.
+
 Builds on: ADR-0061 (extension-owned browser identity and service-assigned slots)
 
 ## Context

@@ -538,10 +538,26 @@ is evidently returning (`await_returning`), and `BrowserRecovery::request_browse
 scoped to that installed browser: registration checks, owned repair, one launch and the handshake
 wait. It answers ready when a connection of that browser arrives, or at once when one is already
 connected in another profile, since starting it again would only open a window there. The
-executor then waits within the call's deadline for the bound identity itself, since another
-profile may connect first, and refuses with `browser_wrong_profile` only when the deadline ends
-without it. With no mapping, as after a service restart, the bound workspace waits the whole
-grace and keeps its refusals. Every flight, unbound or scoped, shares one launch guard per
+executor asks for no start while that installed browser is already connected under another
+identity. After a start it waits the return grace for the bound identity itself, since another
+profile may connect first, and keeps the rest of the deadline for the work. With no mapping, as
+after a service restart, the bound workspace waits the whole grace.
+
+A bound browser that stayed away is settled in one place, `target_browser` in
+`work/routing.rs`, which is also the only reader of the binding for routing (ADR-0196 Decision
+12 amendment, 2026-11-13). With no browser connected the call is refused as not connected. With
+exactly one connected, the workspace leaves its browser and the call goes there: one browser is
+no choice, so nothing in the result says it moved. With several, the call is refused with
+`browser_wrong_profile`, and the agent moves the session by naming one. Both moves go through
+`move_session`, which calls `WorkspaceStore::leave_browser` and writes one
+`session_browser_moved` line to the process log, when diagnostics are on, with the workspace,
+both browser ids and the cause. `leave_browser` forgets every binding, so the tabs of the browser
+that left read as no longer open and a command addressed to one never crosses to another browser.
+It does so only while the workspace still works in the browser named as left, so a second call
+that waited out the same absence undoes nothing. The connected browsers are counted once
+(`after_absence`), and a bound browser that is back by then takes the call. The audit record
+and the window keep naming the browser each action ran in. A call that names a browser never
+moves anywhere else. Every flight, unbound or scoped, shares one launch guard per
 installed browser: while a start Ghostlight made is younger than `LAUNCH_HANDSHAKE_WINDOW` (30
 seconds, the longest call timeout) and no connection of that browser has arrived since, no flight
 starts it again, and each waits for that start's connection as if it had made it.

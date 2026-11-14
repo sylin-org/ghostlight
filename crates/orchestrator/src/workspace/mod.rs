@@ -575,9 +575,9 @@ struct WorkspaceState {
     /// A workspace lives in one browser for its whole life. Its tabs, targets, and views are all
     /// physical things inside that one browser, and physical tab ids only mean anything there, so
     /// a workspace that could span two browsers could not name its own tabs unambiguously. When
-    /// that browser stops, the binding stays: the work belongs to a person's Chrome profile, and
-    /// silently finishing it in their Edge profile would be a different act than the one asked
-    /// for (ADR-0084 D4).
+    /// that browser stops, the binding stays while the call waits for it: the work belongs to a
+    /// person's Chrome profile, and choosing between their other profiles would be a different
+    /// act than the one asked for (ADR-0084 D4). Only [`WorkspaceStore::leave_browser`] clears it.
     browser: Option<String>,
     leased: bool,
     /// Every tab binding, confirmed or pending.
@@ -1330,19 +1330,32 @@ impl WorkspaceStore {
             .and_then(|state| state.browser.clone())
     }
 
-    /// Let `workspace` leave the browser it works in, after that browser left and the agent named
-    /// another connected one (W-D5). The caller holds the workspace's lease.
+    /// Let `workspace` leave `from`, the browser it works in, after that browser stayed away and
+    /// the agent named another connected one (W-D5) or exactly one other is connected (ADR-0196
+    /// Decision 12 amendment, 2026-11-13). Returns whether it left.
     ///
     /// Every binding goes, so the old browser's tabs read as no longer open in this session, and
-    /// the next tab binds the browser the agent named. The tabs themselves stay where they are.
-    pub fn leave_browser(&self, workspace: &str) {
-        if let Some(state) = self.lock().workspaces.get_mut(workspace) {
-            let handles: Vec<TabHandle> = state.tabs.keys().cloned().collect();
-            for handle in handles {
-                state.forget_tab(&handle);
-            }
-            state.browser = None;
+    /// the next tab binds the browser the call goes to. The tabs themselves stay where they are.
+    ///
+    /// A workspace that no longer works in `from` is left as it is. A recording call runs without
+    /// the workspace's lease, so two calls of one session can wait out the same absent browser,
+    /// and the second must not undo the tabs the first has opened since in the browser it moved
+    /// to.
+    pub fn leave_browser(&self, workspace: &str, from: &str) -> bool {
+        let mut state = self.lock();
+        let Some(state) = state
+            .workspaces
+            .get_mut(workspace)
+            .filter(|state| state.browser.as_deref() == Some(from))
+        else {
+            return false;
+        };
+        let handles: Vec<TabHandle> = state.tabs.keys().cloned().collect();
+        for handle in handles {
+            state.forget_tab(&handle);
         }
+        state.browser = None;
+        true
     }
 
     /// The recording `workspace` holds in its browser, if any.

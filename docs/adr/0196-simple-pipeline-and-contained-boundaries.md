@@ -5,6 +5,9 @@ Decision 12 amended 2026-10-17: a session's own browser that stays gone is start
 `on_demand` (amendment at the end).
 Decision 12's amendment of 2026-10-17 amended by ADR-0203 (2026-10-19): a pinned wait reads its own
 installed browser's evidence, not the evidence the unbound path reads.
+Decision 12 amended 2026-11-13: a session whose browser stayed away moves to the only connected
+browser without telling the caller; several connected browsers keep the refusal (amendment at the
+end).
 
 Date: 2026-10-13. Status: Accepted by owner direction.
 
@@ -219,3 +222,70 @@ Acceptance evidence:
    the old refusals.
 3. Owed live check: on Windows, an MCP session that worked in Chrome, Chrome closed by the
    person, the session's next request starts Chrome and proceeds in the same session.
+
+## Amendment 2026-11-13: the only connected browser takes the session
+
+Owner decision of 2026-11-13, under the standing rule recorded in docs/MEMORY.md the same day:
+"Never bleed unnecessary details to the client. If we can resolve on your own in a meaningful
+manner, do so; the best Ghostlight can be, the highest degree of delight is 'it just works'."
+
+Evidence, from the owner's machine that day: a session was bound to a browser identity, which
+the extension mints. The extension was replaced, so the same browser connected under a new
+identity and the bound one never came back. Exactly one browser was connected, and the session
+held nothing usable in the old one. The service still refused with `browser_wrong_profile` and
+told the model to list the browsers and name one. The model spent two calls on a question with
+one answer.
+
+Decision 12 keeps its order: wait while the session's browser is evidently returning, start it
+again when Ghostlight can, then tell the truth. This amendment changes what follows a browser
+that stayed away:
+
+- When the session's browser is not connected and exactly one browser is, a call that needs a
+  browser and names none moves the session to that browser and runs there. There is no refusal
+  and nothing in the result about the move: no fact, no sentence, no next step. The caller would
+  not act differently for knowing it.
+- The move is recorded where a person can find it. The process log gets one
+  `session_browser_moved` line with the workspace, both browser identities and the cause, while
+  process diagnostics are on (ADR-0145 keeps that log opt-in). The audit record and the window
+  already name the browser each action ran in, whether or not diagnostics are on.
+- When several browsers are connected the choice is real, so `browser_wrong_profile` stays, and
+  the agent moves the session by naming one (W-D5). Its words now say what is true of that case
+  only: "This session works in a browser that is not connected, and more than one other browser
+  is. Nothing was sent."
+- A browser the call names is always the one used. A session never moves away from a browser
+  that is connected.
+- Every tab the session held in the browser that left reads as no longer open, as after a named
+  move. A call that names one of them gets the existing `tab_unavailable` refusal and reaches no
+  browser. This follows ADR-0203: a remembered tab is a hint its own browser confirms, and no
+  other browser can confirm it. `browser_navigate` keeps its own answer to a handle whose tab is
+  gone: it opens the page in a new tab under that handle and says the tab was gone.
+- There is one way a session changes browser. The named move and this one share one function at
+  the routing seam, which is the only place that clears the binding. It clears the binding only
+  while the session still works in the browser that left. A recording call holds no workspace
+  lease, so two calls of one session can wait out the same absence, and the later one must not
+  forget the tabs the earlier one opened in the browser it moved to.
+- The connected browsers are counted once, after the wait. If the session's own browser is back
+  by then, the call goes to it and nothing moves, whatever else is connected.
+
+The 2026-10-17 amendment stands with two changes that give the move time to run. Nothing is
+started while the session's installed browser is already connected under another identity, and
+the call no longer waits out its deadline there. After a start that connected, the call waits
+the return grace for its own identity, not the whole deadline. That amendment's sentence that
+another profile connecting "is the existing wrong profile refusal" now holds only when several
+browsers are connected.
+
+What this amends elsewhere: ADR-0114 Decision 2 and its 2026-10-14 amendment ("never replaced
+by another"), and ADR-0084 Decision 4 (no silent failover), each for this one case. Choosing
+among several browsers still never happens silently. ADR-0149 is unchanged: with no browser
+connected, recovery starts the only or the last browser as before. ADR-0203 is unchanged.
+
+Model-visible change: the `browser_wrong_profile` summary and both of its next steps are
+reworded for several browsers, and the reason code is kept. No catalog change, no wire change.
+
+Acceptance evidence, as rows of the existing availability table test: a started browser that
+connects as another profile, the only one connected, takes the session and the call succeeds
+with the result a fresh session gets, and the process log holds the line; under `manual` or
+with an unknown installed browser, several other browsers still refuse and move nothing, a call
+naming a tab of the browser that left is `tab_unavailable` with nothing sent, and the next open
+goes to the only connected browser; a later leave of the old browser changes nothing; and a
+browser that is back when the connected ones are counted takes the call.

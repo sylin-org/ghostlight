@@ -2030,7 +2030,7 @@ impl Refusal {
                     "The browser this session works in is not connected. Nothing was sent."
                 }
                 BrowserUnavailableReason::WrongProfile => {
-                    "This session works in a browser that is not connected; a different browser is."
+                    "This session works in a browser that is not connected, and more than one other browser is. Nothing was sent."
                 }
                 BrowserUnavailableReason::Busy => {
                     "The browser connection was busy, so nothing was sent."
@@ -2146,11 +2146,13 @@ impl Refusal {
             Self::IncompatibleReceipt | Self::BrowserAdapterOutdated | Self::BrowserContract => {
                 vec![update_extension_then_repeat()]
             }
-            // A session whose browser left can move to a connected one by naming it (W-D5).
+            // Only several connected browsers reach this: a session whose browser left moves to
+            // the only one connected by itself, and among several the agent names one (W-D5;
+            // ADR-0196 Decision 12 amendment, 2026-11-13).
             Self::BrowserUnavailable {
                 reason: BrowserUnavailableReason::WrongProfile,
             } => vec![
-                "Ask the user to reopen the browser profile this session started in, then repeat the call.".into(),
+                "Ask the user to reopen the browser this session started in, then repeat the call.".into(),
                 MOVE_TO_CONNECTED_BROWSER.into(),
             ],
             Self::BrowserUnavailable { reason } => vec![match reason {
@@ -2626,9 +2628,9 @@ fn page_recovered_summary(host: Option<&str>) -> String {
     }
 }
 
-/// The step that moves a session whose browser left to a connected one: naming it is the only
-/// thing that moves a session to another browser (W-D5).
-pub(crate) const MOVE_TO_CONNECTED_BROWSER: &str = "To work in a connected browser instead, call browser_tabs with action list, then browser_navigate with new_tab true and that browser.";
+/// The step that moves a session whose browser left to one of several connected browsers: among
+/// several, naming one is the only thing that moves it (W-D5).
+pub(crate) const MOVE_TO_CONNECTED_BROWSER: &str = "To work in one of the connected browsers instead, call browser_tabs with action list, then browser_navigate with new_tab true and that browser.";
 
 /// Authored sentence for closing a handle this session does not hold.
 fn tab_not_held_summary() -> String {

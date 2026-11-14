@@ -10,6 +10,12 @@ use ghostlight_bridge::diagnostics::{
 
 use crate::browser::AdapterLifecycleObserver;
 
+/// A session left the browser it worked in, which was not connected, for a connected one; the
+/// detail names the workspace, both browsers and why (ADR-0196 Decision 12 amendment, 2026-11-13).
+/// The process log is the one place the move is told. The name is the service's own; the other
+/// event names are `ghostlight_bridge::diagnostics::event`.
+pub const SESSION_BROWSER_MOVED: &str = "session_browser_moved";
+
 /// A point-in-time read of the diagnostics state for `doctor` and the workbench. It observes
 /// only; it never demand-starts anything.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -77,6 +83,22 @@ impl DiagnosticsHub {
         Arc::new(Self {
             sink,
             home: home.to_path_buf(),
+        })
+    }
+
+    /// A hub whose sink writes into `directory`, for a test that reads what the process log says.
+    #[cfg(test)]
+    pub fn for_tests_in(directory: &Path) -> Arc<Self> {
+        let sink = Sink::birth_with(
+            Component::Orchestrator,
+            env!("CARGO_PKG_VERSION"),
+            directory,
+            Some(directory.to_path_buf()),
+            None,
+        );
+        Arc::new(Self {
+            sink,
+            home: directory.to_path_buf(),
         })
     }
 

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needs the next Ghostlight in Browser version.
 - A click or scroll at a point below the fold of a full-page screenshot works: the point is
   scrolled into view instead of being refused.
+- A session whose browser went away keeps working when exactly one other browser is connected:
+  it moves there instead of refusing. With several connected it still asks which one.
 - A wait that used its whole time says so. It no longer reports a version mismatch.
 - With the next Ghostlight in Browser version, a screenshot no longer comes back blank or with an
   embedded app squeezed into a corner: a capture of what is on screen does not touch the page.

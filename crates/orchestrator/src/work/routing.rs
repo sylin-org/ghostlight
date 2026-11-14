@@ -1,5 +1,6 @@
-//! Which browser a call goes to: the session's own, waited for or started again, or the one the
-//! agent names, and the refusal when none can take it (ADR-0196 Decision 12).
+//! Which browser a call goes to: the session's own, waited for or started again, the one the
+//! agent names, or the only one connected once its own stayed away, and the refusal when none can
+//! take it (ADR-0196 Decision 12 and its amendment of 2026-11-13).
 
 use super::*;
 
@@ -28,7 +29,10 @@ impl ApplicationExecutor {
     /// a recording status, leaves the session free to open its first tab in any browser. Until a
     /// tab binds one, the frame keeps its own first choice, so one frame never crosses to two
     /// browsers. When the chosen browser is gone, the call waits for it and may start that same
-    /// browser again, but never moves to another one.
+    /// browser again. A session whose browser stayed away leaves it in one place,
+    /// [`Self::move_session`]: for the connected browser the agent named, or for the only browser
+    /// connected, which is no choice and so is settled here and never told to the caller. Among
+    /// several connected browsers the choice is real, and the call is refused.
     pub(super) fn target_browser(
         &self,
         context: &InvocationContext<'_>,
@@ -51,7 +55,7 @@ impl ApplicationExecutor {
                 && connected.iter().any(|browser| browser.id == requested)
                 && !connected.iter().any(|browser| browser.id == gone)
             {
-                self.workspaces.leave_browser(context.workspace.as_str());
+                self.move_session(context, gone, requested, SessionMove::Named);
                 pinned = None;
             }
         }
@@ -59,13 +63,69 @@ impl ApplicationExecutor {
         {
             Ok(chosen) => chosen,
             Err(BrowserError::DisconnectedBeforeDispatch) => match pinned.as_deref() {
-                Some(pinned) => self.await_pinned_browser(context, pinned)?,
+                Some(pinned) => match self.await_pinned_browser(context, pinned) {
+                    Err(BrowserError::WrongProfile) => {
+                        self.move_to_only_browser(context, pinned)?
+                    }
+                    waited => waited?,
+                },
                 None => self.await_or_recover_browser(context)?,
             },
             Err(error) => return Err(error),
         };
         context.findings.target(&chosen);
         Ok(chosen)
+    }
+
+    /// Let the session leave `gone`, the browser it works in, which stayed away, for the only
+    /// browser connected, and name that browser (ADR-0196 Decision 12 amendment, 2026-11-13).
+    ///
+    /// The connected browsers are read once, here, and [`after_absence`] decides among them. A
+    /// call that names a browser never comes here, so a named browser is always the one used.
+    fn move_to_only_browser(
+        &self,
+        context: &InvocationContext<'_>,
+        gone: &str,
+    ) -> Result<String, BrowserError> {
+        let to = after_absence(gone, &self.browser.browsers())?;
+        if to != gone {
+            self.move_session(context, gone, &to, SessionMove::OnlyConnected);
+        }
+        Ok(to)
+    }
+
+    /// The one way a session changes browser: it leaves `from`, which is not connected, so its
+    /// next tab binds `to`. Every tab it held in `from` reads as no longer open from here on
+    /// ([`WorkspaceStore::leave_browser`]). The move goes to the process log, where a person can
+    /// find it, and never to the result: the audit record and the window already name the browser
+    /// each action ran in.
+    ///
+    /// A session that does not work in `from` has nothing to leave and nothing is logged: a
+    /// frame's own first choice bound no tab, and another call of the session may have moved it
+    /// already.
+    fn move_session(
+        &self,
+        context: &InvocationContext<'_>,
+        from: &str,
+        to: &str,
+        cause: SessionMove,
+    ) {
+        if !self
+            .workspaces
+            .leave_browser(context.workspace.as_str(), from)
+        {
+            return;
+        }
+        self.diagnostics.sink().emit(
+            crate::diagnostics::SESSION_BROWSER_MOVED,
+            ghostlight_bridge::diagnostics::Level::Info,
+            Some(context.invocation.as_str()),
+            &format!(
+                "{} left {from}, not connected, for {to}, {}",
+                context.workspace.as_str(),
+                cause.detail()
+            ),
+        );
     }
 
     /// Wait a bounded grace for the browser this session already works in, then start that
@@ -76,8 +136,11 @@ impl ApplicationExecutor {
     /// window. When the session's browser is one installed browser this service saw it connect
     /// as, and `browser.startup` is `on_demand`, the grace ends once nothing is evidently
     /// returning, which leaves the start the call's budget, and recovery then starts that browser
-    /// and no other (ADR-0196 Decision 12 amendment, 2026-10-17). Otherwise the session waits the
-    /// whole grace and the refusal says the browser is not connected, or that another one is.
+    /// and no other (ADR-0196 Decision 12 amendment, 2026-10-17). It starts nothing while that
+    /// installed browser is already connected as another identity, since a start would only open a
+    /// window there. Otherwise the session waits the whole grace. A browser that stayed away is
+    /// answered as not connected, or as [`BrowserError::WrongProfile`] while another browser is,
+    /// which [`Self::target_browser`] settles.
     pub(super) fn await_pinned_browser(
         &self,
         context: &InvocationContext<'_>,
@@ -100,21 +163,28 @@ impl ApplicationExecutor {
         match (availability, restartable) {
             (Availability::Available, _) => Ok(pinned.into()),
             (Availability::NotAnswering, _) => Err(BrowserError::NotAnsweringBeforeDispatch),
-            (Availability::Absent, Some(installed)) => {
+            (Availability::Absent, Some(installed)) if !self.runs_as_another(&installed) => {
                 self.restart_pinned_browser(context, pinned, &installed)
             }
-            (Availability::Absent, None) => Err(self.pinned_browser_absent()),
+            (Availability::Absent, _) => Err(self.pinned_browser_absent()),
         }
+    }
+
+    /// Whether the installed browser `installed` is connected now, under any browser identity.
+    fn runs_as_another(&self, installed: &str) -> bool {
+        self.browser.browsers().iter().any(|connected| {
+            self.browser.installed_browser_of(&connected.id).as_deref() == Some(installed)
+        })
     }
 
     /// Start `installed`, the installed browser this session's browser `pinned` connected as,
     /// and take the call there once `pinned` is back.
     ///
-    /// Once that browser is connected, the call waits within its deadline for `pinned` itself,
-    /// since another profile of the browser may connect first; it is the wrong profile only when
-    /// the deadline ends without `pinned` while another browser is connected. A browser that
-    /// recovery leaves to the person gets the refusal a session that waited for its browser
-    /// always got.
+    /// Once that browser is connected, the call waits the return grace for `pinned` itself,
+    /// since another profile of the browser may connect first, and keeps the rest of its deadline
+    /// for the work. `pinned` still absent then, while another browser is connected, is
+    /// [`BrowserError::WrongProfile`]. A browser that recovery leaves to the person gets the
+    /// answer a session that waited for its browser always got.
     pub(super) fn restart_pinned_browser(
         &self,
         context: &InvocationContext<'_>,
@@ -127,10 +197,11 @@ impl ApplicationExecutor {
             .request_browser(installed, context.deadline, cancelled)
         {
             Ok(RecoveryDecision::Ready { .. }) => {
-                match self
-                    .browser
-                    .await_available(pinned, context.deadline, cancelled)
-                {
+                match self.browser.await_available(
+                    pinned,
+                    return_grace_end(context.deadline),
+                    cancelled,
+                ) {
                     Availability::Available => Ok(pinned.into()),
                     _ if cancelled.load(Ordering::SeqCst) => {
                         Err(BrowserError::CancelledBeforeDispatch)
@@ -147,7 +218,7 @@ impl ApplicationExecutor {
         }
     }
 
-    /// The refusal for a session whose browser is not connected: not connected when no browser
+    /// The answer for a session whose browser is not connected: not connected when no browser
     /// is, and the wrong profile when another browser is.
     pub(super) fn pinned_browser_absent(&self) -> BrowserError {
         if self.browser.browsers().is_empty() {
@@ -187,6 +258,45 @@ impl ApplicationExecutor {
             Ok(RecoveryDecision::Ready { browser }) => Ok(browser),
             Err(error) => Err(error.into()),
         }
+    }
+}
+
+/// Why a session left its browser for another, as the process log says it.
+#[derive(Clone, Copy)]
+enum SessionMove {
+    /// The agent named the browser it moved to.
+    Named,
+    /// It was the only browser connected.
+    OnlyConnected,
+}
+
+impl SessionMove {
+    const fn detail(self) -> &'static str {
+        match self {
+            Self::Named => "named by the agent",
+            Self::OnlyConnected => "the only browser connected",
+        }
+    }
+}
+
+/// Where a call goes once the wait for `gone`, the browser its session works in, ended without
+/// it, given the browsers `connected` now (ADR-0196 Decision 12 amendment, 2026-11-13).
+///
+/// The wait and this reading are two moments, so `gone` may be back: the call then goes to it and
+/// the session moves nowhere, whatever else is connected. Otherwise one connected browser is no
+/// choice and takes the call, several are a real choice between signed-in contexts and keep the
+/// refusal, and none is not connected.
+pub(super) fn after_absence(
+    gone: &str,
+    connected: &[crate::browser::BrowserSummary],
+) -> Result<String, BrowserError> {
+    if connected.iter().any(|browser| browser.id == gone) {
+        return Ok(gone.into());
+    }
+    match connected {
+        [] => Err(BrowserError::DisconnectedBeforeDispatch),
+        [only] => Ok(only.id.clone()),
+        _ => Err(BrowserError::WrongProfile),
     }
 }
 

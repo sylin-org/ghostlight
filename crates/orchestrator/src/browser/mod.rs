@@ -374,8 +374,9 @@ pub trait BrowserPort: Send + Sync {
 /// 5. otherwise nothing, because two equally plausible browsers are two different user contexts
 ///    and picking one would be a coin flip with the person's session.
 ///
-/// A pinned browser that is not connected never falls back to another one (ADR-0084 D4): the
-/// work waits for the browser it belongs to, and says so.
+/// A pinned browser that is not connected never falls back to another one here (ADR-0084 D4): the
+/// work waits for the browser it belongs to. The executor's routing owns what follows a browser
+/// that stayed away (ADR-0196 Decision 12 amendment, 2026-11-13).
 ///
 /// An explicit selection outranks the automatic default but never an established binding: a
 /// workspace with tabs open in one browser cannot be told to continue in another, because the
@@ -1523,7 +1524,9 @@ pub enum BrowserError {
     /// request was written. The connection is busy, not gone.
     #[error("browser connection was busy before dispatch")]
     BusyBeforeDispatch,
-    /// The browser this workspace works in is not connected, while a different browser is.
+    /// The browser this workspace works in is not connected, while a different browser is. The
+    /// executor's routing moves the session when that is the only browser connected, so the
+    /// caller hears this only among several (ADR-0196 Decision 12 amendment, 2026-11-13).
     #[error("the workspace's browser is not connected, but a different browser is")]
     WrongProfile,
     /// The connection ended after a request could have reached the adapter.

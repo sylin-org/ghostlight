@@ -17,6 +17,10 @@ deadline, and is never handed to browser recovery. If the browser does not retur
 says it is not answering, not connected, or not connected while a different browser is. Only that
 last case names another profile.
 
+Amendment, 2026-11-13: D2 is amended by ADR-0196's amendment of the same day. A session whose
+browser stayed away moves to the only connected browser, and the caller is told nothing. With
+several connected the refusal stays.
+
 Amendment, 2026-10-19: D2 is amended by ADR-0203 Decision 2.2. A session's browser binding is
 taken when its first tab binds, not by its first crossing; a crossing that binds no tab binds no
 browser.
