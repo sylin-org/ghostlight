@@ -42,6 +42,9 @@ are UTC.
 5. MCP Registry: `org.sylin/ghostlight 2.0.3`, published with `scripts/publish-mcp-registry.ps1`
    once npm served the exact version.
 6. WinGet: not submitted. WinGet serves 2.0.2 (observed with `winget show`).
+7. Website: `scripts/publish-website.ps1` pushed the refreshed public status to `sylin-org/website`
+   (`c44f4bf`). `scripts/check-public-surfaces.ps1 -Online` then passed: GitHub, npm, the Chrome
+   update feed, the MCP Registry and the website agree on 2.0.3 with adapter 2.0.2.
 
 ## Public install
 
