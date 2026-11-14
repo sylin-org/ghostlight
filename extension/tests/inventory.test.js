@@ -66,6 +66,20 @@ test("active frames no session reported are unseen urls, matched as a multiset w
   const { inventory, lifecycle } = await attached(chrome);
   const snap = await inventory.snapshot(TAB);
   assert.deepEqual(snap.unseen, ["https://example.com/embed", "https://ads.example.org/slot"]);
+  assert.equal(snap.complete, true);
+
+  // The top document is not part of the comparison on either side, so a frame nobody read that
+  // shows the top's own url is still unseen.
+  chrome.frames.push({ frameId: 8, url: `${TOP_URL}#again`, documentLifecycle: "active" });
+  assert.deepEqual((await inventory.snapshot(TAB)).unseen, ["https://example.com/embed", "https://ads.example.org/slot", `${TOP_URL}#again`]);
+
+  // Without the browser's own list the comparison did not run, whether the browser failed or
+  // answered with no list.
+  for (const answer of [async () => null, async () => { throw new Error("No tab with id: 12."); }]) {
+    chrome.webNavigation.getAllFrames = answer;
+    const unchecked = await inventory.snapshot(TAB);
+    assert.deepEqual([unchecked.complete, unchecked.unseen], [false, []]);
+  }
   await lifecycle.detachAll();
 });
 
@@ -77,23 +91,70 @@ test("unseen urls are bounded to MAX_UNSEEN", async () => {
   await lifecycle.detachAll();
 });
 
-test("a session that cannot be read makes the snapshot incomplete", async () => {
+test("an attached session that cannot be read leaves the snapshot incomplete, and one Chrome no longer knows does not", async () => {
   const chrome = oopifChrome();
   const { inventory, lifecycle } = await attached(chrome);
   chrome.emit({ tabId: TAB }, "Target.attachedToTarget", { sessionId: "s1", targetInfo: { type: "iframe", targetId: "OOP" } });
+  chrome.emit({ tabId: TAB, sessionId: "s1" }, "Target.attachedToTarget", { sessionId: "s2", targetInfo: { type: "iframe", targetId: "DEEP" } });
+  await lifecycle.acquire(TAB);
+  const asked = () => chrome.calls.filter((call) => call.method === "Page.getFrameTree").map((call) => call.target.sessionId ?? "root");
+
+  // The frame's session is still attached and did not answer: it may hold documents nobody listed.
   chrome.handlers["Page.getFrameTree"] = (target) => {
-    if (target.sessionId) throw new Error("No session with given id");
-    return { frameTree: chrome.trees.root };
+    if (target.sessionId === "s1") throw new Error("{\"code\":-32000,\"message\":\"Internal error\"}");
+    return { frameTree: chrome.trees[target.sessionId ?? "root"] };
   };
-  const snap = await inventory.snapshot(TAB);
+  let snap = await inventory.snapshot(TAB);
   assert.equal(snap.complete, false);
-  assert.equal(snap.owner.get("OOP").loaderId, "L-stub");
+  assert.equal(snap.owner.get("OOP").loaderId, "L-stub", "the root's own entry for the frame is what remains");
+  assert.equal(lifecycle.childSessions(TAB).length, 2);
+  delete chrome.handlers["Page.getFrameTree"];
+
+  // Chrome ended the session and said nothing (Chrome 157 does this for a session attached through
+  // a child). It holds no document, so the snapshot is whole without it, and it is not asked again:
+  // neither it nor the session announced through it.
+  chrome.end("s1");
+  chrome.end("s2");
+  chrome.calls.length = 0;
+  snap = await inventory.snapshot(TAB);
+  assert.equal(snap.complete, true);
+  assert.equal(snap.owner.has("INNER"), false);
+  assert.deepEqual(asked(), ["root", "s1"]);
+  assert.deepEqual(lifecycle.childSessions(TAB), []);
+  chrome.calls.length = 0;
+  assert.equal((await inventory.snapshot(TAB)).complete, true);
+  assert.deepEqual(asked(), ["root"]);
+
+  // The whole attachment ends under a frame's read. No session is registered then, which is no
+  // inventory at all, never a complete one.
+  chrome.emit({ tabId: TAB }, "Target.attachedToTarget", { sessionId: "s3", targetInfo: { type: "iframe", targetId: "OOP" } });
+  await lifecycle.acquire(TAB);
+  let reading;
+  const read = new Promise((resolve) => { reading = resolve; });
+  chrome.handlers["Page.getFrameTree"] = (target) => {
+    if (target.sessionId !== "s3") return { frameTree: chrome.trees.root };
+    reading();
+    return new Promise(() => {});
+  };
+  const pending = inventory.snapshot(TAB);
+  await read;
+  lifecycle.detached(TAB);
+  await assert.rejects(pending, { code: "session_lost" });
   await lifecycle.detachAll();
 });
 
-test("a tab with no debugger session is session_lost", async () => {
-  const { inventory } = wire(fakeChrome());
+test("the root must be read: a tab with no session is session_lost, and a root that cannot answer fails the snapshot", async () => {
+  const chrome = fakeChrome();
+  const { inventory, lifecycle } = wire(chrome);
   await assert.rejects(inventory.snapshot(TAB), { code: "session_lost" });
+  await lifecycle.retain(TAB);
+  chrome.handlers["Page.getFrameTree"] = () => { throw new Error("Debugger is not attached to the tab with id: 12."); };
+  await assert.rejects(inventory.snapshot(TAB), /Debugger is not attached/);
+  await assert.rejects(inventory.framesPrimitive({ tab_id: TAB }), /Debugger is not attached/);
+  // A root that names no top document is no inventory either, never an empty and complete one.
+  chrome.handlers["Page.getFrameTree"] = () => ({});
+  await assert.rejects(inventory.snapshot(TAB), { code: "document_changed" });
+  await lifecycle.detachAll();
 });
 
 function snapOf(entries, { complete = true, unseen = [] } = {}) {

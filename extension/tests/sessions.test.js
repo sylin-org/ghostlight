@@ -4,23 +4,29 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const sessions = require("../lib/sessions.js");
 const protocol = require("../lib/protocol.js");
+const { SESSION_NOT_FOUND } = require("./p4-fakes.js");
 
 const installer = async () => {};
 const noEvents = { addListener() {} };
 
+// `end(sessionId)` ends a session the way Chrome ends one that was attached through a child: every
+// later command addressed to it is rejected with Chrome's text, and no detach event is sent.
 function fakeDebugger() {
   const calls = [];
   const focus = new Map();
   const listeners = [];
+  const ended = new Set();
   return {
     calls,
     focus,
     onEvent: { addListener(listener) { listeners.push(listener); } },
     emit(source, method, params) { for (const listener of listeners) listener(source, method, params); },
+    end(sessionId) { ended.add(sessionId); },
     async attach(target, version) { calls.push(["attach", target.tabId, version]); },
     async detach(target) { calls.push(["detach", target.tabId]); focus.delete(target.tabId); },
     async sendCommand(target, method, params) {
       calls.push(["command", target.tabId, method]);
+      if (ended.has(target.sessionId)) throw new Error(SESSION_NOT_FOUND);
       if (method === "Emulation.setFocusEmulationEnabled") focus.set(target.tabId, params.enabled);
     }
   };
@@ -71,9 +77,10 @@ test("a retained controlled tab stays attached between sequential operations", a
   assert.equal(lifecycle.attachedCount(), 0);
 });
 
-function iframeAttached(chromeDebugger, tabId, sessionId, extra = {}) {
+// Announces an out-of-process frame. `through` is the session that announces it: the root when absent.
+function iframeAttached(chromeDebugger, tabId, sessionId, extra = {}, through = undefined) {
   chromeDebugger.emit(
-    { tabId },
+    through ? { tabId, sessionId: through } : { tabId },
     "Target.attachedToTarget",
     { sessionId, targetInfo: { type: "iframe", targetId: `target-${sessionId}` }, waitingForDebugger: true, ...extra }
   );
@@ -180,7 +187,7 @@ test("the root is enabled, registered and then set to auto-attach iframes", asyn
   await lifecycle.release(44);
 });
 
-test("a child session is recorded on attachedToTarget and dropped on detachedFromTarget", async () => {
+test("a session ends on its detach event, and a session announced through it ends with it", async () => {
   const chromeDebugger = fakeDebugger();
   const gone = [];
   const lifecycle = sessions.create(chromeDebugger, {
@@ -196,9 +203,40 @@ test("a child session is recorded on attachedToTarget and dropped on detachedFro
   assert.equal(child.targetId, "target-child-1");
   assert.deepEqual(child.identifiers, []);
 
+  // A frame inside that frame, and a frame inside that one, arrive through the same listener, each
+  // announced by the session of the frame around it. Other target types are ignored.
+  iframeAttached(chromeDebugger, 45, "nested", {}, "child-1");
+  iframeAttached(chromeDebugger, 45, "innermost", {}, "nested");
+  iframeAttached(chromeDebugger, 45, "sibling");
+  chromeDebugger.emit({ tabId: 45 }, "Target.attachedToTarget", {
+    sessionId: "worker-1", targetInfo: { type: "worker", targetId: "w" }, waitingForDebugger: false
+  });
+  await lifecycle.acquire(45);
+  assert.deepEqual(lifecycle.childSessions(45).map((session) => session.target.sessionId), ["child-1", "nested", "innermost", "sibling"]);
+
+  // No id names no child: the sessions announced through the root end only with the attachment.
+  lifecycle.endSession(45, null);
+  lifecycle.endSession(45, undefined);
+  assert.equal(lifecycle.childSessions(45).length, 4);
+
+  // Chrome sends the detach event for the session attached through the root and none for the
+  // sessions attached through it (Chrome 157). They are gone all the same.
   chromeDebugger.emit({ tabId: 45 }, "Target.detachedFromTarget", { sessionId: "child-1" });
-  assert.deepEqual(lifecycle.childSessions(45), []);
-  assert.deepEqual(gone, [[45, "child-1"]]);
+  assert.deepEqual(lifecycle.childSessions(45).map((session) => session.target.sessionId), ["sibling"]);
+  assert.deepEqual(gone, [[45, "child-1"], [45, "nested"], [45, "innermost"]]);
+
+  chromeDebugger.emit({ tabId: 45 }, "Target.detachedFromTarget", { sessionId: "child-1" });
+  chromeDebugger.emit({ tabId: 45 }, "Target.detachedFromTarget", { sessionId: "never-announced" });
+  assert.equal(gone.length, 3, "a session ends once, and an unknown one never");
+
+  // A frame announced by a session that is no longer registered attached paused all the same, so
+  // it is still set up and resumed.
+  const resumes = () => chromeDebugger.calls.filter(([, , method]) => method === "Runtime.runIfWaitingForDebugger").length;
+  const before = resumes();
+  iframeAttached(chromeDebugger, 45, "late", {}, "child-1");
+  await lifecycle.acquire(45);
+  assert.deepEqual(lifecycle.childSessions(45).map((session) => session.target.sessionId), ["sibling", "late"]);
+  assert.equal(resumes(), before + 1);
   await lifecycle.detachAll();
 });
 
@@ -261,38 +299,87 @@ test("a child resumes last even when its installer fails, and the failure reache
   await lifecycle.detachAll();
 });
 
-test("a child that ended before its setup finished does not fail the tab", async () => {
+test("a session Chrome no longer knows is ended by Chrome's answer, and its failed setup does not fail the tab", async () => {
   const chromeDebugger = fakeDebugger();
+  const gone = [];
+  const lifecycle = sessions.create(chromeDebugger, {
+    installer,
+    onSessionGone: (tabId, sessionId) => gone.push(sessionId)
+  });
+  const detaches = () => chromeDebugger.calls.filter(([kind]) => kind === "detach").length;
+  await lifecycle.retain(49);
+
+  // The frame was gone before its setup began: every setup command is answered with Chrome's
+  // text and no detach event comes. The child leaves; the tab keeps its attachment.
+  chromeDebugger.end("child-5");
+  iframeAttached(chromeDebugger, 49, "child-5");
+  iframeAttached(chromeDebugger, 49, "nested", {}, "child-5");
+  await lifecycle.acquire(49);
+  assert.deepEqual(lifecycle.childSessions(49), []);
+  assert.deepEqual(gone, ["child-5", "nested"]);
+  assert.equal(lifecycle.attachedCount(), 1);
+  assert.equal(detaches(), 0);
+
+  // A session that was set up and ends later is found by the first command sent to it, whoever
+  // sends it. The caller still reads Chrome's own error.
+  iframeAttached(chromeDebugger, 49, "child-6");
+  await lifecycle.acquire(49);
+  chromeDebugger.end("child-6");
+  await assert.rejects(lifecycle.cdp({ tabId: 49, sessionId: "child-6" }, "Page.getFrameTree"), { message: SESSION_NOT_FOUND });
+  assert.deepEqual(lifecycle.childSessions(49), []);
+  assert.deepEqual(gone, ["child-5", "nested", "child-6"]);
+
+  // Any other failure of a child's command leaves the child registered: only Chrome's measured
+  // answer says the session is gone.
+  iframeAttached(chromeDebugger, 49, "child-7");
+  await lifecycle.acquire(49);
   const sendCommand = chromeDebugger.sendCommand;
   chromeDebugger.sendCommand = async (target, method, params) => {
-    if (target.sessionId === "child-5" && method === "Page.enable") {
-      chromeDebugger.emit({ tabId: 49 }, "Target.detachedFromTarget", { sessionId: "child-5" });
-      throw new Error("session not found");
-    }
+    if (target.sessionId === "child-7") throw new Error("Target closed");
     return sendCommand(target, method, params);
   };
-  const lifecycle = sessions.create(chromeDebugger, { installer });
-  await lifecycle.retain(49);
-  iframeAttached(chromeDebugger, 49, "child-5");
-  await lifecycle.acquire(49);
-  assert.equal(lifecycle.attachedCount(), 1);
-  assert.deepEqual(lifecycle.childSessions(49), []);
+  await assert.rejects(lifecycle.cdp({ tabId: 49, sessionId: "child-7" }, "Page.getFrameTree"), /Target closed/);
+  assert.deepEqual(lifecycle.childSessions(49).map((session) => session.target.sessionId), ["child-7"]);
+  assert.equal(detaches(), 0);
   await lifecycle.detachAll();
 });
 
-test("a nested iframe arrives through the same listener and other target types are ignored", async () => {
+test("a command pending on a child settles when the child ends, so a setup Chrome never answers does not hold the tab", async () => {
   const chromeDebugger = fakeDebugger();
+  const sendCommand = chromeDebugger.sendCommand;
+  // Chrome drops a command with its target: the frame around this one navigates before the answer.
+  let dropping = true;
+  const dropped = [];
+  chromeDebugger.sendCommand = (target, method, params) => {
+    if (!dropping || target.sessionId !== "nested") return sendCommand(target, method, params);
+    const command = {};
+    command.answer = new Promise((_resolve, reject) => { command.fail = reject; });
+    dropped.push(command);
+    return command.answer;
+  };
   const lifecycle = sessions.create(chromeDebugger, { installer });
   await lifecycle.retain(50);
-  iframeAttached(chromeDebugger, 50, "child-6");
-  chromeDebugger.emit({ tabId: 50, sessionId: "child-6" }, "Target.attachedToTarget", {
-    sessionId: "grandchild", targetInfo: { type: "iframe", targetId: "target-grandchild" }, waitingForDebugger: true
-  });
-  chromeDebugger.emit({ tabId: 50 }, "Target.attachedToTarget", {
-    sessionId: "worker-1", targetInfo: { type: "worker", targetId: "w" }, waitingForDebugger: false
-  });
+  iframeAttached(chromeDebugger, 50, "child-8");
+  iframeAttached(chromeDebugger, 50, "nested", {}, "child-8");
+  const waiting = lifecycle.acquire(50);
+  const pending = lifecycle.cdp({ tabId: 50, sessionId: "nested" }, "Runtime.evaluate", {});
+
+  chromeDebugger.emit({ tabId: 50 }, "Target.detachedFromTarget", { sessionId: "child-8" });
+  await assert.rejects(pending, /frame's debugger session ended/);
+  await waiting;
+  assert.equal(lifecycle.attachedCount(), 1);
+  assert.deepEqual(lifecycle.childSessions(50), []);
+  assert.equal(chromeDebugger.calls.filter(([kind]) => kind === "detach").length, 0);
+
+  // A late answer to a command of the ended session ends nothing, not even a session that is
+  // registered under the same id by then: only the session a command was sent to can be ended by
+  // its answer.
+  dropping = false;
+  iframeAttached(chromeDebugger, 50, "nested");
   await lifecycle.acquire(50);
-  assert.deepEqual(lifecycle.childSessions(50).map((child) => child.target.sessionId), ["child-6", "grandchild"]);
+  for (const command of dropped) command.fail(new Error(SESSION_NOT_FOUND));
+  await Promise.allSettled(dropped.map((command) => command.answer));
+  assert.deepEqual(lifecycle.childSessions(50).map((session) => session.target.sessionId), ["nested"]);
   await lifecycle.detachAll();
 });
 
@@ -426,10 +513,16 @@ test("sessions of a tab that is not attached are not exposed", async () => {
   assert.equal(lifecycle.rootSession(62), null);
 });
 
-test("a dialog records its message and the session that raised it", async () => {
+test("a dialog records its message and the session that raised it, and leaves with that session", async () => {
   const chromeDebugger = fakeDebugger();
-  const lifecycle = sessions.create(chromeDebugger, { installer });
+  const gone = [];
+  const lifecycle = sessions.create(chromeDebugger, {
+    installer,
+    onSessionGone: (tabId, sessionId, dialogEnded) => gone.push([sessionId, dialogEnded])
+  });
   await lifecycle.acquire(63);
+  iframeAttached(chromeDebugger, 63, "child-11");
+  iframeAttached(chromeDebugger, 63, "child-12");
   lifecycle.openDialog(63, { type: "alert" });
   assert.deepEqual(lifecycle.currentDialog(63), { type: "alert", message: "", defaultPrompt: "", url: "", sessionId: null });
   lifecycle.openDialog(63, {});
@@ -441,9 +534,18 @@ test("a dialog records its message and the session that raised it", async () => 
   copy.message = "changed";
   assert.deepEqual(lifecycle.currentDialog(63),
     { type: "beforeunload", message: "Leave?", defaultPrompt: "", url: "https://example.com/form", sessionId: "child-11" });
-  await lifecycle.closeDialog(63);
-  await lifecycle.release(63);
+
+  // Another session ending leaves the dialog. The one that raised it takes the dialog with it:
+  // nothing could answer it, and while it is recorded the tab is never read or released.
+  chromeDebugger.emit({ tabId: 63 }, "Target.detachedFromTarget", { sessionId: "child-12" });
+  assert.equal(lifecycle.currentDialog(63).sessionId, "child-11");
+  chromeDebugger.emit({ tabId: 63 }, "Target.detachedFromTarget", { sessionId: "child-11" });
   assert.equal(lifecycle.currentDialog(63), null);
+  assert.deepEqual(gone, [["child-12", false], ["child-11", true]]);
+  assert.equal(lifecycle.openDialog(63, { type: "alert", sessionId: "child-11" }), false, "a session that ended raises nothing");
+  assert.equal(lifecycle.currentDialog(63), null);
+  await lifecycle.release(63);
+  assert.equal(lifecycle.attachedCount(), 0);
 });
 
 test("terminal shutdown detaches retained controlled tabs", async () => {
@@ -488,10 +590,12 @@ test("an external detach preserves a known dialog for a later handling lease", a
   const lifecycle = sessions.create(chromeDebugger, { installer });
 
   await lifecycle.acquire(11);
+  iframeAttached(chromeDebugger, 11, "child-1");
   lifecycle.openDialog(11, { type: "confirm", message: "Sure?", sessionId: "child-1" });
   lifecycle.detached(11);
   await lifecycle.release(11);
-  assert.deepEqual(lifecycle.currentDialog(11), { type: "confirm", message: "Sure?", defaultPrompt: "", url: "", sessionId: "child-1" });
+  // The dialog is kept, but the session that raised it went with the attachment.
+  assert.deepEqual(lifecycle.currentDialog(11), { type: "confirm", message: "Sure?", defaultPrompt: "", url: "", sessionId: null });
 
   await lifecycle.acquire(11);
   assert.deepEqual(chromeDebugger.calls.filter(([kind]) => kind === "attach"), [
@@ -860,7 +964,7 @@ test("a dialog that opens while a focus change is in flight frees the wait, and 
   await lifecycle.detachAll();
 });
 
-test("a release, a domain's disable and a terminal shutdown never wait on a page that shows a dialog", WAITS_ON_A_DIALOG, async () => {
+test("a lease, a release, a domain's disable and a terminal shutdown never wait on a page that shows a dialog", WAITS_ON_A_DIALOG, async () => {
   const chromeDebugger = pageWithDialogs();
   const released = [];
   const lifecycle = sessions.create(chromeDebugger, {
@@ -876,6 +980,12 @@ test("a release, a domain's disable and a terminal shutdown never wait on a page
   await lifecycle.enableDomain(44, "Network");
   chromeDebugger.show(44);
   lifecycle.openDialog(44, { type: "confirm", message: "Sure?" });
+
+  // A frame that attaches now cannot be set up until the dialog closes. The lease that answers the
+  // dialog is granted all the same.
+  iframeAttached(chromeDebugger, 44, "child-behind-dialog");
+  await lifecycle.acquire(44);
+  await lifecycle.release(44);
 
   await lifecycle.unretain(44);
   assert.equal(lifecycle.attachedCount(), 1, "the dialog keeps the session, so it can still be answered");

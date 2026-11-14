@@ -17,11 +17,18 @@
   // own process, so frames Chrome would not attach are found through webNavigation and reported as
   // unseen urls. The guard is a mechanical currency check run right before the adapter acts; the
   // service decides what a guard holds.
+  //
+  // The inventory reports what the sessions say and does not shape it: a frame whose parent is not
+  // listed is still listed, because the service owns the tree. Whether a session is alive is the
+  // session registry's fact, so a failed read is judged by asking the registry, never by reading
+  // the error.
 
   const TOP_FRAME_ID = 0;
   const ACTIVE_LIFECYCLE = "active";
   const { DOCUMENT_CHANGED, SESSION_LOST } = protocol.RECEIPT_FAILURE;
   const CHANGED_MESSAGE = "The page changed since it was read.";
+  const NO_TOP_MESSAGE = "The tab has no top document.";
+  const NOT_ATTACHED_MESSAGE = "The debugger is not attached to this tab.";
 
   function walk(tree, visit) {
     if (!tree?.frame) return;
@@ -96,7 +103,7 @@
     function rootOf(tabId) {
       lifecycle.requireNoDialog(tabId);
       const session = lifecycle.rootSession(tabId);
-      if (!session) throw protocol.failure(SESSION_LOST, "The debugger is not attached to this tab.");
+      if (!session) throw protocol.failure(SESSION_LOST, NOT_ATTACHED_MESSAGE);
       return session;
     }
 
@@ -104,23 +111,38 @@
      * Reads every document of an attached tab; fails at once with `dialog_open` while a dialog is
      * open on it. Resolves `{ owner, complete, unseen, top }`: `owner`
      * maps a frame id to `{ session, loaderId, fact }` where `session` is the CDP target that owns
-     * the frame; `complete` is false when a session could not be read; `unseen` lists the urls of
-     * active child frames no session reported; `top` is the top document `{ frame_id, loader_id }`.
+     * the frame; `unseen` lists the urls of active child frames no session reported; `top` is the
+     * top document `{ frame_id, loader_id }`. `complete` says every attached session answered and
+     * the browser's own frame list was read: it is false when a child session that is still
+     * attached could not be read, or when that list could not be had. A child session that has
+     * ended holds no document, so it adds nothing and leaves `complete` alone. The root must be
+     * read: when it cannot be, the snapshot rejects with that error. When the whole attachment ends
+     * under a child's read there is nothing left to list, and the snapshot rejects `session_lost`.
      */
     async function snapshot(tabId) {
       const rootSession = rootOf(tabId);
       const owner = new Map();
       let complete = true;
       let top = null;
+      const attached = (session) => lifecycle.childSessions(tabId).includes(session);
+      const rootTree = (await cdp(rootSession.target, CDP.PAGE_GET_FRAME_TREE)).frameTree;
+      if (!rootTree?.frame) throw protocol.failure(DOCUMENT_CHANGED, NO_TOP_MESSAGE);
       for (const session of [rootSession, ...lifecycle.childSessions(tabId)]) {
-        let tree;
-        try {
-          tree = (await cdp(session.target, CDP.PAGE_GET_FRAME_TREE)).frameTree;
-        } catch (_error) {
-          complete = false;
-          continue;
-        }
         const child = Boolean(session.target.sessionId);
+        let tree = rootTree;
+        if (child) {
+          // A session that ended with an earlier one of this pass is not asked.
+          if (!attached(session)) continue;
+          try {
+            tree = (await cdp(session.target, CDP.PAGE_GET_FRAME_TREE)).frameTree;
+          } catch (_error) {
+            // No child is registered once the tab's attachment has ended. That is not a whole
+            // inventory, it is none.
+            if (!lifecycle.rootSession(tabId)) throw protocol.failure(SESSION_LOST, NOT_ATTACHED_MESSAGE);
+            if (attached(session)) complete = false;
+            continue;
+          }
+        }
         walk(tree, (frame) => {
           const oopifRoot = child && frame.id === session.targetId;
           const known = owner.get(frame.id);
@@ -130,14 +152,20 @@
           if (!child && !frame.parentId) top = Object.freeze({ frame_id: frame.id, loader_id: frame.loaderId });
         });
       }
+      // The browser's list is compared without its top frame, so the top document is not counted
+      // here either: its url would otherwise stand in for an unread frame that shows the same url.
       const seen = new Map();
-      for (const { fact } of owner.values()) {
+      for (const [frameId, { fact }] of owner) {
+        if (frameId === top?.frame_id) continue;
         const url = withoutFragment(fact.url);
         seen.set(url, (seen.get(url) ?? 0) + 1);
       }
       let frames = [];
       try {
-        frames = (await webNavigation.getAllFrames({ tabId })) ?? [];
+        const listed = await webNavigation.getAllFrames({ tabId });
+        // Chrome answers with no list for a tab it cannot describe: the check did not run.
+        if (Array.isArray(listed)) frames = listed;
+        else complete = false;
       } catch (_error) {
         complete = false;
       }

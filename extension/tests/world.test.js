@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const World = require("../lib/world.js");
 const protocol = require("../lib/protocol.js");
 const {
-  TOP, TOP_LOADER, CHILD, CHILD_LOADER, node, fakeChrome, assets, wire, effects, methods, worldCalls
+  TOP, TOP_LOADER, CHILD, CHILD_LOADER, SESSION_NOT_FOUND, node, fakeChrome, assets, wire, effects, methods, worldCalls
 } = require("./p4-fakes.js");
 
 const TAB = 12;
@@ -180,8 +180,10 @@ test("mapCallError covers the closed table", () => {
   assert.equal(World.mapCallError(new Error("Debugger is not attached to the tab with id: 12.")).code, "session_lost");
   assert.equal(World.mapCallError(new Error("Object couldn't be returned by value")).code, "unserializable");
   assert.deepEqual(World.mapCallError(new Error("Something odd")), { code: "other", started: true, dropHandle: false });
-  for (const text of ["Session with given id not found.", "debugger session was released"]) {
-    assert.deepEqual(World.mapCallError(new Error(text)), { code: "session_lost", started: true, dropHandle: true }, text);
+  assert.deepEqual(World.mapCallError(new Error("debugger session was released")), { code: "session_lost", started: true, dropHandle: true });
+  // A frame whose own session ended lost its document; the tab is still under control.
+  for (const text of [SESSION_NOT_FOUND, "The frame's debugger session ended."]) {
+    assert.deepEqual(World.mapCallError(new Error(text)), { code: "document_changed", started: true, dropHandle: true }, text);
   }
   for (const code of ["document_changed", "session_lost", "unserializable", "other"]) assert.ok(protocol.isKnown("call_failures", code));
 });
@@ -413,18 +415,32 @@ test("dispose releases the cached worlds, the object group and the registrations
   assert.equal(chrome.calls[1].params.objectGroup, protocol.WORLD_NAME);
 });
 
-test("devicePixelRatio is read in the top isolated world and documentObject keeps a remote object", async () => {
+test("devicePixelRatio and the page geometry are read in the top isolated world and documentObject keeps a remote object", async () => {
   const { chrome, lifecycle, world, inventory } = await ready();
-  chrome.handlers["Runtime.callFunctionOn"] = (target, params) => (params.functionDeclaration === World.SHIMS.DPR
-    ? { result: { value: 2 } }
-    : { result: { objectId: "document:1" } });
+  const geometry = { devicePixelRatio: 2, innerWidth: 1295, innerHeight: 720 };
+  chrome.handlers["Runtime.callFunctionOn"] = (target, params) => {
+    if (params.functionDeclaration === World.SHIMS.DPR) return { result: { value: 2 } };
+    if (params.functionDeclaration === World.SHIMS.GEOMETRY) return { result: { value: geometry } };
+    return { result: { objectId: "document:1" } };
+  };
+  await assert.rejects(world.pageGeometry(TAB), { code: "session_lost" }, "a tab that is not attached is never attached to read it");
   await lifecycle.retain(TAB);
   assert.equal(await world.devicePixelRatio(TAB), 2);
+  assert.deepEqual(await world.pageGeometry(TAB), geometry);
+  const read = chrome.calls.find((call) => call.params.functionDeclaration === World.SHIMS.GEOMETRY);
+  assert.deepEqual([read.params.objectId, read.params.returnByValue, read.params.arguments], [`global:${TOP}`, true, []]);
   const snap = await inventory.snapshot(TAB);
   assert.equal(await world.documentObject(TAB, top, snap), "document:1");
   const doc = chrome.calls.find((call) => call.params.functionDeclaration === World.SHIMS.DOC);
   assert.equal(doc.params.returnByValue, false);
   await lifecycle.detachAll();
+});
+
+test("the geometry shim reads the device pixel ratio and the window's inner size, and nothing of the document", () => {
+  const vm = require("node:vm");
+  // Runs the shim as the page's isolated world would. There is no document here, so reading one would throw.
+  const facts = vm.runInNewContext(`(${World.SHIMS.GEOMETRY})()`, { devicePixelRatio: 1.5, innerWidth: 1295, innerHeight: 720 });
+  assert.deepEqual({ ...facts }, { devicePixelRatio: 1.5, innerWidth: 1295, innerHeight: 720 });
 });
 
 test("a child session that ends drops its handles", async () => {

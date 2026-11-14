@@ -715,20 +715,48 @@ test("events go only for controlled tabs", async () => {
   } finally { worker.dispose(); }
 });
 
-test("a dialog is recorded with its message, the frame that raised it and its session", async () => {
+test("a dialog is recorded with its message, the frame that raised it and its session, and leaves with that session", async () => {
   const worker = await connected();
   try {
-    worker.chrome.debugger.emit({ tabId: TAB, sessionId: "CHILD" }, "Page.javascriptDialogOpening",
+    const api = worker.chrome.debugger;
+    const raise = () => api.emit({ tabId: TAB, sessionId: "CHILD" }, "Page.javascriptDialogOpening",
       { type: "prompt", message: "Name?", defaultPrompt: "Ada", url: "https://example.com/frame" });
+    const answer = async (correlation, name, args) => {
+      await worker.request(correlation, name, args);
+      return worker.receipts().find((entry) => entry.correlation === correlation);
+    };
+    // A tab that shows a dialog refuses to be read, so a read that answers says none is recorded.
+    const readable = async (correlation) => Boolean((await answer(correlation, "frames", goldenArgs("frames"))).ok);
+    api.emit({ tabId: TAB }, "Target.attachedToTarget", { sessionId: "CHILD", targetInfo: { type: "iframe", targetId: "FRAME" } });
+    raise();
     await flush();
-    await worker.request("p4_dialog", "dialog", { tab_id: TAB, op: { op: "status" } });
-    const receipt = worker.receipts().find((entry) => entry.correlation === "p4_dialog");
     // Status names the text the prompt's field holds, the default its event carried.
-    assert.deepEqual(receipt.ok, { present: true, dialog_type: "prompt", message: "Name?", default_prompt: "Ada", url: "https://example.com/frame" });
-    // Accepted without text, the prompt is answered with that default.
+    assert.equal(await readable("p4_blocked"), false);
+    assert.deepEqual((await answer("p4_dialog", "dialog", { tab_id: TAB, op: { op: "status" } })).ok, { present: true, dialog_type: "prompt", message: "Name?", default_prompt: "Ada", url: "https://example.com/frame" });
+    // Accepted without text, the prompt is answered with that default, on the session that raised it.
     await worker.request("p4_accept", "dialog", { tab_id: TAB, op: { op: "handle", accept: true, text: null } });
-    const answered = worker.chrome.debugger.calls.find((call) => call.method === "Page.handleJavaScriptDialog");
+    const answered = api.calls.find((call) => call.method === "Page.handleJavaScriptDialog");
+    assert.deepEqual({ ...answered.target }, { tabId: TAB, sessionId: "CHILD" });
     assert.deepEqual({ ...answered.params }, { accept: true, promptText: "Ada" });
+
+    // The frame that raised a dialog goes away with the dialog still open. Nothing could answer it
+    // any more, so it is cleared and the service is told. The tab itself stays attached.
+    raise();
+    await flush();
+    const before = worker.events().length;
+    const rootAttaches = () => api.calls.filter((call) => call.method === "Page.enable" && !call.target.sessionId).length;
+    const attaches = rootAttaches();
+    api.onDetach.emit({ tabId: TAB, sessionId: "CHILD" }, "target_closed");
+    await flush();
+    assert.deepEqual(worker.events().slice(before), [{ event: "dialog_changed", tab_id: TAB, present: false, dialog_type: "unknown" }]);
+    assert.equal(await readable("p4_after"), true);
+    assert.equal(rootAttaches(), attaches, "a detach that names a child session does not end the tab's attachment");
+
+    // A dialog announced for a session that has ended is not recorded and not reported.
+    raise();
+    await flush();
+    assert.equal(worker.events().length, before + 1);
+    assert.equal(await readable("p4_late"), true);
   } finally { worker.dispose(); }
 });
 

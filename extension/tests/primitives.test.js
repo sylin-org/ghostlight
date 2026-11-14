@@ -553,9 +553,17 @@ test("a dialog the browser gave no url for reports none, and a long url is bound
   assert.ok(parts.frames[1].ok.url.length <= protocol.URL_CHARS);
 });
 
+// Attaches the tab and announces one out-of-process frame, whose session then raises a dialog.
+async function dialogFromChild(parts) {
+  await parts.lifecycle.acquire(TAB);
+  parts.chrome.emit({ tabId: TAB }, "Target.attachedToTarget", { sessionId: "CHILD-SESSION", targetInfo: { type: "iframe", targetId: "FRAME" } });
+  assert.equal(parts.lifecycle.openDialog(TAB, { type: "confirm", message: "Discard changes?", url: URL, sessionId: "CHILD-SESSION" }), true);
+  await parts.lifecycle.release(TAB);
+}
+
 test("dialog handle answers on the session that raised the dialog and closes it, matching the golden receipt", async () => {
   const parts = rig();
-  parts.lifecycle.openDialog(TAB, { type: "confirm", message: "Discard changes?", url: URL, sessionId: "CHILD-SESSION" });
+  await dialogFromChild(parts);
   await parts.primitives.run("p4_001e", request("dialog", { tab_id: TAB, op: { op: "handle", accept: true, text: "yes" } }));
   assert.deepEqual(wireFrame(parts.frames), [golden("receipts/dialog.ok_handled")]);
   const sent = parts.chrome.calls.find((call) => call.method === "Page.handleJavaScriptDialog");
@@ -605,6 +613,17 @@ test("dialog handle with nothing to handle answers absent and dispatches nothing
   parts.chrome.handlers["Page.handleJavaScriptDialog"] = async () => { throw new Error("No dialog is showing"); };
   await parts.primitives.run("p4_001e", request("dialog", { tab_id: TAB, op: { op: "handle", accept: true } }));
   assert.deepEqual(wireFrame(parts.frames), [golden("receipts/dialog.ok_nothing_to_handle")]);
+});
+
+test("handling a dialog whose session ended answers absent and dispatches nothing", async () => {
+  const parts = rig();
+  await dialogFromChild(parts);
+  // Chrome ended the frame's session without saying so: the answer is the first command to find out.
+  parts.chrome.end("CHILD-SESSION");
+  await parts.primitives.run("p4_001e", request("dialog", { tab_id: TAB, op: { op: "handle", accept: true } }));
+  assert.deepEqual(wireFrame(parts.frames), [golden("receipts/dialog.ok_nothing_to_handle")]);
+  assert.equal(parts.lifecycle.currentDialog(TAB), null);
+  assert.equal(parts.lifecycle.attachedCount(), 0, "nothing keeps the tab attached for a dialog that is gone");
 });
 
 test("dialog handle that fails for another reason fails having dispatched", async () => {

@@ -273,7 +273,9 @@
         await lifecycle.closeDialog(tabId);
         return { present: true, dialog_type: dialog?.type ?? protocol.UNKNOWN_DIALOG_TYPE, handled: true, accepted: request.op.accept, ...dialogUrl(dialog) };
       } catch (error) {
-        if (!NO_DIALOG.test(String(error?.message))) throw error;
+        // A dialog whose raising session ended is cleared by the session registry as the answer fails.
+        const cleared = Boolean(dialog) && !lifecycle.currentDialog(tabId);
+        if (!cleared && !NO_DIALOG.test(String(error?.message))) throw error;
         // The dialog was already gone: nothing was handled, so nothing was dispatched.
         fx.dispatched = false;
         await lifecycle.closeDialog(tabId);

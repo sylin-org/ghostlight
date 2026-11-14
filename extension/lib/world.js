@@ -36,6 +36,8 @@
     PRESENT: "function(id, signal, local) { const rt = globalThis.__ghostlightRuntime; return rt?.id === id ? rt.present(signal, local) : false; }",
     DISPOSE: "function() { globalThis.__ghostlightRuntime?.dispose(); return true; }",
     DPR: "function() { return globalThis.devicePixelRatio; }",
+    // How the page sits in its window: the device pixel ratio and the window's inner size, read together.
+    GEOMETRY: "function() { return { devicePixelRatio: globalThis.devicePixelRatio, innerWidth: globalThis.innerWidth, innerHeight: globalThis.innerHeight }; }",
     DOC: "function() { return document; }"
   });
 
@@ -46,13 +48,16 @@
   const MODE = Object.freeze({ SEQUENCE: "sequence", PARALLEL: "parallel", RACE: "race" });
   const SKIPPED = Object.freeze({ status: ANSWER.SKIPPED });
 
-  // The closed mapping from CDP error text to a call failure. `started` says whether the page may
-  // have run the message; `dropHandle` says the cached world handle is dead.
+  // The closed mapping from CDP error text to a call failure, first match first. `started` says
+  // whether the page may have run the message; `dropHandle` says the cached world handle is dead.
+  // A frame whose own session ended lost its document while the tab stayed under control, so it
+  // reads as a changed document; only the texts about the whole tab read as a lost session.
   const CALL_ERRORS = Object.freeze([
     { pattern: /Cannot find context with specified id|Could not find object with given id|No frame with given id found/i,
       code: CALL.DOCUMENT_CHANGED, started: false, dropHandle: true },
     { pattern: /Execution context was destroyed|Inspected target navigated or closed/i,
       code: CALL.DOCUMENT_CHANGED, started: true, dropHandle: true },
+    { pattern: sessions.SESSION_ENDED_TEXT, code: CALL.DOCUMENT_CHANGED, started: true, dropHandle: true },
     { pattern: sessions.SESSION_LOST_TEXT, code: CALL.SESSION_LOST, started: true, dropHandle: true },
     { pattern: /Object couldn't be returned by value/i, code: CALL.UNSERIALIZABLE, started: true, dropHandle: false }
   ]);
@@ -555,22 +560,42 @@
       hiddenHolds.delete(tabId);
     }
 
-    /** Forgets the world handles that lived in a child session that ended (the sessions onSessionGone hook). */
+    /**
+     * Forgets the world handles that lived in a child session that ended (the sessions onSessionGone
+     * hook). It is called once for each session that ended: on Chrome's detach event, with the
+     * session that announced it, or on Chrome's answer that it no longer knows the session.
+     */
     function sessionGone(tabId, sessionId) {
       for (const [key, handle] of tabHandles(tabId)) {
         if (handle.session.sessionId === sessionId) handles.delete(key);
       }
     }
 
+    // The value a fixed shim returns in the top isolated world, where the page cannot override what
+    // the shim reads. Fails `session_lost` when the tab is not attached.
+    async function topValue(tabId, shim) {
+      const handle = await topHandle(tabId);
+      if (!handle) throw protocol.failure(CALL.SESSION_LOST, "The debugger is not attached to this tab.");
+      const reply = await callShim(handle, shim, []);
+      return reply?.result?.value;
+    }
+
     /**
      * Reads devicePixelRatio in the top isolated world, where the page cannot override it.
      * The caller holds a debugger lease.
      */
-    async function devicePixelRatio(tabId) {
-      const handle = await topHandle(tabId);
-      if (!handle) throw protocol.failure(CALL.SESSION_LOST, "The debugger is not attached to this tab.");
-      const reply = await callShim(handle, SHIMS.DPR, []);
-      return reply?.result?.value;
+    function devicePixelRatio(tabId) {
+      return topValue(tabId, SHIMS.DPR);
+    }
+
+    /**
+     * Reads how the top document sits in its window, in the top isolated world:
+     * `{ devicePixelRatio, innerWidth, innerHeight }`. The sizes are CSS pixels and include the
+     * scrollbars. A shim that could not run answers without the facts, so a caller checks each one
+     * it uses. The caller holds a debugger lease.
+     */
+    function pageGeometry(tabId) {
+      return topValue(tabId, SHIMS.GEOMETRY);
     }
 
     /**
@@ -614,6 +639,7 @@
       dropTab,
       sessionGone,
       devicePixelRatio,
+      pageGeometry,
       documentObject,
       localFacts,
       withHidden

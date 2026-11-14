@@ -11,11 +11,9 @@ const { golden, goldenArgs, execute, fakeBrowser } = require("./p4-chrome.js");
 const TAB = 12;
 const URL = "https://example.com/account";
 const EMBED = "https://example.com/embed";
-const SHOT = { width: 1000, height: 600 };
-const METRICS = {
-  cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: SHOT.width, clientHeight: SHOT.height },
-  cssContentSize: { width: SHOT.width, height: 2000 }
-};
+// The tab's surface as a still photographs it: a window 1000 by 600 CSS pixels at two device pixels each.
+const SURFACE = { width: 2000, height: 1200 };
+const PNG = "iVBORw0KGgo=";
 const GIF = { frame_count: 3, captured_frame_count: 3, duration_ms: 900, width: 1000, height: 600, byte_count: 77 };
 const watchBoth = [
   { frame_id: TOP, loader_id: TOP_LOADER, url: URL },
@@ -23,12 +21,15 @@ const watchBoth = [
 ];
 const guardOf = (documents, exact = false) => ({ documents, exact, unseen: 0 });
 
-function setup({ withAssets = false, encoder = null } = {}) {
+/**
+ * Wires the buffers over a scripted debugger. The fake image tool opens a still's photograph as a
+ * picture of `surface` and records each JPEG it is asked for in `log.stills`; every still it
+ * encodes is a different one-byte image, as the recording store keeps no frame twice in a row.
+ */
+function setup({ withAssets = false, encoder = null, surface = SURFACE } = {}) {
   const chrome = fakeChrome();
-  let shots = 0;
   Object.assign(chrome.handlers, {
-    "Page.getLayoutMetrics": async () => METRICS,
-    "Page.captureScreenshot": async () => { shots += 1; return { data: Buffer.from([shots]).toString("base64") }; },
+    "Page.captureScreenshot": async () => ({ data: PNG }),
     "Page.startScreencast": async () => ({}),
     "Page.stopScreencast": async () => ({}),
     "Page.screencastFrameAck": async () => ({})
@@ -36,7 +37,15 @@ function setup({ withAssets = false, encoder = null } = {}) {
   const box = {};
   const parts = wire(chrome, { local: { recording: (tabId) => Boolean(box.recording?.activeForTab(tabId)) } });
   const browser = fakeBrowser({ tabs: [{ id: TAB, windowId: 1, url: URL, title: "Account" }] });
-  const log = { sent: [], offscreen: [], downloads: [], changed: 0 };
+  const log = { sent: [], offscreen: [], downloads: [], changed: 0, stills: [], closed: 0 };
+  const imageTool = async (data, mimeType) => ({
+    ...surface,
+    async jpeg(options) {
+      log.stills.push({ source: data, mimeType, ...options });
+      return Buffer.from([log.stills.length]).toString("base64");
+    },
+    close() { log.closed += 1; }
+  });
   let hasDocument = false;
   const downloadListeners = new Set();
   const chromeApi = Object.assign(browser, {
@@ -75,7 +84,7 @@ function setup({ withAssets = false, encoder = null } = {}) {
     worldCalls: parts.world,
     diagnostics: box.diagnostics,
     recording: box.recording,
-    imageSize: async () => SHOT,
+    imageTool,
     now: clock,
     changed: () => { log.changed += 1; }
   });
@@ -323,6 +332,39 @@ test("start takes a seed frame, starts the screencast and reports the recording,
   assert.equal(rig.lifecycle.attachedCount(), 1, "the retained tab stays attached");
 });
 
+test("a still frame is one photograph of the surface, fitted to the recording size off the page", async () => {
+  const rig = await managed({ withAssets: true });
+  await startRecording(rig);
+  const order = methods(rig.chrome).filter((method) => ["Page.getLayoutMetrics", "Page.captureScreenshot", "Page.startScreencast"].includes(method));
+  assert.deepEqual(order, ["Page.captureScreenshot", "Page.startScreencast"], "no layout is read for a still");
+  assert.deepEqual(rig.chrome.calls.find((call) => call.method === "Page.captureScreenshot").params,
+    { format: "png", optimizeForSpeed: true, fromSurface: true }, "no clip and no captureBeyondViewport, so Chrome lays nothing out again");
+  assert.deepEqual(rig.log.stills, [{
+    source: PNG,
+    mimeType: "image/png",
+    crop: { x: 0, y: 0, ...SURFACE },
+    width: 1200,
+    height: 720,
+    quality: Recording.JPEG_QUALITY
+  }], "the whole surface, as large as the recording's frame allows");
+  assert.equal(rig.log.closed, 1);
+  const ambient = rig.chrome.calls.filter((call) => call.method === "Runtime.callFunctionOn" && call.params.functionDeclaration.includes("rt.ambient"));
+  assert.deepEqual(ambient.slice(0, 2).map((call) => call.params.arguments[1].value.hidden), [true, false], "hidden for the photograph only");
+
+  // A surface smaller than the frame is kept at its own size, never enlarged.
+  const small = await managed({ surface: { width: 800, height: 500 } });
+  await startRecording(small);
+  assert.deepEqual([small.log.stills[0].width, small.log.stills[0].height], [800, 500]);
+
+  // A picture with no size cannot be shown to fit the frame: the still is dropped and the recording goes on.
+  const broken = await managed({ surface: {} });
+  const id = await startRecording(broken);
+  assert.deepEqual(broken.log.stills, []);
+  assert.equal(summaryOf(broken, id).frame_count, 0);
+  assert.equal(summaryOf(broken, id).state, "recording");
+  assert.equal(broken.log.closed, 1);
+});
+
 test("start sends the recording flag to the page worlds", async () => {
   const rig = await managed({ withAssets: true });
   await startRecording(rig);
@@ -490,7 +532,7 @@ test("stop takes a final frame, stops the screencast and freezes the recording; 
   assert.equal(stopped.ok.summary.stop_reason, "explicit");
   assert.equal(stopped.ok.summary.frame_count, 2, "seed and final");
   assert.equal(stopped.dispatched, false);
-  assert.deepEqual(methods(rig.chrome).filter((method) => method.startsWith("Page.") && method !== "Page.getLayoutMetrics"),
+  assert.deepEqual(methods(rig.chrome).filter((method) => method.startsWith("Page.")),
     ["Page.getFrameTree", "Page.captureScreenshot", "Page.getFrameTree", "Page.stopScreencast"], "stopped once, by the stop itself");
   const again = await execute(rig.buffers.recording, { op: "stop", recording_id: id });
   assert.equal(again.ok.changed, false);

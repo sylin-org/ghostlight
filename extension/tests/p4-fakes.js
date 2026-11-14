@@ -14,6 +14,8 @@ const TOP = "TOP";
 const TOP_LOADER = "L-top";
 const CHILD = "CHILD";
 const CHILD_LOADER = "L-child";
+// What Chrome answers a command addressed to a session it no longer knows (measured on Chrome 157).
+const SESSION_NOT_FOUND = "{\"code\":-32001,\"message\":\"Session with given id not found.\"}";
 
 /** A frame tree node: `{ frame: { id, loaderId, url, parentId? }, childFrames }`. */
 function node(id, loaderId, url, parentId, childFrames = []) {
@@ -31,6 +33,9 @@ function sameProcessTree() {
 /**
  * A scripted Chrome debugger. `trees` maps a session id (or "root") to its frame tree.
  * `handlers[method](target, params)` overrides one method; `calls` records every command.
+ * `end(sessionId)` ends a session the way Chrome ends one that was attached through a child: from
+ * then on every command addressed to it is rejected with SESSION_NOT_FOUND, and no
+ * Target.detachedFromTarget is sent.
  */
 function fakeChrome({ trees = { [ROOT]: sameProcessTree() }, frames = [] } = {}) {
   const listeners = [];
@@ -38,17 +43,20 @@ function fakeChrome({ trees = { [ROOT]: sameProcessTree() }, frames = [] } = {})
   const handlers = {};
   let counter = 0;
   const contexts = new Map();
+  const ended = new Set();
   const api = {
     calls,
     handlers,
     trees,
     frames,
+    end(sessionId) { ended.add(sessionId); },
     onEvent: { addListener(listener) { listeners.push(listener); } },
     emit(source, method, params) { for (const listener of listeners) listener(source, method, params); },
     async attach() {},
     async detach() {},
     async sendCommand(target, method, params = {}) {
       calls.push({ target, method, params });
+      if (ended.has(target.sessionId)) throw new Error(SESSION_NOT_FOUND);
       if (handlers[method]) return handlers[method](target, params);
       switch (method) {
         case "Page.getFrameTree": return { frameTree: trees[target.sessionId ?? ROOT] };
@@ -110,6 +118,6 @@ function worldCalls(chrome) {
 }
 
 module.exports = {
-  ROOT, TOP, TOP_LOADER, CHILD, CHILD_LOADER,
+  ROOT, TOP, TOP_LOADER, CHILD, CHILD_LOADER, SESSION_NOT_FOUND,
   node, sameProcessTree, fakeChrome, assets, wire, effects, methods, worldCalls
 };

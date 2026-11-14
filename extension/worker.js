@@ -103,6 +103,11 @@ function sendControlledEvent(event) {
   if (controlled.has(event.tab_id)) sendEvent(event);
 }
 
+// Tells the service that a controlled tab no longer shows a JavaScript dialog.
+function sendDialogClosed(tabId) {
+  sendControlledEvent({ event: EVENT.DIALOG_CHANGED, tab_id: tabId, present: false, dialog_type: protocol.UNKNOWN_DIALOG_TYPE });
+}
+
 function recordError(error) {
   setConnection({ last_error: errorText(error) });
 }
@@ -194,7 +199,11 @@ const commandChunks = globalThis.GhostlightCommandChunks.create({
 const lifecycle = globalThis.GhostlightSessions.create(chrome.debugger, {
   installer: (session) => world.register(session),
   onRelease: (tabId) => world.disposeTab(tabId),
-  onSessionGone: (tabId, sessionId) => world.sessionGone(tabId, sessionId)
+  onSessionGone: (tabId, sessionId, dialogEnded) => {
+    world.sessionGone(tabId, sessionId);
+    // The dialog a frame raised went with the frame's session, so the service's fact is cleared too.
+    if (dialogEnded) sendDialogClosed(tabId);
+  }
 });
 const inventory = globalThis.GhostlightInventory.create({ lifecycle, webNavigation: chrome.webNavigation });
 const world = globalThis.GhostlightWorld.create({
@@ -580,14 +589,15 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   if (method === DEBUGGER_EVENT.DIALOG_OPENING) {
     const type = params.type || protocol.UNKNOWN_DIALOG_TYPE;
     const sessionId = source.sessionId ?? null;
-    lifecycle.openDialog(tabId, { type, message: params.message, defaultPrompt: params.defaultPrompt, url: params.url, sessionId });
+    // A dialog from a session that has ended is not recorded: nothing could answer it.
+    if (!lifecycle.openDialog(tabId, { type, message: params.message, defaultPrompt: params.defaultPrompt, url: params.url, sessionId })) return;
     sendControlledEvent({ event: EVENT.DIALOG_CHANGED, tab_id: tabId, present: true, dialog_type: type });
     tabs.acceptBeforeUnload(tabId, { type, sessionId }).catch(() => {});
     return;
   }
   if (method === DEBUGGER_EVENT.DIALOG_CLOSED) {
     lifecycle.closeDialog(tabId).catch(() => {});
-    sendControlledEvent({ event: EVENT.DIALOG_CHANGED, tab_id: tabId, present: false, dialog_type: protocol.UNKNOWN_DIALOG_TYPE });
+    sendDialogClosed(tabId);
     return;
   }
   if (method === DEBUGGER_EVENT.DRAG_INTERCEPTED) {
@@ -605,6 +615,11 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 chrome.debugger.onDetach.addListener((source) => {
   const tabId = source.tabId;
   if (!tabId) return;
+  // A detach that names a child session ends that frame's session, not the tab's attachment.
+  if (source.sessionId) {
+    lifecycle.endSession(tabId, source.sessionId);
+    return;
+  }
   lifecycle.detached(tabId);
   buffers.tabDetached(tabId);
   world.dropTab(tabId);

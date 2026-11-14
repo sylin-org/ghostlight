@@ -74,7 +74,6 @@
   const RECORDING_ID_CHARS = 160;
   const BINDING_CHARS = 512;
   const FILE_NAME_CHARS = 255;
-  const MIN_CAPTURE_SCALE = 0.05;
   const JPEG = "jpeg";
 
   /** The DiagnosticsFacts of a clear: how many tab rings were dropped. */
@@ -88,9 +87,10 @@
    * `lifecycle` is a GhostlightSessions instance, `inventory` a GhostlightInventory and `worldCalls`
    * a GhostlightWorld instance. `diagnostics` is a GhostlightDiagnostics instance, whose events the
    * worker feeds, and `recording` a GhostlightRecording instance created with `onStop` set to this
-   * object's `recordingEnded`. `imageSize(base64)` measures an encoded frame. `changed()` is called
-   * after a recording starts or ends, so the worker can refresh the popup and badge. `chromeApi`
-   * supplies `tabs`, `runtime`, `offscreen` and `downloads`.
+   * object's `recordingEnded`. `imageTool(base64, mimeType)` opens an encoded image as
+   * `GhostlightCapture.openImage` does, the default; it fits a still frame to the recording's size.
+   * `changed()` is called after a recording starts or ends, so the worker can refresh the popup and
+   * badge. `chromeApi` supplies `tabs`, `runtime`, `offscreen` and `downloads`.
    */
   function create({
     chromeApi = globalThis.chrome,
@@ -99,7 +99,7 @@
     worldCalls,
     diagnostics,
     recording,
-    imageSize = captureApi.decodeImageSize,
+    imageTool = captureApi.openImage,
     now = () => Date.now(),
     changed = () => {}
   } = {}) {
@@ -252,37 +252,38 @@
       return false;
     }
 
-    async function frameSize(data, clip) {
-      try {
-        return await imageSize(data);
-      } catch (_error) {
-        return { width: Math.round(clip.width * clip.scale), height: Math.round(clip.height * clip.scale) };
-      }
+    // The size a still is kept at: the picture fitted into the recording's frame, never enlarged.
+    function stillSize(picture) {
+      const scale = Math.min(1, recordingApi.MAX_WIDTH / picture.width, recordingApi.MAX_HEIGHT / picture.height);
+      return { width: Math.max(1, Math.round(picture.width * scale)), height: Math.max(1, Math.round(picture.height * scale)) };
     }
 
-    // One still frame of the visible viewport, taken inside the caller's lease with Ghostlight's own
-    // presentation hidden. Resolves true when the frame was kept.
+    // One still frame of the tab, taken inside the caller's lease: a photograph of the tab's
+    // surface with Ghostlight's own presentation hidden, which leaves the page as it is, then fitted
+    // to the recording's frame and encoded off the page. Nothing maps a point through a still, so it
+    // is not cut and no layout is read. Resolves true when the frame was kept.
     async function captureFrame(tabId, frameKind) {
       // A dialog blocks the renderer, so no frame can be taken until it is handled.
       if (lifecycle.currentDialog(tabId) || !(await scopeCurrent(tabId))) return false;
-      return worldCalls.withHidden(tabId, async () => {
-        const metrics = await cdp(rootTarget(tabId), CDP.PAGE_GET_LAYOUT_METRICS);
-        const visual = metrics.cssVisualViewport || metrics.visualViewport;
-        const clip = {
-          x: visual.pageX ?? 0,
-          y: visual.pageY ?? 0,
-          width: Math.max(1, visual.clientWidth),
-          height: Math.max(1, visual.clientHeight),
-          scale: Math.max(MIN_CAPTURE_SCALE, Math.min(1, recordingApi.MAX_WIDTH / visual.clientWidth, recordingApi.MAX_HEIGHT / visual.clientHeight))
-        };
-        const shot = await cdp(rootTarget(tabId), CDP.PAGE_CAPTURE_SCREENSHOT,
-          { format: JPEG, quality: recordingApi.JPEG_QUALITY, clip, captureBeyondViewport: true, fromSurface: true });
-        const size = await frameSize(shot.data, clip);
-        if (size.width > recordingApi.MAX_WIDTH || size.height > recordingApi.MAX_HEIGHT) {
+      const shot = await worldCalls.withHidden(tabId, () =>
+        cdp(rootTarget(tabId), CDP.PAGE_CAPTURE_SCREENSHOT, captureApi.PHOTOGRAPH));
+      const picture = await imageTool(shot.data, captureApi.PHOTOGRAPH_MIME);
+      let data;
+      try {
+        const size = stillSize(picture);
+        // Written so that a size that is not a number is refused too.
+        if (!(size.width <= recordingApi.MAX_WIDTH && size.height <= recordingApi.MAX_HEIGHT)) {
           throw new Error("recording frame exceeded its negotiated dimensions");
         }
-        return await scopeCurrent(tabId) && recording.append(tabId, shot.data, frameKind, now());
-      });
+        data = await picture.jpeg({
+          crop: { x: 0, y: 0, width: picture.width, height: picture.height },
+          ...size,
+          quality: recordingApi.JPEG_QUALITY
+        });
+      } finally {
+        picture.close();
+      }
+      return await scopeCurrent(tabId) && recording.append(tabId, data, frameKind, now());
     }
 
     function requireTab(tabId) {
