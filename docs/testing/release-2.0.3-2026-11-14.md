@@ -41,7 +41,12 @@ are UTC.
    -WriteObservedState` observed public adapter 2.0.2 and recorded it.
 5. MCP Registry: `org.sylin/ghostlight 2.0.3`, published with `scripts/publish-mcp-registry.ps1`
    once npm served the exact version.
-6. WinGet: not submitted. WinGet serves 2.0.2 (observed with `winget show`).
+6. WinGet: at publication WinGet served 2.0.2 (observed with `winget show`). On the owner's go the
+   same day, the 2.0.3 manifests went to
+   [microsoft/winget-pkgs#479983](https://github.com/microsoft/winget-pkgs/pull/479983), generated
+   by `scripts/prepare-winget-manifest.ps1 -ValidateWinGet` from this release's own assets. The
+   installer hash in the manifest (`d3ce038f...`) is the one in the public release's `SHA256SUMS`.
+   WinGet serves 2.0.2 until Microsoft merges it.
 7. Website: `scripts/publish-website.ps1` pushed the refreshed public status to `sylin-org/website`
    (`c44f4bf`). `scripts/check-public-surfaces.ps1 -Online` then passed: GitHub, npm, the Chrome
    update feed, the MCP Registry and the website agree on 2.0.3 with adapter 2.0.2.
