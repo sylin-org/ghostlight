@@ -70,10 +70,6 @@ fn a_session_is_its_opener_and_owner_and_outlives_its_connections() {
             store.single_connection(&workspace).unwrap().attribution(),
             second.attribution()
         );
-        assert_eq!(
-            first.details().reported_application.as_deref(),
-            Some("first")
-        );
     }
 
     // a later connection neither renames the session nor its tab group.

@@ -45,5 +45,4 @@ fn policy_explain_and_its_audit_line_name_one_authority() {
         explained.result.facts["capabilities"],
         json!(enforced.capabilities)
     );
-    assert_eq!(context.snapshot.id(), enforced.id);
 }

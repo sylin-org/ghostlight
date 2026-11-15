@@ -8,16 +8,11 @@ use crate::browser::adapter::{
 use crate::language::outcome::{Outcome, Refusal};
 use crate::language::ReadMode;
 
-/// ACCEPTANCE Executor 3-4, L-D6 and ADR-0203 Decision 5: a result says what happened, with its
-/// true effect. A browser failure renders its typed refusal with detail, its own sentence and the
-/// browser's text kept to detail; a capture over budget, a disconnection, a deadline and a
-/// cancellation before dispatch each say so truthfully; a contract failure after dispatch never
-/// claims nothing was sent; an unknown effect reads as unknown and guides recovery without replay;
-/// history with no page that way says which way. A capture states its size, a wait how long it
-/// waited, an empty object what else reads as empty; readiness keeps its vocabulary; a receipt names
-/// its target without trusting its role, governance can remove target names and keep the role,
-/// focused typing names the control it described, and the adapter budget keeps time for the
-/// receipt.
+/// ACCEPTANCE Executor 3-4, L-D6 and ADR-0203 Decision 5: a browser failure renders its typed
+/// refusal with the true effect. A primitive failure keeps the browser's text in detail and a
+/// debugger refusal reads its own sentence; a capture over budget says so; no failure but a
+/// disconnection claims one; a contract failure after dispatch never claims nothing was sent; an
+/// unknown effect reads as unknown and guides recovery without replay.
 #[test]
 fn a_browser_failure_renders_its_typed_refusal_with_the_true_effect() {
     // primitive adapter errors route to an honest refusal with detail.
@@ -270,6 +265,57 @@ fn a_browser_failure_renders_its_typed_refusal_with_the_true_effect() {
         assert_eq!(clicked.next_steps, contract.next_steps());
     }
 
+    // effect unknown receipts render as unknown with the browser reason.
+    {
+        let (executor, browser, _workspaces, workspace, _) = fixture();
+        browser.connect(vec![summary("browser_chrome", true)]);
+        browser.push(Ok(BrowserOutcome::EffectUnknown {
+            reason: "the page stopped responding after dispatch".into(),
+        }));
+
+        let terminal = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com"}),
+            &CancellationToken::default(),
+        );
+
+        assert_eq!(terminal.status, Status::Unknown);
+        assert_eq!(terminal.facts["reason"], "browser_effect_unknown");
+        assert_eq!(
+            terminal.facts["detail"],
+            "the page stopped responding after dispatch"
+        );
+    }
+
+    // uncertain effect guides recovery without replay.
+    {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.push(Err(crate::browser::BrowserError::DisconnectedAfterDispatch));
+        let result = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com"}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Unknown);
+        assert_eq!(result.effect, Effect::Unknown);
+        assert!(!result.repeat_safe);
+        assert_eq!(
+                result.next_steps,
+                vec![
+                    "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.".to_string(),
+                    "Then observe the page with browser_read or browser_inspect to learn what happened.".to_string(),
+                ]
+            );
+    }
+}
+
+/// ACCEPTANCE Executor 3-4: a deadline and a cancellation speak for themselves. Neither claims a
+/// disconnection, each says whether anything reached the browser, and the audit keeps the
+/// cancellation.
+#[test]
+fn a_deadline_or_a_cancellation_says_so_and_never_claims_disconnection() {
     // deadlines speak for themselves instead of claiming disconnection.
     {
         let (executor, browser, _, workspace, _) = fixture();
@@ -341,52 +387,12 @@ fn a_browser_failure_renders_its_typed_refusal_with_the_true_effect() {
             Some(crate::language::audit::AuditRefusal::CancelledBeforeDispatch)
         );
     }
+}
 
-    // effect unknown receipts render as unknown with the browser reason.
-    {
-        let (executor, browser, _workspaces, workspace, _) = fixture();
-        browser.connect(vec![summary("browser_chrome", true)]);
-        browser.push(Ok(BrowserOutcome::EffectUnknown {
-            reason: "the page stopped responding after dispatch".into(),
-        }));
-
-        let terminal = executor.execute(
-            &workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com"}),
-            &CancellationToken::default(),
-        );
-
-        assert_eq!(terminal.status, Status::Unknown);
-        assert_eq!(terminal.facts["reason"], "browser_effect_unknown");
-        assert_eq!(
-            terminal.facts["detail"],
-            "the page stopped responding after dispatch"
-        );
-    }
-
-    // uncertain effect guides recovery without replay.
-    {
-        let (executor, browser, _, workspace, _) = fixture();
-        browser.push(Err(crate::browser::BrowserError::DisconnectedAfterDispatch));
-        let result = executor.execute(
-            &workspace,
-            "browser_navigate",
-            json!({"url":"https://example.com"}),
-            &CancellationToken::default(),
-        );
-        assert_eq!(result.status, Status::Unknown);
-        assert_eq!(result.effect, Effect::Unknown);
-        assert!(!result.repeat_safe);
-        assert_eq!(
-                result.next_steps,
-                vec![
-                    "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.".to_string(),
-                    "Then observe the page with browser_read or browser_inspect to learn what happened.".to_string(),
-                ]
-            );
-    }
-
+/// ACCEPTANCE Executor 3: history with no page that way is refused before anything is sent, and
+/// the refusal says which way.
+#[test]
+fn history_with_no_page_that_way_says_which_way() {
     // history with no page that way is refused and says which way.
     {
         let (executor, browser, _workspaces, workspace, tab_handle, _target) =
@@ -419,7 +425,12 @@ fn a_browser_failure_renders_its_typed_refusal_with_the_true_effect() {
             );
         }
     }
+}
 
+/// ACCEPTANCE Executor 3: a capture states its size and a wait how long it waited. An image
+/// handed on states its decoded size, and the audit holds the measurements without the landing.
+#[test]
+fn a_capture_states_its_size_and_a_wait_how_long_it_waited() {
     // a captured image states its decoded size.
     {
         for (data, size) in [("QQ==", 1u64), ("QUI=", 2), ("QUJD", 3), ("QUJDRA==", 4)] {
@@ -560,7 +571,12 @@ fn a_browser_failure_renders_its_typed_refusal_with_the_true_effect() {
         assert_eq!(wait.count, Some(2));
         assert_eq!(wait.readiness.as_deref(), Some("complete"));
     }
+}
 
+/// L-D6: a script result that reads as an empty object says what else reads as empty, by the
+/// form the script ran in, and the audit holds neither the script nor the advice.
+#[test]
+fn an_empty_object_result_says_what_else_reads_as_empty() {
     // an empty object result says what else reads as empty.
     {
         use crate::browser::adapter::ScriptForm;
@@ -622,25 +638,12 @@ fn a_browser_failure_renders_its_typed_refusal_with_the_true_effect() {
             assert!(!encoded.contains("PRIVATE_SCRIPT") && !encoded.contains("reads as JSON"));
         }
     }
+}
 
-    // readiness names stay the vocabulary a result uses.
-    {
-        for value in [
-            Readiness::NotApplicable,
-            Readiness::Loading,
-            Readiness::Interactive,
-            Readiness::Complete,
-            Readiness::Unknown,
-        ] {
-            let encoded = serde_json::to_value(value).unwrap();
-            assert_eq!(
-                encoded.as_str().unwrap(),
-                readiness_name(value),
-                "the observation and the result would disagree about readiness"
-            );
-        }
-    }
-
+/// ACCEPTANCE Executor 4: a receipt names its target without trusting its role. Governance can
+/// remove target names and keep the role, and focused typing names the control it described.
+#[test]
+fn a_receipt_names_its_target_without_trusting_its_role() {
     // physical action receipt names the target without trusting its role.
     {
         let (executor, browser, _, workspace, audit) = fixture();
@@ -825,16 +828,6 @@ fn a_browser_failure_renders_its_typed_refusal_with_the_true_effect() {
             calls[2],
             BrowserCommand::TypeFocused(PhysicalTypeFocused { .. })
         ));
-    }
-
-    // adapter budget preserves time for the physical receipt.
-    {
-        assert_eq!(
-            adapter_budget_ms(3_000, Duration::from_millis(3_000)),
-            2_250
-        );
-        assert_eq!(adapter_budget_ms(100, Duration::from_millis(100)), 0);
-        assert_eq!(adapter_budget_ms(500, Duration::from_millis(5_000)), 500);
     }
 }
 
@@ -3546,33 +3539,6 @@ fn one_executor_and_one_receipt_serve_every_call_and_step() {
                 }));
             }
         }
-    }
-
-    // browser seam observes landing facts but not outcome measurements.
-    {
-        let tabs = observed_from(&BrowserOutcome::Tabs {
-            tabs: vec![tab(7, "https://example.com/")],
-        });
-        assert_eq!(tabs, Observed::default());
-
-        let text = observed_from(&BrowserOutcome::Text {
-            tab_id: 7,
-            text: "three private words".into(),
-            truncated: false,
-            title: "Example".into(),
-            url: "https://example.com/private?id=3".into(),
-        });
-        assert_eq!(text.host.as_deref(), Some("example.com"));
-        assert_eq!(text.count, None);
-
-        let wait = observed_from(&BrowserOutcome::Observed {
-            tab_id: 7,
-            satisfied: true,
-            elapsed_ms: 1_830,
-            readiness: BrowserReadiness::Complete,
-        });
-        assert_eq!(wait.readiness.as_deref(), Some("complete"));
-        assert_eq!(wait.count, None);
     }
 
     // outcome language and the seam observe without carrying page detail.

@@ -45,14 +45,14 @@ use crate::audit::AuditSink;
 use crate::governance::GovernanceFacade;
 use crate::install::browser_package::BrowserPackage;
 use crate::install::native_host::NativeHostState;
-use crate::language::outcome::{ExtensionAdvice, Observed};
+use crate::language::outcome::ExtensionAdvice;
 use crate::presentation::{PresentationError, PresentationPort, PresentationReactor};
 use crate::workbench::WorkbenchProjection;
 use crate::workspace::{StaleReason, WorkspaceStore};
 
 use super::{
-    adapter_budget_ms, observed_from, readiness_name, routing_refusal, ApplicationExecutor,
-    BrowserError, BrowserPort, CancellationToken, Effect, Readiness, Status,
+    routing_refusal, ApplicationExecutor, BrowserError, BrowserPort, CancellationToken, Effect,
+    Status,
 };
 
 #[derive(Default)]

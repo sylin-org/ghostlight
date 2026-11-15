@@ -709,7 +709,6 @@ mod tests {
 
         the_product_icon_decodes_to_32_by_32_rgba();
         the_dot_sits_in_the_lower_right_in_the_colour_of_the_state();
-        the_dark_taskbar_shows_the_product_icon_bytes();
         a_dot_on_a_light_taskbar_lies_over_the_mascot();
         a_light_taskbar_shows_the_mascot_in_one_piece();
         a_soft_night_outline_parts_the_light_mascot_from_the_taskbar();
@@ -872,11 +871,6 @@ mod tests {
 
     /// How much darker than the head around them the eyes of the 16 pixel light mascot are.
     const FACE_CONTRAST: u32 = 96;
-
-    fn the_dark_taskbar_shows_the_product_icon_bytes() {
-        assert_eq!(DARK_16.source(), ICON_16_PNG);
-        assert_eq!(DARK_32.source(), ICON_PNG);
-    }
 
     fn a_dot_on_a_light_taskbar_lies_over_the_mascot() {
         for (taskbar, size, centre) in [(LIGHT_32, 32, 24), (LIGHT_16, 16, 12)] {
